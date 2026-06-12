@@ -13,6 +13,7 @@ add_library(llm_npc_core STATIC
     src/core/Config.cpp
     src/core/LlmClient.cpp
     src/core/Npc.cpp
+    src/core/PersonaLoader.cpp
 )
 target_include_directories(llm_npc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
