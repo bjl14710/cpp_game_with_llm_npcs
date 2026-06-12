@@ -37,6 +37,9 @@ constexpr float kTalkRadius = 3.5f;       // how close "press T to talk" works
 constexpr float kNameplateRange = 28.f;   // how far name tags stay visible
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
+// How long an arrest holds the player at the police station. Short, because
+// the worst on-the-books offense here is disturbing the peace.
+constexpr float kJailSeconds = 10.f;
 
 // What the main loop is currently showing.
 enum class AppMode { Playing, Dialogue, Menu };
@@ -260,6 +263,11 @@ int main() {
     centerMouse(window);
 
     int nearbyNpc = -1;
+    // Arrest bookkeeping: when an officer catches the player, the player is
+    // held at the police station for a short sentence. wasCaught tracks each
+    // NPC's previous catch latch so the moment of capture fires exactly once.
+    float jailSecondsLeft = 0.f;
+    std::vector<bool> wasCaught(world.npcs().size(), false);
     sf::Clock frameClock;
     while (window.isOpen()) {
         sf::Event event{};
@@ -341,23 +349,52 @@ int main() {
         if (mode == AppMode::Playing) {
             if (window.hasFocus()) handleMouseLook(window, camera);
 
-            Vec3 wish{};
-            if (isActionPressed(bindings, Action::MoveForward)) wish += flatForward(camera.yawDeg);
-            if (isActionPressed(bindings, Action::MoveBackward)) wish += flatForward(camera.yawDeg) * -1.f;
-            if (isActionPressed(bindings, Action::StrafeRight)) wish += flatRight(camera.yawDeg);
-            if (isActionPressed(bindings, Action::StrafeLeft)) wish += flatRight(camera.yawDeg) * -1.f;
-            wish = normalize(wish);
-            const Vec3 target = camera.position + wish * (kWalkSpeed * dt);
-            camera.position = world.city().resolveMovement(camera.position, target, kPlayerRadius);
+            // No walking out of a sentence; looking around is still allowed.
+            if (jailSecondsLeft <= 0.f) {
+                Vec3 wish{};
+                if (isActionPressed(bindings, Action::MoveForward)) wish += flatForward(camera.yawDeg);
+                if (isActionPressed(bindings, Action::MoveBackward)) wish += flatForward(camera.yawDeg) * -1.f;
+                if (isActionPressed(bindings, Action::StrafeRight)) wish += flatRight(camera.yawDeg);
+                if (isActionPressed(bindings, Action::StrafeLeft)) wish += flatRight(camera.yawDeg) * -1.f;
+                wish = normalize(wish);
+                const Vec3 target = camera.position + wish * (kWalkSpeed * dt);
+                camera.position = world.city().resolveMovement(camera.position, target, kPlayerRadius);
+            }
         } else if (mode == AppMode::Menu) {
             menu.update(dt);
         }
+        if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
 
         // NPCs act on whatever instruction they last accepted (follow, chase,
         // face, gesture). This keeps running during dialogue so a companion
         // trails you while you talk, but the pause menu freezes the world.
         if (mode != AppMode::Menu) {
             for (Npc& npc : world.npcs()) npc.update(dt, camera.position, world.city());
+        }
+
+        // The moment an officer catches the player: a short stay at the
+        // station. The officer heads back to their post, and the player is
+        // released where they were dropped off once the sentence runs out.
+        for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+            Npc& npc = world.npcs()[i];
+            const bool caughtNow = npc.hasCaughtPlayer();
+            if (caughtNow && !wasCaught[i] && npc.persona().police) {
+                jailSecondsLeft = kJailSeconds;
+                if (const Building* station = world.city().findBuilding("police")) {
+                    camera.position = Vec3{(station->minX + station->maxX) * 0.5f, 0.f,
+                                           station->maxZ + 2.f};
+                }
+                npc.commandReturnHome();
+                if (mode == AppMode::Dialogue) {
+                    // Being hauled off ends any open conversation.
+                    session.close();
+                    dialog.endStreaming();
+                    mode = AppMode::Playing;
+                    window.setMouseCursorVisible(false);
+                    centerMouse(window);
+                }
+            }
+            wasCaught[i] = npc.hasCaughtPlayer();
         }
 
         nearbyNpc = world.nearestNpcWithin(camera.position, kTalkRadius);
@@ -443,13 +480,13 @@ int main() {
                                     "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name,
                                     20, static_cast<float>(window.getSize().y) - 84.f);
             }
-            // Announce an arrest the moment a chasing NPC catches up.
-            for (const Npc& npc : world.npcs()) {
-                if (!npc.hasCaughtPlayer()) continue;
+            // Serving time: show the countdown while movement is locked.
+            if (jailSecondsLeft > 0.f) {
+                const int secs = static_cast<int>(jailSecondsLeft) + 1;
                 drawCenteredHudText(window, font,
-                                    npc.persona().name + " caught you!", 22,
-                                    static_cast<float>(window.getSize().y) - 120.f);
-                break;
+                                    "Arrested: disturbing the peace. Released in " +
+                                        std::to_string(secs) + "s",
+                                    22, static_cast<float>(window.getSize().y) - 120.f);
             }
             // Crosshair dot.
             sf::CircleShape dot(2.f);
