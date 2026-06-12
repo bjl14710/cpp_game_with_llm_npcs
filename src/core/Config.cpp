@@ -47,6 +47,7 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
     if (auto it = kv.find("request_timeout_s"); it != kv.end()) {
         cfg.requestTimeoutSeconds = std::stoi(it->second);
     }
+    if (auto it = kv.find("keep_alive"); it != kv.end()) cfg.keepAlive = it->second;
     return cfg;
 }
 

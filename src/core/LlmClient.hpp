@@ -3,7 +3,6 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
-#include <functional>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -24,6 +23,9 @@ struct LlmConfig {
     std::string model = "qwen2.5:3b-instruct";
     double temperature = 0.8;
     int requestTimeoutSeconds = 60;
+    // Passed to Ollama as keep_alive so the model stays loaded between
+    // conversations instead of paying the cold-start cost every time.
+    std::string keepAlive = "10m";
 };
 
 // One request submitted to the LLM.
@@ -32,20 +34,30 @@ struct ChatRequest {
     std::string systemPrompt;
     std::vector<ChatTurn> history;
     std::string userMessage;
+    // Internal requests (model warm-up) never produce a ChatReply or deltas.
+    bool internal = false;
+};
+
+// One incremental fragment of an in-flight streamed reply, surfaced to the
+// main thread via drainDeltas() so the UI can show words as they arrive.
+struct ChatDelta {
+    std::uint64_t id = 0;
+    std::string text;
 };
 
 // One reply pulled off the queue on the main thread.
 struct ChatReply {
     std::uint64_t id = 0;
     bool ok = false;
-    std::string content;     // model's reply when ok
+    std::string content;       // model's reply when ok
     std::string errorMessage;  // human-readable error when !ok
 };
 
 // Centralized LLM access point. One worker thread serves all NPCs.
-// Callers submit() requests from the main thread and drainReplies() each frame
-// to receive completed replies. The id returned from submit() lets callers
-// match replies back to the request they sent.
+// Callers submit() requests from the main thread, drainDeltas() each frame to
+// stream partial text, and drainReplies() to receive completed replies. The
+// id returned from submit() lets callers match deltas and replies back to the
+// request they sent.
 class LlmClient {
    public:
     explicit LlmClient(LlmConfig config);
@@ -59,6 +71,15 @@ class LlmClient {
                          std::vector<ChatTurn> history,
                          std::string userMessage);
 
+    // Enqueue an internal request that makes Ollama load the model into
+    // memory (empty messages + keep_alive). Produces no deltas and no reply;
+    // call once at startup so the first real conversation answers fast.
+    void warmUp();
+
+    // Pop all streamed text fragments that arrived since the last call.
+    // Non-blocking; fragments are in arrival order.
+    std::vector<ChatDelta> drainDeltas();
+
     // Pop all replies that have arrived since the last call. Non-blocking.
     std::vector<ChatReply> drainReplies();
 
@@ -70,6 +91,7 @@ class LlmClient {
    private:
     void workerLoop();
     ChatReply processOne(const ChatRequest& req);
+    void enqueue(ChatRequest req);
 
     LlmConfig config_;
 
@@ -83,6 +105,7 @@ class LlmClient {
 
     std::mutex replyMutex_;
     std::vector<ChatReply> replies_;
+    std::vector<ChatDelta> deltas_;
 
     std::atomic<std::uint64_t> nextId_{1};
 };
