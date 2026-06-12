@@ -77,52 +77,51 @@ Vec3 flatForward(float yawDeg) {
     return normalize(Vec3{std::sin(degToRad(yawDeg)), 0.f, std::cos(degToRad(yawDeg))});
 }
 
-// Ground-plane right vector for a yaw in degrees.
+// Ground-plane right vector for a yaw in degrees. Must match the camera's
+// right basis in Renderer3D (cross(forward, up)) or strafe is inverted —
+// cross((fx,0,fz),(0,1,0)) = (-fz, 0, fx).
 Vec3 flatRight(float yawDeg) {
     const Vec3 f = flatForward(yawDeg);
-    return Vec3{f.z, 0.f, -f.x};
+    return Vec3{-f.z, 0.f, f.x};
 }
 
 #ifdef __APPLE__
-// On macOS, SFML re-centers the cursor by posting a synthetic mouse event
-// whose coordinates land in the wrong place (and which the OS may drop
-// entirely without Accessibility permission), so the camera saw a large
-// constant delta every frame and spun. Bypass SFML: read the true cursor
-// location and warp it back to a fixed anchor, all in CoreGraphics global
-// coordinates so the loop is self-consistent.
-CGPoint gMouseAnchor{-1.0, -1.0};
+// macOS mouse-look. SFML's cursor re-centering (and the earlier
+// warp-the-cursor-back workaround) lands the cursor ~1px off target every
+// frame — a HiDPI readback rounding mismatch — so the camera saw a constant
+// residual delta and slowly drifted left even with the mouse held still,
+// which curved forward walking. Instead, while playing we disassociate the
+// cursor from the physical mouse: the cursor freezes in place (no
+// screen-edge clamping, nothing to re-center) and CGGetLastMouseDelta
+// reports raw HID movement, which reads a clean zero when the mouse is idle.
+// Measured: idle drift drops from -0.92 px/frame to 0.
 
-CGPoint currentCursorLocation() {
-    CGEventRef ev = CGEventCreate(nullptr);
-    const CGPoint p = CGEventGetLocation(ev);
-    CFRelease(ev);
-    return p;
-}
-
-// "Re-centering" on macOS means re-anchoring at the cursor's current spot;
-// the anchor only needs to be a fixed reference point for deltas.
+// Freezes the cursor to the physical mouse and discards any movement that
+// accumulated while we were away, so look resumes without a jump. Called on
+// every (re)entry into first-person play.
 void centerMouse(sf::RenderWindow&) {
-    gMouseAnchor = currentCursorLocation();
+    CGAssociateMouseAndMouseCursorPosition(false);
+    std::int32_t dx = 0, dy = 0;
+    CGGetLastMouseDelta(&dx, &dy);  // flush pending delta
 }
 
-// Applies one frame of mouse look to the camera and warps the cursor back
-// to the anchor so deltas keep accumulating.
+// Re-couples the cursor to the physical mouse. Called when leaving play for
+// the menu/dialogue (so the pointer is usable) and when focus is lost (so
+// the disassociation never leaks out and freezes the mouse system-wide).
+void releaseMouse() {
+    CGAssociateMouseAndMouseCursorPosition(true);
+}
+
+// Applies one frame of mouse look from the raw HID movement delta.
 void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
     if (!window.hasFocus()) return;
-    if (gMouseAnchor.x < 0.0) {
-        gMouseAnchor = currentCursorLocation();
-        return;
-    }
-    const CGPoint cur = currentCursorLocation();
-    const float dx = static_cast<float>(cur.x - gMouseAnchor.x);
-    const float dy = static_cast<float>(cur.y - gMouseAnchor.y);
-    camera.yawDeg += dx * kMouseSensitivity;
-    camera.pitchDeg = clampf(camera.pitchDeg - dy * kMouseSensitivity,
+    std::int32_t dx = 0, dy = 0;
+    CGGetLastMouseDelta(&dx, &dy);
+    // Mouse-right must lower yaw: screen-right is cross(forward, up) = -X at
+    // yaw 0, but increasing yaw rotates forward toward +X (screen-left).
+    camera.yawDeg -= static_cast<float>(dx) * kMouseSensitivity;
+    camera.pitchDeg = clampf(camera.pitchDeg - static_cast<float>(dy) * kMouseSensitivity,
                              -kMaxPitchDeg, kMaxPitchDeg);
-    CGWarpMouseCursorPosition(gMouseAnchor);
-    // The warp suspends mouse events briefly by default; re-associating
-    // cancels that so look stays smooth.
-    CGAssociateMouseAndMouseCursorPosition(true);
 }
 #else
 // Re-centers the OS cursor so relative mouse-look deltas keep working.
@@ -132,12 +131,17 @@ void centerMouse(sf::RenderWindow& window) {
                            window);
 }
 
+// No cursor decoupling to undo off macOS; menus rely on SFML's own cursor.
+void releaseMouse() {}
+
 // Applies one frame of mouse look to the camera and re-centers the cursor.
 void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
     const sf::Vector2i center(static_cast<int>(window.getSize().x / 2),
                               static_cast<int>(window.getSize().y / 2));
     const sf::Vector2i delta = sf::Mouse::getPosition(window) - center;
-    camera.yawDeg += static_cast<float>(delta.x) * kMouseSensitivity;
+    // Mouse-right lowers yaw to match the camera's right-handed basis; see
+    // the macOS path for the derivation.
+    camera.yawDeg -= static_cast<float>(delta.x) * kMouseSensitivity;
     camera.pitchDeg = clampf(camera.pitchDeg - static_cast<float>(delta.y) * kMouseSensitivity,
                              -kMaxPitchDeg, kMaxPitchDeg);
     if (window.hasFocus()) centerMouse(window);
@@ -231,6 +235,9 @@ int main() {
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed) window.close();
             if (event.type == sf::Event::GainedFocus && mode == AppMode::Playing) centerMouse(window);
+            // Release the cursor when focus leaves so the macOS disassociation
+            // (see centerMouse) can't freeze the mouse in other apps.
+            if (event.type == sf::Event::LostFocus) releaseMouse();
 
             if (mode == AppMode::Playing && event.type == sf::Event::KeyPressed) {
                 const bool menuKey = event.key.code == keyFromName(bindings.key(Action::OpenMenu)) ||
@@ -239,6 +246,7 @@ int main() {
                     menu.open();
                     mode = AppMode::Menu;
                     window.setMouseCursorVisible(true);
+                    releaseMouse();
                 } else if (event.key.code == keyFromName(bindings.key(Action::Talk)) && nearbyNpc >= 0) {
                     session.open(nearbyNpc);
                     const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
@@ -250,6 +258,7 @@ int main() {
                                            npc.persona().role + "). Enter sends, Esc leaves."});
                     mode = AppMode::Dialogue;
                     window.setMouseCursorVisible(true);
+                    releaseMouse();
                 }
                 continue;
             }
