@@ -86,6 +86,10 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                     result.error = id + ": bad facing '" + val + "'";
                     return result;
                 }
+            } else if (key == "police") {
+                // Grants the arrest action; everyone else can only summon
+                // the police. Accepts true/yes/1 (anything else is false).
+                result.value.persona.police = (val == "true" || val == "yes" || val == "1");
             } else {
                 result.error = id + ": unknown header key '" + key + "'";
                 return result;

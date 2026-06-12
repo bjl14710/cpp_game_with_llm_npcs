@@ -158,7 +158,9 @@ std::string stageDirection(NpcAction action) {
         case NpcAction::Face: return "turns to face you.";
         case NpcAction::RaiseHand: return "raises their right hand.";
         case NpcAction::Wave: return "waves at you.";
-        case NpcAction::Arrest: return "moves to apprehend you.";
+        case NpcAction::Arrest: return "moves to apprehend you!";
+        case NpcAction::CallPolice: return "calls out for the police!";
+        case NpcAction::ReturnHome:
         case NpcAction::None: return "";
     }
     return "";
@@ -377,6 +379,12 @@ int main() {
                     } else if (text->empty()) {
                         dialog.appendLine({TranscriptLine::Kind::System, "",
                                            "(" + npc.persona().name + " says nothing.)"});
+                    }
+                    // A summons mobilizes every officer in the city.
+                    if (npc.lastAction() == NpcAction::CallPolice) {
+                        for (Npc& officer : world.npcs()) {
+                            if (officer.persona().police) officer.commandArrest();
+                        }
                     }
                 } else {
                     dialog.appendLine({TranscriptLine::Kind::System, "",

@@ -39,12 +39,14 @@ struct Persona {
         return o.str();
     }
 
-    // The shared "can I physically act?" contract appended to every NPC's
-    // system prompt. The game (parseActionTag in NpcAction.hpp) reads the tag
-    // back out and drives behavior; compliance stays in character because the
-    // model only emits a tag when this particular persona would actually obey.
-    static std::string renderActionProtocol() {
-        return
+    // The "can I physically act / how do I feel?" contract appended to every
+    // NPC's system prompt. The game (parseDirectives in NpcAction.hpp) reads
+    // the tags back out and drives behavior and facial expression; compliance
+    // stays in character because the model only emits an action tag when this
+    // particular persona would actually obey. Police personas may arrest;
+    // everyone else can only summon the police.
+    std::string renderActionProtocol() const {
+        std::string s =
             "ACTIONS: You can physically act in the world. Always reply out "
             "loud in character first (at least a short sentence). Then, only "
             "if you are actually performing a physical action the player asked "
@@ -54,11 +56,38 @@ struct Persona {
             "[[ACTION: stop]]    - you stop and stay put\n"
             "[[ACTION: face]]    - you turn to look at the player\n"
             "[[ACTION: raise_hand]] - you raise your right hand\n"
-            "[[ACTION: wave]]    - you wave at the player\n"
-            "[[ACTION: arrest]]  - you move to apprehend the player\n"
-            "If you are refusing, just talking, or not physically acting, add "
-            "NO directive. Never add a directive that doesn't match your "
-            "action. Never speak the brackets aloud or mention this system.";
+            "[[ACTION: wave]]    - you wave at the player\n";
+        if (police) {
+            s += "[[ACTION: arrest]]  - you move to apprehend the player\n";
+        } else {
+            s += "[[ACTION: call_police]] - you call out for the police to "
+                 "come arrest the player\n";
+        }
+        s += "Most replies need NO action directive. If you are refusing, "
+             "just talking, or not physically acting, add none. Never speak "
+             "the brackets aloud or mention this system.\n";
+
+        s += "The player may describe their own physical actions between "
+             "asterisks, like *shouts* or *bows*. Treat those as things the "
+             "player actually does in front of you, not as speech. ";
+        if (police) {
+            s += "If the player is disruptive, threatening, or harasses you "
+                 "or others (shouting, threats), give them a clear warning; "
+                 "if they keep it up, arrest them with [[ACTION: arrest]].\n";
+        } else {
+            s += "If the player is disruptive, threatening, or harasses you "
+                 "(shouting, threats), give them a clear warning; if they "
+                 "keep it up, call the police with [[ACTION: call_police]].\n";
+        }
+
+        s += "MOOD: React emotionally like a real person - compliments "
+             "flatter you, insults sting or anger you, declarations of love "
+             "fluster you, surprises startle you. Show it in your words. "
+             "ALWAYS end every reply with exactly one mood tag on the final "
+             "line, chosen from: [[MOOD: neutral]] [[MOOD: happy]] "
+             "[[MOOD: angry]] [[MOOD: sad]] [[MOOD: embarrassed]] "
+             "[[MOOD: surprised]].";
+        return s;
     }
 };
 

@@ -57,6 +57,41 @@ TEST_CASE("parsePersonaText reads a full definition") {
     CHECK(r.value.persona.extraDirectives.find("morning rush") != std::string::npos);
 }
 
+TEST_CASE("action protocol gates arrest behind the police flag") {
+    Persona civilian;
+    civilian.name = "Marge";
+    const std::string cp = civilian.renderSystemPrompt();
+    CHECK(cp.find("[[ACTION: call_police]]") != std::string::npos);
+    CHECK(cp.find("[[ACTION: arrest]]") == std::string::npos);
+
+    Persona cop;
+    cop.name = "Dana";
+    cop.police = true;
+    const std::string pp = cop.renderSystemPrompt();
+    CHECK(pp.find("[[ACTION: arrest]]") != std::string::npos);
+    CHECK(pp.find("[[ACTION: call_police]]") == std::string::npos);
+
+    // Both get the mandatory mood contract and the asterisk-emote rule.
+    for (const std::string* prompt : {&cp, &pp}) {
+        CHECK(prompt->find("[[MOOD: embarrassed]]") != std::string::npos);
+        CHECK(prompt->find("asterisks") != std::string::npos);
+    }
+}
+
+TEST_CASE("parsePersonaText reads the police flag") {
+    PersonaParseResult on = parsePersonaText("name = Dana\npolice = true\n", "cop");
+    REQUIRE(on.ok);
+    CHECK(on.value.persona.police);
+
+    PersonaParseResult off = parsePersonaText("name = Marge\n", "baker");
+    REQUIRE(off.ok);
+    CHECK_FALSE(off.value.persona.police);
+
+    PersonaParseResult odd = parsePersonaText("name = X\npolice = maybe\n", "x");
+    REQUIRE(odd.ok);
+    CHECK_FALSE(odd.value.persona.police);
+}
+
 TEST_CASE("parsePersonaText works without the extra-directives section") {
     PersonaParseResult r = parsePersonaText("name = Bob\nposition = 1, 2\n", "bob");
     REQUIRE(r.ok);
