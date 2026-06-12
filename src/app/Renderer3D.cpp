@@ -377,10 +377,12 @@ void Renderer3D::drawFace(NpcFace face) const {
     drawTexturedBox(Vec3{0.07f, 1.71f, zFront}, 0.024f, eyeHalfY, 0.006f, texCloth_, dark, 1.f);
 
     // Brows: flat by default, inner ends pulled down when angry, up when sad,
-    // raised high when surprised.
+    // raised high when surprised. With the mirrored per-side rotation below,
+    // a positive tilt lowers the inner (nose-side) ends: +theta about Z lifts
+    // a box's +X end, and each side's inner end alternates between +X and -X.
     float browTilt = 0.f;  // degrees about local +Z, applied mirrored per side
-    if (face == NpcFace::Angry) browTilt = -18.f;
-    if (face == NpcFace::Sad) browTilt = 14.f;
+    if (face == NpcFace::Angry) browTilt = 18.f;
+    if (face == NpcFace::Sad) browTilt = -14.f;
     const float browY = face == NpcFace::Surprised ? 1.80f : 1.77f;
     for (int side = -1; side <= 1; side += 2) {
         glPushMatrix();
