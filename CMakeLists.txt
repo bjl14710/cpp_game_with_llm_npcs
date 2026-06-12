@@ -35,7 +35,7 @@ endif()
 if(SFML_FOUND AND OPENGL_FOUND)
     add_executable(cpp_game_with_llm_npcs
         src/main.cpp
-        src/DialogUI.cpp
+        src/app/DialogUI.cpp
         src/app/Renderer3D.cpp
     )
     target_include_directories(cpp_game_with_llm_npcs PRIVATE

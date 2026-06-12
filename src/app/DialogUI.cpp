@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 namespace llm_npc {
 
@@ -68,6 +69,10 @@ std::vector<std::string> wrap(const std::string& s, std::size_t maxChars) {
 DialogUI::DialogUI(const sf::Font& font) : font_(font) {}
 
 std::string DialogUI::handleEvent(const sf::Event& event) {
+    if (event.type == sf::Event::TextEntered && swallowNext_) {
+        swallowNext_ = false;
+        return {};
+    }
     if (!inputEnabled_) return {};
 
     if (event.type == sf::Event::TextEntered) {
@@ -82,8 +87,7 @@ std::string DialogUI::handleEvent(const sf::Event& event) {
         return {};
     }
 
-    if (event.type == sf::Event::KeyPressed &&
-        (event.key.code == sf::Keyboard::Enter || event.key.code == sf::Keyboard::Return)) {
+    if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Enter) {
         if (input_.empty()) return {};
         std::string submitted = std::move(input_);
         input_.clear();
@@ -106,6 +110,33 @@ void DialogUI::setThinking(bool thinking, const std::string& speaker) {
 
 void DialogUI::setInputEnabled(bool enabled) { inputEnabled_ = enabled; }
 
+void DialogUI::swallowNextTextEntered() { swallowNext_ = true; }
+
+void DialogUI::beginStreaming(const std::string& speaker) {
+    streaming_ = true;
+    streamingSpeaker_ = speaker;
+    streamingText_.clear();
+}
+
+void DialogUI::appendStreamingDelta(const std::string& text) {
+    if (streaming_) streamingText_ += text;
+}
+
+void DialogUI::endStreaming() {
+    streaming_ = false;
+    streamingSpeaker_.clear();
+    streamingText_.clear();
+}
+
+void DialogUI::reset() {
+    transcript_.clear();
+    input_.clear();
+    thinking_ = false;
+    thinkingSpeaker_.clear();
+    swallowNext_ = false;
+    endStreaming();
+}
+
 void DialogUI::render(sf::RenderTarget& target) const {
     const sf::Vector2u sz = target.getSize();
     const float w = static_cast<float>(sz.x);
@@ -121,9 +152,19 @@ void DialogUI::render(sf::RenderTarget& target) const {
     float used = 0.f;
     const float available = transcriptBottom - kPadding;
 
-    if (thinking_) {
-        std::string indicator = "... " + (thinkingSpeaker_.empty() ? std::string("(thinking)")
-                                                                    : thinkingSpeaker_ + " is thinking...");
+    if (streaming_ && !streamingText_.empty()) {
+        // Live, partially-streamed NPC line with a cursor.
+        const std::string prefix = streamingSpeaker_.empty() ? "" : streamingSpeaker_ + ": ";
+        auto wrapped = wrap(prefix + streamingText_ + "_", wrapChars);
+        for (auto wi = wrapped.rbegin(); wi != wrapped.rend(); ++wi) {
+            if (used + kLineHeight > available) break;
+            rendered.push_back({*wi, colorFor(TranscriptLine::Kind::Npc)});
+            used += kLineHeight;
+        }
+    } else if (thinking_ || streaming_) {
+        const std::string speaker = streaming_ ? streamingSpeaker_ : thinkingSpeaker_;
+        std::string indicator = "... " + (speaker.empty() ? std::string("(thinking)")
+                                                          : speaker + " is thinking...");
         rendered.push_back({indicator, sf::Color(140, 140, 140)});
         used += kLineHeight;
     }
