@@ -5,8 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(SFML 2.6 COMPONENTS graphics window system REQUIRED)
 find_package(Threads REQUIRED)
+# Game executable needs SFML+OpenGL; QUIET so the dev container can still
+# configure CMake and build the core library + tests without them.
+find_package(SFML 2.6 COMPONENTS graphics window system QUIET)
+find_package(OpenGL QUIET)
 
 # Core: SFML-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
@@ -29,20 +32,25 @@ if(WIN32)
     target_link_libraries(llm_npc_core PUBLIC ws2_32)
 endif()
 
-add_executable(cpp_game_with_llm_npcs
-    src/main.cpp
-    src/DialogUI.cpp
-)
-
-target_include_directories(cpp_game_with_llm_npcs
-    PRIVATE
+if(SFML_FOUND AND OPENGL_FOUND)
+    add_executable(cpp_game_with_llm_npcs
+        src/main.cpp
+        src/DialogUI.cpp
+        src/app/Renderer3D.cpp
+    )
+    target_include_directories(cpp_game_with_llm_npcs PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_link_libraries(cpp_game_with_llm_npcs
-    PRIVATE
-        llm_npc_core
-        sfml-graphics
-        sfml-window
-        sfml-system
-)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/app
+    )
+    target_link_libraries(cpp_game_with_llm_npcs
+        PRIVATE
+            llm_npc_core
+            sfml-graphics
+            sfml-window
+            sfml-system
+            OpenGL::GL
+    )
+else()
+    message(STATUS "SFML or OpenGL not found; building core library only "
+                   "(use tests/Makefile for the test suite)")
+endif()
