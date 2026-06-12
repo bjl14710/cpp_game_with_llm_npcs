@@ -34,7 +34,7 @@ endif()
 
 if(SFML_FOUND AND OPENGL_FOUND)
     add_executable(cpp_game_with_llm_npcs
-        src/main.cpp
+        src/app/main.cpp
         src/app/DialogUI.cpp
         src/app/InputMap.cpp
         src/app/Menu.cpp
