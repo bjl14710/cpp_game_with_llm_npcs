@@ -10,7 +10,7 @@ find_package(Threads REQUIRED)
 
 add_executable(cpp_game_with_llm_npcs
     src/main.cpp
-    src/LlmClient.cpp
+    src/core/LlmClient.cpp
     src/Npc.cpp
     src/DialogUI.cpp
 )
@@ -18,6 +18,7 @@ add_executable(cpp_game_with_llm_npcs
 target_include_directories(cpp_game_with_llm_npcs
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
         ${CMAKE_CURRENT_SOURCE_DIR}/external
 )
 
