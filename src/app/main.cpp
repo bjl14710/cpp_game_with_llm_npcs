@@ -166,6 +166,19 @@ std::string stageDirection(NpcAction action) {
     return "";
 }
 
+// Maps the NPC's core mood onto the renderer's face enum.
+NpcFace faceForMood(NpcMood mood) {
+    switch (mood) {
+        case NpcMood::Happy: return NpcFace::Happy;
+        case NpcMood::Angry: return NpcFace::Angry;
+        case NpcMood::Sad: return NpcFace::Sad;
+        case NpcMood::Embarrassed: return NpcFace::Embarrassed;
+        case NpcMood::Surprised: return NpcFace::Surprised;
+        case NpcMood::Neutral: return NpcFace::Neutral;
+    }
+    return NpcFace::Neutral;
+}
+
 // Draws `str` centered horizontally at height `y`, with a dark backdrop bar.
 void drawCenteredHudText(sf::RenderWindow& window, const sf::Font& font,
                          const std::string& str, unsigned size, float y) {
@@ -404,7 +417,7 @@ int main() {
             if (npc.pose() == NpcAction::RaiseHand) pose = NpcPose::RaiseHand;
             else if (npc.pose() == NpcAction::Wave) pose = NpcPose::Wave;
             renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i),
-                                       pose, npc.gesturePhase()});
+                                       pose, npc.gesturePhase(), faceForMood(npc.mood())});
         }
 
         // ---- SFML overlay pass ----
