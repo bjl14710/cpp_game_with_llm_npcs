@@ -9,7 +9,7 @@
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -g -O0 -pthread -Wall -Wextra
-INCLUDES := -I../src/core -I../src -I../external -I.
+INCLUDES := -I../src/core -I../external -I.
 
 BUILD  := build
 TARGET := $(BUILD)/run_tests

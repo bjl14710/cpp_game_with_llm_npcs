@@ -10,6 +10,7 @@ find_package(Threads REQUIRED)
 
 # Core: SFML-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
+    src/core/Config.cpp
     src/core/LlmClient.cpp
     src/core/Npc.cpp
 )

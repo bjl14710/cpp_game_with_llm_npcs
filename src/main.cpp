@@ -2,13 +2,11 @@
 
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "Config.hpp"
 #include "DialogUI.hpp"
 #include "LlmClient.hpp"
 #include "Npc.hpp"
@@ -17,54 +15,6 @@
 namespace fs = std::filesystem;
 
 namespace {
-
-// Trim ASCII whitespace from both ends.
-std::string trim(const std::string& s) {
-    auto b = s.find_first_not_of(" \t\r\n");
-    if (b == std::string::npos) return {};
-    auto e = s.find_last_not_of(" \t\r\n");
-    return s.substr(b, e - b + 1);
-}
-
-// Tiny key=value config reader; same shape as cpp_racing_game/config/*.cfg.
-// Lines starting with '#' are comments.
-std::unordered_map<std::string, std::string> readKv(const fs::path& path) {
-    std::unordered_map<std::string, std::string> out;
-    std::ifstream in(path);
-    if (!in) return out;
-    std::string line;
-    while (std::getline(in, line)) {
-        auto hash = line.find('#');
-        if (hash != std::string::npos) line = line.substr(0, hash);
-        line = trim(line);
-        if (line.empty()) continue;
-        auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        out[trim(line.substr(0, eq))] = trim(line.substr(eq + 1));
-    }
-    return out;
-}
-
-std::string slurp(const fs::path& path) {
-    std::ifstream in(path);
-    if (!in) return {};
-    std::ostringstream o;
-    o << in.rdbuf();
-    return o.str();
-}
-
-llm_npc::LlmConfig loadLlmConfig(const fs::path& configDir) {
-    llm_npc::LlmConfig cfg;
-    auto kv = readKv(configDir / "llm.cfg");
-    if (auto it = kv.find("host"); it != kv.end()) cfg.host = it->second;
-    if (auto it = kv.find("port"); it != kv.end()) cfg.port = std::stoi(it->second);
-    if (auto it = kv.find("model"); it != kv.end()) cfg.model = it->second;
-    if (auto it = kv.find("temperature"); it != kv.end()) cfg.temperature = std::stod(it->second);
-    if (auto it = kv.find("request_timeout_s"); it != kv.end()) {
-        cfg.requestTimeoutSeconds = std::stoi(it->second);
-    }
-    return cfg;
-}
 
 // Try a few likely font paths so the game runs on stock Linux and Windows
 // without bundling a font. Returns the first existing path or empty.
@@ -95,7 +45,7 @@ llm_npc::Persona buildCompanion(const fs::path& personasDir) {
         "You know the road, the weather, and rumours from villages you have passed through. "
         "You have never heard of computers, code, taxes, sports teams, or modern celebrities; "
         "if asked, say so in character.";
-    std::string extra = slurp(personasDir / "companion.txt");
+    std::string extra = llm_npc::slurp(personasDir / "companion.txt");
     if (!extra.empty()) p.extraDirectives = extra;
     return p;
 }
@@ -113,7 +63,7 @@ int main() {
     const fs::path configDir = projectRoot / "config";
     const fs::path personasDir = projectRoot / "personas";
 
-    llm_npc::LlmConfig llmConfig = loadLlmConfig(configDir);
+    llm_npc::LlmConfig llmConfig = llm_npc::loadLlmConfig(configDir);
     std::cerr << "[llm_npc] using model=" << llmConfig.model
               << " host=" << llmConfig.host << ":" << llmConfig.port << "\n";
 
