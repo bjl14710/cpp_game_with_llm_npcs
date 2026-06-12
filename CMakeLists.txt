@@ -52,6 +52,11 @@ if(SFML_FOUND AND OPENGL_FOUND)
             sfml-system
             OpenGL::GL
     )
+    if(APPLE)
+        # Mouse-look uses CoreGraphics cursor warping directly; see main.cpp.
+        target_link_libraries(cpp_game_with_llm_npcs PRIVATE
+            "-framework ApplicationServices")
+    endif()
 else()
     message(STATUS "SFML or OpenGL not found; building core library only "
                    "(use tests/Makefile for the test suite)")

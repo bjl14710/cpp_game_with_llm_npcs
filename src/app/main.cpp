@@ -1,6 +1,10 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/OpenGL.hpp>
 
+#ifdef __APPLE__
+#include <ApplicationServices/ApplicationServices.h>
+#endif
+
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -47,6 +51,9 @@ fs::path findSystemFont() {
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/Library/Fonts/Arial.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Geneva.ttf",
+        "/System/Library/Fonts/Monaco.ttf",
     };
     for (const char* c : candidates) {
         if (fs::exists(c)) return fs::path(c);
@@ -76,6 +83,48 @@ Vec3 flatRight(float yawDeg) {
     return Vec3{f.z, 0.f, -f.x};
 }
 
+#ifdef __APPLE__
+// On macOS, SFML re-centers the cursor by posting a synthetic mouse event
+// whose coordinates land in the wrong place (and which the OS may drop
+// entirely without Accessibility permission), so the camera saw a large
+// constant delta every frame and spun. Bypass SFML: read the true cursor
+// location and warp it back to a fixed anchor, all in CoreGraphics global
+// coordinates so the loop is self-consistent.
+CGPoint gMouseAnchor{-1.0, -1.0};
+
+CGPoint currentCursorLocation() {
+    CGEventRef ev = CGEventCreate(nullptr);
+    const CGPoint p = CGEventGetLocation(ev);
+    CFRelease(ev);
+    return p;
+}
+
+// "Re-centering" on macOS means re-anchoring at the cursor's current spot;
+// the anchor only needs to be a fixed reference point for deltas.
+void centerMouse(sf::RenderWindow&) {
+    gMouseAnchor = currentCursorLocation();
+}
+
+// Applies one frame of mouse look to the camera and warps the cursor back
+// to the anchor so deltas keep accumulating.
+void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
+    if (!window.hasFocus()) return;
+    if (gMouseAnchor.x < 0.0) {
+        gMouseAnchor = currentCursorLocation();
+        return;
+    }
+    const CGPoint cur = currentCursorLocation();
+    const float dx = static_cast<float>(cur.x - gMouseAnchor.x);
+    const float dy = static_cast<float>(cur.y - gMouseAnchor.y);
+    camera.yawDeg += dx * kMouseSensitivity;
+    camera.pitchDeg = clampf(camera.pitchDeg - dy * kMouseSensitivity,
+                             -kMaxPitchDeg, kMaxPitchDeg);
+    CGWarpMouseCursorPosition(gMouseAnchor);
+    // The warp suspends mouse events briefly by default; re-associating
+    // cancels that so look stays smooth.
+    CGAssociateMouseAndMouseCursorPosition(true);
+}
+#else
 // Re-centers the OS cursor so relative mouse-look deltas keep working.
 void centerMouse(sf::RenderWindow& window) {
     sf::Mouse::setPosition(sf::Vector2i(static_cast<int>(window.getSize().x / 2),
@@ -93,6 +142,7 @@ void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
                              -kMaxPitchDeg, kMaxPitchDeg);
     if (window.hasFocus()) centerMouse(window);
 }
+#endif
 
 // Draws `str` centered horizontally at height `y`, with a dark backdrop bar.
 void drawCenteredHudText(sf::RenderWindow& window, const sf::Font& font,
