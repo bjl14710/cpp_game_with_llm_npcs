@@ -46,6 +46,10 @@ class Npc {
     // Id of the building or prop this NPC stands at ("bakery", "bench", ...).
     const std::string& spotId() const { return spotId_; }
 
+    // Turns immediately to face `target` (e.g. the player starting a chat)
+    // without changing the current behavior.
+    void lookAt(const Vec3& target) { faceToward(target); }
+
     // Advances world behavior by `dt` seconds: follows/chases the player and
     // turns to face them per the current behavior, sliding around buildings
     // via `city`, and counts down any active gesture pose. Pure game logic

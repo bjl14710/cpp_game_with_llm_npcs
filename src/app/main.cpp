@@ -265,7 +265,8 @@ int main() {
                     releaseMouse();
                 } else if (event.key.code == keyFromName(bindings.key(Action::Talk)) && nearbyNpc >= 0) {
                     session.open(nearbyNpc);
-                    const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
+                    Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
+                    npc.lookAt(camera.position);  // turn to the player as the chat opens
                     dialog.reset();
                     dialog.setInputEnabled(true);
                     dialog.swallowNextTextEntered();

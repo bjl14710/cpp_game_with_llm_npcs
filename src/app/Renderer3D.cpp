@@ -332,7 +332,9 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
 
     glPushMatrix();
     glTranslatef(npc.position.x, npc.position.y, npc.position.z);
-    glRotatef(-npc.facingDeg, 0.0f, 1.0f, 0.0f);
+    // +facing about Y maps the figure's local +Z (visor/front) onto
+    // flatForward(facing); negating it mirrored every NPC in X.
+    glRotatef(npc.facingDeg, 0.0f, 1.0f, 0.0f);
 
     // Legs, torso, head, and a short visor/brim hinting at the facing side.
     drawTexturedCylinder(Vec3{0.f, 0.45f, 0.f}, 0.26f, 0.45f, 14, texCloth_, accent);
