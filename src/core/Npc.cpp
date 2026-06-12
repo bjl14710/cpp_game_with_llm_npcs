@@ -18,6 +18,8 @@ constexpr float kCatchRadius = 1.6f;   // arrest succeeds within this range
 // reply and leaves the dialog to look at the NPC (the timer starts the moment
 // the reply lands, while the dialog may still be open).
 constexpr float kGestureSeconds = 15.f; // how long raise_hand / wave holds
+constexpr float kMoodSeconds = 25.f;    // how long an expression lingers
+constexpr float kHomeSnapRadius = 0.6f; // close enough to be "back at post"
 }  // namespace
 
 Npc::Npc(Persona persona, LlmClient& client, int maxHistoryTurns)
@@ -43,11 +45,16 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
         return std::nullopt;
     }
 
-    // Pull any action directive out of the reply before it is shown or
-    // remembered, so the tag never appears in the transcript or future
-    // context, and route it into behavior/gesture state.
+    // Pull every directive tag out of the reply before it is shown or
+    // remembered, so tags never appear in the transcript or future context,
+    // and route them into behavior/gesture/mood state.
     std::string content = reply.content;
-    applyAction(parseActionTag(content));
+    const Directives directives = parseDirectives(content);
+    applyAction(directives.action);
+    if (directives.hasMood) {
+        mood_ = directives.mood;
+        moodTimer_ = kMoodSeconds;
+    }
 
     history_.push_back({"user", std::move(pendingUserLine_)});
     history_.push_back({"assistant", content});
@@ -57,10 +64,15 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
 }
 
 void Npc::applyAction(NpcAction action) {
+    // Only police can actually arrest; when the model has a civilian try
+    // anyway, treat it as calling for the police instead.
+    if (action == NpcAction::Arrest && !persona_.police) action = NpcAction::CallPolice;
+
     lastAction_ = action;  // remembered for one turn so the UI can narrate it
     switch (action) {
         case NpcAction::None:
-            // The reply carried no directive; leave existing behavior intact.
+        case NpcAction::ReturnHome:  // internal-only; never arrives from a reply
+            // Leave existing behavior intact.
             break;
         case NpcAction::Follow:
         case NpcAction::Stop:
@@ -68,6 +80,13 @@ void Npc::applyAction(NpcAction action) {
         case NpcAction::Arrest:
             behavior_ = action;
             caughtPlayer_ = false;  // a new instruction clears the latch
+            break;
+        case NpcAction::CallPolice:
+            // The world (main loop) routes the summons to police NPCs; the
+            // caller just flags someone down, which reads as a wave.
+            pose_ = NpcAction::Wave;
+            poseTimer_ = kGestureSeconds;
+            gesturePhase_ = 0.f;
             break;
         case NpcAction::RaiseHand:
         case NpcAction::Wave:
@@ -98,6 +117,15 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city) {
         }
     }
 
+    // Expressions relax back to neutral when the conversation moves on.
+    if (moodTimer_ > 0.f) {
+        moodTimer_ -= dt;
+        if (moodTimer_ <= 0.f) {
+            mood_ = NpcMood::Neutral;
+            moodTimer_ = 0.f;
+        }
+    }
+
     const float dist = distanceXZ(position_, playerPos);
 
     switch (behavior_) {
@@ -120,6 +148,18 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city) {
             }
             break;
         }
+        case NpcAction::ReturnHome: {
+            const float homeDist = distanceXZ(position_, homePosition_);
+            if (homeDist > kHomeSnapRadius) {
+                faceToward(homePosition_);
+                const Vec3 step = normalize(homePosition_ - position_) * (kNpcWalk * dt);
+                position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
+            } else {
+                behavior_ = NpcAction::None;  // back at post
+                facingDeg_ = homeFacingDeg_;
+            }
+            break;
+        }
         case NpcAction::Stop:
         case NpcAction::Face:
             faceToward(playerPos);
@@ -127,6 +167,7 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city) {
         case NpcAction::None:
         case NpcAction::RaiseHand:  // gesture-only kinds never reach behavior_
         case NpcAction::Wave:
+        case NpcAction::CallPolice:
             break;
     }
 }

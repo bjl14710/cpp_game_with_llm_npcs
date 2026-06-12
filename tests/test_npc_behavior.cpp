@@ -17,6 +17,14 @@ Persona testPersona() {
     Persona p;
     p.name = "Dana";
     p.role = "beat cop";
+    p.police = true;  // movement tests below exercise the arrest behavior
+    return p;
+}
+
+Persona civilianPersona() {
+    Persona p;
+    p.name = "Marge";
+    p.role = "baker";
     return p;
 }
 
@@ -107,6 +115,85 @@ TEST_CASE("Arrest closes faster than follow and latches a catch") {
     for (int i = 0; i < 600; ++i) chaser.update(0.1f, player, city);
     CHECK(chaser.hasCaughtPlayer());
     CHECK(chaser.behavior() == NpcAction::Stop);
+}
+
+TEST_CASE("Civilian arrest converts to calling the police") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city;
+    const Vec3 player{0.f, 0.f, 5.f};
+
+    instruct(npc, "You can't do that here! [[ACTION: arrest]]");
+    CHECK(npc.lastAction() == NpcAction::CallPolice);
+    CHECK(npc.behavior() == NpcAction::None);   // she doesn't chase
+    CHECK(npc.pose() == NpcAction::Wave);       // she flags the police down
+
+    const Vec3 before = npc.position();
+    for (int i = 0; i < 20; ++i) npc.update(0.1f, player, city);
+    CHECK(npc.position().x == doctest::Approx(before.x));  // still no chase
+    CHECK(npc.position().z == doctest::Approx(before.z));
+}
+
+TEST_CASE("commandArrest sends a police NPC chasing without any reply") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc cop(testPersona(), client);
+    City city;
+    cop.setPlacement(Vec3{0.f, 0.f, 20.f}, 0.f, "police");
+
+    cop.commandArrest();
+    CHECK(cop.behavior() == NpcAction::Arrest);
+    for (int i = 0; i < 600; ++i) cop.update(0.1f, Vec3{0.f, 0.f, 0.f}, city);
+    CHECK(cop.hasCaughtPlayer());
+}
+
+TEST_CASE("commandReturnHome walks the NPC back to its spawn spot") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc cop(testPersona(), client);
+    City city;
+    cop.setPlacement(Vec3{4.f, 0.f, -36.f}, 90.f, "police");
+
+    // Chase away from home first, then get sent back.
+    cop.commandArrest();
+    for (int i = 0; i < 100; ++i) cop.update(0.1f, Vec3{0.f, 0.f, 30.f}, city);
+    CHECK(distanceXZ(cop.position(), Vec3{4.f, 0.f, -36.f}) > 5.f);
+
+    cop.commandReturnHome();
+    CHECK_FALSE(cop.hasCaughtPlayer());
+    for (int i = 0; i < 600; ++i) cop.update(0.1f, Vec3{0.f, 0.f, 30.f}, city);
+    CHECK(distanceXZ(cop.position(), Vec3{4.f, 0.f, -36.f}) < 1.f);
+    CHECK(cop.behavior() == NpcAction::None);
+    CHECK(cop.facingDeg() == doctest::Approx(90.f));  // spawn facing restored
+}
+
+TEST_CASE("Mood is read from the reply and decays back to neutral") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city;
+    const Vec3 player{0.f, 0.f, 3.f};
+
+    instruct(npc, "Oh! You shouldn't have. [[MOOD: embarrassed]]");
+    CHECK(npc.mood() == NpcMood::Embarrassed);
+
+    for (int i = 0; i < 10; ++i) npc.update(1.0f, player, city);  // 10s: still felt
+    CHECK(npc.mood() == NpcMood::Embarrassed);
+    for (int i = 0; i < 30; ++i) npc.update(1.0f, player, city);  // 40s total
+    CHECK(npc.mood() == NpcMood::Neutral);
+}
+
+TEST_CASE("lookAt turns the NPC without moving it") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    npc.setPlacement(Vec3{0.f, 0.f, 0.f}, 0.f, "");
+
+    npc.lookAt(Vec3{-5.f, 0.f, 0.f});  // due -X
+    CHECK(npc.facingDeg() == doctest::Approx(-90.f));
+    CHECK(npc.position().x == doctest::Approx(0.f));
+    CHECK(npc.position().z == doctest::Approx(0.f));
 }
 
 TEST_CASE("Gestures pose the NPC and expire on their own") {

@@ -7,21 +7,42 @@ namespace llm_npc {
 
 // A physical action an NPC can take in the world, decided by the LLM in
 // response to a player instruction ("follow me", "wave", ...). The model emits
-// at most one action tag per reply; parseActionTag() turns it into one of
-// these. Two axes are mixed here: persistent movement behaviors (Follow,
-// Arrest, Stop, Face) and transient gesture poses (RaiseHand, Wave). The Npc
-// routes each kind to the right state.
+// action tags in its replies; parseDirectives() turns them into one of these.
+// Three kinds are mixed here: persistent movement behaviors (Follow, Arrest,
+// Stop, Face, ReturnHome), transient gesture poses (RaiseHand, Wave), and the
+// world-level CallPolice signal. The Npc routes each kind to the right state.
 enum class NpcAction {
     None,
-    Follow,     // trail the player at a walk until told otherwise
-    Stop,       // hold position, face the player
-    Face,       // turn to look at the player, don't move
-    RaiseHand,  // raise the right hand for a few seconds
-    Wave,       // wave the right hand for a few seconds
-    Arrest,     // chase the player down, then stop on catch
+    Follow,      // trail the player at a walk until told otherwise
+    Stop,        // hold position, face the player
+    Face,        // turn to look at the player, don't move
+    RaiseHand,   // raise the right hand for a few seconds
+    Wave,        // wave the right hand for a few seconds
+    Arrest,      // police only: chase the player down, then stop on catch
+    CallPolice,  // civilians: summon the police to come arrest the player
+    ReturnHome,  // not LLM-emittable: walk back to the spawn spot
 };
 
-// Maps a lowercase tag keyword to its action. Unknown keywords yield None.
+// The NPC's emotional read on the conversation, also emitted by the LLM as a
+// tag on every reply. Drives the rendered facial expression.
+enum class NpcMood {
+    Neutral,
+    Happy,
+    Angry,
+    Sad,
+    Embarrassed,
+    Surprised,
+};
+
+// Everything extracted from one reply's directive tags.
+struct Directives {
+    NpcAction action = NpcAction::None;
+    NpcMood mood = NpcMood::Neutral;
+    bool hasMood = false;  // distinguishes "said neutral" from "said nothing"
+};
+
+// Maps a normalized (lowercase, '_'-joined) tag keyword to its action.
+// Unknown keywords yield None. ReturnHome is internal and not mapped.
 inline NpcAction actionFromKeyword(const std::string& kw) {
     if (kw == "follow") return NpcAction::Follow;
     if (kw == "stop" || kw == "stay") return NpcAction::Stop;
@@ -29,7 +50,25 @@ inline NpcAction actionFromKeyword(const std::string& kw) {
     if (kw == "raise_hand" || kw == "raise") return NpcAction::RaiseHand;
     if (kw == "wave") return NpcAction::Wave;
     if (kw == "arrest") return NpcAction::Arrest;
+    if (kw == "call_police" || kw == "police") return NpcAction::CallPolice;
     return NpcAction::None;
+}
+
+// Maps a normalized mood keyword to a mood, with synonyms for the words small
+// models actually emit. Unknown keywords yield Neutral with `ok = false`.
+inline bool moodFromKeyword(const std::string& kw, NpcMood& out) {
+    if (kw == "neutral" || kw == "calm") out = NpcMood::Neutral;
+    else if (kw == "happy" || kw == "flattered" || kw == "pleased" ||
+             kw == "excited" || kw == "joyful" || kw == "amused") out = NpcMood::Happy;
+    else if (kw == "angry" || kw == "annoyed" || kw == "irritated" ||
+             kw == "frustrated" || kw == "mad") out = NpcMood::Angry;
+    else if (kw == "sad" || kw == "upset" || kw == "hurt" ||
+             kw == "disappointed") out = NpcMood::Sad;
+    else if (kw == "embarrassed" || kw == "flustered" || kw == "awkward" ||
+             kw == "shy" || kw == "nervous") out = NpcMood::Embarrassed;
+    else if (kw == "surprised" || kw == "shocked" || kw == "startled") out = NpcMood::Surprised;
+    else return false;
+    return true;
 }
 
 // Lowercase copy of s (ASCII), used for case-insensitive matching.
@@ -39,41 +78,88 @@ inline std::string toLowerAscii(const std::string& s) {
     return out;
 }
 
-// Extracts an action directive of the form "[[ACTION: <keyword>]]" from an LLM
-// reply. The match is case-insensitive and tolerant of inner whitespace. When
-// a valid tag is found, it is erased from `reply` in place and any whitespace
-// left trailing is trimmed (the model is told to put the tag last, on its own
-// line) so it never reaches the transcript; the corresponding NpcAction is
-// returned. Returns NpcAction::None when no valid tag is present, leaving
-// `reply` untouched.
-inline NpcAction parseActionTag(std::string& reply) {
-    const std::string lower = toLowerAscii(reply);
+// Extracts every directive tag from an LLM reply, tolerating the mess a small
+// model actually produces: tags at the start, middle, or end; doubled or
+// single brackets; duplicate mood tags (the last one wins); unknown keywords.
+// All recognized-looking tags ("action"/"mood" kinds) are erased from `reply`
+// in place - including unknown keywords, so brackets never reach the
+// transcript - and seam whitespace is collapsed. Other bracketed text (e.g.
+// "[sigh]" or "[[1]]") is left alone.
+inline Directives parseDirectives(std::string& reply) {
+    Directives out;
 
-    const std::size_t open = lower.find("[[");
-    if (open == std::string::npos) return NpcAction::None;
-    const std::size_t close = lower.find("]]", open);
-    if (close == std::string::npos) return NpcAction::None;
+    std::size_t i = 0;
+    while (i < reply.size()) {
+        if (reply[i] != '[') {
+            ++i;
+            continue;
+        }
+        const std::size_t open = i;
+        std::size_t inner = open + 1;
+        if (inner < reply.size() && reply[inner] == '[') ++inner;  // "[[" form
+        const std::size_t close = reply.find(']', inner);
+        if (close == std::string::npos) break;  // no closing bracket anywhere
+        std::size_t end = close + 1;
+        // Consume a second ']' if present so "]]" closes fully.
+        if (end < reply.size() && reply[end] == ']') ++end;
 
-    // Content between the brackets, e.g. "action: follow".
-    const std::string inner = lower.substr(open + 2, close - (open + 2));
-    if (inner.find("action") == std::string::npos) return NpcAction::None;
-    const std::size_t colon = inner.find(':');
-    if (colon == std::string::npos) return NpcAction::None;
+        // "kind : keyword" between the brackets.
+        const std::string body = toLowerAscii(reply.substr(inner, close - inner));
+        const std::size_t colon = body.find(':');
+        if (colon == std::string::npos) {
+            ++i;
+            continue;
+        }
+        const auto trimRange = [&](std::size_t b, std::size_t e) {
+            while (b < e && std::isspace(static_cast<unsigned char>(body[b]))) ++b;
+            while (e > b && std::isspace(static_cast<unsigned char>(body[e - 1]))) --e;
+            return body.substr(b, e - b);
+        };
+        const std::string kind = trimRange(0, colon);
+        std::string keyword = trimRange(colon + 1, body.size());
+        // Normalize inner spaces to underscores ("call police" -> "call_police").
+        for (char& c : keyword) {
+            if (std::isspace(static_cast<unsigned char>(c))) c = '_';
+        }
 
-    // Trim whitespace around the keyword that follows the colon.
-    std::size_t kwStart = colon + 1;
-    while (kwStart < inner.size() && std::isspace(static_cast<unsigned char>(inner[kwStart]))) ++kwStart;
-    std::size_t kwEnd = inner.size();
-    while (kwEnd > kwStart && std::isspace(static_cast<unsigned char>(inner[kwEnd - 1]))) --kwEnd;
-    const std::string keyword = inner.substr(kwStart, kwEnd - kwStart);
+        if (kind != "action" && kind != "mood") {
+            ++i;
+            continue;
+        }
 
-    const NpcAction action = actionFromKeyword(keyword);
-    if (action == NpcAction::None) return NpcAction::None;
+        if (kind == "action") {
+            const NpcAction action = actionFromKeyword(keyword);
+            if (action != NpcAction::None) out.action = action;
+        } else {
+            NpcMood mood = NpcMood::Neutral;
+            if (moodFromKeyword(keyword, mood)) {
+                out.mood = mood;  // last recognized mood wins
+                out.hasMood = true;
+            }
+        }
 
-    // Remove the tag and any whitespace it leaves dangling at the end.
-    reply.erase(open, (close + 2) - open);
+        // Strip the tag and collapse the whitespace seam it leaves behind.
+        reply.erase(open, end - open);
+        while (open < reply.size() && open > 0 &&
+               std::isspace(static_cast<unsigned char>(reply[open])) &&
+               std::isspace(static_cast<unsigned char>(reply[open - 1]))) {
+            reply.erase(open, 1);
+        }
+        i = open;
+    }
+
+    // Tags at the very edges leave dangling whitespace; trim both ends.
     while (!reply.empty() && std::isspace(static_cast<unsigned char>(reply.back()))) reply.pop_back();
-    return action;
+    std::size_t lead = 0;
+    while (lead < reply.size() && std::isspace(static_cast<unsigned char>(reply[lead]))) ++lead;
+    reply.erase(0, lead);
+
+    return out;
+}
+
+// Compatibility wrapper: extract just the action (still strips all tags).
+inline NpcAction parseActionTag(std::string& reply) {
+    return parseDirectives(reply).action;
 }
 
 }  // namespace llm_npc

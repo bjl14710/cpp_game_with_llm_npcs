@@ -30,10 +30,13 @@ class Npc {
     std::optional<std::string> onReplyArrived(const ChatReply& reply);
 
     // Places the NPC in the world: feet position, facing in degrees (0 looks
-    // toward +Z), and the id of the building/prop they belong to.
+    // toward +Z), and the id of the building/prop they belong to. The spot is
+    // remembered as "home" so ReturnHome can walk back to it later.
     void setPlacement(const Vec3& position, float facingDeg, std::string spotId) {
         position_ = position;
         facingDeg_ = facingDeg;
+        homePosition_ = position;
+        homeFacingDeg_ = facingDeg;
         spotId_ = std::move(spotId);
     }
 
@@ -74,6 +77,24 @@ class Npc {
     // no words alongside its action tag.
     NpcAction lastAction() const { return lastAction_; }
 
+    // The emotional state read from the latest reply; decays back to Neutral
+    // after a while. Drives the rendered facial expression.
+    NpcMood mood() const { return mood_; }
+
+    // Orders this NPC (a summoned police officer) to chase the player down,
+    // exactly as if its own reply had carried an arrest directive.
+    void commandArrest() {
+        behavior_ = NpcAction::Arrest;
+        caughtPlayer_ = false;
+    }
+
+    // Sends the NPC walking back to its spawn spot (e.g. a cop returning to
+    // post after an arrest). Clears the catch latch.
+    void commandReturnHome() {
+        behavior_ = NpcAction::ReturnHome;
+        caughtPlayer_ = false;
+    }
+
     const Persona& persona() const { return persona_; }
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
@@ -93,9 +114,13 @@ class Npc {
     NpcAction behavior_ = NpcAction::None;    // persistent: follow/arrest/stop/face
     NpcAction pose_ = NpcAction::None;        // transient gesture overlay
     NpcAction lastAction_ = NpcAction::None;  // action from the latest reply
+    NpcMood mood_ = NpcMood::Neutral;         // current expression
+    float moodTimer_ = 0.f;                   // seconds until mood relaxes
     float poseTimer_ = 0.f;                   // seconds of gesture remaining
     float gesturePhase_ = 0.f;                // seconds elapsed in current gesture
     bool caughtPlayer_ = false;               // arrest reached the player
+    Vec3 homePosition_{};                     // spawn spot for ReturnHome
+    float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
 
     // Routes a freshly parsed action into behavior/gesture state.
     void applyAction(NpcAction action);

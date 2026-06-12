@@ -15,6 +15,7 @@ struct Persona {
     std::string speakingStyle;        // "short sentences, 1-3 per reply"
     std::string knowledgeBoundary;    // what they do / do not know
     std::string extraDirectives;      // free-form constraints
+    bool police = false;              // may arrest; others can only call police
 
     std::string renderSystemPrompt() const {
         std::ostringstream o;
