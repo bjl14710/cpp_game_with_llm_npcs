@@ -8,24 +8,35 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(SFML 2.6 COMPONENTS graphics window system REQUIRED)
 find_package(Threads REQUIRED)
 
+# Core: SFML-free game logic shared with the unit tests.
+add_library(llm_npc_core STATIC
+    src/core/LlmClient.cpp
+    src/core/Npc.cpp
+)
+target_include_directories(llm_npc_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/external
+)
+target_link_libraries(llm_npc_core PUBLIC Threads::Threads)
+if(WIN32)
+    # httplib needs winsock when built with MinGW.
+    target_link_libraries(llm_npc_core PUBLIC ws2_32)
+endif()
+
 add_executable(cpp_game_with_llm_npcs
     src/main.cpp
-    src/core/LlmClient.cpp
-    src/Npc.cpp
     src/DialogUI.cpp
 )
 
 target_include_directories(cpp_game_with_llm_npcs
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-        ${CMAKE_CURRENT_SOURCE_DIR}/external
 )
 
 target_link_libraries(cpp_game_with_llm_npcs
     PRIVATE
+        llm_npc_core
         sfml-graphics
         sfml-window
         sfml-system
-        Threads::Threads
 )
