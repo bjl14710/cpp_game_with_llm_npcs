@@ -12,6 +12,7 @@ find_package(Threads REQUIRED)
 add_library(llm_npc_core STATIC
     src/core/City.cpp
     src/core/Config.cpp
+    src/core/KeyBindings.cpp
     src/core/LlmClient.cpp
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp
