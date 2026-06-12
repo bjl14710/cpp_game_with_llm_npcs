@@ -340,6 +340,39 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
     drawTexturedBox(Vec3{0.f, 1.68f, 0.f}, 0.17f, 0.18f, 0.17f, texCloth_, skin, 1.f);
     drawTexturedBox(Vec3{0.f, 1.82f, 0.07f}, 0.18f, 0.04f, 0.24f, texCloth_, accent, 1.f);
 
+    // Arms hang at the sides by default. The NPC's right arm (+X local) can be
+    // raised or waved in response to a "raise your hand" / "wave" instruction;
+    // the left arm always hangs.
+    drawArm(-0.40f, body, skin, 0.f, 0.f);  // left, always down
+    float raise = 0.f;   // degrees about local +X: 0 = down, ~195 = up & forward
+    float swing = 0.f;   // degrees about local +Z for a side-to-side wave
+    if (npc.pose == NpcPose::RaiseHand) {
+        raise = 195.f;
+    } else if (npc.pose == NpcPose::Wave) {
+        raise = 195.f;
+        swing = 22.f * std::sin(npc.gesturePhase * 9.f);
+    }
+    drawArm(0.40f, body, skin, raise, swing);  // right, posed
+
+    glPopMatrix();
+}
+
+// Draws one arm in the NPC's local frame, pivoting at the shoulder. `xOffset`
+// places it left (-) or right (+); `raiseDeg` rotates it up about local +X
+// (0 hangs down, ~180 points straight up); `swingDeg` adds a side-to-side
+// rotation about local +Z for waving. Upper arm is sleeve-colored cloth with a
+// small skin "hand" at the end.
+void Renderer3D::drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
+                         float raiseDeg, float swingDeg) const {
+    const float shoulderY = 1.42f;
+    const float armHalf = 0.27f;  // half-length of the upper arm
+    glPushMatrix();
+    glTranslatef(xOffset, shoulderY, 0.f);
+    if (swingDeg != 0.f) glRotatef(swingDeg, 0.f, 0.f, 1.f);
+    if (raiseDeg != 0.f) glRotatef(raiseDeg, 1.f, 0.f, 0.f);
+    // Arm and hand extend downward (-Y) from the shoulder pivot.
+    drawTexturedBox(Vec3{0.f, -armHalf, 0.f}, 0.07f, armHalf, 0.07f, texCloth_, sleeve, 1.f);
+    drawTexturedBox(Vec3{0.f, -2.f * armHalf - 0.06f, 0.f}, 0.07f, 0.07f, 0.07f, texCloth_, skin, 1.f);
     glPopMatrix();
 }
 

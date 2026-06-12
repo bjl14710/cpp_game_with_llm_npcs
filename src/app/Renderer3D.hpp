@@ -18,12 +18,20 @@ struct CameraPose {
     float pitchDeg = 0.f;
 };
 
+// A transient arm gesture the renderer can pose an NPC into. Kept separate
+// from the core NpcAction enum so the renderer stays self-contained; the main
+// loop maps one to the other.
+enum class NpcPose { None, RaiseHand, Wave };
+
 // Everything the renderer needs to draw one NPC: where they stand, which way
-// they face, and a palette slot that picks their clothing colors.
+// they face, a palette slot that picks their clothing colors, and the current
+// arm gesture (with elapsed seconds so a wave can animate).
 struct NpcVisual {
     Vec3 position{};
     float facingDeg = 0.f;
     int palette = 0;
+    NpcPose pose = NpcPose::None;
+    float gesturePhase = 0.f;
 };
 
 // Legacy-GL (2.1) renderer for the city and its inhabitants. Draws with
@@ -84,6 +92,11 @@ class Renderer3D {
 
     // Draws one building box, choosing texture and tint from facadeKind.
     void drawBuilding(const Building& building) const;
+
+    // Draws one NPC arm in the figure's local frame; see the definition for
+    // how xOffset/raiseDeg/swingDeg pose it for raise-hand and wave gestures.
+    void drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
+                 float raiseDeg, float swingDeg) const;
 };
 
 }  // namespace llm_npc

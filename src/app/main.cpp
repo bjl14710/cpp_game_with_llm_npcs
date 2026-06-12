@@ -148,6 +148,22 @@ void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
 }
 #endif
 
+// A short third-person description of an action an NPC just took, shown in the
+// transcript so the player gets feedback even when the model answered with only
+// an action tag (and no spoken words). Empty for None.
+std::string stageDirection(NpcAction action) {
+    switch (action) {
+        case NpcAction::Follow: return "falls into step with you.";
+        case NpcAction::Stop: return "stops and stays put.";
+        case NpcAction::Face: return "turns to face you.";
+        case NpcAction::RaiseHand: return "raises their right hand.";
+        case NpcAction::Wave: return "waves at you.";
+        case NpcAction::Arrest: return "moves to apprehend you.";
+        case NpcAction::None: return "";
+    }
+    return "";
+}
+
 // Draws `str` centered horizontally at height `y`, with a dark backdrop bar.
 void drawCenteredHudText(sf::RenderWindow& window, const sf::Font& font,
                          const std::string& str, unsigned size, float y) {
@@ -321,6 +337,13 @@ int main() {
             menu.update(dt);
         }
 
+        // NPCs act on whatever instruction they last accepted (follow, chase,
+        // face, gesture). This keeps running during dialogue so a companion
+        // trails you while you talk, but the pause menu freezes the world.
+        if (mode != AppMode::Menu) {
+            for (Npc& npc : world.npcs()) npc.update(dt, camera.position, world.city());
+        }
+
         nearbyNpc = world.nearestNpcWithin(camera.position, kTalkRadius);
 
         // Streamed fragments for the open conversation appear immediately.
@@ -341,7 +364,19 @@ int main() {
             if (session.replyArrived(reply.id, reply.ok)) {
                 dialog.endStreaming();
                 if (text) {
-                    dialog.appendLine({TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                    if (!text->empty()) {
+                        dialog.appendLine({TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                    }
+                    // Narrate any physical action so it's visible in the log,
+                    // and so a wordless "tag-only" reply still shows something.
+                    const std::string sd = stageDirection(npc.lastAction());
+                    if (!sd.empty()) {
+                        dialog.appendLine({TranscriptLine::Kind::System, "",
+                                           npc.persona().name + " " + sd});
+                    } else if (text->empty()) {
+                        dialog.appendLine({TranscriptLine::Kind::System, "",
+                                           "(" + npc.persona().name + " says nothing.)"});
+                    }
                 } else {
                     dialog.appendLine({TranscriptLine::Kind::System, "",
                                        "[" + npc.persona().name + " seems distracted: " +
@@ -356,7 +391,11 @@ int main() {
         renderer.drawCity(world.city());
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             const Npc& npc = world.npcs()[i];
-            renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i)});
+            NpcPose pose = NpcPose::None;
+            if (npc.pose() == NpcAction::RaiseHand) pose = NpcPose::RaiseHand;
+            else if (npc.pose() == NpcAction::Wave) pose = NpcPose::Wave;
+            renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i),
+                                       pose, npc.gesturePhase()});
         }
 
         // ---- SFML overlay pass ----
@@ -381,6 +420,14 @@ int main() {
                 drawCenteredHudText(window, font,
                                     "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name,
                                     20, static_cast<float>(window.getSize().y) - 84.f);
+            }
+            // Announce an arrest the moment a chasing NPC catches up.
+            for (const Npc& npc : world.npcs()) {
+                if (!npc.hasCaughtPlayer()) continue;
+                drawCenteredHudText(window, font,
+                                    npc.persona().name + " caught you!", 22,
+                                    static_cast<float>(window.getSize().y) - 120.f);
+                break;
             }
             // Crosshair dot.
             sf::CircleShape dot(2.f);

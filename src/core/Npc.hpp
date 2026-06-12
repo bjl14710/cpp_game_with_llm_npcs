@@ -5,8 +5,10 @@
 #include <string>
 #include <vector>
 
+#include "City.hpp"
 #include "LlmClient.hpp"
 #include "Math.hpp"
+#include "NpcAction.hpp"
 #include "Persona.hpp"
 
 namespace llm_npc {
@@ -44,6 +46,30 @@ class Npc {
     // Id of the building or prop this NPC stands at ("bakery", "bench", ...).
     const std::string& spotId() const { return spotId_; }
 
+    // Advances world behavior by `dt` seconds: follows/chases the player and
+    // turns to face them per the current behavior, sliding around buildings
+    // via `city`, and counts down any active gesture pose. Pure game logic
+    // (no LLM, no graphics) so it stays unit-testable.
+    void update(float dt, const Vec3& playerPos, const City& city);
+
+    // The persistent movement behavior set by the last obeyed instruction.
+    NpcAction behavior() const { return behavior_; }
+
+    // The transient gesture currently being shown (None when idle).
+    NpcAction pose() const { return pose_; }
+
+    // Seconds since the active gesture began; drives wave animation phase.
+    float gesturePhase() const { return gesturePhase_; }
+
+    // True once an Arrest behavior has reached the player. Latches until the
+    // NPC is given a different instruction; lets the UI announce the catch.
+    bool hasCaughtPlayer() const { return caughtPlayer_; }
+
+    // The action parsed from the most recent reply (None if the NPC didn't act
+    // this turn). Lets the UI show a stage direction even when the model spoke
+    // no words alongside its action tag.
+    NpcAction lastAction() const { return lastAction_; }
+
     const Persona& persona() const { return persona_; }
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
@@ -60,6 +86,16 @@ class Npc {
     float facingDeg_ = 0.f;
     std::string spotId_;
 
+    NpcAction behavior_ = NpcAction::None;    // persistent: follow/arrest/stop/face
+    NpcAction pose_ = NpcAction::None;        // transient gesture overlay
+    NpcAction lastAction_ = NpcAction::None;  // action from the latest reply
+    float poseTimer_ = 0.f;                   // seconds of gesture remaining
+    float gesturePhase_ = 0.f;                // seconds elapsed in current gesture
+    bool caughtPlayer_ = false;               // arrest reached the player
+
+    // Routes a freshly parsed action into behavior/gesture state.
+    void applyAction(NpcAction action);
+    void faceToward(const Vec3& target);
     void trimHistory();
 };
 
