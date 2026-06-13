@@ -30,11 +30,16 @@ build: $(TARGET)
 $(TARGET): $(CORE_OBJS) $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
+# -MMD -MP emits .d header-dependency files next to each object so editing a
+# header (e.g. changing the Npc class layout) recompiles every dependent
+# object instead of leaving stale, ABI-mismatched ones behind.
 $(BUILD)/core_%.o: ../src/core/%.cpp | $(BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 $(BUILD)/%.o: %.cpp | $(BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
+
+-include $(wildcard $(BUILD)/*.d)
 
 $(BUILD):
 	mkdir -p $(BUILD)

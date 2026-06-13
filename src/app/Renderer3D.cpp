@@ -332,14 +332,111 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
 
     glPushMatrix();
     glTranslatef(npc.position.x, npc.position.y, npc.position.z);
-    glRotatef(-npc.facingDeg, 0.0f, 1.0f, 0.0f);
+    // +facing about Y maps the figure's local +Z (visor/front) onto
+    // flatForward(facing); negating it mirrored every NPC in X.
+    glRotatef(npc.facingDeg, 0.0f, 1.0f, 0.0f);
 
     // Legs, torso, head, and a short visor/brim hinting at the facing side.
     drawTexturedCylinder(Vec3{0.f, 0.45f, 0.f}, 0.26f, 0.45f, 14, texCloth_, accent);
     drawTexturedCylinder(Vec3{0.f, 1.18f, 0.f}, 0.32f, 0.32f, 14, texCloth_, body);
     drawTexturedBox(Vec3{0.f, 1.68f, 0.f}, 0.17f, 0.18f, 0.17f, texCloth_, skin, 1.f);
     drawTexturedBox(Vec3{0.f, 1.82f, 0.07f}, 0.18f, 0.04f, 0.24f, texCloth_, accent, 1.f);
+    drawFace(npc.face);
 
+    // Arms hang at the sides by default. The NPC's right arm (+X local) can be
+    // raised or waved in response to a "raise your hand" / "wave" instruction;
+    // the left arm always hangs.
+    drawArm(-0.40f, body, skin, 0.f, 0.f);  // left, always down
+    float raise = 0.f;   // degrees about local +X: 0 = down, ~195 = up & forward
+    float swing = 0.f;   // degrees about local +Z for a side-to-side wave
+    if (npc.pose == NpcPose::RaiseHand) {
+        raise = 195.f;
+    } else if (npc.pose == NpcPose::Wave) {
+        raise = 195.f;
+        swing = 22.f * std::sin(npc.gesturePhase * 9.f);
+    }
+    drawArm(0.40f, body, skin, raise, swing);  // right, posed
+
+    glPopMatrix();
+}
+
+// Draws the facial features on the head's front (+Z) face in the NPC's local
+// frame. Everything is tiny textured boxes sitting just proud of the skin so
+// they read at a distance: dark eyes and brows, a mouth whose corners shift
+// with the expression, blush patches when embarrassed, wide eyes and an open
+// mouth when surprised, slanted brows when angry or sad.
+void Renderer3D::drawFace(NpcFace face) const {
+    const sf::Color dark(45, 38, 38);
+    const sf::Color lip(150, 75, 70);
+    const sf::Color blush(235, 140, 150);
+    const float zFront = 0.176f;  // head half-depth 0.17 + a hair
+
+    // Eyes: taller when surprised.
+    const float eyeHalfY = face == NpcFace::Surprised ? 0.040f : 0.022f;
+    drawTexturedBox(Vec3{-0.07f, 1.71f, zFront}, 0.024f, eyeHalfY, 0.006f, texCloth_, dark, 1.f);
+    drawTexturedBox(Vec3{0.07f, 1.71f, zFront}, 0.024f, eyeHalfY, 0.006f, texCloth_, dark, 1.f);
+
+    // Brows: flat by default, inner ends pulled down when angry, up when sad,
+    // raised high when surprised. With the mirrored per-side rotation below,
+    // a positive tilt lowers the inner (nose-side) ends: +theta about Z lifts
+    // a box's +X end, and each side's inner end alternates between +X and -X.
+    float browTilt = 0.f;  // degrees about local +Z, applied mirrored per side
+    if (face == NpcFace::Angry) browTilt = 18.f;
+    if (face == NpcFace::Sad) browTilt = -14.f;
+    const float browY = face == NpcFace::Surprised ? 1.80f : 1.77f;
+    for (int side = -1; side <= 1; side += 2) {
+        glPushMatrix();
+        glTranslatef(0.07f * static_cast<float>(side), browY, 0.f);
+        glRotatef(browTilt * static_cast<float>(side), 0.f, 0.f, 1.f);
+        drawTexturedBox(Vec3{0.f, 0.f, zFront}, 0.038f, 0.008f, 0.006f, texCloth_, dark, 1.f);
+        glPopMatrix();
+    }
+
+    // Mouth.
+    switch (face) {
+        case NpcFace::Surprised:
+            // Small open "o".
+            drawTexturedBox(Vec3{0.f, 1.615f, zFront}, 0.022f, 0.030f, 0.006f, texCloth_, dark, 1.f);
+            break;
+        case NpcFace::Happy:
+            drawTexturedBox(Vec3{0.f, 1.615f, zFront}, 0.045f, 0.008f, 0.006f, texCloth_, lip, 1.f);
+            drawTexturedBox(Vec3{-0.048f, 1.628f, zFront}, 0.010f, 0.010f, 0.006f, texCloth_, lip, 1.f);
+            drawTexturedBox(Vec3{0.048f, 1.628f, zFront}, 0.010f, 0.010f, 0.006f, texCloth_, lip, 1.f);
+            break;
+        case NpcFace::Sad:
+        case NpcFace::Angry:
+            drawTexturedBox(Vec3{0.f, 1.612f, zFront}, 0.040f, 0.008f, 0.006f, texCloth_, lip, 1.f);
+            drawTexturedBox(Vec3{-0.044f, 1.600f, zFront}, 0.010f, 0.010f, 0.006f, texCloth_, lip, 1.f);
+            drawTexturedBox(Vec3{0.044f, 1.600f, zFront}, 0.010f, 0.010f, 0.006f, texCloth_, lip, 1.f);
+            break;
+        case NpcFace::Embarrassed:
+            // Tight little mouth plus blush patches on the cheeks.
+            drawTexturedBox(Vec3{0.f, 1.612f, zFront}, 0.022f, 0.008f, 0.006f, texCloth_, lip, 1.f);
+            drawTexturedBox(Vec3{-0.115f, 1.66f, zFront}, 0.030f, 0.016f, 0.005f, texCloth_, blush, 1.f);
+            drawTexturedBox(Vec3{0.115f, 1.66f, zFront}, 0.030f, 0.016f, 0.005f, texCloth_, blush, 1.f);
+            break;
+        case NpcFace::Neutral:
+            drawTexturedBox(Vec3{0.f, 1.612f, zFront}, 0.038f, 0.008f, 0.006f, texCloth_, lip, 1.f);
+            break;
+    }
+}
+
+// Draws one arm in the NPC's local frame, pivoting at the shoulder. `xOffset`
+// places it left (-) or right (+); `raiseDeg` rotates it up about local +X
+// (0 hangs down, ~180 points straight up); `swingDeg` adds a side-to-side
+// rotation about local +Z for waving. Upper arm is sleeve-colored cloth with a
+// small skin "hand" at the end.
+void Renderer3D::drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
+                         float raiseDeg, float swingDeg) const {
+    const float shoulderY = 1.42f;
+    const float armHalf = 0.27f;  // half-length of the upper arm
+    glPushMatrix();
+    glTranslatef(xOffset, shoulderY, 0.f);
+    if (swingDeg != 0.f) glRotatef(swingDeg, 0.f, 0.f, 1.f);
+    if (raiseDeg != 0.f) glRotatef(raiseDeg, 1.f, 0.f, 0.f);
+    // Arm and hand extend downward (-Y) from the shoulder pivot.
+    drawTexturedBox(Vec3{0.f, -armHalf, 0.f}, 0.07f, armHalf, 0.07f, texCloth_, sleeve, 1.f);
+    drawTexturedBox(Vec3{0.f, -2.f * armHalf - 0.06f, 0.f}, 0.07f, 0.07f, 0.07f, texCloth_, skin, 1.f);
     glPopMatrix();
 }
 

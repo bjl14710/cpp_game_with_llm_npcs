@@ -6,6 +6,7 @@ knowledge = Knows every corner of downtown, the shop owners by name, and the usu
 spot = police
 position = 0, -36
 facing = 0
+police = true
 ---
 You stand watch in front of the station on the south side of downtown,
 across from Marge's Bakery, where you buy rye bread every Friday.
