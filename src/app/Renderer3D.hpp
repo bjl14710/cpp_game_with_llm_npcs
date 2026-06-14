@@ -84,6 +84,9 @@ class Renderer3D {
     GLuint texGlass_ = 0;
     GLuint texStripe_ = 0;
     GLuint texCloth_ = 0;
+    GLuint texWood_ = 0;    // interior floors, counters
+    GLuint texLeaf_ = 0;    // tree foliage
+    GLuint texShelf_ = 0;   // bookshelves / store shelving
 
     // Camera basis captured by beginFrame for worldToScreen.
     Vec3 eye_{};
@@ -96,8 +99,28 @@ class Renderer3D {
     void drawGroundPatch(float minX, float minZ, float maxX, float maxZ, float y,
                          GLuint texture, const sf::Color& tint, float tile) const;
 
-    // Draws one building box, choosing texture and tint from facadeKind.
+    // Draws one building: a solid box, or (when enterable) a hollow shell with
+    // walls, doorway, roof, interior floor, and shop fixtures.
     void drawBuilding(const Building& building) const;
+
+    // Draws an enterable shop: wall segments with the doorway gap, a lintel
+    // over the door, a roof, an interior floor, a sign band, and a swinging
+    // door panel whose angle follows the camera's distance to the doorway.
+    void drawHollowBuilding(const Building& building) const;
+
+    // Draws the back-wall fixtures themed to a shop's facadeKind (bookshelves,
+    // store shelving, counters, wall guitars, ...).
+    void drawShopFixtures(const Building& building) const;
+
+    // Draws steel bars across an AABB span (the holding-cell front).
+    void drawCellBars(const Building& building) const;
+
+    // Draws an axis-aligned box from the footprint `box`, spanning y0..y1.
+    void drawBox(const AABB& box, float y0, float y1, GLuint texture,
+                 const sf::Color& tint, float tile) const;
+
+    // Street dressing drawn across the city: lamp posts and trees.
+    void drawStreetProps() const;
 
     // Draws one NPC arm in the figure's local frame; see the definition for
     // how xOffset/raiseDeg/swingDeg pose it for raise-hand and wave gestures.

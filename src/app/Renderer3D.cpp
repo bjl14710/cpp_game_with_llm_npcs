@@ -222,6 +222,17 @@ void Renderer3D::init() {
     glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
     glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
 
+    // A dim positional "fill" light pinned to the camera each frame so roofed
+    // interiors are readable without washing out the daylit exterior.
+    glEnable(GL_LIGHT1);
+    const GLfloat fillAmbient[] = {0.06f, 0.06f, 0.06f, 1.0f};
+    const GLfloat fillDiffuse[] = {0.42f, 0.40f, 0.36f, 1.0f};
+    glLightfv(GL_LIGHT1, GL_AMBIENT, fillAmbient);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, fillDiffuse);
+    glLightf(GL_LIGHT1, GL_CONSTANT_ATTENUATION, 1.0f);
+    glLightf(GL_LIGHT1, GL_LINEAR_ATTENUATION, 0.03f);
+    glLightf(GL_LIGHT1, GL_QUADRATIC_ATTENUATION, 0.0f);
+
     texAsphalt_ = makeCheckerTexture(sf::Color(70, 72, 76), sf::Color(62, 64, 68), 16);
     texPavement_ = makeCheckerTexture(sf::Color(176, 170, 160), sf::Color(158, 152, 142), 8);
     texGrass_ = makeCheckerTexture(sf::Color(64, 130, 62), sf::Color(54, 112, 52), 12);
@@ -229,6 +240,9 @@ void Renderer3D::init() {
     texGlass_ = makeCheckerTexture(sf::Color(120, 160, 200), sf::Color(80, 110, 150), 6);
     texStripe_ = makeStripeTexture(sf::Color(235, 235, 235), sf::Color(200, 60, 60));
     texCloth_ = makeCheckerTexture(sf::Color(255, 255, 255), sf::Color(235, 235, 235), 4);
+    texWood_ = makeStripeTexture(sf::Color(124, 84, 48), sf::Color(102, 66, 36));
+    texLeaf_ = makeCheckerTexture(sf::Color(46, 98, 44), sf::Color(58, 116, 54), 10);
+    texShelf_ = makeStripeTexture(sf::Color(178, 62, 52), sf::Color(70, 96, 160));
 }
 
 void Renderer3D::beginFrame(const sf::RenderWindow& window, const CameraPose& camera) {
@@ -254,6 +268,10 @@ void Renderer3D::beginFrame(const sf::RenderWindow& window, const CameraPose& ca
 
     const GLfloat lightPos[] = {60.0f, 120.0f, 40.0f, 1.0f};
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+
+    // Fill light rides with the camera (positional, set in eye space).
+    const GLfloat fillPos[] = {eye_.x, eye_.y, eye_.z, 1.0f};
+    glLightfv(GL_LIGHT1, GL_POSITION, fillPos);
 }
 
 void Renderer3D::drawGroundPatch(float minX, float minZ, float maxX, float maxZ, float y,
@@ -265,7 +283,23 @@ void Renderer3D::drawGroundPatch(float minX, float minZ, float maxX, float maxZ,
     glEnd();
 }
 
+void Renderer3D::drawBox(const AABB& box, float y0, float y1, GLuint texture,
+                         const sf::Color& tint, float tile) const {
+    const Vec3 center{(box.minX + box.maxX) * 0.5f, (y0 + y1) * 0.5f, (box.minZ + box.maxZ) * 0.5f};
+    drawTexturedBox(center, (box.maxX - box.minX) * 0.5f, (y1 - y0) * 0.5f,
+                    (box.maxZ - box.minZ) * 0.5f, texture, tint, tile);
+}
+
 void Renderer3D::drawBuilding(const Building& b) const {
+    if (b.enterable) {
+        drawHollowBuilding(b);
+        return;
+    }
+    if (b.facadeKind == 14) {  // holding-cell bars
+        drawCellBars(b);
+        return;
+    }
+
     const Vec3 center{(b.minX + b.maxX) * 0.5f, b.height * 0.5f, (b.minZ + b.maxZ) * 0.5f};
     const float halfX = (b.maxX - b.minX) * 0.5f;
     const float halfZ = (b.maxZ - b.minZ) * 0.5f;
@@ -274,17 +308,13 @@ void Renderer3D::drawBuilding(const Building& b) const {
     GLuint texture = texBrick_;
     sf::Color tint = sf::Color::White;
     switch (b.facadeKind) {
-        case 0: tint = sf::Color(235, 200, 170); break;                       // bakery: warm brick
-        case 1: tint = sf::Color(180, 190, 215); break;                       // police: blue-grey
-        case 2: tint = sf::Color(205, 165, 130); break;                       // coffee: roast brown
-        case 3: tint = sf::Color(225, 210, 175); break;                       // library: sandstone
-        case 4: tint = sf::Color(195, 195, 195); break;                       // hardware: grey
         case 5: texture = texStripe_; break;                                  // hot-dog cart awning
         case 6: texture = texGlass_; tint = sf::Color(245, 210, 70); break;   // taxi: cab yellow
         case 7: texture = texPavement_; tint = sf::Color(205, 215, 225); break;  // fountain stone
         case 8: texture = texPavement_; tint = sf::Color(150, 105, 65); break;   // wooden bench
         case 9: tint = sf::Color(185, 160, 150); break;                       // apartments
         case 10: texture = texGlass_; break;                                  // office tower
+        case 13: tint = sf::Color(150, 150, 158); break;                      // cell wall: concrete
         default: break;
     }
 
@@ -297,6 +327,137 @@ void Renderer3D::drawBuilding(const Building& b) const {
         drawGroundPatch(b.minX + 0.7f, b.minZ + 0.7f, b.maxX - 0.7f, b.maxZ - 0.7f,
                         b.height - 0.25f, texGlass_, sf::Color(90, 160, 220), 2.f);
         glEnable(GL_LIGHTING);
+    }
+}
+
+void Renderer3D::drawHollowBuilding(const Building& b) const {
+    sf::Color wallTint(200, 190, 175);
+    sf::Color signTint(80, 80, 90);
+    switch (b.facadeKind) {
+        case 0:  wallTint = sf::Color(235, 200, 170); signTint = sf::Color(150, 90, 60); break;  // bakery
+        case 1:  wallTint = sf::Color(180, 190, 215); signTint = sf::Color(40, 70, 140); break;  // police
+        case 2:  wallTint = sf::Color(205, 165, 130); signTint = sf::Color(90, 60, 40); break;   // coffee
+        case 3:  wallTint = sf::Color(225, 210, 175); signTint = sf::Color(130, 60, 130); break; // library
+        case 4:  wallTint = sf::Color(195, 195, 195); signTint = sf::Color(160, 90, 40); break;  // hardware
+        case 11: wallTint = sf::Color(205, 180, 150); signTint = sf::Color(60, 120, 170); break; // guitar
+        case 12: wallTint = sf::Color(190, 215, 185); signTint = sf::Color(70, 150, 80); break;  // grocery
+        default: break;
+    }
+
+    const float t = kWallThickness;
+    const float cx = (b.minX + b.maxX) * 0.5f;
+    const float cz = (b.minZ + b.maxZ) * 0.5f;
+    const float half = kDoorWidth * 0.5f;
+    const float wallTile = std::max(1.0f, b.height / 3.0f);
+
+    for (const AABB& w : buildingWallSegments(b)) {
+        drawBox(w, 0.f, b.height, texBrick_, wallTint, wallTile);
+    }
+
+    // Lintel above the doorway and an exterior sign band, oriented to the door.
+    AABB lintel{}, sign{};
+    switch (b.doorSide) {
+        case DoorSide::NegZ: lintel = {cx - half, b.minZ, cx + half, b.minZ + t};
+                             sign = {b.minX, b.minZ - 0.3f, b.maxX, b.minZ + 0.1f}; break;
+        case DoorSide::PosZ: lintel = {cx - half, b.maxZ - t, cx + half, b.maxZ};
+                             sign = {b.minX, b.maxZ - 0.1f, b.maxX, b.maxZ + 0.3f}; break;
+        case DoorSide::NegX: lintel = {b.minX, cz - half, b.minX + t, cz + half};
+                             sign = {b.minX - 0.3f, b.minZ, b.minX + 0.1f, b.maxZ}; break;
+        case DoorSide::PosX: lintel = {b.maxX - t, cz - half, b.maxX, cz + half};
+                             sign = {b.maxX - 0.1f, b.minZ, b.maxX + 0.3f, b.maxZ}; break;
+    }
+    drawBox(lintel, kDoorHeight, b.height, texBrick_, wallTint, 1.f);
+    drawBox(sign, b.height - 1.0f, b.height - 0.2f, texStripe_, signTint, 3.f);
+
+    // Flat roof and a wood interior floor inset past the walls.
+    drawBox(AABB{b.minX, b.minZ, b.maxX, b.maxZ}, b.height, b.height + 0.4f,
+            texBrick_, sf::Color(110, 105, 100), 4.f);
+    glDisable(GL_LIGHTING);
+    drawGroundPatch(b.minX + t, b.minZ + t, b.maxX - t, b.maxZ - t, 0.06f,
+                    texWood_, sf::Color(235, 225, 215), 4.f);
+    glEnable(GL_LIGHTING);
+
+    drawShopFixtures(b);
+
+    // Swinging door panel, hinged at one end of the gap; opens as you approach.
+    const Vec3 dc = buildingDoorCenter(b);
+    const float openFrac = clampf((5.0f - distanceXZ(eye_, dc)) / 3.0f, 0.f, 1.f);
+    const bool alongX = (b.doorSide == DoorSide::NegZ || b.doorSide == DoorSide::PosZ);
+    glPushMatrix();
+    glTranslatef(alongX ? cx - half : dc.x, 0.f, alongX ? dc.z : cz - half);
+    glRotatef((alongX ? 0.f : 90.f) + 100.f * openFrac, 0.f, 1.f, 0.f);
+    drawTexturedBox(Vec3{kDoorWidth * 0.5f, kDoorHeight * 0.5f, 0.f}, kDoorWidth * 0.5f,
+                    kDoorHeight * 0.5f, 0.08f, texWood_, sf::Color(120, 80, 45), 1.f);
+    glPopMatrix();
+}
+
+void Renderer3D::drawShopFixtures(const Building& b) const {
+    const float t = kWallThickness;
+    const float ix0 = b.minX + t, iz0 = b.minZ + t, ix1 = b.maxX - t, iz1 = b.maxZ - t;
+    const sf::Color wood(120, 80, 45);
+
+    switch (b.facadeKind) {
+        case 3:    // library bookshelves
+        case 4:    // hardware shelving
+        case 12: { // grocery shelving
+            for (int i = 0; i < 3; ++i) {
+                const float z = iz0 + 1.0f + static_cast<float>(i) * (iz1 - iz0 - 2.0f) / 3.0f;
+                drawBox(AABB{ix0 + 1.0f, z, ix1 - 1.0f, z + 0.7f}, 0.f, 2.6f,
+                        texShelf_, sf::Color::White, 2.f);
+            }
+            break;
+        }
+        case 11: { // guitar shop: counter + guitars on the back wall
+            drawBox(AABB{ix0 + 1.0f, iz1 - 1.2f, ix1 - 1.0f, iz1 - 0.4f}, 0.f, 1.1f,
+                    texWood_, wood, 2.f);
+            for (int i = 0; i < 4; ++i) {
+                const float x = ix0 + 1.5f + static_cast<float>(i) * 1.6f;
+                drawBox(AABB{x, iz0 + 0.2f, x + 0.5f, iz0 + 0.6f}, 1.2f, 2.6f,
+                        texWood_, sf::Color(150, 90, 50), 1.f);
+            }
+            break;
+        }
+        default: { // bakery / coffee / police: a service counter at the back
+            drawBox(AABB{ix0 + 1.0f, iz1 - 1.4f, ix1 - 1.0f, iz1 - 0.6f}, 0.f, 1.1f,
+                    texWood_, wood, 2.f);
+            break;
+        }
+    }
+}
+
+void Renderer3D::drawCellBars(const Building& b) const {
+    const sf::Color steel(120, 124, 132);
+    const float cz = (b.minZ + b.maxZ) * 0.5f;
+    const int n = 10;
+    for (int i = 0; i < n; ++i) {
+        const float x = b.minX + (b.maxX - b.minX) * (static_cast<float>(i) / (n - 1));
+        drawBox(AABB{x - 0.06f, cz - 0.06f, x + 0.06f, cz + 0.06f}, 0.f, b.height,
+                texPavement_, steel, 1.f);
+    }
+    drawBox(AABB{b.minX, cz - 0.06f, b.maxX, cz + 0.06f}, b.height - 0.15f, b.height,
+            texPavement_, steel, 1.f);
+}
+
+void Renderer3D::drawStreetProps() const {
+    // Lamp posts at the four plaza corners with a glowing head.
+    const float lampX[] = {-30.f, 30.f, -30.f, 30.f};
+    const float lampZ[] = {-30.f, -30.f, 30.f, 30.f};
+    for (int i = 0; i < 4; ++i) {
+        drawTexturedCylinder(Vec3{lampX[i], 2.0f, lampZ[i]}, 0.12f, 2.0f, 8,
+                             texPavement_, sf::Color(70, 70, 76));
+        glDisable(GL_LIGHTING);
+        drawTexturedBox(Vec3{lampX[i], 4.1f, lampZ[i]}, 0.25f, 0.25f, 0.25f,
+                        texGlass_, sf::Color(255, 240, 180), 1.f);
+        glEnable(GL_LIGHTING);
+    }
+    // Trees: a cluster in the park (NE) and a pair flanking the guitar shop.
+    const float treeX[] = {50.f, 72.f, 58.f, -22.f, 22.f};
+    const float treeZ[] = {52.f, 66.f, 78.f, 20.f, 20.f};
+    for (int i = 0; i < 5; ++i) {
+        drawTexturedCylinder(Vec3{treeX[i], 1.4f, treeZ[i]}, 0.3f, 1.4f, 8,
+                             texWood_, sf::Color(110, 75, 45));
+        drawTexturedBox(Vec3{treeX[i], 3.4f, treeZ[i]}, 1.5f, 1.5f, 1.5f,
+                        texLeaf_, sf::Color::White, 2.f);
     }
 }
 
@@ -322,6 +483,8 @@ void Renderer3D::drawCity(const City& city) {
     for (const auto& building : city.buildings()) {
         drawBuilding(building);
     }
+
+    drawStreetProps();
 }
 
 void Renderer3D::drawNpc(const NpcVisual& npc) {
