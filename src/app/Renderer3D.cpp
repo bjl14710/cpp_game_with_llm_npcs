@@ -23,9 +23,25 @@ GLuint createTexture(const std::vector<std::uint8_t>& pixels, int size) {
     return texture;
 }
 
+// Adds per-texel luminance grain so flat procedural fills don't look plastic.
+void addGrain(std::vector<std::uint8_t>& pixels, int size, int amp) {
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            unsigned h = static_cast<unsigned>(x * 374761393 ^ y * 668265263);
+            h = (h ^ (h >> 13)) * 1274126177u;
+            const int n = static_cast<int>(h % (2u * amp + 1u)) - amp;
+            const int i = (y * size + x) * 4;
+            for (int k = 0; k < 3; ++k) {
+                const int v = static_cast<int>(pixels[i + k]) + n;
+                pixels[i + k] = static_cast<std::uint8_t>(v < 0 ? 0 : v > 255 ? 255 : v);
+            }
+        }
+    }
+}
+
 // Procedural checkerboard texture of `cells` x `cells` squares in two colors.
 GLuint makeCheckerTexture(const sf::Color& a, const sf::Color& b, int cells) {
-    constexpr int size = 64;
+    constexpr int size = 128;
     std::vector<std::uint8_t> pixels(size * size * 4, 255);
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
@@ -38,37 +54,39 @@ GLuint makeCheckerTexture(const sf::Color& a, const sf::Color& b, int cells) {
             pixels[i + 2] = color.b;
         }
     }
+    addGrain(pixels, size, 8);
     return createTexture(pixels, size);
 }
 
-// Procedural vertical-stripe texture: alternating 8-pixel columns.
+// Procedural vertical-stripe texture: alternating columns.
 GLuint makeStripeTexture(const sf::Color& base, const sf::Color& stripe) {
-    constexpr int size = 64;
+    constexpr int size = 128;
     std::vector<std::uint8_t> pixels(size * size * 4, 255);
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
-            const sf::Color color = ((x / 8) % 2 == 0) ? stripe : base;
+            const sf::Color color = ((x / 16) % 2 == 0) ? stripe : base;
             const int i = (y * size + x) * 4;
             pixels[i + 0] = color.r;
             pixels[i + 1] = color.g;
             pixels[i + 2] = color.b;
         }
     }
+    addGrain(pixels, size, 8);
     return createTexture(pixels, size);
 }
 
 // Procedural brick texture: running-bond courses with mortar lines.
 GLuint makeBrickTexture(const sf::Color& brick, const sf::Color& mortar) {
-    constexpr int size = 64;
-    constexpr int courseH = 8;
-    constexpr int brickW = 16;
+    constexpr int size = 128;
+    constexpr int courseH = 16;
+    constexpr int brickW = 32;
     std::vector<std::uint8_t> pixels(size * size * 4, 255);
     for (int y = 0; y < size; ++y) {
         const int course = y / courseH;
         const int offset = (course % 2 == 0) ? 0 : brickW / 2;
         for (int x = 0; x < size; ++x) {
-            const bool mortarRow = (y % courseH) == 0;
-            const bool mortarCol = ((x + offset) % brickW) == 0;
+            const bool mortarRow = (y % courseH) < 2;
+            const bool mortarCol = ((x + offset) % brickW) < 2;
             const sf::Color color = (mortarRow || mortarCol) ? mortar : brick;
             const int i = (y * size + x) * 4;
             pixels[i + 0] = color.r;
@@ -76,6 +94,7 @@ GLuint makeBrickTexture(const sf::Color& brick, const sf::Color& mortar) {
             pixels[i + 2] = color.b;
         }
     }
+    addGrain(pixels, size, 10);
     return createTexture(pixels, size);
 }
 
@@ -645,15 +664,39 @@ void Renderer3D::drawStreetProps() const {
         drawTexturedBox(Vec3{lampX[i], 4.1f, lampZ[i]}, 0.25f, 0.25f, 0.25f,
                         texGlass_, sf::Color(255, 240, 180), 1.f);
         glEnable(GL_LIGHTING);
+        glPushMatrix();
+        glTranslatef(lampX[i], 0.f, lampZ[i]);
+        drawBlobShadow(0.6f);
+        glPopMatrix();
     }
-    // Trees: a cluster in the park (NE) and a pair flanking the guitar shop.
+
+    // Trees: a tapered trunk with a canopy of overlapping spheres, grounded by
+    // a blob shadow. A cluster sits in the park (NE) and a pair flanks the
+    // guitar shop.
     const float treeX[] = {50.f, 72.f, 58.f, -22.f, 22.f};
     const float treeZ[] = {52.f, 66.f, 78.f, 20.f, 20.f};
+    const sf::Color bark(110, 75, 45);
     for (int i = 0; i < 5; ++i) {
-        drawTexturedCylinder(Vec3{treeX[i], 1.4f, treeZ[i]}, 0.3f, 1.4f, 8,
-                             texWood_, sf::Color(110, 75, 45));
-        drawTexturedBox(Vec3{treeX[i], 3.4f, treeZ[i]}, 1.5f, 1.5f, 1.5f,
-                        texLeaf_, sf::Color::White, 2.f);
+        glPushMatrix();
+        glTranslatef(treeX[i], 0.f, treeZ[i]);
+        drawBlobShadow(1.6f);
+        glPopMatrix();
+        drawTaperedCylinder(Vec3{treeX[i], 1.5f, treeZ[i]}, 0.34f, 0.22f, 1.5f, 10, texWood_, bark);
+        drawSphere(Vec3{treeX[i], 3.5f, treeZ[i]}, 1.5f, 12, 10, texLeaf_, sf::Color::White);
+        drawSphere(Vec3{treeX[i] - 0.9f, 3.1f, treeZ[i] + 0.3f}, 1.0f, 10, 8, texLeaf_, sf::Color(225, 235, 225));
+        drawSphere(Vec3{treeX[i] + 0.8f, 3.2f, treeZ[i] - 0.4f}, 1.05f, 10, 8, texLeaf_, sf::Color(235, 240, 230));
+        drawSphere(Vec3{treeX[i], 4.4f, treeZ[i]}, 0.95f, 10, 8, texLeaf_, sf::Color(245, 245, 240));
+    }
+
+    // Low bushes scattered in the park.
+    const float bushX[] = {44.f, 78.f, 64.f};
+    const float bushZ[] = {46.f, 50.f, 82.f};
+    for (int i = 0; i < 3; ++i) {
+        glPushMatrix();
+        glTranslatef(bushX[i], 0.5f, bushZ[i]);
+        glScalef(1.0f, 0.65f, 1.0f);
+        drawSphere(Vec3{0.f, 0.f, 0.f}, 1.0f, 10, 8, texLeaf_, sf::Color(215, 230, 215));
+        glPopMatrix();
     }
 }
 
@@ -675,6 +718,24 @@ void Renderer3D::drawCity(const City& city) {
                             sf::Color::White, park ? 6.f : 10.f);
         }
     }
+
+    // Road markings on the asphalt avenues (between the block rows at +-32):
+    // dashed center lines, plus a crosswalk at the plaza's south entrance.
+    glDisable(GL_LIGHTING);
+    const sf::Color paint(225, 222, 205);
+    for (float lane : {-32.f, 32.f}) {
+        for (float d = -half + 4.f; d < half - 4.f; d += 8.f) {
+            // North-south avenue (constant x = lane).
+            drawGroundPatch(lane - 0.3f, d, lane + 0.3f, d + 4.f, 0.02f, texPavement_, paint, 1.f);
+            // East-west avenue (constant z = lane).
+            drawGroundPatch(d, lane - 0.3f, d + 4.f, lane + 0.3f, 0.02f, texPavement_, paint, 1.f);
+        }
+    }
+    for (int i = 0; i < 7; ++i) {  // crosswalk stripes south of the plaza
+        const float x = -7.f + static_cast<float>(i) * 2.0f;
+        drawGroundPatch(x, -34.f, x + 1.1f, -26.f, 0.02f, texPavement_, paint, 1.f);
+    }
+    glEnable(GL_LIGHTING);
 
     for (const auto& building : city.buildings()) {
         drawBuilding(building);
