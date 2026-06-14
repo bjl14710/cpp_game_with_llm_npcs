@@ -40,6 +40,10 @@ constexpr float kMaxPitchDeg = 75.f;
 // How long an arrest holds the player at the police station. Short, because
 // the worst on-the-books offense here is disturbing the peace.
 constexpr float kJailSeconds = 10.f;
+// Inside the station holding cell (see the cell walls in City::makeDowntown),
+// and the spot just outside the station door where the player is released.
+constexpr Vec3 kCellInterior{12.f, 0.f, -72.f};
+constexpr Vec3 kStationDoorStep{0.f, 0.f, -37.f};
 
 // What the main loop is currently showing.
 enum class AppMode { Playing, Dialogue, Menu };
@@ -363,7 +367,13 @@ int main() {
         } else if (mode == AppMode::Menu) {
             menu.update(dt);
         }
-        if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
+        if (mode != AppMode::Menu && jailSecondsLeft > 0.f) {
+            jailSecondsLeft -= dt;
+            if (jailSecondsLeft <= 0.f) {
+                jailSecondsLeft = 0.f;
+                camera.position = kStationDoorStep;  // released, step out the front door
+            }
+        }
 
         // NPCs act on whatever instruction they last accepted (follow, chase,
         // face, gesture). This keeps running during dialogue so a companion
@@ -380,10 +390,7 @@ int main() {
             const bool caughtNow = npc.hasCaughtPlayer();
             if (caughtNow && !wasCaught[i] && npc.persona().police) {
                 jailSecondsLeft = kJailSeconds;
-                if (const Building* station = world.city().findBuilding("police")) {
-                    camera.position = Vec3{(station->minX + station->maxX) * 0.5f, 0.f,
-                                           station->maxZ + 2.f};
-                }
+                camera.position = kCellInterior;  // locked in the station holding cell
                 npc.commandReturnHome();
                 if (mode == AppMode::Dialogue) {
                     // Being hauled off ends any open conversation.
