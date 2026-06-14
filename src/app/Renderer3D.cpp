@@ -125,34 +125,103 @@ void drawTexturedBox(const Vec3& center, float halfX, float halfY, float halfZ,
     glEnd();
 }
 
-// Draws a vertical textured cylinder (caps + wall) centered at `center`.
-void drawTexturedCylinder(const Vec3& center, float radius, float halfHeight,
-                          int segments, GLuint texture, const sf::Color& tint) {
+// Draws a vertical frustum (cone slice) with caps and correctly slanted side
+// normals, so a torso can flare from waist to shoulders and a limb can taper.
+void drawTaperedCylinder(const Vec3& center, float rBottom, float rTop, float halfHeight,
+                         int segments, GLuint texture, const sf::Color& tint) {
     glBindTexture(GL_TEXTURE_2D, texture);
     setColor(tint);
+    const float yb = center.y - halfHeight;
+    const float yt = center.y + halfHeight;
 
+    // Top cap.
     glBegin(GL_TRIANGLE_FAN);
     glNormal3f(0.0f, 1.0f, 0.0f);
-    vertexTextured(Vec3{center.x, center.y + halfHeight, center.z}, 0.5f, 0.5f);
+    vertexTextured(Vec3{center.x, yt, center.z}, 0.5f, 0.5f);
     for (int i = 0; i <= segments; ++i) {
-        const float angle = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
-        vertexTextured(Vec3{center.x + std::cos(angle) * radius, center.y + halfHeight,
-                            center.z + std::sin(angle) * radius},
-                       0.5f + std::cos(angle) * 0.5f, 0.5f + std::sin(angle) * 0.5f);
+        const float a = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
+        vertexTextured(Vec3{center.x + std::cos(a) * rTop, yt, center.z + std::sin(a) * rTop},
+                       0.5f + std::cos(a) * 0.5f, 0.5f + std::sin(a) * 0.5f);
     }
     glEnd();
 
-    glBegin(GL_QUAD_STRIP);
-    for (int i = 0; i <= segments; ++i) {
-        const float angle = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
-        const float nx = std::cos(angle);
-        const float nz = std::sin(angle);
-        const float u = static_cast<float>(i) / static_cast<float>(segments) * 2.0f;
-        glNormal3f(nx, 0.0f, nz);
-        vertexTextured(Vec3{center.x + nx * radius, center.y - halfHeight, center.z + nz * radius}, u, 0.0f);
-        vertexTextured(Vec3{center.x + nx * radius, center.y + halfHeight, center.z + nz * radius}, u, 1.0f);
+    // Bottom cap.
+    glBegin(GL_TRIANGLE_FAN);
+    glNormal3f(0.0f, -1.0f, 0.0f);
+    vertexTextured(Vec3{center.x, yb, center.z}, 0.5f, 0.5f);
+    for (int i = segments; i >= 0; --i) {
+        const float a = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
+        vertexTextured(Vec3{center.x + std::cos(a) * rBottom, yb, center.z + std::sin(a) * rBottom},
+                       0.5f + std::cos(a) * 0.5f, 0.5f + std::sin(a) * 0.5f);
     }
     glEnd();
+
+    // Slanted wall: normal tilts by the radius change over the height.
+    const float ny = (rBottom - rTop);
+    glBegin(GL_QUAD_STRIP);
+    for (int i = 0; i <= segments; ++i) {
+        const float a = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
+        const float c = std::cos(a), s = std::sin(a);
+        const Vec3 n = normalize(Vec3{c * 2.0f * halfHeight, ny, s * 2.0f * halfHeight});
+        const float u = static_cast<float>(i) / static_cast<float>(segments) * 2.0f;
+        glNormal3f(n.x, n.y, n.z);
+        vertexTextured(Vec3{center.x + c * rBottom, yb, center.z + s * rBottom}, u, 0.0f);
+        vertexTextured(Vec3{center.x + c * rTop, yt, center.z + s * rTop}, u, 1.0f);
+    }
+    glEnd();
+}
+
+// Straight cylinder: a frustum with equal radii.
+void drawTexturedCylinder(const Vec3& center, float radius, float halfHeight,
+                          int segments, GLuint texture, const sf::Color& tint) {
+    drawTaperedCylinder(center, radius, radius, halfHeight, segments, texture, tint);
+}
+
+// Smooth UV sphere with per-vertex normals (heads, shoulders, tree canopies).
+void drawSphere(const Vec3& center, float radius, int slices, int stacks,
+                GLuint texture, const sf::Color& tint) {
+    glBindTexture(GL_TEXTURE_2D, texture);
+    setColor(tint);
+    for (int st = 0; st < stacks; ++st) {
+        const float p0 = kPi * (static_cast<float>(st) / stacks - 0.5f);
+        const float p1 = kPi * (static_cast<float>(st + 1) / stacks - 0.5f);
+        glBegin(GL_QUAD_STRIP);
+        for (int sl = 0; sl <= slices; ++sl) {
+            const float a = 2.0f * kPi * static_cast<float>(sl) / slices;
+            const float ca = std::cos(a), sa = std::sin(a);
+            for (float p : {p1, p0}) {
+                const float cp = std::cos(p), sp = std::sin(p);
+                const Vec3 n{cp * ca, sp, cp * sa};
+                glNormal3f(n.x, n.y, n.z);
+                vertexTextured(Vec3{center.x + n.x * radius, center.y + n.y * radius,
+                                    center.z + n.z * radius},
+                               static_cast<float>(sl) / slices, (p == p0 ? st : st + 1) / 1.0f);
+            }
+        }
+        glEnd();
+    }
+}
+
+// A soft round contact shadow on the ground, centered at the local origin.
+// Caller has already translated to the prop's feet. Sits above all ground
+// patches and writes no depth so it never z-fights.
+void drawBlobShadow(float radius) {
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDepthMask(GL_FALSE);
+    glBegin(GL_TRIANGLE_FAN);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.34f);
+    glVertex3f(0.0f, 0.08f, 0.0f);
+    glColor4f(0.0f, 0.0f, 0.0f, 0.0f);
+    const int seg = 18;
+    for (int i = 0; i <= seg; ++i) {
+        const float a = 2.0f * kPi * static_cast<float>(i) / seg;
+        glVertex3f(std::cos(a) * radius, 0.08f, std::sin(a) * radius);
+    }
+    glEnd();
+    glDepthMask(GL_TRUE);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
 }
 
 // Builds an OpenGL frustum for a vertical field of view + aspect ratio.
@@ -557,17 +626,32 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
     // flatForward(facing); negating it mirrored every NPC in X.
     glRotatef(npc.facingDeg, 0.0f, 1.0f, 0.0f);
 
-    // Legs, torso, head, and a short visor/brim hinting at the facing side.
-    drawTexturedCylinder(Vec3{0.f, 0.45f, 0.f}, 0.26f, 0.45f, 14, texCloth_, accent);
-    drawTexturedCylinder(Vec3{0.f, 1.18f, 0.f}, 0.32f, 0.32f, 14, texCloth_, body);
-    drawTexturedBox(Vec3{0.f, 1.68f, 0.f}, 0.17f, 0.18f, 0.17f, texCloth_, skin, 1.f);
-    drawTexturedBox(Vec3{0.f, 1.82f, 0.07f}, 0.18f, 0.04f, 0.24f, texCloth_, accent, 1.f);
+    // A soft contact shadow grounds the figure.
+    drawBlobShadow(0.5f);
+
+    // Rounded, smooth-shaded figure: two tapered legs, hips, a torso that
+    // flares to the shoulders, a neck, a spherical head, and a hair cap.
+    drawTaperedCylinder(Vec3{-0.13f, 0.45f, 0.f}, 0.11f, 0.16f, 0.45f, 12, texCloth_, accent);
+    drawTaperedCylinder(Vec3{0.13f, 0.45f, 0.f}, 0.11f, 0.16f, 0.45f, 12, texCloth_, accent);
+    drawSphere(Vec3{0.f, 0.92f, 0.f}, 0.27f, 14, 10, texCloth_, body);
+    drawTaperedCylinder(Vec3{0.f, 1.2f, 0.f}, 0.24f, 0.33f, 0.30f, 16, texCloth_, body);
+    drawSphere(Vec3{-0.30f, 1.46f, 0.f}, 0.13f, 10, 8, texCloth_, body);
+    drawSphere(Vec3{0.30f, 1.46f, 0.f}, 0.13f, 10, 8, texCloth_, body);
+    drawTexturedCylinder(Vec3{0.f, 1.55f, 0.f}, 0.09f, 0.07f, 10, texCloth_, skin);
+    drawSphere(Vec3{0.f, 1.70f, 0.f}, 0.18f, 16, 12, texCloth_, skin);
     drawFace(npc.face);
+    // Hair cap: a flattened sphere skull-cap on the crown, tilted back so it
+    // never covers the face.
+    glPushMatrix();
+    glTranslatef(0.f, 1.78f, -0.02f);
+    glScalef(1.0f, 0.55f, 1.0f);
+    drawSphere(Vec3{0.f, 0.f, 0.f}, 0.18f, 14, 8, texCloth_, accent);
+    glPopMatrix();
 
     // Arms hang at the sides by default. The NPC's right arm (+X local) can be
     // raised or waved in response to a "raise your hand" / "wave" instruction;
     // the left arm always hangs.
-    drawArm(-0.40f, body, skin, 0.f, 0.f);  // left, always down
+    drawArm(-0.34f, body, skin, 0.f, 0.f);  // left, always down
     float raise = 0.f;   // degrees about local +X: 0 = down, ~195 = up & forward
     float swing = 0.f;   // degrees about local +Z for a side-to-side wave
     if (npc.pose == NpcPose::RaiseHand) {
@@ -576,7 +660,7 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
         raise = 195.f;
         swing = 22.f * std::sin(npc.gesturePhase * 9.f);
     }
-    drawArm(0.40f, body, skin, raise, swing);  // right, posed
+    drawArm(0.34f, body, skin, raise, swing);  // right, posed
 
     glPopMatrix();
 }
@@ -649,15 +733,15 @@ void Renderer3D::drawFace(NpcFace face) const {
 // small skin "hand" at the end.
 void Renderer3D::drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
                          float raiseDeg, float swingDeg) const {
-    const float shoulderY = 1.42f;
+    const float shoulderY = 1.46f;
     const float armHalf = 0.27f;  // half-length of the upper arm
     glPushMatrix();
     glTranslatef(xOffset, shoulderY, 0.f);
     if (swingDeg != 0.f) glRotatef(swingDeg, 0.f, 0.f, 1.f);
     if (raiseDeg != 0.f) glRotatef(raiseDeg, 1.f, 0.f, 0.f);
-    // Arm and hand extend downward (-Y) from the shoulder pivot.
-    drawTexturedBox(Vec3{0.f, -armHalf, 0.f}, 0.07f, armHalf, 0.07f, texCloth_, sleeve, 1.f);
-    drawTexturedBox(Vec3{0.f, -2.f * armHalf - 0.06f, 0.f}, 0.07f, 0.07f, 0.07f, texCloth_, skin, 1.f);
+    // A tapered sleeve and a rounded hand extend downward from the shoulder.
+    drawTaperedCylinder(Vec3{0.f, -armHalf, 0.f}, 0.07f, 0.10f, armHalf, 10, texCloth_, sleeve);
+    drawSphere(Vec3{0.f, -2.f * armHalf - 0.02f, 0.f}, 0.085f, 8, 6, texCloth_, skin);
     glPopMatrix();
 }
 
