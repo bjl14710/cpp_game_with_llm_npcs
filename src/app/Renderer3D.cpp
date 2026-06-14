@@ -184,18 +184,21 @@ Vec3 forwardFromAngles(float yawDeg, float pitchDeg) {
     return normalize(Vec3{std::sin(yaw) * cp, std::sin(pitch), std::cos(yaw) * cp});
 }
 
-// Clothing palettes for NPC figures: {body, accent} pairs cycled by index.
-const std::array<std::array<sf::Color, 2>, 10> kNpcPalettes = {{
+// Clothing palettes for NPC figures: {body, accent} pairs indexed by the NPC's
+// position in the roster, which loadAllPersonas sorts by filename. Keep this
+// list in that alphabetical order so each citizen keeps sensible colors.
+const std::array<std::array<sf::Color, 2>, 11> kNpcPalettes = {{
     {{sf::Color(214, 178, 148), sf::Color(120, 70, 40)}},    // baker: flour apron
-    {{sf::Color(40, 70, 140), sf::Color(20, 35, 80)}},       // cop: police blue
-    {{sf::Color(240, 200, 60), sf::Color(40, 40, 40)}},      // taxi: cab yellow
     {{sf::Color(90, 60, 40), sf::Color(50, 130, 90)}},       // barista: espresso + green
+    {{sf::Color(40, 70, 140), sf::Color(20, 35, 80)}},       // cop: police blue
+    {{sf::Color(70, 150, 80), sf::Color(240, 235, 225)}},    // grocer: green apron
+    {{sf::Color(160, 90, 40), sf::Color(110, 110, 120)}},    // hardware: work tan + steel
+    {{sf::Color(200, 50, 50), sf::Color(250, 245, 235)}},    // hotdog: red + white stripes
     {{sf::Color(130, 60, 130), sf::Color(230, 220, 200)}},   // librarian: plum cardigan
     {{sf::Color(60, 120, 170), sf::Color(190, 150, 100)}},   // musician: denim + guitar wood
-    {{sf::Color(200, 50, 50), sf::Color(250, 245, 235)}},    // hot dog: red + white stripes
-    {{sf::Color(160, 90, 40), sf::Color(110, 110, 120)}},    // hardware: work tan + steel
-    {{sf::Color(250, 130, 160), sf::Color(245, 245, 250)}},  // tourist: bright pink
+    {{sf::Color(240, 200, 60), sf::Color(40, 40, 40)}},      // taxi: cab yellow
     {{sf::Color(110, 110, 100), sf::Color(60, 60, 70)}},     // teacher: tweed grey
+    {{sf::Color(250, 130, 160), sf::Color(245, 245, 250)}},  // tourist: bright pink
 }};
 
 }  // namespace

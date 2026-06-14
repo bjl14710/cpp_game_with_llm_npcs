@@ -7,7 +7,7 @@
 #include "PersonaLoader.hpp"
 #include "doctest.h"
 
-TEST_CASE("the shipped personas directory yields the full ten-citizen roster") {
+TEST_CASE("the shipped personas directory yields the full citizen roster") {
     namespace fs = std::filesystem;
     // The test binary runs from tests/ (make) or build/ (ctest); walk up to
     // wherever personas/ lives.
@@ -18,7 +18,7 @@ TEST_CASE("the shipped personas directory yields the full ten-citizen roster") {
     std::vector<std::string> errors;
     const auto roster = llm_npc::loadAllPersonas(dir, &errors);
     CHECK(errors.empty());
-    REQUIRE(roster.size() == 10);
+    REQUIRE(roster.size() == 11);  // ten citizens + the grocer at Plaza Market
 
     // Sorted by filename; every persona is named, placed, and distinct.
     CHECK(roster.front().id == "baker");
