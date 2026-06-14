@@ -217,13 +217,28 @@ void Renderer3D::init() {
     glEnable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glShadeModel(GL_SMOOTH);
 
-    const GLfloat ambient[] = {0.32f, 0.32f, 0.34f, 1.0f};
-    const GLfloat diffuse[] = {0.9f, 0.9f, 0.85f, 1.0f};
-    const GLfloat specular[] = {0.15f, 0.15f, 0.15f, 1.0f};
+    // Warm, slightly-overcast key light with a cool sky-fill ambient.
+    const GLfloat ambient[] = {0.34f, 0.36f, 0.40f, 1.0f};
+    const GLfloat diffuse[] = {1.0f, 0.96f, 0.88f, 1.0f};
+    const GLfloat specular[] = {0.30f, 0.30f, 0.28f, 1.0f};
     glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
     glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
+
+    // A gentle specular highlight so curved surfaces read as rounded.
+    const GLfloat matSpecular[] = {0.18f, 0.18f, 0.18f, 1.0f};
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matSpecular);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 14.0f);
+
+    // Distance fog dissolves far buildings into the horizon haze (sky bottom).
+    glEnable(GL_FOG);
+    glFogi(GL_FOG_MODE, GL_LINEAR);
+    const GLfloat fogColor[] = {0.80f, 0.85f, 0.90f, 1.0f};
+    glFogfv(GL_FOG_COLOR, fogColor);
+    glFogf(GL_FOG_START, 70.0f);
+    glFogf(GL_FOG_END, 220.0f);
 
     // A dim positional "fill" light pinned to the camera each frame so roofed
     // interiors are readable without washing out the daylit exterior.
@@ -253,8 +268,10 @@ void Renderer3D::beginFrame(const sf::RenderWindow& window, const CameraPose& ca
     aspect_ = size.y == 0 ? 1.0f : static_cast<float>(size.x) / static_cast<float>(size.y);
 
     glViewport(0, 0, static_cast<GLint>(size.x), static_cast<GLint>(size.y));
-    glClearColor(0.56f, 0.72f, 0.92f, 1.0f);
+    glClearColor(0.80f, 0.85f, 0.90f, 1.0f);  // horizon haze; matches the fog
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    drawSky();  // gradient background painted before the 3D pass
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -275,6 +292,44 @@ void Renderer3D::beginFrame(const sf::RenderWindow& window, const CameraPose& ca
     // Fill light rides with the camera (positional, set in eye space).
     const GLfloat fillPos[] = {eye_.x, eye_.y, eye_.z, 1.0f};
     glLightfv(GL_LIGHT1, GL_POSITION, fillPos);
+}
+
+void Renderer3D::drawSky() const {
+    // Full-screen vertical gradient in an ortho pass, with depth/lighting/fog
+    // off so it sits behind everything and the 3D pass paints over it.
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, 1.0, 0.0, 1.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_FOG);
+
+    glBegin(GL_QUADS);
+    setColor(sf::Color(204, 217, 230));  // horizon haze (== fog color)
+    glVertex2f(0.0f, 0.0f);
+    glVertex2f(1.0f, 0.0f);
+    setColor(sf::Color(82, 140, 216));   // zenith blue
+    glVertex2f(1.0f, 1.0f);
+    glVertex2f(0.0f, 1.0f);
+    glEnd();
+
+    glEnable(GL_FOG);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_DEPTH_TEST);
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
 }
 
 void Renderer3D::drawGroundPatch(float minX, float minZ, float maxX, float maxZ, float y,

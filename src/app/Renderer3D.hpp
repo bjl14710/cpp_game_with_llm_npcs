@@ -122,6 +122,10 @@ class Renderer3D {
     // Street dressing drawn across the city: lamp posts and trees.
     void drawStreetProps() const;
 
+    // Paints the background gradient sky (an ortho full-screen quad) before the
+    // 3D pass; the horizon color matches the fog so distance dissolves to haze.
+    void drawSky() const;
+
     // Draws one NPC arm in the figure's local frame; see the definition for
     // how xOffset/raiseDeg/swingDeg pose it for raise-hand and wave gestures.
     void drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
