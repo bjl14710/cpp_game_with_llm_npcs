@@ -79,6 +79,39 @@ GLuint makeBrickTexture(const sf::Color& brick, const sf::Color& mortar) {
     return createTexture(pixels, size);
 }
 
+// Procedural windowed-facade texture: a grid of glass panes with dark mullion
+// frames, a scatter of panes lit warm. Tiled across a tall building it reads as
+// a curtain wall of windows.
+GLuint makeWindowTexture() {
+    constexpr int size = 128;
+    constexpr int panes = 4;          // panes per tile edge
+    constexpr int cell = size / panes;
+    std::vector<std::uint8_t> pixels(size * size * 4, 255);
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const int px = x / cell, py = y / cell;
+            const bool frame = (x % cell) < 3 || (y % cell) < 3;
+            // Cheap hash so a few panes glow as if lit inside.
+            const unsigned h = static_cast<unsigned>(px * 73856093 ^ py * 19349663);
+            const bool lit = (h % 5u) == 0u;
+            sf::Color c;
+            if (frame) {
+                c = sf::Color(54, 58, 66);                 // mullion / spandrel
+            } else if (lit) {
+                c = sf::Color(250, 226, 150);              // a lit room
+            } else {
+                const int j = static_cast<int>(h % 24u);   // subtle pane variation
+                c = sf::Color(120 + j, 150 + j, 178 + j);  // cool daylit glass
+            }
+            const int i = (y * size + x) * 4;
+            pixels[i + 0] = c.r;
+            pixels[i + 1] = c.g;
+            pixels[i + 2] = c.b;
+        }
+    }
+    return createTexture(pixels, size);
+}
+
 // Sets the GL color from an opaque SFML color.
 void setColor(const sf::Color& color) {
     glColor3f(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f);
@@ -330,6 +363,7 @@ void Renderer3D::init() {
     texWood_ = makeStripeTexture(sf::Color(124, 84, 48), sf::Color(102, 66, 36));
     texLeaf_ = makeCheckerTexture(sf::Color(46, 98, 44), sf::Color(58, 116, 54), 10);
     texShelf_ = makeStripeTexture(sf::Color(178, 62, 52), sf::Color(70, 96, 160));
+    texWindow_ = makeWindowTexture();
 }
 
 void Renderer3D::beginFrame(const sf::RenderWindow& window, const CameraPose& camera) {
@@ -434,19 +468,31 @@ void Renderer3D::drawBuilding(const Building& b) const {
 
     GLuint texture = texBrick_;
     sf::Color tint = sf::Color::White;
+    float tile = std::max(1.0f, halfY / 3.0f);
+    const bool tower = (b.facadeKind == 9 || b.facadeKind == 10);
     switch (b.facadeKind) {
         case 5: texture = texStripe_; break;                                  // hot-dog cart awning
         case 6: texture = texGlass_; tint = sf::Color(245, 210, 70); break;   // taxi: cab yellow
         case 7: texture = texPavement_; tint = sf::Color(205, 215, 225); break;  // fountain stone
         case 8: texture = texPavement_; tint = sf::Color(150, 105, 65); break;   // wooden bench
-        case 9: tint = sf::Color(185, 160, 150); break;                       // apartments
-        case 10: texture = texGlass_; break;                                  // office tower
+        case 9:  texture = texWindow_; tint = sf::Color(214, 200, 188);        // apartments
+                 tile = std::max(2.0f, b.height / 7.0f); break;
+        case 10: texture = texWindow_; tint = sf::Color(196, 210, 224);        // office tower
+                 tile = std::max(2.0f, b.height / 7.0f); break;
         case 13: tint = sf::Color(150, 150, 158); break;                      // cell wall: concrete
         default: break;
     }
 
-    const float tile = std::max(1.0f, halfY / 3.0f);
     drawTexturedBox(center, halfX, halfY, halfZ, texture, tint, tile);
+
+    // Tall buildings get a capping cornice and a base plinth so they don't read
+    // as bare extruded boxes.
+    if (tower) {
+        drawBox(AABB{b.minX - 0.4f, b.minZ - 0.4f, b.maxX + 0.4f, b.maxZ + 0.4f},
+                b.height - 0.6f, b.height + 0.25f, texBrick_, sf::Color(96, 92, 90), 3.f);
+        drawBox(AABB{b.minX - 0.25f, b.minZ - 0.25f, b.maxX + 0.25f, b.maxZ + 0.25f},
+                0.f, 1.1f, texPavement_, sf::Color(120, 116, 112), 3.f);
+    }
 
     if (b.id == "fountain") {
         // Water surface just below the rim.
@@ -503,6 +549,29 @@ void Renderer3D::drawHollowBuilding(const Building& b) const {
     drawGroundPatch(b.minX + t, b.minZ + t, b.maxX - t, b.maxZ - t, 0.06f,
                     texWood_, sf::Color(235, 225, 215), 4.f);
     glEnable(GL_LIGHTING);
+
+    // Eave cornice and base plinth, slightly oversized, to break the box edge.
+    drawBox(AABB{b.minX - 0.3f, b.minZ - 0.3f, b.maxX + 0.3f, b.maxZ + 0.3f},
+            b.height - 0.4f, b.height + 0.2f, texBrick_, sf::Color(96, 92, 90), 2.f);
+    drawBox(AABB{b.minX - 0.2f, b.minZ - 0.2f, b.maxX + 0.2f, b.maxZ + 0.2f},
+            0.f, 0.5f, texPavement_, sf::Color(120, 116, 112), 2.f);
+
+    // Storefront glass flanking the doorway on the door wall (sits just proud).
+    const sf::Color glass(150, 185, 210);
+    const float gy = 0.55f;
+    if (b.doorSide == DoorSide::NegZ || b.doorSide == DoorSide::PosZ) {
+        const float zc = (b.doorSide == DoorSide::NegZ) ? b.minZ : b.maxZ;
+        drawBox(AABB{b.minX + 0.4f, zc - 0.05f, cx - half - 0.2f, zc + 0.05f},
+                gy, kDoorHeight, texGlass_, glass, 2.f);
+        drawBox(AABB{cx + half + 0.2f, zc - 0.05f, b.maxX - 0.4f, zc + 0.05f},
+                gy, kDoorHeight, texGlass_, glass, 2.f);
+    } else {
+        const float xc = (b.doorSide == DoorSide::NegX) ? b.minX : b.maxX;
+        drawBox(AABB{xc - 0.05f, b.minZ + 0.4f, xc + 0.05f, cz - half - 0.2f},
+                gy, kDoorHeight, texGlass_, glass, 2.f);
+        drawBox(AABB{xc - 0.05f, cz + half + 0.2f, xc + 0.05f, b.maxZ - 0.4f},
+                gy, kDoorHeight, texGlass_, glass, 2.f);
+    }
 
     drawShopFixtures(b);
 

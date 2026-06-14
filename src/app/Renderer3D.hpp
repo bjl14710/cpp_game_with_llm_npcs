@@ -87,6 +87,7 @@ class Renderer3D {
     GLuint texWood_ = 0;    // interior floors, counters
     GLuint texLeaf_ = 0;    // tree foliage
     GLuint texShelf_ = 0;   // bookshelves / store shelving
+    GLuint texWindow_ = 0;  // windowed facade for tall filler buildings
 
     // Camera basis captured by beginFrame for worldToScreen.
     Vec3 eye_{};
