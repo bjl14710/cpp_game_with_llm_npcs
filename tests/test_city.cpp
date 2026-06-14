@@ -31,6 +31,60 @@ TEST_CASE("makeDowntown contains the five named shops") {
     CHECK(city.findBuilding("no_such_building") == nullptr);
 }
 
+TEST_CASE("the new shops exist and are enterable") {
+    City city = City::makeDowntown();
+    for (const char* id : {"guitar", "grocery"}) {
+        const Building* b = city.findBuilding(id);
+        REQUIRE_MESSAGE(b != nullptr, id);
+        CHECK_FALSE(b->name.empty());
+    }
+    for (const char* id : {"bakery", "police", "coffee", "library", "hardware",
+                           "guitar", "grocery"}) {
+        const Building* b = city.findBuilding(id);
+        REQUIRE_MESSAGE(b != nullptr, id);
+        CHECK_MESSAGE(b->enterable, id);
+    }
+}
+
+TEST_CASE("buildingWallSegments yields a split wall with a doorway gap") {
+    Building b;
+    b.minX = -10.f; b.maxX = 10.f; b.minZ = -10.f; b.maxZ = 10.f;
+    b.enterable = true;
+    b.doorSide = llm_npc::DoorSide::PosZ;
+    const auto walls = llm_npc::buildingWallSegments(b);
+    // Three solid walls plus the door wall split into two = five segments.
+    CHECK(walls.size() == 5);
+    // The doorway center sits on the +Z edge, at x = 0.
+    const Vec3 d = llm_npc::buildingDoorCenter(b);
+    CHECK(d.x == doctest::Approx(0.f));
+    CHECK(d.z == doctest::Approx(10.f - llm_npc::kWallThickness * 0.5f));
+}
+
+TEST_CASE("an enterable shop is hollow: walls block, doorway and interior clear") {
+    City city = City::makeDowntown();
+    const Building* lib = city.findBuilding("library");  // door on +X edge (x=-40)
+    REQUIRE(lib != nullptr);
+    // Interior center is open space.
+    CHECK_FALSE(city.circleIntersectsAny(-60.f, 0.f, 0.4f));
+    // The north wall is solid.
+    CHECK(city.circleIntersectsAny(-60.f, 15.7f, 0.4f));
+    // The doorway gap on the east wall (z = 0) is open.
+    CHECK_FALSE(city.circleIntersectsAny(-40.3f, 0.f, 0.3f));
+    // The east wall beside the doorway (z = 8) is solid.
+    CHECK(city.circleIntersectsAny(-40.3f, 8.f, 0.3f));
+}
+
+TEST_CASE("resolveMovement steps through a doorway but not through a wall") {
+    City city = City::makeDowntown();
+    const float r = 0.45f;
+    // A step from just outside the library door into the doorway gap lands.
+    const Vec3 in = city.resolveMovement({-39.5f, 0.f, 0.f}, {-40.5f, 0.f, 0.f}, r);
+    CHECK(in.x == doctest::Approx(-40.5f));
+    // A step into the solid north wall is rejected (z stays put).
+    const Vec3 blocked = city.resolveMovement({-60.f, 0.f, 14.5f}, {-60.f, 0.f, 15.0f}, r);
+    CHECK(blocked.z == doctest::Approx(14.5f));
+}
+
 TEST_CASE("buildings stay inside world bounds") {
     City city = City::makeDowntown();
     for (const auto& b : city.buildings()) {
