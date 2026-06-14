@@ -85,6 +85,16 @@ TEST_CASE("resolveMovement steps through a doorway but not through a wall") {
     CHECK(blocked.z == doctest::Approx(14.5f));
 }
 
+TEST_CASE("the holding cell is enclosed: interior clear, bars block") {
+    City city = City::makeDowntown();
+    // The arrest teleport target inside the cell is open space...
+    CHECK_FALSE(city.circleIntersectsAny(12.f, -72.f, 0.4f));
+    // ...but the steel bars across the cell front are solid.
+    CHECK(city.circleIntersectsAny(12.f, -66.3f, 0.2f));
+    // The release spot just outside the station door is clear.
+    CHECK_FALSE(city.circleIntersectsAny(0.f, -37.f, 0.45f));
+}
+
 TEST_CASE("buildings stay inside world bounds") {
     City city = City::makeDowntown();
     for (const auto& b : city.buildings()) {
