@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -194,6 +195,67 @@ TEST_CASE("lookAt turns the NPC without moving it") {
     CHECK(npc.facingDeg() == doctest::Approx(-90.f));
     CHECK(npc.position().x == doctest::Approx(0.f));
     CHECK(npc.position().z == doctest::Approx(0.f));
+}
+
+TEST_CASE("Wander keeps the NPC strolling but inside the world bounds") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city = City::makeDowntown();
+    const Vec3 player{0.f, 0.f, 24.f};
+    npc.setPlacement(Vec3{0.f, 0.f, 24.f}, 0.f, "street");
+
+    npc.commandWander();
+    CHECK(npc.behavior() == NpcAction::Wander);
+
+    const Vec3 start = npc.position();
+    float maxDrift = 0.f;
+    for (int i = 0; i < 1200; ++i) {  // ~60s of strolling
+        npc.update(0.05f, player, city);
+        CHECK(std::fabs(npc.position().x) <= city.halfSize());
+        CHECK(std::fabs(npc.position().z) <= city.halfSize());
+        maxDrift = std::max(maxDrift, distanceXZ(start, npc.position()));
+    }
+    CHECK(maxDrift > 1.f);  // it actually went somewhere
+}
+
+TEST_CASE("Wander never steps into a building footprint") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city = City::makeDowntown();
+    npc.setPlacement(Vec3{0.f, 0.f, 24.f}, 0.f, "street");
+    npc.commandWander();
+    for (int i = 0; i < 2000; ++i) {
+        npc.update(0.05f, Vec3{0.f, 0.f, 24.f}, city);
+        CHECK_FALSE(city.circleIntersectsAny(npc.position().x, npc.position().z, 0.4f));
+    }
+}
+
+TEST_CASE("An instruction overrides wandering") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    npc.setPlacement(Vec3{0.f, 0.f, 0.f}, 0.f, "street");
+    npc.commandWander();
+    instruct(npc, "Sure, right behind you. [[ACTION: follow]]");
+    CHECK(npc.behavior() == NpcAction::Follow);  // no longer wandering
+}
+
+TEST_CASE("A wanderer in conversation faces the player and holds position") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city;  // empty world
+    npc.setPlacement(Vec3{0.f, 0.f, 0.f}, 0.f, "street");
+    npc.commandWander();
+    npc.setInConversation(true);
+
+    const Vec3 player{5.f, 0.f, 0.f};  // due +X
+    for (int i = 0; i < 40; ++i) npc.update(0.1f, player, city);
+    CHECK(npc.position().x == doctest::Approx(0.f));  // didn't stroll off
+    CHECK(npc.position().z == doctest::Approx(0.f));
+    CHECK(npc.facingDeg() == doctest::Approx(90.f).epsilon(0.01));  // faces the player
 }
 
 TEST_CASE("Gestures pose the NPC and expire on their own") {

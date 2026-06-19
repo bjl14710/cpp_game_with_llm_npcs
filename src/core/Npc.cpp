@@ -11,6 +11,7 @@ namespace {
 // trailing rather than shoving, while an arrest can nearly keep pace.
 constexpr float kNpcWalk = 3.8f;       // follow speed
 constexpr float kNpcRun = 6.0f;        // arrest speed
+constexpr float kNpcWander = 2.2f;     // ambient stroll speed
 constexpr float kNpcRadius = 0.45f;    // collision circle, matches the player
 constexpr float kFollowStop = 2.5f;    // stop this close when following
 constexpr float kCatchRadius = 1.6f;   // arrest succeeds within this range
@@ -33,6 +34,7 @@ Npc::Npc(Persona persona, LlmClient& client, int maxHistoryTurns)
         h *= 16777619u;
     }
     appearanceSeed_ = h ? h : 1u;
+    wanderRng_ = appearanceSeed_ * 2654435761u + 12345u;
 }
 
 std::uint64_t Npc::ask(const std::string& playerLine) {
@@ -83,6 +85,7 @@ void Npc::applyAction(NpcAction action) {
     switch (action) {
         case NpcAction::None:
         case NpcAction::ReturnHome:  // internal-only; never arrives from a reply
+        case NpcAction::Wander:      // internal-only; never arrives from a reply
             // Leave existing behavior intact.
             break;
         case NpcAction::Follow:
@@ -115,6 +118,21 @@ void Npc::faceToward(const Vec3& target) {
     // Yaw convention matches flatForward/forwardFromAngles: 0 looks toward +Z,
     // increasing toward +X, hence atan2(dx, dz).
     facingDeg_ = std::atan2(dx, dz) * 180.f / 3.14159265358979323846f;
+}
+
+void Npc::pickWanderTarget(const City& city) {
+    const float angle = nextRandUnit() * kTwoPi;
+    const float dist = 6.f + nextRandUnit() * 16.f;
+    const float lim = city.halfSize() - 2.f;
+    wanderTarget_.x = clampf(position_.x + std::cos(angle) * dist, -lim, lim);
+    wanderTarget_.z = clampf(position_.z + std::sin(angle) * dist, -lim, lim);
+    wanderTarget_.y = 0.f;
+}
+
+float Npc::nextRandUnit() {
+    // A small linear-congruential step; good enough for wander variety.
+    wanderRng_ = wanderRng_ * 1664525u + 1013904223u;
+    return static_cast<float>((wanderRng_ >> 8) & 0xFFFFFFu) / static_cast<float>(0x1000000u);
 }
 
 void Npc::update(float dt, const Vec3& playerPos, const City& city) {
@@ -171,6 +189,33 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city) {
                 behavior_ = NpcAction::None;  // back at post
                 facingDeg_ = homeFacingDeg_;
             }
+            break;
+        }
+        case NpcAction::Wander: {
+            if (inConversation_) {
+                faceToward(playerPos);  // pause and face the player while talking
+                break;
+            }
+            if (!wanderReady_) {
+                pickWanderTarget(city);
+                wanderReady_ = true;
+            }
+            if (wanderPauseTimer_ > 0.f) {
+                wanderPauseTimer_ -= dt;
+                break;
+            }
+            if (distanceXZ(position_, wanderTarget_) < 1.0f) {
+                wanderPauseTimer_ = 1.0f + nextRandUnit() * 2.5f;  // dawdle a moment
+                pickWanderTarget(city);
+                break;
+            }
+            faceToward(wanderTarget_);
+            const Vec3 step = normalize(wanderTarget_ - position_) * (kNpcWander * dt);
+            const Vec3 next = city.resolveMovement(position_, position_ + step, kNpcRadius);
+            if (distanceXZ(next, position_) < 1e-4f) {
+                pickWanderTarget(city);  // blocked by a wall: try a new direction
+            }
+            position_ = next;
             break;
         }
         case NpcAction::Stop:

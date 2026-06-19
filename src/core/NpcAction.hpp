@@ -11,8 +11,9 @@ namespace llm_npc {
 // response to a player instruction ("follow me", "wave", ...). The model emits
 // action tags in its replies; parseDirectives() turns them into one of these.
 // Three kinds are mixed here: persistent movement behaviors (Follow, Arrest,
-// Stop, Face, ReturnHome), transient gesture poses (RaiseHand, Wave), and the
-// world-level CallPolice signal. The Npc routes each kind to the right state.
+// Stop, Face, Wander, ReturnHome), transient gesture poses (RaiseHand, Wave),
+// and the world-level CallPolice signal. The Npc routes each kind to the right
+// state.
 enum class NpcAction {
     None,
     Follow,      // trail the player at a walk until told otherwise
@@ -22,6 +23,7 @@ enum class NpcAction {
     Wave,        // wave the right hand for a few seconds
     Arrest,      // police only: chase the player down, then stop on catch
     CallPolice,  // civilians: summon the police to come arrest the player
+    Wander,      // not LLM-emittable: stroll between random nearby spots
     ReturnHome,  // not LLM-emittable: walk back to the spawn spot
 };
 

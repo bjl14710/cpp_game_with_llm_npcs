@@ -109,6 +109,18 @@ class Npc {
         caughtPlayer_ = false;
     }
 
+    // Starts the NPC strolling between random nearby spots: the ambient state
+    // for street pedestrians. The first goal is chosen lazily on the next
+    // update(), where the city is available for bounds checking.
+    void commandWander() {
+        behavior_ = NpcAction::Wander;
+        caughtPlayer_ = false;
+    }
+
+    // Marks whether the player is mid-conversation with this NPC, so a wanderer
+    // pauses and faces the player instead of strolling off while they talk.
+    void setInConversation(bool talking) { inConversation_ = talking; }
+
     const Persona& persona() const { return persona_; }
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
@@ -139,11 +151,22 @@ class Npc {
     bool caughtPlayer_ = false;               // arrest reached the player
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
+    Vec3 wanderTarget_{};                     // current stroll goal (Wander)
+    float wanderPauseTimer_ = 0.f;            // idle seconds before a new goal
+    std::uint32_t wanderRng_ = 1u;            // per-NPC RNG state for wandering
+    bool wanderReady_ = false;                // first wander target chosen yet?
+    bool inConversation_ = false;             // player is mid-chat with this NPC
 
     // Routes a freshly parsed action into behavior/gesture state.
     void applyAction(NpcAction action);
     void faceToward(const Vec3& target);
     void trimHistory();
+
+    // Chooses a new random wander goal near the current position, clamped just
+    // inside the walkable world.
+    void pickWanderTarget(const City& city);
+    // Next pseudo-random float in [0, 1) from wanderRng_ (no <random> needed).
+    float nextRandUnit();
 };
 
 }  // namespace llm_npc

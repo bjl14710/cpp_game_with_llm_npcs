@@ -20,6 +20,7 @@ add_library(llm_npc_core STATIC
     src/core/LlmClient.cpp
     src/core/Npc.cpp
     src/core/Offense.cpp
+    src/core/PersonaFactory.cpp
     src/core/PersonaLoader.cpp
     src/core/World.cpp
 )

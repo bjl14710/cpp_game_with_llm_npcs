@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "Menu.hpp"
 #include "Npc.hpp"
 #include "Offense.hpp"
+#include "PersonaFactory.hpp"
 #include "PersonaLoader.hpp"
 #include "Renderer3D.hpp"
 #include "World.hpp"
@@ -167,6 +169,7 @@ std::string stageDirection(NpcAction action) {
         case NpcAction::Wave: return "waves at you.";
         case NpcAction::Arrest: return "moves to apprehend you!";
         case NpcAction::CallPolice: return "calls out for the police!";
+        case NpcAction::Wander:
         case NpcAction::ReturnHome:
         case NpcAction::None: return "";
     }
@@ -229,6 +232,33 @@ int main() {
         Npc npc(loaded.persona, client);
         npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
         world.addNpc(std::move(npc));
+    }
+
+    // Populate the streets with a wandering crowd of procedural strangers, some
+    // of them (arrestable) police. Each gets a stable generation seed so it
+    // looks and behaves consistently; spawn spots are sampled on open ground.
+    {
+        constexpr int kPedestrians = 32;
+        constexpr double kPoliceChance = 0.15;
+        const float spawnLimit = world.city().halfSize() - 6.f;
+        std::mt19937 rng(20260616u);
+        std::uniform_real_distribution<float> coord(-spawnLimit, spawnLimit);
+        std::uniform_real_distribution<float> facing(0.f, 360.f);
+        for (int i = 0; i < kPedestrians; ++i) {
+            Persona persona = makePedestrianPersona(
+                static_cast<std::uint32_t>(i + 1) * 2654435761u, kPoliceChance);
+            Vec3 pos{};
+            bool placed = false;
+            for (int attempt = 0; attempt < 30 && !placed; ++attempt) {
+                pos = Vec3{coord(rng), 0.f, coord(rng)};
+                if (!world.city().circleIntersectsAny(pos.x, pos.z, 0.6f)) placed = true;
+            }
+            if (!placed) continue;  // no open ground found; skip this one
+            Npc npc(std::move(persona), client);
+            npc.setPlacement(pos, facing(rng), "street");
+            npc.commandWander();
+            world.addNpc(std::move(npc));
+        }
     }
     std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs\n";
 
@@ -402,7 +432,14 @@ int main() {
         // face, gesture). This keeps running during dialogue so a companion
         // trails you while you talk, but the pause menu freezes the world.
         if (mode != AppMode::Menu) {
-            for (Npc& npc : world.npcs()) npc.update(dt, camera.position, world.city());
+            // The NPC the player is talking to pauses any wandering and faces
+            // them; everyone else acts on their current behavior.
+            const int talkingIdx =
+                (mode == AppMode::Dialogue && session.isOpen()) ? session.npcIndex() : -1;
+            for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                world.npcs()[i].setInConversation(static_cast<int>(i) == talkingIdx);
+                world.npcs()[i].update(dt, camera.position, world.city());
+            }
         }
 
         // The moment an officer catches the player: a short stay at the
