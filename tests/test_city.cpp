@@ -95,6 +95,21 @@ TEST_CASE("the holding cell is enclosed: interior clear, bars block") {
     CHECK_FALSE(city.circleIntersectsAny(0.f, -37.f, 0.45f));
 }
 
+TEST_CASE("the map expanded to a larger grid with outer high-rises") {
+    City city = City::makeDowntown();
+    CHECK(city.halfSize() > 150.f);
+    // A sample of the outer-ring filler exists and stays solid (not enterable).
+    for (const char* id : {"hr_nw", "hr_ne", "hr_sw", "hr_se", "hr_e0", "hr_w0"}) {
+        const Building* b = city.findBuilding(id);
+        REQUIRE_MESSAGE(b != nullptr, id);
+        CHECK_FALSE(b->enterable);
+        CHECK(b->height > 0.f);
+    }
+    // The core landmarks survived the expansion.
+    CHECK(city.findBuilding("police") != nullptr);
+    CHECK(city.findBuilding("cell_bars") != nullptr);
+}
+
 TEST_CASE("buildings stay inside world bounds") {
     City city = City::makeDowntown();
     for (const auto& b : city.buildings()) {

@@ -686,29 +686,31 @@ void Renderer3D::drawCellBars(const Building& b) const {
 }
 
 void Renderer3D::drawStreetProps() const {
-    // Lamp posts at the four plaza corners with a glowing head.
-    const float lampX[] = {-30.f, 30.f, -30.f, 30.f};
-    const float lampZ[] = {-30.f, -30.f, 30.f, 30.f};
-    for (int i = 0; i < 4; ++i) {
-        drawTexturedCylinder(Vec3{lampX[i], 2.0f, lampZ[i]}, 0.12f, 2.0f, 8,
-                             texPavement_, sf::Color(70, 70, 76));
-        glDisable(GL_LIGHTING);
-        drawTexturedBox(Vec3{lampX[i], 4.1f, lampZ[i]}, 0.25f, 0.25f, 0.25f,
-                        texGlass_, sf::Color(255, 240, 180), 1.f);
-        glEnable(GL_LIGHTING);
-        glPushMatrix();
-        glTranslatef(lampX[i], 0.f, lampZ[i]);
-        drawBlobShadow(0.6f);
-        glPopMatrix();
+    // Lamp posts near the avenue intersections (just inside x/z = +-32 and
+    // +-96), each with a glowing head.
+    const float lampLines[] = {-94.f, -30.f, 30.f, 94.f};
+    for (float lx : lampLines) {
+        for (float lz : lampLines) {
+            drawTexturedCylinder(Vec3{lx, 2.0f, lz}, 0.12f, 2.0f, 8,
+                                 texPavement_, sf::Color(70, 70, 76));
+            glDisable(GL_LIGHTING);
+            drawTexturedBox(Vec3{lx, 4.1f, lz}, 0.25f, 0.25f, 0.25f,
+                            texGlass_, sf::Color(255, 240, 180), 1.f);
+            glEnable(GL_LIGHTING);
+            glPushMatrix();
+            glTranslatef(lx, 0.f, lz);
+            drawBlobShadow(0.6f);
+            glPopMatrix();
+        }
     }
 
     // Trees: a tapered trunk with a canopy of overlapping spheres, grounded by
     // a blob shadow. A cluster sits in the park (NE) and a pair flanks the
     // guitar shop.
-    const float treeX[] = {50.f, 72.f, 58.f, -22.f, 22.f};
-    const float treeZ[] = {52.f, 66.f, 78.f, 20.f, 20.f};
+    const float treeX[] = {50.f, 72.f, 58.f, -22.f, 22.f, 62.f, 46.f, 74.f, -18.f, 16.f};
+    const float treeZ[] = {52.f, 66.f, 78.f, 20.f, 20.f, 58.f, 72.f, 80.f, -16.f, -18.f};
     const sf::Color bark(110, 75, 45);
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 10; ++i) {
         glPushMatrix();
         glTranslatef(treeX[i], 0.f, treeZ[i]);
         drawBlobShadow(1.6f);
@@ -738,10 +740,10 @@ void Renderer3D::drawCity(const City& city) {
     // Asphalt base over the whole walkable square.
     drawGroundPatch(-half, -half, half, half, 0.f, texAsphalt_, sf::Color::White, half / 4.f);
 
-    // Sidewalk pads under the nine blocks (centers at -64/0/64, +-26 with curb
-    // overhang past the 24-unit block so buildings sit on pavement).
-    for (int bx = -1; bx <= 1; ++bx) {
-        for (int bz = -1; bz <= 1; ++bz) {
+    // Sidewalk pads under the 25 blocks (centers at -128/-64/0/64/128, +-26
+    // with curb overhang past the 24-unit block so buildings sit on pavement).
+    for (int bx = -2; bx <= 2; ++bx) {
+        for (int bz = -2; bz <= 2; ++bz) {
             const float cx = static_cast<float>(bx) * 64.f;
             const float cz = static_cast<float>(bz) * 64.f;
             const bool park = bx == 1 && bz == 1;
@@ -751,11 +753,12 @@ void Renderer3D::drawCity(const City& city) {
         }
     }
 
-    // Road markings on the asphalt avenues (between the block rows at +-32):
-    // dashed center lines, plus a crosswalk at the plaza's south entrance.
+    // Road markings on the asphalt avenues (between the block rows at +-32 and
+    // +-96): dashed center lines, plus a crosswalk at the plaza's south
+    // entrance.
     glDisable(GL_LIGHTING);
     const sf::Color paint(225, 222, 205);
-    for (float lane : {-32.f, 32.f}) {
+    for (float lane : {-96.f, -32.f, 32.f, 96.f}) {
         for (float d = -half + 4.f; d < half - 4.f; d += 8.f) {
             // North-south avenue (constant x = lane).
             drawGroundPatch(lane - 0.3f, d, lane + 0.3f, d + 4.f, 0.02f, texPavement_, paint, 1.f);

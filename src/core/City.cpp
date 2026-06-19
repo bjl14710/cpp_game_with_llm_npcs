@@ -67,15 +67,17 @@ Vec3 buildingDoorCenter(const Building& b) {
 }
 
 City City::makeDowntown() {
-    // Layout reference: 3x3 city blocks on a 64-unit pitch. Block centers sit
-    // at -64/0/64 on each axis and each block spans +-24 around its center,
-    // leaving 16-unit streets between blocks. The center block is an open
-    // plaza; the north-east block is a park.
+    // Layout reference: 5x5 city blocks on a 64-unit pitch. Block centers sit
+    // at -128/-64/0/64/128 on each axis and each block spans +-24 around its
+    // center, leaving 16-unit streets between blocks (avenues run along
+    // x/z = +-32 and +-96). The center block is an open plaza; the inner
+    // north-east block is a park. The inner ring holds the named shops and the
+    // police station; the outer ring is solid high-rise filler.
     //
     // The seven named shops are single-story hollow shells (enterable) with a
     // doorway on the side facing the plaza; everything else is a solid block.
     City city;
-    city.halfSize_ = 110.f;
+    city.halfSize_ = 170.f;
     const float shopH = 5.5f;  // single story, so open interiors light cleanly
     city.buildings_ = {
         // Named shops: {id,name, minX,minZ,maxX,maxZ, height, facade, enterable, door}
@@ -107,6 +109,27 @@ City City::makeDowntown() {
         {"office_a", "", 44.f, -88.f, 88.f, -66.f, 26.f, 10},
         {"apts_c", "", -88.f, 44.f, -44.f, 84.f, 24.f, 9},
         {"tower", "", -24.f, 48.f, 24.f, 88.f, 30.f, 10},
+
+        // Outer ring (the 5x5 grid's perimeter blocks): solid high-rise filler
+        // framing the core, with 16-unit avenues (x/z = +-96) between it and
+        // the inner ring. Footprints sit at +-104..+-148 on the edge axis so
+        // those avenues stay clear for traffic.
+        {"hr_nw", "", -148.f, 104.f, -104.f, 148.f, 30.f, 10},
+        {"hr_n1", "", -84.f, 104.f, -44.f, 148.f, 20.f, 9},
+        {"hr_n0", "", -20.f, 104.f, 20.f, 148.f, 26.f, 9},
+        {"hr_n2", "", 44.f, 104.f, 84.f, 148.f, 18.f, 9},
+        {"hr_ne", "", 104.f, 104.f, 148.f, 148.f, 32.f, 10},
+        {"hr_sw", "", -148.f, -148.f, -104.f, -104.f, 28.f, 10},
+        {"hr_s1", "", -84.f, -148.f, -44.f, -104.f, 18.f, 9},
+        {"hr_s0", "", -20.f, -148.f, 20.f, -104.f, 22.f, 9},
+        {"hr_s2", "", 44.f, -148.f, 84.f, -104.f, 24.f, 9},
+        {"hr_se", "", 104.f, -148.f, 148.f, -104.f, 34.f, 10},
+        {"hr_w1", "", -148.f, -84.f, -104.f, -44.f, 24.f, 9},
+        {"hr_w0", "", -148.f, -20.f, -104.f, 20.f, 28.f, 10},
+        {"hr_w2", "", -148.f, 44.f, -104.f, 84.f, 18.f, 9},
+        {"hr_e1", "", 104.f, -84.f, 148.f, -44.f, 22.f, 9},
+        {"hr_e0", "", 104.f, -20.f, 148.f, 20.f, 26.f, 10},
+        {"hr_e2", "", 104.f, 44.f, 148.f, 84.f, 20.f, 9},
     };
     city.rebuildCollision();
     return city;
