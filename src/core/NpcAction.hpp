@@ -3,6 +3,8 @@
 #include <cctype>
 #include <string>
 
+#include "Offense.hpp"
+
 namespace llm_npc {
 
 // A physical action an NPC can take in the world, decided by the LLM in
@@ -38,7 +40,8 @@ enum class NpcMood {
 struct Directives {
     NpcAction action = NpcAction::None;
     NpcMood mood = NpcMood::Neutral;
-    bool hasMood = false;  // distinguishes "said neutral" from "said nothing"
+    bool hasMood = false;           // distinguishes "said neutral" from "said nothing"
+    Charge charge = Charge::None;   // an arresting officer's stated charge, if any
 };
 
 // Maps a normalized (lowercase, '_'-joined) tag keyword to its action.
@@ -69,6 +72,25 @@ inline bool moodFromKeyword(const std::string& kw, NpcMood& out) {
     else if (kw == "surprised" || kw == "shocked" || kw == "startled") out = NpcMood::Surprised;
     else return false;
     return true;
+}
+
+// Maps a normalized charge keyword (from an arresting officer's [[CHARGE: ...]]
+// tag) to a Charge, tolerating the synonyms a small model emits. Unknown
+// keywords yield Charge::None.
+inline Charge chargeFromKeyword(const std::string& kw) {
+    if (kw == "armed_violence" || kw == "armed" || kw == "shooting" || kw == "weapon" ||
+        kw == "firearm" || kw == "violence" || kw == "murder")
+        return Charge::ArmedViolence;
+    if (kw == "assault" || kw == "battery" || kw == "attack" || kw == "violent" ||
+        kw == "fighting")
+        return Charge::Assault;
+    if (kw == "theft" || kw == "robbery" || kw == "stealing" || kw == "larceny" ||
+        kw == "burglary")
+        return Charge::Theft;
+    if (kw == "disturbing_the_peace" || kw == "disturbing" || kw == "disturbance" ||
+        kw == "peace" || kw == "harassment" || kw == "disorderly")
+        return Charge::DisturbingPeace;
+    return Charge::None;
 }
 
 // Lowercase copy of s (ASCII), used for case-insensitive matching.
@@ -122,7 +144,7 @@ inline Directives parseDirectives(std::string& reply) {
             if (std::isspace(static_cast<unsigned char>(c))) c = '_';
         }
 
-        if (kind != "action" && kind != "mood") {
+        if (kind != "action" && kind != "mood" && kind != "charge") {
             ++i;
             continue;
         }
@@ -130,12 +152,15 @@ inline Directives parseDirectives(std::string& reply) {
         if (kind == "action") {
             const NpcAction action = actionFromKeyword(keyword);
             if (action != NpcAction::None) out.action = action;
-        } else {
+        } else if (kind == "mood") {
             NpcMood mood = NpcMood::Neutral;
             if (moodFromKeyword(keyword, mood)) {
                 out.mood = mood;  // last recognized mood wins
                 out.hasMood = true;
             }
+        } else {  // charge
+            const Charge c = chargeFromKeyword(keyword);
+            if (c != Charge::None) out.charge = moreSerious(out.charge, c);
         }
 
         // Strip the tag and collapse the whitespace seam it leaves behind.

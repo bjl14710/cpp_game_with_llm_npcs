@@ -22,6 +22,7 @@
 #include "Math.hpp"
 #include "Menu.hpp"
 #include "Npc.hpp"
+#include "Offense.hpp"
 #include "PersonaLoader.hpp"
 #include "Renderer3D.hpp"
 #include "World.hpp"
@@ -38,11 +39,9 @@ constexpr float kNameplateRange = 28.f;   // how far name tags stay visible
 constexpr float kNpcCullRange = 150.f;    // skip drawing NPCs farther than this
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
-// How long an arrest holds the player at the police station. Short, because
-// the worst on-the-books offense here is disturbing the peace.
-constexpr float kJailSeconds = 10.f;
 // Inside the station holding cell (see the cell walls in City::makeDowntown),
-// and the spot just outside the station door where the player is released.
+// and the spot just outside the station door where the player is released. The
+// length of the stay is the charge's sentence (see Offense.hpp).
 constexpr Vec3 kCellInterior{12.f, 0.f, -72.f};
 constexpr Vec3 kStationDoorStep{0.f, 0.f, -37.f};
 
@@ -273,6 +272,24 @@ int main() {
     // NPC's previous catch latch so the moment of capture fires exactly once.
     float jailSecondsLeft = 0.f;
     std::vector<bool> wasCaught(world.npcs().size(), false);
+    // The worst offense the player has committed since their last release: it
+    // sets the sentence on the next arrest, and a manhunt-level charge sends
+    // every officer after them at once.
+    Charge playerCharge = Charge::None;
+    std::string jailLabel;       // the charge label shown on the HUD while serving
+    bool manhuntActive = false;  // every officer is hunting the player
+
+    // Raise the standing charge to at least `c`; the first time it reaches a
+    // manhunt-level offense, send every officer after the player.
+    const auto escalateCharge = [&](Charge c) {
+        playerCharge = moreSerious(playerCharge, c);
+        if (sentenceFor(playerCharge).manhunt && !manhuntActive) {
+            manhuntActive = true;
+            for (Npc& officer : world.npcs()) {
+                if (officer.persona().police) officer.commandArrest();
+            }
+        }
+    };
     sf::Clock frameClock;
     while (window.isOpen()) {
         sf::Event event{};
@@ -322,6 +339,9 @@ int main() {
                     Npc& npc = world.npcs()[static_cast<std::size_t>(session.npcIndex())];
                     if (!npc.waiting()) {
                         dialog.appendLine({TranscriptLine::Kind::Player, "You", submitted});
+                        // Deterministic floor: the player's own words set a
+                        // minimum charge before any officer reacts.
+                        escalateCharge(classifyPlayerAction(submitted));
                         const std::uint64_t id = npc.ask(submitted);
                         session.submitted(id);
                         pendingRoutes[id] = session.npcIndex();
@@ -373,6 +393,8 @@ int main() {
             if (jailSecondsLeft <= 0.f) {
                 jailSecondsLeft = 0.f;
                 camera.position = kStationDoorStep;  // released, step out the front door
+                playerCharge = Charge::None;  // sentence served; the slate is clean
+                manhuntActive = false;
             }
         }
 
@@ -390,7 +412,13 @@ int main() {
             Npc& npc = world.npcs()[i];
             const bool caughtNow = npc.hasCaughtPlayer();
             if (caughtNow && !wasCaught[i] && npc.persona().police) {
-                jailSecondsLeft = kJailSeconds;
+                // An arrest with no classified offense still means the officer
+                // judged the player worth detaining: treat it as the minimum.
+                const Charge charge =
+                    playerCharge == Charge::None ? Charge::DisturbingPeace : playerCharge;
+                const Sentence sentence = sentenceFor(charge);
+                jailSecondsLeft = sentence.jailSeconds;
+                jailLabel = sentence.label;
                 camera.position = kCellInterior;  // locked in the station holding cell
                 npc.commandReturnHome();
                 if (mode == AppMode::Dialogue) {
@@ -421,6 +449,9 @@ int main() {
             Npc& npc = world.npcs()[static_cast<std::size_t>(route->second)];
             const auto text = npc.onReplyArrived(reply);
             pendingRoutes.erase(route);
+            // An officer's reply may name a charge that escalates the player's
+            // standing offense above the floor their own words set.
+            if (reply.ok) escalateCharge(npc.lastCharge());
 
             if (session.replyArrived(reply.id, reply.ok)) {
                 dialog.endStreaming();
@@ -501,7 +532,7 @@ int main() {
             if (jailSecondsLeft > 0.f) {
                 const int secs = static_cast<int>(jailSecondsLeft) + 1;
                 drawCenteredHudText(window, font,
-                                    "Arrested: disturbing the peace. Released in " +
+                                    "Arrested: " + jailLabel + ". Released in " +
                                         std::to_string(secs) + "s",
                                     22, static_cast<float>(window.getSize().y) - 120.f);
             }

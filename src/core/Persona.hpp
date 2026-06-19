@@ -73,7 +73,13 @@ struct Persona {
         if (police) {
             s += "If the player is disruptive, threatening, or harasses you "
                  "or others (shouting, threats), give them a clear warning; "
-                 "if they keep it up, arrest them with [[ACTION: arrest]].\n";
+                 "if they keep it up, arrest them with [[ACTION: arrest]]. "
+                 "Serious crimes - theft, assault, or anything involving a "
+                 "weapon - need no warning; arrest at once. Whenever you "
+                 "arrest someone, add one charge tag on its own line for the "
+                 "most serious thing they did: [[CHARGE: disturbing_the_peace]], "
+                 "[[CHARGE: theft]], [[CHARGE: assault]], or "
+                 "[[CHARGE: armed_violence]].\n";
         } else {
             s += "If the player is disruptive, threatening, or harasses you "
                  "(shouting, threats), give them a clear warning; if they "

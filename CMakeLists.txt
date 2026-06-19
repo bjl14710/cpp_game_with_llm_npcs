@@ -19,6 +19,7 @@ add_library(llm_npc_core STATIC
     src/core/KeyBindings.cpp
     src/core/LlmClient.cpp
     src/core/Npc.cpp
+    src/core/Offense.cpp
     src/core/PersonaLoader.cpp
     src/core/World.cpp
 )

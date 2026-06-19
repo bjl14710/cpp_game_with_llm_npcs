@@ -61,6 +61,7 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
     std::string content = reply.content;
     const Directives directives = parseDirectives(content);
     applyAction(directives.action);
+    lastCharge_ = directives.charge;  // an arresting officer's stated charge, if any
     if (directives.hasMood) {
         mood_ = directives.mood;
         moodTimer_ = kMoodSeconds;

@@ -86,6 +86,11 @@ class Npc {
     // no words alongside its action tag.
     NpcAction lastAction() const { return lastAction_; }
 
+    // The charge parsed from the most recent reply's [[CHARGE: ...]] tag, when
+    // an arresting officer named one (Charge::None otherwise). Meaningful only
+    // for the turn it arrives, like lastAction().
+    Charge lastCharge() const { return lastCharge_; }
+
     // The emotional state read from the latest reply; decays back to Neutral
     // after a while. Drives the rendered facial expression.
     NpcMood mood() const { return mood_; }
@@ -123,6 +128,7 @@ class Npc {
     NpcAction behavior_ = NpcAction::None;    // persistent: follow/arrest/stop/face
     NpcAction pose_ = NpcAction::None;        // transient gesture overlay
     NpcAction lastAction_ = NpcAction::None;  // action from the latest reply
+    Charge lastCharge_ = Charge::None;        // charge from the latest reply
     NpcMood mood_ = NpcMood::Neutral;         // current expression
     float moodTimer_ = 0.f;                   // seconds until mood relaxes
     float poseTimer_ = 0.f;                   // seconds of gesture remaining
