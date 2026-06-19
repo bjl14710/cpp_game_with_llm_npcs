@@ -476,7 +476,14 @@ int main() {
                 jailSecondsLeft = sentence.jailSeconds;
                 jailLabel = sentence.label;
                 camera.position = kCellInterior;  // locked in the station holding cell
-                npc.commandReturnHome();
+                // The crime is answered the moment they catch you, so stand the
+                // WHOLE pursuit down — not just the catching officer. Otherwise
+                // the other cops a manhunt mobilized stay in Arrest and re-catch
+                // you the instant you're released at the station door.
+                for (Npc& officer : world.npcs()) {
+                    if (officer.persona().police) officer.commandReturnHome();
+                }
+                manhuntActive = false;
                 if (mode == AppMode::Dialogue) {
                     // Being hauled off ends any open conversation.
                     session.close();
