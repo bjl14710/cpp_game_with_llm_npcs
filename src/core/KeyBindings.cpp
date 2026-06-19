@@ -17,18 +17,19 @@ std::string canonical(std::string name) {
 }
 
 constexpr std::array<const char*, kActionCount> kActionNames = {
-    "move_forward", "move_backward", "strafe_left", "strafe_right", "talk", "menu",
+    "move_forward", "move_backward", "strafe_left", "strafe_right", "talk", "menu", "interact",
 };
 
 constexpr std::array<const char*, kActionCount> kActionLabels = {
-    "Move forward", "Move backward", "Strafe left", "Strafe right", "Talk to NPC", "Open menu",
+    "Move forward", "Move backward", "Strafe left", "Strafe right",
+    "Talk to NPC",  "Open menu",     "Interact / buy",
 };
 
 }  // namespace
 
 KeyBindings KeyBindings::defaults() {
     KeyBindings kb;
-    kb.keys_ = {"W", "S", "A", "D", "T", "Escape"};
+    kb.keys_ = {"W", "S", "A", "D", "T", "Escape", "E"};
     return kb;
 }
 

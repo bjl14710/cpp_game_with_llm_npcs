@@ -26,6 +26,7 @@
 #include "Offense.hpp"
 #include "PersonaFactory.hpp"
 #include "PersonaLoader.hpp"
+#include "PlayerState.hpp"
 #include "Renderer3D.hpp"
 #include "Traffic.hpp"
 #include "World.hpp"
@@ -40,6 +41,8 @@ constexpr float kPlayerRadius = 0.45f;    // collision circle on the ground
 constexpr float kTalkRadius = 3.5f;       // how close "press T to talk" works
 constexpr float kNameplateRange = 28.f;   // how far name tags stay visible
 constexpr float kNpcCullRange = 150.f;    // skip drawing NPCs farther than this
+constexpr float kInteractRadius = 4.0f;   // how close [E] interactions (bank/shop) work
+constexpr int kWithdrawAmount = 500;      // cash per bank withdrawal (infinite by repeating)
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 // Inside the station holding cell (see the cell walls in City::makeDowntown),
@@ -177,6 +180,16 @@ std::string stageDirection(NpcAction action) {
     return "";
 }
 
+// True when the player circle at `p` is within `r` of a building's footprint
+// (used for "walk up to the bank and press E"). Buildings are axis-aligned.
+bool nearFootprint(const Building& b, const Vec3& p, float r) {
+    const float cx = clampf(p.x, b.minX, b.maxX);
+    const float cz = clampf(p.z, b.minZ, b.maxZ);
+    const float dx = p.x - cx;
+    const float dz = p.z - cz;
+    return dx * dx + dz * dz < r * r;
+}
+
 // Maps the NPC's core mood onto the renderer's face enum.
 NpcFace faceForMood(NpcMood mood) {
     switch (mood) {
@@ -301,6 +314,12 @@ int main() {
     centerMouse(window);
 
     int nearbyNpc = -1;
+    PlayerState player;  // wallet + arsenal (money, owned weapons, selection)
+    const Building* bankBuilding = world.city().findBuilding("bank");
+    bool shopOpen = false;       // is the weapon-shop overlay open?
+    std::string toast;           // transient HUD message (withdrawals, purchases)
+    float toastTimer = 0.f;
+    const auto setToast = [&](const std::string& m) { toast = m; toastTimer = 2.2f; };
     // Arrest bookkeeping: when an officer catches the player, the player is
     // held at the police station for a short sentence. wasCaught tracks each
     // NPC's previous catch latch so the moment of capture fires exactly once.
@@ -335,6 +354,25 @@ int main() {
             if (event.type == sf::Event::LostFocus) releaseMouse();
 
             if (mode == AppMode::Playing && event.type == sf::Event::KeyPressed) {
+                // While the shop overlay is open, number keys buy and E/Esc closes.
+                if (shopOpen) {
+                    const int code = static_cast<int>(event.key.code);
+                    const bool closeKey = event.key.code == sf::Keyboard::Escape ||
+                                          event.key.code == keyFromName(bindings.key(Action::Interact));
+                    const int firstNum = static_cast<int>(sf::Keyboard::Num1);
+                    if (closeKey) {
+                        shopOpen = false;
+                        window.setMouseCursorVisible(false);
+                        centerMouse(window);
+                    } else if (code >= firstNum &&
+                               code < firstNum + static_cast<int>(kWeaponCatalog.size())) {
+                        const ShopItem& item = kWeaponCatalog[static_cast<std::size_t>(code - firstNum)];
+                        if (player.owns(item.weapon)) setToast(std::string("Already own the ") + item.label);
+                        else if (player.buy(item)) setToast(std::string("Bought the ") + item.label);
+                        else setToast(std::string("Can't afford the ") + item.label);
+                    }
+                    continue;
+                }
                 const bool menuKey = event.key.code == keyFromName(bindings.key(Action::OpenMenu)) ||
                                      event.key.code == sf::Keyboard::Escape;
                 if (menuKey) {
@@ -355,6 +393,19 @@ int main() {
                     mode = AppMode::Dialogue;
                     window.setMouseCursorVisible(true);
                     releaseMouse();
+                } else if (event.key.code == keyFromName(bindings.key(Action::Interact))) {
+                    // Context-sensitive: bank withdrawal, or open a shop's catalog.
+                    if (bankBuilding && nearFootprint(*bankBuilding, camera.position, kInteractRadius)) {
+                        player.withdraw(kWithdrawAmount);
+                        setToast("Withdrew $" + std::to_string(kWithdrawAmount));
+                    } else if (nearbyNpc >= 0 &&
+                               world.npcs()[static_cast<std::size_t>(nearbyNpc)].spotId() == "hardware") {
+                        shopOpen = true;
+                        window.setMouseCursorVisible(true);
+                        releaseMouse();
+                    } else {
+                        setToast("Nothing to buy here.");
+                    }
                 }
                 continue;
             }
@@ -404,8 +455,9 @@ int main() {
         if (!window.isOpen()) break;
 
         const float dt = std::min(0.03f, frameClock.restart().asSeconds());
+        if (toastTimer > 0.f) toastTimer -= dt;
 
-        if (mode == AppMode::Playing) {
+        if (mode == AppMode::Playing && !shopOpen) {
             if (window.hasFocus()) handleMouseLook(window, camera);
 
             // No walking out of a sentence; looking around is still allowed.
@@ -589,11 +641,38 @@ int main() {
         }
 
         if (mode == AppMode::Playing) {
-            if (nearbyNpc >= 0) {
+            // Wallet, top-left.
+            sf::Text cash("$" + std::to_string(player.money()), font, 24);
+            cash.setPosition(16.f, 12.f);
+            cash.setOutlineThickness(2.f);
+            cash.setOutlineColor(sf::Color(0, 0, 0, 200));
+            cash.setFillColor(sf::Color(120, 230, 140));
+            window.draw(cash);
+
+            const bool nearBank = bankBuilding &&
+                                  nearFootprint(*bankBuilding, camera.position, kInteractRadius);
+            const bool nearShop = nearbyNpc >= 0 &&
+                world.npcs()[static_cast<std::size_t>(nearbyNpc)].spotId() == "hardware";
+
+            if (!shopOpen && nearbyNpc >= 0) {
                 const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
                 drawCenteredHudText(window, font,
                                     "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name,
                                     20, static_cast<float>(window.getSize().y) - 84.f);
+            }
+            if (!shopOpen && nearBank) {
+                drawCenteredHudText(window, font,
+                                    "[" + bindings.key(Action::Interact) + "] City Bank — withdraw $" +
+                                        std::to_string(kWithdrawAmount),
+                                    20, static_cast<float>(window.getSize().y) - 60.f);
+            } else if (!shopOpen && nearShop) {
+                drawCenteredHudText(window, font,
+                                    "[" + bindings.key(Action::Interact) + "] Buy weapons",
+                                    20, static_cast<float>(window.getSize().y) - 60.f);
+            }
+            if (toastTimer > 0.f) {
+                drawCenteredHudText(window, font, toast, 22,
+                                    static_cast<float>(window.getSize().y) - 150.f);
             }
             // Serving time: show the countdown while movement is locked.
             if (jailSecondsLeft > 0.f) {
@@ -610,6 +689,35 @@ int main() {
                             static_cast<float>(window.getSize().y) * 0.5f);
             dot.setFillColor(sf::Color(255, 255, 255, 200));
             window.draw(dot);
+
+            // Weapon-shop catalog overlay.
+            if (shopOpen) {
+                sf::RectangleShape dim(sf::Vector2f(static_cast<float>(window.getSize().x),
+                                                    static_cast<float>(window.getSize().y)));
+                dim.setFillColor(sf::Color(8, 10, 16, 170));
+                window.draw(dim);
+                float y = 170.f;
+                drawCenteredHudText(window, font,
+                                    "HARDWARE STORE — weapons    ($" + std::to_string(player.money()) + ")",
+                                    26, y);
+                y += 48.f;
+                for (std::size_t k = 0; k < kWeaponCatalog.size(); ++k) {
+                    const ShopItem& it = kWeaponCatalog[k];
+                    std::string status;
+                    if (player.owns(it.weapon)) status = "owned";
+                    else if (player.money() < it.price)
+                        status = "need $" + std::to_string(it.price - player.money()) + " more";
+                    const std::string line = "[" + std::to_string(k + 1) + "]  " + it.label + " — $" +
+                                             std::to_string(it.price) +
+                                             (status.empty() ? "" : "   (" + status + ")");
+                    drawCenteredHudText(window, font, line, 22, y);
+                    y += 36.f;
+                }
+                drawCenteredHudText(window, font,
+                                    "press a number to buy   ·   [" +
+                                        bindings.key(Action::Interact) + "/Esc] close",
+                                    18, y + 14.f);
+            }
         } else if (mode == AppMode::Dialogue) {
             sf::RectangleShape dim(sf::Vector2f(static_cast<float>(window.getSize().x),
                                                 static_cast<float>(window.getSize().y)));

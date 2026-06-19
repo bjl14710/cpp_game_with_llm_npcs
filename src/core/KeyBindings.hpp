@@ -16,6 +16,7 @@ enum class Action {
     StrafeRight,
     Talk,
     OpenMenu,
+    Interact,  // bank withdraw / buy from a shop
     Count,
 };
 

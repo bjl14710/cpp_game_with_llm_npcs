@@ -99,6 +99,7 @@ City City::makeDowntown() {
 
         // Plaza furniture and street props (low solid obstacles).
         {"cart", "Gus's Hot Dogs", -3.f, -2.f, 3.f, 2.f, 3.f, 5},
+        {"bank", "City Bank", 6.f, 12.f, 18.f, 22.f, 6.f, 1},  // walk up + Interact for cash
         {"taxi_cab", "", 26.f, -6.f, 34.f, -1.f, 1.6f, 6},
         {"fountain", "", 60.f, 56.f, 68.f, 64.f, 1.5f, 7},
         {"bench", "", 66.f, 70.f, 70.f, 71.f, 0.6f, 8},
