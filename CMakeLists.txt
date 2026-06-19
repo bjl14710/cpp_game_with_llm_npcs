@@ -14,6 +14,7 @@ find_package(OpenGL QUIET)
 # Core: SFML-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
     src/core/City.cpp
+    src/core/Combat.cpp
     src/core/Config.cpp
     src/core/DialogueSession.cpp
     src/core/KeyBindings.cpp

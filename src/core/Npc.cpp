@@ -136,6 +136,10 @@ float Npc::nextRandUnit() {
 }
 
 void Npc::update(float dt, const Vec3& playerPos, const City& city) {
+    if (downed_) {  // a knocked-down NPC lies still and does nothing
+        moving_ = false;
+        return;
+    }
     const Vec3 startPos = position_;  // for the walk-cycle phase below
 
     // Tick down any gesture overlay independently of movement.

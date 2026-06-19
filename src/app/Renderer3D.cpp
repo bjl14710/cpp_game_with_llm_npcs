@@ -791,6 +791,12 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
     // A soft contact shadow grounds the figure (drawn before body scaling).
     drawBlobShadow(0.42f * a.buildScale);
 
+    // A knocked-down NPC is tipped onto the ground (rotated about the feet).
+    if (npc.downed) {
+        glTranslatef(0.f, 0.12f, 0.20f);
+        glRotatef(86.f, 1.f, 0.f, 0.f);
+    }
+
     // Distance-based level of detail: distant figures use coarser geometry so a
     // whole crowd stays cheap in immediate mode.
     const float camDist = distanceXZ(eye_, npc.position);

@@ -258,6 +258,24 @@ TEST_CASE("A wanderer in conversation faces the player and holds position") {
     CHECK(npc.facingDeg() == doctest::Approx(90.f).epsilon(0.01));  // faces the player
 }
 
+TEST_CASE("A knocked-down NPC stops acting and holds position") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city;
+    npc.setPlacement(Vec3{0.f, 0.f, 0.f}, 0.f, "street");
+    npc.commandWander();
+
+    npc.knockDown();
+    CHECK(npc.isDowned());
+
+    const Vec3 before = npc.position();
+    for (int i = 0; i < 200; ++i) npc.update(0.05f, Vec3{8.f, 0.f, 8.f}, city);
+    CHECK(npc.position().x == doctest::Approx(before.x));  // didn't wander off
+    CHECK(npc.position().z == doctest::Approx(before.z));
+    CHECK_FALSE(npc.isMoving());
+}
+
 TEST_CASE("Gestures pose the NPC and expire on their own") {
     FakeOllama fake;
     LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});

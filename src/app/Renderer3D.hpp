@@ -56,6 +56,7 @@ struct NpcVisual {
     NpcFace face = NpcFace::Neutral;
     float locomotionPhase = 0.f;  // accumulated stride phase (radians)
     bool moving = false;          // true while the NPC is walking
+    bool downed = false;          // knocked down: drawn collapsed on the ground
 };
 
 // Derives a stable, varied appearance from a seed. Police get a recognizable

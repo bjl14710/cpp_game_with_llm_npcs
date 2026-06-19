@@ -121,6 +121,17 @@ class Npc {
     // pauses and faces the player instead of strolling off while they talk.
     void setInConversation(bool talking) { inConversation_ = talking; }
 
+    // Incapacitates the NPC (hit by a weapon or a car): they collapse and stop
+    // acting. Deliberately NOT deleted — the body stays in the roster so NPC
+    // indices (which arrest routing and conversation targeting rely on) hold.
+    void knockDown() {
+        downed_ = true;
+        behavior_ = NpcAction::None;
+        pose_ = NpcAction::None;
+        moving_ = false;
+    }
+    bool isDowned() const { return downed_; }
+
     const Persona& persona() const { return persona_; }
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
@@ -156,6 +167,7 @@ class Npc {
     std::uint32_t wanderRng_ = 1u;            // per-NPC RNG state for wandering
     bool wanderReady_ = false;                // first wander target chosen yet?
     bool inConversation_ = false;             // player is mid-chat with this NPC
+    bool downed_ = false;                     // incapacitated (weapon/car hit)
 
     // Routes a freshly parsed action into behavior/gesture state.
     void applyAction(NpcAction action);

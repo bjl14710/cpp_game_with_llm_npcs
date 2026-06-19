@@ -38,6 +38,17 @@ TEST_CASE("nearestNpcWithin picks the closest NPC in range") {
     CHECK(world.npcs()[static_cast<std::size_t>(idx)].persona().name == "nearer");
 }
 
+TEST_CASE("nearestNpcWithin skips knocked-down NPCs") {
+    World world(City::makeDowntown());
+    world.addNpc(makeNpc("standing", 3.f, 0.f));
+    world.addNpc(makeNpc("downed", 1.f, 0.f));  // closer, but knocked out
+    world.npcs()[1].knockDown();
+
+    const int idx = world.nearestNpcWithin(Vec3{0.f, 0.f, 0.f}, 10.f);
+    REQUIRE(idx == 0);  // the closer body is ignored; the standing NPC wins
+    CHECK(world.npcs()[static_cast<std::size_t>(idx)].persona().name == "standing");
+}
+
 TEST_CASE("nearestNpcWithin returns -1 when everyone is out of range") {
     World world(City::makeDowntown());
     world.addNpc(makeNpc("far", 50.f, 50.f));

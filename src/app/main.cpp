@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "City.hpp"
+#include "Combat.hpp"
 #include "Config.hpp"
 #include "DialogUI.hpp"
 #include "DialogueSession.hpp"
@@ -180,6 +181,17 @@ std::string stageDirection(NpcAction action) {
     return "";
 }
 
+// Display name + HUD slot number for a weapon.
+const char* weaponName(WeaponKind w) {
+    switch (w) {
+        case WeaponKind::Fists:  return "Fists";
+        case WeaponKind::Bat:    return "Bat";
+        case WeaponKind::Pistol: return "Pistol";
+    }
+    return "Fists";
+}
+int weaponSlot(WeaponKind w) { return static_cast<int>(w) + 1; }  // Fists=1, Bat=2, Pistol=3
+
 // True when the player circle at `p` is within `r` of a building's footprint
 // (used for "walk up to the bank and press E"). Buildings are axis-aligned.
 bool nearFootprint(const Building& b, const Vec3& p, float r) {
@@ -343,6 +355,38 @@ int main() {
             }
         }
     };
+
+    // Fires the equipped weapon: knock down the nearest NPC in front (melee =
+    // short/wide, pistol = long/narrow) and let the law respond. Brief flash for
+    // feedback.
+    float fireFlash = 0.f;
+    const auto fireWeapon = [&]() {
+        float range = 2.8f;
+        float halfAngle = 35.f;
+        switch (player.current()) {
+            case WeaponKind::Fists:  range = 2.8f; halfAngle = 35.f; break;
+            case WeaponKind::Bat:    range = 3.6f; halfAngle = 30.f; break;
+            case WeaponKind::Pistol: range = 70.f; halfAngle = 3.5f; break;
+        }
+        std::vector<Vec3> positions;
+        std::vector<int> indexMap;
+        for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+            if (world.npcs()[i].isDowned()) continue;  // already on the ground
+            positions.push_back(world.npcs()[i].position());
+            indexMap.push_back(static_cast<int>(i));
+        }
+        fireFlash = 0.12f;
+        const int hit = pickTargetInCone(camera.position, camera.yawDeg, range, halfAngle, positions);
+        if (hit < 0) {
+            setToast("Missed.");
+            return;
+        }
+        Npc& victim = world.npcs()[static_cast<std::size_t>(indexMap[hit])];
+        victim.knockDown();
+        const bool armed = player.current() == WeaponKind::Pistol;
+        escalateCharge(armed ? Charge::ArmedViolence : Charge::Assault);
+        setToast(std::string(armed ? "You shot " : "You struck ") + victim.persona().name + "!");
+    };
     sf::Clock frameClock;
     while (window.isOpen()) {
         sf::Event event{};
@@ -406,7 +450,22 @@ int main() {
                     } else {
                         setToast("Nothing to buy here.");
                     }
+                } else if (event.key.code >= sf::Keyboard::Num1 &&
+                           event.key.code <= sf::Keyboard::Num3) {
+                    const WeaponKind k = event.key.code == sf::Keyboard::Num1 ? WeaponKind::Fists
+                                         : event.key.code == sf::Keyboard::Num2 ? WeaponKind::Bat
+                                                                                : WeaponKind::Pistol;
+                    if (player.select(k)) setToast(std::string("Equipped ") + weaponName(k));
+                    else setToast(std::string("You don't own a ") + weaponName(k));
                 }
+                continue;
+            }
+
+            // Left-click attacks with the equipped weapon (not while jailed).
+            if (mode == AppMode::Playing && !shopOpen && jailSecondsLeft <= 0.f &&
+                event.type == sf::Event::MouseButtonPressed &&
+                event.mouseButton.button == sf::Mouse::Left) {
+                fireWeapon();
                 continue;
             }
 
@@ -456,6 +515,7 @@ int main() {
 
         const float dt = std::min(0.03f, frameClock.restart().asSeconds());
         if (toastTimer > 0.f) toastTimer -= dt;
+        if (fireFlash > 0.f) fireFlash -= dt;
 
         if (mode == AppMode::Playing && !shopOpen) {
             if (window.hasFocus()) handleMouseLook(window, camera);
@@ -617,6 +677,7 @@ int main() {
             visual.face = faceForMood(npc.mood());
             visual.locomotionPhase = npc.locomotionPhase();
             visual.moving = npc.isMoving();
+            visual.downed = npc.isDowned();
             renderer.drawNpc(visual);
         }
         for (const Vehicle& v : traffic.vehicles()) {
@@ -648,6 +709,47 @@ int main() {
             cash.setOutlineColor(sf::Color(0, 0, 0, 200));
             cash.setFillColor(sf::Color(120, 230, 140));
             window.draw(cash);
+
+            // Equipped weapon: a label plus a crude bottom-right viewmodel so
+            // the player sees what they're holding, with a flash when firing.
+            const WeaponKind heldWeapon = player.current();
+            sf::Text wlabel("[" + std::to_string(weaponSlot(heldWeapon)) + "] " + weaponName(heldWeapon),
+                            font, 18);
+            wlabel.setPosition(16.f, 44.f);
+            wlabel.setOutlineThickness(2.f);
+            wlabel.setOutlineColor(sf::Color(0, 0, 0, 200));
+            wlabel.setFillColor(sf::Color(230, 230, 235));
+            window.draw(wlabel);
+            {
+                const float W = static_cast<float>(window.getSize().x);
+                const float H = static_cast<float>(window.getSize().y);
+                sf::RectangleShape vm;
+                if (heldWeapon == WeaponKind::Pistol) {
+                    vm.setSize({72.f, 26.f});
+                    vm.setPosition(W - 220.f, H - 92.f);
+                    vm.setRotation(-18.f);
+                    vm.setFillColor(sf::Color(40, 40, 48));
+                } else if (heldWeapon == WeaponKind::Bat) {
+                    vm.setSize({150.f, 22.f});
+                    vm.setPosition(W - 250.f, H - 70.f);
+                    vm.setRotation(-30.f);
+                    vm.setFillColor(sf::Color(150, 95, 45));
+                } else {
+                    vm.setSize({46.f, 46.f});
+                    vm.setPosition(W - 150.f, H - 78.f);
+                    vm.setFillColor(sf::Color(225, 195, 170));
+                }
+                vm.setOutlineThickness(2.f);
+                vm.setOutlineColor(sf::Color(0, 0, 0, 170));
+                window.draw(vm);
+                if (fireFlash > 0.f) {
+                    sf::CircleShape flash(heldWeapon == WeaponKind::Pistol ? 16.f : 22.f);
+                    flash.setOrigin(flash.getRadius(), flash.getRadius());
+                    flash.setPosition(W - 232.f, H - 96.f);
+                    flash.setFillColor(sf::Color(255, 230, 130, 200));
+                    window.draw(flash);
+                }
+            }
 
             const bool nearBank = bankBuilding &&
                                   nearFootprint(*bankBuilding, camera.position, kInteractRadius);
