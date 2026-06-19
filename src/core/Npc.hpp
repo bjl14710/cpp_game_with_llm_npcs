@@ -132,6 +132,14 @@ class Npc {
     }
     bool isDowned() const { return downed_; }
 
+    // Reverts the NPC to a known-good position and halts it for this tick. Used
+    // to block a wanderer from walking into a stopped car (the prior position
+    // was already collision-valid).
+    void haltAt(const Vec3& p) {
+        position_ = p;
+        moving_ = false;
+    }
+
     const Persona& persona() const { return persona_; }
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }

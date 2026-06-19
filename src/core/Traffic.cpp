@@ -55,7 +55,7 @@ Traffic::Traffic(float halfSize, std::uint32_t seed, int count)
     }
 }
 
-void Traffic::update(float dt, const Vec3& playerPos) {
+void Traffic::update(float dt, const Vec3& playerPos, const std::vector<Vec3>& people) {
     const float wrap = halfSize_ + 4.f;
     // Closest an obstacle's center may get ahead of a car's center before the
     // car stops dead, so the body (front bumper at +kCarHalfLen) never overlaps.
@@ -85,6 +85,13 @@ void Traffic::update(float dt, const Vec3& playerPos) {
             target = 0.f;
             nearestYield = std::min(nearestYield, fwd);
         }
+        // Pedestrians get the same priority: cars stop for them, not through them.
+        for (const Vec3& q : people) {
+            if (forwardTo(q.x, q.z, kLateral + 0.2f, fwd)) {
+                target = 0.f;
+                nearestYield = std::min(nearestYield, fwd);
+            }
+        }
         // Yield to cars ahead: a follower yields to the car it trails, and at a
         // crossing north-south traffic (axis 0) yields to east-west (axis 1).
         for (const Vehicle& o : vehicles_) {
@@ -112,7 +119,7 @@ void Traffic::update(float dt, const Vec3& playerPos) {
     }
 }
 
-bool Traffic::circleHitsVehicle(float x, float z, float radius) const {
+const Vehicle* Traffic::vehicleAt(float x, float z, float radius) const {
     for (const Vehicle& v : vehicles_) {
         // Cars are grid-aligned, so the body box is axis-aligned: length runs
         // along Z for a north-south car, along X for an east-west car.
@@ -122,9 +129,13 @@ bool Traffic::circleHitsVehicle(float x, float z, float radius) const {
         const float nz = clampf(z, v.z - hz, v.z + hz);
         const float dx = x - nx;
         const float dz = z - nz;
-        if (dx * dx + dz * dz < radius * radius) return true;
+        if (dx * dx + dz * dz < radius * radius) return &v;
     }
-    return false;
+    return nullptr;
+}
+
+bool Traffic::circleHitsVehicle(float x, float z, float radius) const {
+    return vehicleAt(x, z, radius) != nullptr;
 }
 
 }  // namespace llm_npc

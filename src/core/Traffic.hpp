@@ -38,9 +38,10 @@ class Traffic {
     // seeded so the same seed yields the same traffic.
     Traffic(float halfSize, std::uint32_t seed, int count);
 
-    // Advances every car by `dt` seconds given the player's position (cars
-    // always brake for the player).
-    void update(float dt, const Vec3& playerPos);
+    // Advances every car by `dt` seconds. Cars always brake for the player and
+    // for any `people` positions (pedestrians), so they stop rather than drive
+    // through them.
+    void update(float dt, const Vec3& playerPos, const std::vector<Vec3>& people = {});
 
     const std::vector<Vehicle>& vehicles() const { return vehicles_; }
 
@@ -48,6 +49,11 @@ class Traffic {
     // footprint is axis-aligned because cars only drive along the grid. Used
     // for player-vs-car collision.
     bool circleHitsVehicle(float x, float z, float radius) const;
+
+    // The first vehicle whose body overlaps the circle (x, z, radius), or
+    // nullptr when none does. Lets callers inspect the car's speed (e.g. a
+    // moving car knocks a pedestrian down; a stopped one merely blocks them).
+    const Vehicle* vehicleAt(float x, float z, float radius) const;
 
    private:
     // Recomputes x/z/headingDeg from a car's lane state.

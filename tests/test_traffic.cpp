@@ -43,6 +43,24 @@ TEST_CASE("a lone car brakes rather than driving over the player in its lane") {
     CHECK(t.vehicles().front().speed == doctest::Approx(0.f));  // and it stopped
 }
 
+TEST_CASE("a car brakes for a pedestrian ahead in its lane") {
+    Traffic t(170.f, 5u, 1);
+    t.update(0.01f, kFarAway);  // settle the initial pose
+    const Vehicle car = t.vehicles().front();
+
+    // A pedestrian standing 5 units directly ahead of the car, in its lane.
+    const float h = car.headingDeg * 3.14159265f / 180.f;
+    const std::vector<Vec3> people = {{car.x + std::sin(h) * 5.f, 0.f, car.z + std::cos(h) * 5.f}};
+
+    bool everHit = false;
+    for (int i = 0; i < 300; ++i) {
+        t.update(0.05f, kFarAway, people);  // player far away; only the pedestrian matters
+        if (t.circleHitsVehicle(people[0].x, people[0].z, 0.45f)) everHit = true;
+    }
+    CHECK_FALSE(everHit);                                       // never ran the pedestrian over
+    CHECK(t.vehicles().front().speed == doctest::Approx(0.f));  // and it stopped for them
+}
+
 TEST_CASE("traffic is deterministic for a given seed") {
     Traffic a(170.f, 42u, 12);
     Traffic b(170.f, 42u, 12);

@@ -44,6 +44,8 @@ constexpr float kNameplateRange = 28.f;   // how far name tags stay visible
 constexpr float kNpcCullRange = 150.f;    // skip drawing NPCs farther than this
 constexpr float kInteractRadius = 4.0f;   // how close [E] interactions (bank/shop) work
 constexpr int kWithdrawAmount = 500;      // cash per bank withdrawal (infinite by repeating)
+constexpr float kNpcCarRadius = 0.5f;     // NPC body radius for car contact
+constexpr float kCarHitSpeed = 3.0f;      // car speed above which contact knocks an NPC down
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 // Inside the station holding cell (see the cell walls in City::makeDowntown),
@@ -562,15 +564,32 @@ int main() {
         // face, gesture). This keeps running during dialogue so a companion
         // trails you while you talk, but the pause menu freezes the world.
         if (mode != AppMode::Menu) {
-            // The NPC the player is talking to pauses any wandering and faces
-            // them; everyone else acts on their current behavior.
+            // Cars brake for the player and for pedestrians (standing NPCs), so
+            // they stop for people instead of driving through them.
+            std::vector<Vec3> people;
+            people.reserve(world.npcs().size());
+            for (const Npc& n : world.npcs()) {
+                if (!n.isDowned()) people.push_back(n.position());
+            }
+            traffic.update(dt, camera.position, people);
+
+            // The NPC the player is talking to pauses wandering and faces them;
+            // everyone else acts on their behavior. After moving, an NPC a moving
+            // car overlaps is knocked down; a stopped car merely blocks them.
             const int talkingIdx =
                 (mode == AppMode::Dialogue && session.isOpen()) ? session.npcIndex() : -1;
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
-                world.npcs()[i].setInConversation(static_cast<int>(i) == talkingIdx);
-                world.npcs()[i].update(dt, camera.position, world.city());
+                Npc& n = world.npcs()[i];
+                n.setInConversation(static_cast<int>(i) == talkingIdx);
+                const Vec3 prev = n.position();
+                n.update(dt, camera.position, world.city());
+                if (n.isDowned()) continue;
+                const Vehicle* car = traffic.vehicleAt(n.position().x, n.position().z, kNpcCarRadius);
+                if (car) {
+                    if (car->speed > kCarHitSpeed) n.knockDown();  // run over
+                    else n.haltAt(prev);                           // blocked by a stopped car
+                }
             }
-            traffic.update(dt, camera.position);
         }
 
         // The moment an officer catches the player: a short stay at the
