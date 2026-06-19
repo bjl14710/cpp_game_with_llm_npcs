@@ -92,6 +92,10 @@ class Renderer3D {
     // Draws one NPC as a simple capsule-ish figure facing `facingDeg`.
     void drawNpc(const NpcVisual& npc);
 
+    // Draws one car centered at `pos`, facing `headingDeg` (0 = +Z), with a
+    // body color picked by `colorId`. Cars are grid-aligned street traffic.
+    void drawCar(const Vec3& pos, float headingDeg, int colorId) const;
+
     // Projects a world point through the camera set by beginFrame. Returns
     // true and fills `out` with pixel coordinates when the point is in front
     // of the camera; false when it is behind (the caller should skip drawing).

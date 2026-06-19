@@ -27,6 +27,7 @@
 #include "PersonaFactory.hpp"
 #include "PersonaLoader.hpp"
 #include "Renderer3D.hpp"
+#include "Traffic.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -262,6 +263,9 @@ int main() {
     }
     std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs\n";
 
+    // Street traffic: cars driving the avenue grid (see Traffic).
+    Traffic traffic(world.city().halfSize(), 7u, 16);
+
     // Window with a legacy-GL 2.1 context (same recipe as cpp_shooter_game).
     sf::ContextSettings settings;
     settings.depthBits = 24;
@@ -413,7 +417,21 @@ int main() {
                 if (isActionPressed(bindings, Action::StrafeLeft)) wish += flatRight(camera.yawDeg) * -1.f;
                 wish = normalize(wish);
                 const Vec3 target = camera.position + wish * (kWalkSpeed * dt);
-                camera.position = world.city().resolveMovement(camera.position, target, kPlayerRadius);
+                Vec3 resolved = world.city().resolveMovement(camera.position, target, kPlayerRadius);
+                // Cars are solid: don't walk through one. Try to slide along it
+                // by keeping whichever single axis of motion stays clear.
+                if (traffic.circleHitsVehicle(resolved.x, resolved.z, kPlayerRadius)) {
+                    const Vec3 slideX{resolved.x, resolved.y, camera.position.z};
+                    const Vec3 slideZ{camera.position.x, resolved.y, resolved.z};
+                    if (!traffic.circleHitsVehicle(slideX.x, slideX.z, kPlayerRadius)) {
+                        resolved = slideX;
+                    } else if (!traffic.circleHitsVehicle(slideZ.x, slideZ.z, kPlayerRadius)) {
+                        resolved = slideZ;
+                    } else {
+                        resolved = camera.position;
+                    }
+                }
+                camera.position = resolved;
             }
         } else if (mode == AppMode::Menu) {
             menu.update(dt);
@@ -440,6 +458,7 @@ int main() {
                 world.npcs()[i].setInConversation(static_cast<int>(i) == talkingIdx);
                 world.npcs()[i].update(dt, camera.position, world.city());
             }
+            traffic.update(dt, camera.position);
         }
 
         // The moment an officer catches the player: a short stay at the
@@ -540,6 +559,10 @@ int main() {
             visual.locomotionPhase = npc.locomotionPhase();
             visual.moving = npc.isMoving();
             renderer.drawNpc(visual);
+        }
+        for (const Vehicle& v : traffic.vehicles()) {
+            if (distanceXZ(camera.position, Vec3{v.x, 0.f, v.z}) > kNpcCullRange) continue;
+            renderer.drawCar(Vec3{v.x, 0.f, v.z}, v.headingDeg, v.colorId);
         }
 
         // ---- SFML overlay pass ----

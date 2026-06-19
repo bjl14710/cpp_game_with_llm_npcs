@@ -22,6 +22,7 @@ add_library(llm_npc_core STATIC
     src/core/Offense.cpp
     src/core/PersonaFactory.cpp
     src/core/PersonaLoader.cpp
+    src/core/Traffic.cpp
     src/core/World.cpp
 )
 target_include_directories(llm_npc_core PUBLIC

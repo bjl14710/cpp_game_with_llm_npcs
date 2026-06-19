@@ -838,6 +838,52 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
     glPopMatrix();
 }
 
+void Renderer3D::drawCar(const Vec3& pos, float headingDeg, int colorId) const {
+    static const std::array<sf::Color, 7> bodyColors = {{
+        {180, 45, 45}, {45, 75, 150}, {225, 200, 70}, {235, 235, 240},
+        {45, 45, 52}, {60, 140, 95}, {200, 120, 45}}};
+    const sf::Color body = bodyColors[static_cast<std::size_t>(colorId) % bodyColors.size()];
+    const sf::Color tyre(28, 28, 32);
+
+    glPushMatrix();
+    glTranslatef(pos.x, 0.f, pos.z);
+    glRotatef(headingDeg, 0.f, 1.f, 0.f);  // local +Z is the car's forward (length)
+
+    drawBlobShadow(2.0f);
+
+    // Body: a lower hull, a slightly narrower belt, then a glass cabin.
+    drawTexturedBox(Vec3{0.f, 0.52f, 0.f}, 0.95f, 0.34f, 2.1f, texCloth_, body, 1.f);
+    drawTexturedBox(Vec3{0.f, 0.90f, -0.1f}, 0.90f, 0.26f, 1.7f, texCloth_, body, 1.f);
+    drawTexturedBox(Vec3{0.f, 1.24f, -0.15f}, 0.78f, 0.30f, 1.0f, texGlass_,
+                    sf::Color(125, 155, 180), 1.f);
+
+    // Four wheels: thin cylinders lying across the car (axis along local X).
+    const float wx = 0.93f;
+    const float wz = 1.3f;
+    for (int sx = -1; sx <= 1; sx += 2) {
+        for (int sz = -1; sz <= 1; sz += 2) {
+            glPushMatrix();
+            glTranslatef(static_cast<float>(sx) * wx, 0.36f, static_cast<float>(sz) * wz);
+            glRotatef(90.f, 0.f, 0.f, 1.f);
+            drawTexturedCylinder(Vec3{0.f, 0.f, 0.f}, 0.36f, 0.16f, 10, texCloth_, tyre);
+            glPopMatrix();
+        }
+    }
+
+    // Lights: warm headlamps up front (+Z), red tails at the rear (-Z).
+    glDisable(GL_LIGHTING);
+    for (int sx = -1; sx <= 1; sx += 2) {
+        const float lx = static_cast<float>(sx) * 0.6f;
+        drawTexturedBox(Vec3{lx, 0.58f, 2.12f}, 0.18f, 0.12f, 0.05f, texGlass_,
+                        sf::Color(255, 245, 205), 1.f);
+        drawTexturedBox(Vec3{lx, 0.58f, -2.12f}, 0.18f, 0.12f, 0.05f, texGlass_,
+                        sf::Color(205, 45, 40), 1.f);
+    }
+    glEnable(GL_LIGHTING);
+
+    glPopMatrix();
+}
+
 // Draws the facial features on the head's front (+Z) face in the NPC's local
 // frame. Everything is tiny textured boxes sitting just proud of the skin so
 // they read at a distance: dark eyes and brows, a mouth whose corners shift
