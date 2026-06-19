@@ -1,5 +1,6 @@
 #include "Renderer3D.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -305,24 +306,55 @@ Vec3 forwardFromAngles(float yawDeg, float pitchDeg) {
     return normalize(Vec3{std::sin(yaw) * cp, std::sin(pitch), std::cos(yaw) * cp});
 }
 
-// Clothing palettes for NPC figures: {body, accent} pairs indexed by the NPC's
-// position in the roster, which loadAllPersonas sorts by filename. Keep this
-// list in that alphabetical order so each citizen keeps sensible colors.
-const std::array<std::array<sf::Color, 2>, 11> kNpcPalettes = {{
-    {{sf::Color(214, 178, 148), sf::Color(120, 70, 40)}},    // baker: flour apron
-    {{sf::Color(90, 60, 40), sf::Color(50, 130, 90)}},       // barista: espresso + green
-    {{sf::Color(40, 70, 140), sf::Color(20, 35, 80)}},       // cop: police blue
-    {{sf::Color(70, 150, 80), sf::Color(240, 235, 225)}},    // grocer: green apron
-    {{sf::Color(160, 90, 40), sf::Color(110, 110, 120)}},    // hardware: work tan + steel
-    {{sf::Color(200, 50, 50), sf::Color(250, 245, 235)}},    // hotdog: red + white stripes
-    {{sf::Color(130, 60, 130), sf::Color(230, 220, 200)}},   // librarian: plum cardigan
-    {{sf::Color(60, 120, 170), sf::Color(190, 150, 100)}},   // musician: denim + guitar wood
-    {{sf::Color(240, 200, 60), sf::Color(40, 40, 40)}},      // taxi: cab yellow
-    {{sf::Color(110, 110, 100), sf::Color(60, 60, 70)}},     // teacher: tweed grey
-    {{sf::Color(250, 130, 160), sf::Color(245, 245, 250)}},  // tourist: bright pink
-}};
+// Walk-cycle swing amplitudes, in degrees.
+constexpr float kLegSwingDeg = 26.f;  // hip swing fore/aft
+constexpr float kKneeBendDeg = 28.f;  // extra knee bend on the back swing
+constexpr float kArmSwingDeg = 20.f;  // shoulder swing, opposite the legs
 
 }  // namespace
+
+// Mixes a seed into a varied-but-stable appearance without pulling in <random>.
+NpcAppearance appearanceFromSeed(std::uint32_t seed, bool police) {
+    const auto pick = [seed](std::uint32_t salt) -> std::uint32_t {
+        std::uint32_t x = (seed + 0x9e3779b9u) * (salt * 2654435761u + 1u);
+        x ^= x >> 15;
+        x *= 2246822519u;
+        x ^= x >> 13;
+        return x;
+    };
+    static const sf::Color skins[] = {
+        {245, 222, 190}, {231, 196, 162}, {198, 150, 110}, {161, 110, 75}, {120, 80, 55}};
+    static const sf::Color hairs[] = {
+        {40, 30, 25}, {90, 55, 30}, {155, 120, 70}, {30, 30, 35}, {185, 185, 190}, {140, 45, 45}};
+    static const sf::Color shirts[] = {
+        {200, 70, 70},  {70, 110, 190},  {60, 160, 110}, {210, 175, 60},
+        {150, 90, 180}, {220, 220, 225}, {90, 95, 105},  {215, 130, 60}};
+    static const sf::Color pantsPool[] = {
+        {50, 55, 70}, {72, 56, 44}, {40, 45, 55}, {92, 92, 98}, {30, 40, 60}};
+    static const sf::Color shoesPool[] = {
+        {40, 35, 32}, {62, 50, 45}, {230, 230, 235}, {120, 40, 40}};
+
+    NpcAppearance a;
+    a.skin = skins[pick(1) % (sizeof(skins) / sizeof(skins[0]))];
+    a.hair = hairs[pick(2) % (sizeof(hairs) / sizeof(hairs[0]))];
+    a.hairStyle = static_cast<int>(pick(3) % 3u);
+    a.heightScale = 0.92f + static_cast<float>(pick(4) % 9u) * 0.02f;
+    a.buildScale = 0.92f + static_cast<float>(pick(5) % 9u) * 0.02f;
+    if (police) {
+        // A recognizable uniform: navy shirt and trousers, standard build.
+        a.shirt = sf::Color(40, 70, 140);
+        a.pants = sf::Color(20, 35, 80);
+        a.shoes = sf::Color(20, 20, 25);
+        a.hairStyle = 0;
+        a.heightScale = 1.0f;
+        a.buildScale = 1.05f;
+    } else {
+        a.shirt = shirts[pick(6) % (sizeof(shirts) / sizeof(shirts[0]))];
+        a.pants = pantsPool[pick(7) % (sizeof(pantsPool) / sizeof(pantsPool[0]))];
+        a.shoes = shoesPool[pick(8) % (sizeof(shoesPool) / sizeof(shoesPool[0]))];
+    }
+    return a;
+}
 
 void Renderer3D::init() {
     glClearDepth(1.0);
@@ -745,52 +777,60 @@ void Renderer3D::drawCity(const City& city) {
 }
 
 void Renderer3D::drawNpc(const NpcVisual& npc) {
-    const auto& palette = kNpcPalettes[static_cast<std::size_t>(npc.palette) % kNpcPalettes.size()];
-    const sf::Color body = palette[0];
-    const sf::Color accent = palette[1];
-    const sf::Color skin(235, 200, 175);
+    const NpcAppearance& a = npc.appearance;
 
     glPushMatrix();
     glTranslatef(npc.position.x, npc.position.y, npc.position.z);
-    // +facing about Y maps the figure's local +Z (visor/front) onto
+    // +facing about Y maps the figure's local +Z (face/front) onto
     // flatForward(facing); negating it mirrored every NPC in X.
     glRotatef(npc.facingDeg, 0.0f, 1.0f, 0.0f);
 
-    // A soft contact shadow grounds the figure.
-    drawBlobShadow(0.5f);
+    // A soft contact shadow grounds the figure (drawn before body scaling).
+    drawBlobShadow(0.42f * a.buildScale);
 
-    // Rounded, smooth-shaded figure: two tapered legs, hips, a torso that
-    // flares to the shoulders, a neck, a spherical head, and a hair cap.
-    drawTaperedCylinder(Vec3{-0.13f, 0.45f, 0.f}, 0.11f, 0.16f, 0.45f, 12, texCloth_, accent);
-    drawTaperedCylinder(Vec3{0.13f, 0.45f, 0.f}, 0.11f, 0.16f, 0.45f, 12, texCloth_, accent);
-    drawSphere(Vec3{0.f, 0.92f, 0.f}, 0.27f, 14, 10, texCloth_, body);
-    drawTaperedCylinder(Vec3{0.f, 1.2f, 0.f}, 0.24f, 0.33f, 0.30f, 16, texCloth_, body);
-    drawSphere(Vec3{-0.30f, 1.46f, 0.f}, 0.13f, 10, 8, texCloth_, body);
-    drawSphere(Vec3{0.30f, 1.46f, 0.f}, 0.13f, 10, 8, texCloth_, body);
-    drawTexturedCylinder(Vec3{0.f, 1.55f, 0.f}, 0.09f, 0.07f, 10, texCloth_, skin);
-    drawSphere(Vec3{0.f, 1.70f, 0.f}, 0.18f, 16, 12, texCloth_, skin);
-    drawFace(npc.face);
-    // Hair cap: a flattened sphere skull-cap on the crown, tilted back so it
-    // never covers the face.
-    glPushMatrix();
-    glTranslatef(0.f, 1.78f, -0.02f);
-    glScalef(1.0f, 0.55f, 1.0f);
-    drawSphere(Vec3{0.f, 0.f, 0.f}, 0.18f, 14, 8, texCloth_, accent);
-    glPopMatrix();
+    // Distance-based level of detail: distant figures use coarser geometry so a
+    // whole crowd stays cheap in immediate mode.
+    const float camDist = distanceXZ(eye_, npc.position);
+    const int lod = camDist > 60.f ? 0 : (camDist > 28.f ? 1 : 2);
+    const int slices = lod == 2 ? 16 : (lod == 1 ? 10 : 7);
+    const int stacks = lod == 2 ? 12 : (lod == 1 ? 8 : 5);
+    const int seg = lod == 2 ? 10 : (lod == 1 ? 7 : 5);
 
-    // Arms hang at the sides by default. The NPC's right arm (+X local) can be
-    // raised or waved in response to a "raise your hand" / "wave" instruction;
-    // the left arm always hangs.
-    drawArm(-0.34f, body, skin, 0.f, 0.f);  // left, always down
-    float raise = 0.f;   // degrees about local +X: 0 = down, ~195 = up & forward
-    float swing = 0.f;   // degrees about local +Z for a side-to-side wave
+    // Whole-body height/build variation, applied about the feet at the origin.
+    glScalef(a.buildScale, a.heightScale, a.buildScale);
+
+    // Walk cycle: the legs swing a half-cycle apart; each arm swings opposite
+    // its same-side leg. A stationary NPC stands with a slight knee bend.
+    const float phase = npc.locomotionPhase;
+    const bool walking = npc.moving;
+    drawLeg(-0.13f, phase, walking, a, seg);
+    drawLeg(0.13f, phase + kPi, walking, a, seg);
+
+    // Pelvis, a torso that flares to the shoulders, a collar band, shoulders.
+    drawSphere(Vec3{0.f, 0.92f, 0.f}, 0.22f, slices, stacks, texCloth_, a.pants);
+    drawTaperedCylinder(Vec3{0.f, 1.20f, 0.f}, 0.23f, 0.32f, 0.30f, seg + 4, texCloth_, a.shirt);
+    drawTaperedCylinder(Vec3{0.f, 1.45f, 0.f}, 0.32f, 0.25f, 0.05f, seg + 4, texCloth_, a.shirt);
+    drawSphere(Vec3{-0.30f, 1.45f, 0.f}, 0.12f, slices, stacks, texCloth_, a.shirt);
+    drawSphere(Vec3{0.30f, 1.45f, 0.f}, 0.12f, slices, stacks, texCloth_, a.shirt);
+
+    // Neck and spherical head, with a face once close enough to read.
+    drawTexturedCylinder(Vec3{0.f, 1.56f, 0.f}, 0.075f, 0.06f, seg, texCloth_, a.skin);
+    drawSphere(Vec3{0.f, 1.71f, 0.f}, 0.17f, slices, stacks, texCloth_, a.skin);
+    if (lod >= 1) drawFace(npc.face);
+    drawHair(a, slices, stacks);
+
+    // Arms: posed for gestures, otherwise swinging with the walk.
+    float leftPitch = walking ? kArmSwingDeg * std::sin(phase + kPi) : 0.f;
+    float rightPitch = walking ? kArmSwingDeg * std::sin(phase) : 0.f;
+    float rightRoll = 0.f;
     if (npc.pose == NpcPose::RaiseHand) {
-        raise = 195.f;
+        rightPitch = 195.f;  // up & forward
     } else if (npc.pose == NpcPose::Wave) {
-        raise = 195.f;
-        swing = 22.f * std::sin(npc.gesturePhase * 9.f);
+        rightPitch = 195.f;
+        rightRoll = 22.f * std::sin(npc.gesturePhase * 9.f);
     }
-    drawArm(0.34f, body, skin, raise, swing);  // right, posed
+    drawArm(-0.33f, a.shirt, a.skin, leftPitch, 0.f, seg);        // left
+    drawArm(0.33f, a.shirt, a.skin, rightPitch, rightRoll, seg);  // right, posed
 
     glPopMatrix();
 }
@@ -856,22 +896,78 @@ void Renderer3D::drawFace(NpcFace face) const {
     }
 }
 
-// Draws one arm in the NPC's local frame, pivoting at the shoulder. `xOffset`
-// places it left (-) or right (+); `raiseDeg` rotates it up about local +X
-// (0 hangs down, ~180 points straight up); `swingDeg` adds a side-to-side
-// rotation about local +Z for waving. Upper arm is sleeve-colored cloth with a
-// small skin "hand" at the end.
+// Draws one jointed arm in the NPC's local frame, pivoting at the shoulder.
+// `xOffset` places it left (-) or right (+); `pitchXDeg` rotates the whole arm
+// about local +X (the walk swing, or ~195 to raise it up & forward);
+// `rollZDeg` adds a side-to-side rotation about local +Z for a wave. The arm
+// bends slightly at the elbow; the hand is a small skin sphere.
 void Renderer3D::drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
-                         float raiseDeg, float swingDeg) const {
-    const float shoulderY = 1.46f;
-    const float armHalf = 0.27f;  // half-length of the upper arm
+                         float pitchXDeg, float rollZDeg, int segments) const {
+    const float shoulderY = 1.45f;
+    const float upperHalf = 0.16f;
+    const float foreHalf = 0.15f;
     glPushMatrix();
     glTranslatef(xOffset, shoulderY, 0.f);
-    if (swingDeg != 0.f) glRotatef(swingDeg, 0.f, 0.f, 1.f);
-    if (raiseDeg != 0.f) glRotatef(raiseDeg, 1.f, 0.f, 0.f);
-    // A tapered sleeve and a rounded hand extend downward from the shoulder.
-    drawTaperedCylinder(Vec3{0.f, -armHalf, 0.f}, 0.07f, 0.10f, armHalf, 10, texCloth_, sleeve);
-    drawSphere(Vec3{0.f, -2.f * armHalf - 0.02f, 0.f}, 0.085f, 8, 6, texCloth_, skin);
+    if (rollZDeg != 0.f) glRotatef(rollZDeg, 0.f, 0.f, 1.f);
+    if (pitchXDeg != 0.f) glRotatef(pitchXDeg, 1.f, 0.f, 0.f);
+    // Upper arm hanging from the shoulder.
+    drawTaperedCylinder(Vec3{0.f, -upperHalf, 0.f}, 0.072f, 0.062f, upperHalf, segments, texCloth_, sleeve);
+    // Elbow: drop to the joint and bend the forearm slightly forward.
+    glTranslatef(0.f, -2.f * upperHalf, 0.f);
+    glRotatef(18.f, 1.f, 0.f, 0.f);
+    drawTaperedCylinder(Vec3{0.f, -foreHalf, 0.f}, 0.060f, 0.052f, foreHalf, segments, texCloth_, sleeve);
+    drawSphere(Vec3{0.f, -2.f * foreHalf - 0.02f, 0.f}, 0.07f, 8, 6, texCloth_, skin);
+    glPopMatrix();
+}
+
+// Draws one jointed leg pivoting at the hip: thigh, a knee bend, shin, and a
+// shoe box that extends forward. `phase` drives the fore/aft hip swing and the
+// knee bend while `walking`; a stationary leg keeps a slight knee bend.
+void Renderer3D::drawLeg(float xOffset, float phase, bool walking,
+                         const NpcAppearance& appearance, int segments) const {
+    const float hipY = 0.92f;
+    const float thighHalf = 0.21f;
+    const float shinHalf = 0.19f;
+    const float hipDeg = walking ? kLegSwingDeg * std::sin(phase) : 0.f;
+    const float kneeDeg = walking ? kKneeBendDeg * std::max(0.f, -std::sin(phase)) : 5.f;
+    glPushMatrix();
+    glTranslatef(xOffset, hipY, 0.f);
+    if (hipDeg != 0.f) glRotatef(hipDeg, 1.f, 0.f, 0.f);
+    drawTaperedCylinder(Vec3{0.f, -thighHalf, 0.f}, 0.105f, 0.092f, thighHalf, segments, texCloth_,
+                        appearance.pants);
+    // Knee: drop to the joint and bend the shin back.
+    glTranslatef(0.f, -2.f * thighHalf, 0.f);
+    if (kneeDeg != 0.f) glRotatef(kneeDeg, 1.f, 0.f, 0.f);
+    drawTaperedCylinder(Vec3{0.f, -shinHalf, 0.f}, 0.090f, 0.070f, shinHalf, segments, texCloth_,
+                        appearance.pants);
+    // Shoe: a small box extending forward (+Z) from the ankle.
+    glTranslatef(0.f, -2.f * shinHalf - 0.04f, 0.05f);
+    drawTexturedBox(Vec3{0.f, 0.f, 0.f}, 0.085f, 0.05f, 0.14f, texCloth_, appearance.shoes, 1.f);
+    glPopMatrix();
+}
+
+// Draws the hair cap on the crown. Style 1 is a taller, fuller dome; style 2 a
+// close buzz; the default is a short rounded cap. All are set back and scaled
+// flat so the face stays visible.
+void Renderer3D::drawHair(const NpcAppearance& appearance, int slices, int stacks) const {
+    float lift = 1.78f, back = -0.02f, flat = 0.6f, scale = 1.0f, radius = 0.175f;
+    if (appearance.hairStyle == 1) {  // voluminous
+        lift = 1.80f;
+        back = -0.03f;
+        flat = 0.85f;
+        scale = 1.08f;
+        radius = 0.17f;
+    } else if (appearance.hairStyle == 2) {  // buzz
+        lift = 1.74f;
+        back = -0.01f;
+        flat = 0.5f;
+        scale = 1.02f;
+        radius = 0.165f;
+    }
+    glPushMatrix();
+    glTranslatef(0.f, lift, back);
+    glScalef(scale, flat, scale);
+    drawSphere(Vec3{0.f, 0.f, 0.f}, radius, slices, stacks, texCloth_, appearance.hair);
     glPopMatrix();
 }
 

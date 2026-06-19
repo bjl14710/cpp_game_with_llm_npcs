@@ -68,6 +68,15 @@ class Npc {
     // Seconds since the active gesture began; drives wave animation phase.
     float gesturePhase() const { return gesturePhase_; }
 
+    // A stable per-NPC seed for the renderer's procedural appearance (clothing,
+    // skin, hair, build). Derived from the persona name at construction.
+    std::uint32_t appearanceSeed() const { return appearanceSeed_; }
+
+    // Accumulated stride phase (radians) for the renderer's walk cycle, and
+    // whether the NPC moved on the last update (drives the leg/arm swing).
+    float locomotionPhase() const { return locomotionPhase_; }
+    bool isMoving() const { return moving_; }
+
     // True once an Arrest behavior has reached the player. Latches until the
     // NPC is given a different instruction; lets the UI announce the catch.
     bool hasCaughtPlayer() const { return caughtPlayer_; }
@@ -118,6 +127,9 @@ class Npc {
     float moodTimer_ = 0.f;                   // seconds until mood relaxes
     float poseTimer_ = 0.f;                   // seconds of gesture remaining
     float gesturePhase_ = 0.f;                // seconds elapsed in current gesture
+    float locomotionPhase_ = 0.f;             // accumulated stride phase (radians)
+    bool moving_ = false;                     // moved on the last update tick
+    std::uint32_t appearanceSeed_ = 1u;       // stable per-NPC appearance seed
     bool caughtPlayer_ = false;               // arrest reached the player
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome

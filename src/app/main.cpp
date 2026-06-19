@@ -35,6 +35,7 @@ constexpr float kWalkSpeed = 7.0f;        // units (~meters) per second
 constexpr float kPlayerRadius = 0.45f;    // collision circle on the ground
 constexpr float kTalkRadius = 3.5f;       // how close "press T to talk" works
 constexpr float kNameplateRange = 28.f;   // how far name tags stay visible
+constexpr float kNpcCullRange = 150.f;    // skip drawing NPCs farther than this
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 // How long an arrest holds the player at the police station. Short, because
@@ -457,11 +458,20 @@ int main() {
         renderer.drawCity(world.city());
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             const Npc& npc = world.npcs()[i];
+            if (distanceXZ(camera.position, npc.position()) > kNpcCullRange) continue;
             NpcPose pose = NpcPose::None;
             if (npc.pose() == NpcAction::RaiseHand) pose = NpcPose::RaiseHand;
             else if (npc.pose() == NpcAction::Wave) pose = NpcPose::Wave;
-            renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i),
-                                       pose, npc.gesturePhase(), faceForMood(npc.mood())});
+            NpcVisual visual;
+            visual.position = npc.position();
+            visual.facingDeg = npc.facingDeg();
+            visual.appearance = appearanceFromSeed(npc.appearanceSeed(), npc.persona().police);
+            visual.pose = pose;
+            visual.gesturePhase = npc.gesturePhase();
+            visual.face = faceForMood(npc.mood());
+            visual.locomotionPhase = npc.locomotionPhase();
+            visual.moving = npc.isMoving();
+            renderer.drawNpc(visual);
         }
 
         // ---- SFML overlay pass ----

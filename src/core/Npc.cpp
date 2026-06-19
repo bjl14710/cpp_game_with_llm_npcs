@@ -20,10 +20,20 @@ constexpr float kCatchRadius = 1.6f;   // arrest succeeds within this range
 constexpr float kGestureSeconds = 15.f; // how long raise_hand / wave holds
 constexpr float kMoodSeconds = 25.f;    // how long an expression lingers
 constexpr float kHomeSnapRadius = 0.6f; // close enough to be "back at post"
+constexpr float kStrideRate = 2.1f;     // stride phase gained per unit walked
+constexpr float kTwoPi = 6.283185307f;
 }  // namespace
 
 Npc::Npc(Persona persona, LlmClient& client, int maxHistoryTurns)
-    : persona_(std::move(persona)), client_(client), maxHistoryTurns_(maxHistoryTurns) {}
+    : persona_(std::move(persona)), client_(client), maxHistoryTurns_(maxHistoryTurns) {
+    // Stable per-NPC appearance seed: FNV-1a hash over the persona name.
+    std::uint32_t h = 2166136261u;
+    for (char c : persona_.name) {
+        h ^= static_cast<unsigned char>(c);
+        h *= 16777619u;
+    }
+    appearanceSeed_ = h ? h : 1u;
+}
 
 std::uint64_t Npc::ask(const std::string& playerLine) {
     // Send a snapshot of the current history; the player line is appended to
@@ -107,6 +117,8 @@ void Npc::faceToward(const Vec3& target) {
 }
 
 void Npc::update(float dt, const Vec3& playerPos, const City& city) {
+    const Vec3 startPos = position_;  // for the walk-cycle phase below
+
     // Tick down any gesture overlay independently of movement.
     if (poseTimer_ > 0.f) {
         gesturePhase_ += dt;
@@ -170,6 +182,11 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city) {
         case NpcAction::CallPolice:
             break;
     }
+
+    // Track distance moved this tick so the renderer can drive a walk cycle.
+    const float moved = distanceXZ(startPos, position_);
+    moving_ = moved > 1e-4f;
+    locomotionPhase_ = std::fmod(locomotionPhase_ + moved * kStrideRate, kTwoPi);
 }
 
 void Npc::trimHistory() {

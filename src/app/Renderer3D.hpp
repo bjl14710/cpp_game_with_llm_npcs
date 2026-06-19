@@ -3,6 +3,7 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/OpenGL.hpp>
 
+#include <cstdint>
 #include <vector>
 
 #include "City.hpp"
@@ -27,18 +28,39 @@ enum class NpcPose { None, RaiseHand, Wave };
 // NpcPose mirrors actions.
 enum class NpcFace { Neutral, Happy, Angry, Sad, Embarrassed, Surprised };
 
+// A single NPC's procedurally-varied appearance: clothing/skin/hair colors, a
+// hair-style id, and overall height/build scales. Built deterministically from
+// a per-NPC seed (see appearanceFromSeed) so each citizen looks distinct but
+// stable across frames.
+struct NpcAppearance {
+    sf::Color skin{235, 200, 175};
+    sf::Color hair{60, 45, 35};
+    sf::Color shirt{120, 120, 130};
+    sf::Color pants{60, 60, 70};
+    sf::Color shoes{40, 35, 32};
+    int hairStyle = 0;        // 0 short cap, 1 voluminous, 2 buzz
+    float heightScale = 1.f;  // whole-body vertical scale (~0.92..1.08)
+    float buildScale = 1.f;   // whole-body girth scale (~0.92..1.08)
+};
+
 // Everything the renderer needs to draw one NPC: where they stand, which way
-// they face, a palette slot that picks their clothing colors, the current
-// arm gesture (with elapsed seconds so a wave can animate), and the facial
-// expression matching their mood.
+// they face, their appearance, the current arm gesture (with elapsed seconds
+// so a wave can animate), the facial expression matching their mood, and a
+// locomotion phase + moving flag that drive the walk cycle.
 struct NpcVisual {
     Vec3 position{};
     float facingDeg = 0.f;
-    int palette = 0;
+    NpcAppearance appearance{};
     NpcPose pose = NpcPose::None;
     float gesturePhase = 0.f;
     NpcFace face = NpcFace::Neutral;
+    float locomotionPhase = 0.f;  // accumulated stride phase (radians)
+    bool moving = false;          // true while the NPC is walking
 };
+
+// Derives a stable, varied appearance from a seed. Police get a recognizable
+// blue uniform regardless of seed; everyone else gets seeded colors and build.
+NpcAppearance appearanceFromSeed(std::uint32_t seed, bool police);
 
 // Legacy-GL (2.1) renderer for the city and its inhabitants. Draws with
 // immediate mode and procedural textures so the game needs no asset files.
@@ -127,10 +149,23 @@ class Renderer3D {
     // 3D pass; the horizon color matches the fog so distance dissolves to haze.
     void drawSky() const;
 
-    // Draws one NPC arm in the figure's local frame; see the definition for
-    // how xOffset/raiseDeg/swingDeg pose it for raise-hand and wave gestures.
+    // Draws one jointed NPC arm (upper arm, forearm, hand) in the figure's
+    // local frame, pivoting at the shoulder. `pitchXDeg` rotates the whole arm
+    // about local +X (the walk swing, or ~195 to raise it overhead); `rollZDeg`
+    // adds a side-to-side rotation about local +Z for waving. `segments` sets
+    // the cylinder tessellation for level of detail.
     void drawArm(float xOffset, const sf::Color& sleeve, const sf::Color& skin,
-                 float raiseDeg, float swingDeg) const;
+                 float pitchXDeg, float rollZDeg, int segments) const;
+
+    // Draws one jointed NPC leg (thigh, shin, shoe) pivoting at the hip.
+    // `phase` is the stride phase in radians and `walking` toggles the swing +
+    // knee bend; the left/right legs pass phases a half-cycle apart.
+    void drawLeg(float xOffset, float phase, bool walking,
+                 const NpcAppearance& appearance, int segments) const;
+
+    // Draws the hair cap on the crown, shaped by appearance.hairStyle and set
+    // back so it never covers the face.
+    void drawHair(const NpcAppearance& appearance, int slices, int stacks) const;
 
     // Draws eyes, brows, and mouth on the front of the head in the figure's
     // local frame, shaped by the expression.
