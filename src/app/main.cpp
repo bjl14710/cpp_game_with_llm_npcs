@@ -24,6 +24,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "Renderer3D.hpp"
+#include "Weapon.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -39,7 +40,7 @@ constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 
 // What the main loop is currently showing.
-enum class AppMode { Playing, Dialogue, Menu };
+enum class AppMode { Playing, Dialogue, Menu, Dead };
 
 // Try a few likely font paths so the game runs on stock Linux and Windows
 // without bundling a font. Returns the first existing path or empty.
@@ -250,7 +251,27 @@ int main() {
                                            npc.persona().role + "). Enter sends, Esc leaves."});
                     mode = AppMode::Dialogue;
                     window.setMouseCursorVisible(true);
+                } else if (event.key.code == sf::Keyboard::Num1) {
+                    world.playerSwitchWeapon(WeaponKind::Fist);
+                } else if (event.key.code == sf::Keyboard::Num2) {
+                    world.playerSwitchWeapon(WeaponKind::Pistol);
                 }
+                continue;
+            }
+
+            if (mode == AppMode::Playing &&
+                event.type == sf::Event::MouseButtonPressed &&
+                event.mouseButton.button == sf::Mouse::Left) {
+                world.playerAttack(flatForward(camera.yawDeg));
+                continue;
+            }
+
+            if (mode == AppMode::Dead && event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::Space) {
+                world.player().hp = world.player().hpMax;
+                mode = AppMode::Playing;
+                window.setMouseCursorVisible(false);
+                centerMouse(window);
                 continue;
             }
 
@@ -308,6 +329,15 @@ int main() {
             wish = normalize(wish);
             const Vec3 target = camera.position + wish * (kWalkSpeed * dt);
             camera.position = world.city().resolveMovement(camera.position, target, kPlayerRadius);
+
+            // Keep World's player position in sync with the camera.
+            world.player().position = camera.position;
+            world.updateCombat(dt);
+
+            if (!world.player().alive()) {
+                mode = AppMode::Dead;
+                window.setMouseCursorVisible(true);
+            }
         } else if (mode == AppMode::Menu) {
             menu.update(dt);
         }
@@ -380,6 +410,50 @@ int main() {
                             static_cast<float>(window.getSize().y) * 0.5f);
             dot.setFillColor(sf::Color(255, 255, 255, 200));
             window.draw(dot);
+
+            // HUD — health bar bottom-left.
+            const float W = static_cast<float>(window.getSize().x);
+            const float H = static_cast<float>(window.getSize().y);
+            const float hpRatio = static_cast<float>(world.player().hp) /
+                                  static_cast<float>(world.player().hpMax);
+            sf::RectangleShape hpBg(sf::Vector2f(160.f, 14.f));
+            hpBg.setPosition(16.f, H - 36.f);
+            hpBg.setFillColor(sf::Color(60, 0, 0, 200));
+            window.draw(hpBg);
+            sf::RectangleShape hpBar(sf::Vector2f(160.f * hpRatio, 14.f));
+            hpBar.setPosition(16.f, H - 36.f);
+            hpBar.setFillColor(sf::Color(220, 30, 30, 230));
+            window.draw(hpBar);
+            sf::Text hpText("HP: " + std::to_string(world.player().hp) + "/" +
+                            std::to_string(world.player().hpMax), font, 13);
+            hpText.setPosition(16.f, H - 56.f);
+            hpText.setFillColor(sf::Color::White);
+            window.draw(hpText);
+
+            // HUD — weapon + ammo bottom-right.
+            const WeaponDef& wDef = weaponDef(world.player().weapon);
+            std::string ammoStr = std::string(wDef.name);
+            if (wDef.ammoMax > 0) {
+                ammoStr += "  " + std::to_string(world.player().currentAmmo()) +
+                           "/" + std::to_string(wDef.ammoMax);
+            }
+            sf::Text wText(ammoStr, font, 16);
+            const sf::FloatRect wBounds = wText.getLocalBounds();
+            wText.setPosition(W - wBounds.width - 16.f, H - 48.f);
+            wText.setFillColor(sf::Color::White);
+            wText.setOutlineThickness(1.5f);
+            wText.setOutlineColor(sf::Color(0, 0, 0, 180));
+            window.draw(wText);
+        } else if (mode == AppMode::Dead) {
+            // Full-screen dark red overlay with death message.
+            sf::RectangleShape overlay(sf::Vector2f(static_cast<float>(window.getSize().x),
+                                                     static_cast<float>(window.getSize().y)));
+            overlay.setFillColor(sf::Color(80, 0, 0, 180));
+            window.draw(overlay);
+            drawCenteredHudText(window, font, "You Died", 64,
+                                static_cast<float>(window.getSize().y) * 0.38f);
+            drawCenteredHudText(window, font, "[Space] Restart", 24,
+                                static_cast<float>(window.getSize().y) * 0.58f);
         } else if (mode == AppMode::Dialogue) {
             sf::RectangleShape dim(sf::Vector2f(static_cast<float>(window.getSize().x),
                                                 static_cast<float>(window.getSize().y)));
