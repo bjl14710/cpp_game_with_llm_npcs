@@ -379,6 +379,8 @@ int main() {
             const Npc& npc = world.npcs()[i];
             renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i)});
         }
+        renderer.drawWeaponOverlay(window, world.player().weapon,
+                                   world.player().attackAnimFraction);
 
         // ---- SFML overlay pass ----
         window.pushGLStates();
