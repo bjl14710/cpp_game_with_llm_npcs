@@ -86,6 +86,9 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                     result.error = id + ": bad facing '" + val + "'";
                     return result;
                 }
+            } else if (key == "armed") {
+                // TODO(combat): parse armed = true/false from persona files
+                result.value.persona.armed = (val == "true" || val == "1" || val == "yes");
             } else {
                 result.error = id + ": unknown header key '" + key + "'";
                 return result;
