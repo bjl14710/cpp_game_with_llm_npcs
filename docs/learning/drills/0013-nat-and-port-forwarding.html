@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0013 — NAT and Port Forwarding</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1.5rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.3rem; margin-bottom:1.2rem; }
+  .q h3 { font-size:1rem; margin-bottom:.7rem; }
+  .opt { display:block; width:100%; text-align:left; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.55rem .8rem; margin-bottom:.45rem; cursor:pointer; font-size:.92rem; }
+  .opt:hover { border-color:var(--accent); }
+  .opt.right { border-color:var(--green); background:#16281f; }
+  .opt.wrong { border-color:var(--red); background:#2a1820; }
+  .why { display:none; color:var(--muted); font-size:.88rem; margin-top:.5rem; border-top:1px dashed var(--border); padding-top:.5rem; }
+  .q.done .why { display:block; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .3em; font-size:.88em; }
+  textarea { width:100%; min-height:70px; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.6rem; font-size:.92rem; }
+  details { margin-top:.5rem; color:var(--muted); }
+</style>
+<script>
+function pick(btn, ok) {
+  const q = btn.closest('.q');
+  if (q.classList.contains('done')) return;
+  q.classList.add('done');
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (!ok) q.querySelectorAll('.opt').forEach(o => { if (o.dataset.ok === '1') o.classList.add('right'); });
+}
+</script>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0013 · pairs with lesson 0013</div>
+<h1>NAT and Port Forwarding</h1>
+
+<div class="q"><h3>1. Your friend across town tries your <code>192.168.1.20:40605</code> and times out. Why was this doomed from the start?</h3>
+<button class="opt" onclick="pick(this,false)">Port 40605 is blocked by ISPs</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">192.168.x.x is a private range that isn't routable on the internet — millions of homes reuse it; only your LAN knows that address</button>
+<button class="opt" onclick="pick(this,false)">TCP doesn't work between different ISPs</button>
+<div class="why">Private ranges (10/8, 172.16/12, 192.168/16) exist precisely so every home can reuse them behind one public IP.</div></div>
+
+<div class="q"><h3>2. Why does outbound traffic (browsing) work from behind NAT while inbound hosting doesn't?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">NAT's translation table is keyed by connections YOU initiated; an unsolicited inbound SYN matches no entry and is dropped</button>
+<button class="opt" onclick="pick(this,false)">Browsers use UDP, games use TCP</button>
+<button class="opt" onclick="pick(this,false)">Inbound traffic requires IPv6</button>
+<div class="why">The router only knows where to deliver packets for flows it has already seen leave.</div></div>
+
+<div class="q"><h3>3. What does the port-forward rule "TCP 40605 → 192.168.1.20" actually tell the router?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">"Unsolicited connections arriving on my public IP at port 40605 should be delivered to this LAN machine" — a permanent, manual NAT-table entry</button>
+<button class="opt" onclick="pick(this,false)">"Open the firewall for all traffic to that machine"</button>
+<button class="opt" onclick="pick(this,false)">"Give that machine the public IP"</button>
+<div class="why">It's precisely the missing table entry NAT can't infer on its own, scoped to one port and one host.</div></div>
+
+<div class="q"><h3>4. Why is Tailscale/ZeroTier usually the better recommendation for a 4-friend game night?</h3>
+<button class="opt" onclick="pick(this,false)">They make the connection faster than a forwarded port</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Zero router config, invite-only and encrypted, and the game needs no changes — the overlay IP goes in the same join box</button>
+<button class="opt" onclick="pick(this,false)">Port forwarding no longer works on modern routers</button>
+<div class="why">A forwarded port is open to the whole internet and needs router admin access; an overlay network is private by construction and installs like an app.</div></div>
+
+<div class="q"><h3>5. Written recall:</h3>
+<p>List the three-step "can't connect" debugging ladder from the lesson (same machine → LAN → internet) and what each step isolates.</p>
+<textarea placeholder="1. 127.0.0.1..."></textarea>
+<details><summary>Reference answer</summary>1) 127.0.0.1:port on the host's own machine — isolates "is the server even running/bound". 2) The host's 192.168.x.x from another machine on the same Wi-Fi — isolates OS firewall prompts and AP client isolation. 3) Across the internet — requires port forwarding or an overlay VPN; a bare public IP will hit the game's 4s connect timeout.</details></div>
+</div></body></html>

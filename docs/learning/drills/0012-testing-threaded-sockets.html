@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0012 — Testing Threaded Sockets</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1.5rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.3rem; margin-bottom:1.2rem; }
+  .q h3 { font-size:1rem; margin-bottom:.7rem; }
+  .opt { display:block; width:100%; text-align:left; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.55rem .8rem; margin-bottom:.45rem; cursor:pointer; font-size:.92rem; }
+  .opt:hover { border-color:var(--accent); }
+  .opt.right { border-color:var(--green); background:#16281f; }
+  .opt.wrong { border-color:var(--red); background:#2a1820; }
+  .why { display:none; color:var(--muted); font-size:.88rem; margin-top:.5rem; border-top:1px dashed var(--border); padding-top:.5rem; }
+  .q.done .why { display:block; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .3em; font-size:.88em; }
+  textarea { width:100%; min-height:70px; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.6rem; font-size:.92rem; }
+  details { margin-top:.5rem; color:var(--muted); }
+</style>
+<script>
+function pick(btn, ok) {
+  const q = btn.closest('.q');
+  if (q.classList.contains('done')) return;
+  q.classList.add('done');
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (!ok) q.querySelectorAll('.opt').forEach(o => { if (o.dataset.ok === '1') o.classList.add('right'); });
+}
+</script>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0012 · pairs with lesson 0012</div>
+<h1>Testing Threaded Sockets</h1>
+
+<div class="q"><h3>1. The loopback suite runs a real NetServer + real NetClients but a fake Ollama. What's the principle?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Fake what you don't own (the external LLM API); run what you do own (your threads, framing, routing) for real over 127.0.0.1</button>
+<button class="opt" onclick="pick(this,false)">Always mock everything with threads in it</button>
+<button class="opt" onclick="pick(this,false)">Real sockets are only allowed in manual tests</button>
+<div class="why">The threading and framing ARE the code under test — mocking them would verify a program nobody ships.</div></div>
+
+<div class="q"><h3>2. Why does the test server bind port 0?</h3>
+<button class="opt" onclick="pick(this,false)">Port 0 is a special testing port with no firewall rules</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">The OS picks any free port (read back via getsockname), so parallel or repeated runs never collide on a hardcoded number</button>
+<button class="opt" onclick="pick(this,false)">It makes the server invisible to the network</button>
+<div class="why">Hardcoded test ports are a classic source of "passes alone, fails in CI" — some other process owns the port.</div></div>
+
+<div class="q"><h3>3. What's wrong with <code>sleep_for(200ms); CHECK(arrived());</code> and what replaces it?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">A fixed sleep is both too short (loaded machine → flake) and too long (fast machine → slow suite); replace with a predicate polled under a deadline, pumping the event loop between checks</button>
+<button class="opt" onclick="pick(this,false)">sleep_for is imprecise; use nanosleep</button>
+<button class="opt" onclick="pick(this,false)">Nothing, if 200ms is measured carefully</button>
+<div class="why">eventually(pred, pump, deadline): succeeds the moment the condition holds, fails honestly at the bound. No schedule assumption baked in.</div></div>
+
+<div class="q"><h3>4. FakeOllama deliberately serves responses in 7-byte chunks. Why?</h3>
+<button class="opt" onclick="pick(this,false)">To simulate a slow network connection's bandwidth</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">To force JSON lines to split mid-token across receive callbacks, so reassembly code faces its hardest input in every single test run</button>
+<button class="opt" onclick="pick(this,false)">HTTP chunked encoding requires small chunks</button>
+<div class="why">Concurrency/streaming bugs hide in interleavings that "never happen" locally — a good fake makes the ugly case the ONLY case.</div></div>
+
+<div class="q"><h3>5. Written recall:</h3>
+<p>After changing threaded code, one green test run isn't enough. What did tonight's flake-check protocol look like, and what did it catch?</p>
+<textarea placeholder="Run the suite..."></textarea>
+<details><summary>Reference answer</summary>Run the full suite 5-8 times back-to-back after each threading change; investigate any hang with a stack sampler (sample &lt;pid&gt;) instead of killing it. Run 3 of the first batch hung and the two stacks (destructor in join(), worker in cv wait) diagnosed a pre-existing lost-wakeup deadlock in LlmClient's destructor — unrelated to the new code, exposed by more frequent construction of threaded objects.</details></div>
+</div></body></html>
