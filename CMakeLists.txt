@@ -20,6 +20,7 @@ add_library(llm_npc_core STATIC
     src/core/LlmClient.cpp
     src/core/NetClient.cpp
     src/core/NetFraming.cpp
+    src/core/NetMessage.cpp
     src/core/NetServer.cpp
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp
