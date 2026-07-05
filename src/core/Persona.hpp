@@ -17,6 +17,22 @@ struct Persona {
     std::string extraDirectives;      // free-form constraints
     bool police = false;              // may arrest; others can only call police
 
+    // Renders the system prompt with a persisted first-person memory from
+    // earlier sessions woven in, so the NPC picks up where things left off.
+    // An empty memory renders identically to renderSystemPrompt().
+    std::string renderSystemPrompt(const std::string& memory) const {
+        std::string prompt = renderSystemPrompt();
+        if (memory.empty()) return prompt;
+        // Insert before the action protocol so the directive instructions
+        // stay last (small models weight trailing instructions most).
+        const std::string section =
+            "What you remember from earlier meetings with this player: " + memory + "\n";
+        const auto at = prompt.find("ACTIONS: ");
+        if (at == std::string::npos) return prompt + section;
+        prompt.insert(at, section);
+        return prompt;
+    }
+
     std::string renderSystemPrompt() const {
         std::ostringstream o;
         o << "You are " << name;

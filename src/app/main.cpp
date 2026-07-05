@@ -19,6 +19,7 @@
 #include "Assets.hpp"
 #include "City.hpp"
 #include "Config.hpp"
+#include "ConversationStore.hpp"
 #include "InputMap.hpp"
 #include "KeyBindings.hpp"
 #include "LlmClient.hpp"
@@ -145,6 +146,45 @@ int main(int argc, char** argv) {
     }
     std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs\n";
 
+    // Cross-session NPC memory: summaries persist in saves/ and are injected
+    // into each NPC's system prompt (plan: npc-memory-and-model).
+    ConversationStore memoryStore(projectRoot / "saves" / "conversations.sqlite3");
+    for (Npc& npc : world.npcs()) {
+        const NpcMemory memory = memoryStore.load(npc.persona().name);
+        if (!memory.summary.empty()) npc.setMemory(memory.summary);
+    }
+    // History length at the last save, per NPC — new turns above this mark
+    // trigger a summarization request when the conversation closes.
+    std::vector<std::size_t> savedTurns(world.npcs().size(), 0);
+    // In-flight summary request id → NPC index it belongs to.
+    std::unordered_map<std::uint64_t, int> summaryRoutes;
+
+    // Asks the NPC's own model to update its first-person memory note.
+    const auto requestSummary = [&](int npcIndex) {
+        Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+        if (npc.history().size() <= savedTurns[static_cast<std::size_t>(npcIndex)]) return;
+        std::string transcript;
+        for (const auto& turn : npc.history()) {
+            transcript += (turn.role == "user" ? "Player: " : npc.persona().name + ": ");
+            transcript += turn.content + "\n";
+        }
+        std::string request =
+            "You are " + npc.persona().name + ". Here is your conversation with the "
+            "player so far:\n" + transcript;
+        if (!npc.memory().empty()) {
+            request += "You previously remembered: " + npc.memory() + "\n";
+        }
+        request +=
+            "In at most 3 sentences, first person, write the updated note you keep "
+            "about this player: who they are, what happened, anything to remember "
+            "next time. Reply with the note only.";
+        const std::uint64_t id = client.submit(
+            "You write concise first-person memory notes for a game character. "
+            "No preamble, no directives, just the note.",
+            {}, std::move(request));
+        summaryRoutes[id] = npcIndex;
+    };
+
     SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_MSAA_4X_HINT);
     InitWindow(1280, 720, "LLM NPC City");
     SetTargetFPS(60);
@@ -198,10 +238,27 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
         } else {
-            // Placeholder pages: Escape returns to the game.
+            // Placeholder pages: Escape returns to the game. Leaving a
+            // conversation kicks off the NPC's memory update.
             if (IsKeyPressed(KEY_ESCAPE)) {
+                if (mode == AppMode::Dialogue && nearbyNpc >= 0) requestSummary(nearbyNpc);
                 mode = AppMode::Playing;
                 DisableCursor();
+            }
+        }
+
+        // Summaries arriving from the LLM: remember + persist. (Dialogue
+        // replies join this drain when the UI port lands in issue #40.)
+        for (const auto& reply : client.drainReplies()) {
+            const auto route = summaryRoutes.find(reply.id);
+            if (route == summaryRoutes.end()) continue;
+            const int npcIndex = route->second;
+            summaryRoutes.erase(route);
+            if (!reply.ok) continue;  // keep the old summary; retry next close
+            Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+            npc.setMemory(reply.content);
+            if (memoryStore.save(npc.persona().name, npc.memory(), npc.history())) {
+                savedTurns[static_cast<std::size_t>(npcIndex)] = npc.history().size();
             }
         }
 
@@ -269,6 +326,16 @@ int main(int argc, char** argv) {
             TakeScreenshot(screenshotPath);
         }
         EndDrawing();
+    }
+
+    // Transcripts with unsaved turns still get persisted on quit (their
+    // summary refresh happens at the next conversation close instead —
+    // summarizing here would block shutdown on the LLM).
+    for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+        const Npc& npc = world.npcs()[i];
+        if (npc.history().size() > savedTurns[i]) {
+            memoryStore.save(npc.persona().name, npc.memory(), npc.history());
+        }
     }
 
     CloseWindow();

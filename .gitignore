@@ -6,3 +6,7 @@ tests/build/
 # assets/LICENSES.md stays tracked)
 assets/models/
 assets/fonts/
+
+# Per-player NPC memory + benchmark outputs
+saves/
+bench/out/

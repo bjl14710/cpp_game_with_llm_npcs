@@ -26,6 +26,11 @@ struct LlmConfig {
     // Passed to Ollama as keep_alive so the model stays loaded between
     // conversations instead of paying the cold-start cost every time.
     std::string keepAlive = "10m";
+    // Reasoning-model thinking: "" omits the field entirely (models without
+    // the capability never see it); "false"/"true" is sent as Ollama's
+    // `think`. qwen3-class models need "false" for chat-speed replies —
+    // measured 24s -> 2.7s time-to-first-token (bench/REPORT.md).
+    std::string think = "";
 };
 
 // One request submitted to the LLM.
