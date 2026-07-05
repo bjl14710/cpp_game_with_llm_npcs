@@ -5,7 +5,7 @@
 // Plan: .claude/plans/raylib-visual-overhaul.md, steps 1-3.
 #include "raylib.h"
 
-#include <string>
+#include <unordered_map>
 
 #include "Assets.hpp"
 #include "City.hpp"
@@ -30,6 +30,7 @@ struct CharacterVisual {
     Vec3 position{};
     float facingDeg = 0.f;
     int variantSeed = 0;      // stable id → model/tint pick (NPC index, 1000+playerId)
+    bool police = false;      // uniforms: police always get the Knight model
     bool walking = false;     // switches idle/walk animation clips
     float gesturePhase = 0.f; // seconds into wave/raise-hand; 0 = none
     NpcFace face = NpcFace::Neutral;
@@ -73,8 +74,14 @@ class RaylibRenderer {
     Assets& assets_;
     Camera3D camera_{};  // rebuilt each beginFrame; kept for worldToScreen
 
-    // TODO(implement): fog/tint shader handle, animation clocks per character
-    // variant (advance in drawCharacter using GetFrameTime()).
+    // Per-entity animation playback (keyed by variantSeed, which is unique
+    // per entity): which clip is playing and the running frame clock. The
+    // clock resets when the clip changes so transitions start at frame 0.
+    struct AnimState {
+        int clip = -1;
+        float time = 0.f;
+    };
+    std::unordered_map<int, AnimState> anim_;
 };
 
 }  // namespace llm_npc

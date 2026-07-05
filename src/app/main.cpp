@@ -144,16 +144,25 @@ int main(int argc, char** argv) {
 
     AppMode mode = AppMode::Playing;
     LocalPlayer player;
+    // Smoke runs are deterministic: fixed camera aimed at the plaza (where
+    // most NPCs stand), no mouse-look accumulation.
+    const bool smokeRun = maxFrames >= 0;
+    if (smokeRun) player.yawDeg = 180.f;
     DisableCursor();  // relative mouse for first-person look
 
     int nearbyNpc = -1;
+    // Previous frame's NPC positions, for walk-animation detection.
+    std::vector<Vec3> npcLastPos(world.npcs().size());
+    for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+        npcLastPos[i] = world.npcs()[i].position();
+    }
     long frames = 0;
     while (!WindowShouldClose() && (maxFrames < 0 || frames++ < maxFrames)) {
         const float dt = std::fmin(0.03f, GetFrameTime());
 
         // ---- input + simulation ----
         if (mode == AppMode::Playing) {
-            if (IsWindowFocused()) applyMouseLook(player);
+            if (IsWindowFocused() && !smokeRun) applyMouseLook(player);
 
             Vec3 wish{};
             if (isActionPressed(bindings, Action::MoveForward)) wish += flatForward(player.yawDeg);
@@ -194,11 +203,19 @@ int main(int argc, char** argv) {
         ClearBackground(sky);
         renderer.beginFrame(CameraPose{player.position, player.yawDeg, player.pitchDeg});
         renderer.drawCity(world.city());
-        for (const Npc& npc : world.npcs()) {
+        for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+            const Npc& npc = world.npcs()[i];
             CharacterVisual visual;
             visual.position = npc.position();
             visual.facingDeg = npc.facingDeg();
-            renderer.drawCharacter(visual);  // marker until issue #38
+            visual.variantSeed = static_cast<int>(i);
+            visual.police = npc.persona().police;
+            // Walking = the NPC actually moved this frame (position delta),
+            // which tracks follow/chase/return-home without new core API.
+            visual.walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
+            npcLastPos[i] = npc.position();
+            if (npc.pose() != NpcAction::None) visual.gesturePhase = npc.gesturePhase();
+            renderer.drawCharacter(visual);
         }
         renderer.endFrame();
 

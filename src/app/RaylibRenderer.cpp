@@ -110,10 +110,46 @@ void RaylibRenderer::drawCity(const City& city) {
 }
 
 void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
-    // Animated characters land with issue #38; marker cylinder meanwhile.
-    const Vec3& p = visual.position;
-    DrawCylinder({p.x, 0.f, p.z}, 0.35f, 0.35f, 1.8f, 12, Color{200, 120, 80, 255});
-    DrawCylinderWires({p.x, 0.f, p.z}, 0.35f, 0.35f, 1.8f, 12, Color{60, 30, 20, 255});
+    const Assets::CharacterAsset* character =
+        assets_.characterFor(visual.variantSeed, visual.police);
+    if (!character) {
+        // No pack: marker cylinder, same as the pre-asset placeholder.
+        const Vec3& p = visual.position;
+        DrawCylinder({p.x, 0.f, p.z}, 0.35f, 0.35f, 1.8f, 12, Color{200, 120, 80, 255});
+        DrawCylinderWires({p.x, 0.f, p.z}, 0.35f, 0.35f, 1.8f, 12, Color{60, 30, 20, 255});
+        return;
+    }
+
+    // Pick the clip: gestures interrupt, then walk/idle by movement.
+    int clip = visual.walking ? character->walk : character->idle;
+    if (visual.gesturePhase > 0.f && character->gesture >= 0) clip = character->gesture;
+
+    AnimState& state = anim_[visual.variantSeed];
+    if (state.clip != clip) {
+        state.clip = clip;
+        state.time = 0.f;
+    }
+    state.time += GetFrameTime();
+    if (clip >= 0 && clip < character->clipCount) {
+        // raylib bakes glTF animations at ~60 samples/second; loop by frame.
+        const ModelAnimation& animation = character->clips[clip];
+        const int frame =
+            static_cast<int>(state.time * 60.f) % (animation.frameCount > 0
+                                                       ? animation.frameCount
+                                                       : 1);
+        // CPU skinning on the shared model right before this entity's draw,
+        // so several entities can reuse one model with different clocks.
+        UpdateModelAnimation(character->model, animation, frame);
+    }
+
+    // Uniform height: scale so every character stands ~1.8 units tall, feet
+    // on the ground, rotated to the game's facing convention (0 → +Z).
+    const BoundingBox bb = GetModelBoundingBox(character->model);
+    const float modelHeight = bb.max.y - bb.min.y;
+    const float s = modelHeight > 0.f ? 1.8f / modelHeight : 1.f;
+    const Vector3 position{visual.position.x, -bb.min.y * s, visual.position.z};
+    DrawModelEx(character->model, position, Vector3{0.f, 1.f, 0.f}, visual.facingDeg,
+                Vector3{s, s, s}, WHITE);
 }
 
 void RaylibRenderer::endFrame() { EndMode3D(); }
