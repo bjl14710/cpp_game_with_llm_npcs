@@ -13,6 +13,17 @@
 
 namespace llm_npc {
 
+// Combat state machine for an NPC. Civilians flee when damaged; armed NPCs
+// (cops) turn Hostile and fight back. Orthogonal to the conversational
+// behavior_ system — a Fleeing NPC still has a mood, but combat movement
+// overrides behavior movement while active (World::updateCombat).
+enum class NpcState {
+    Idle,     // default; conversation and behaviors work normally
+    Fleeing,  // moving away from the player at flee speed
+    Hostile,  // armed NPC: moving to preferred range and firing
+    Dead,     // hp reached 0; rendered collapsed, no further interaction
+};
+
 // An NPC that delegates dialogue to the shared LlmClient. Holds its own persona
 // and a bounded conversation history. Many NPCs can share one LlmClient.
 class Npc {
@@ -106,6 +117,32 @@ class Npc {
     void setMemory(std::string summary) { memory_ = std::move(summary); }
     const std::string& memory() const { return memory_; }
 
+    // --- Combat interface --------------------------------------------------
+
+    // Reduces hp by `amount` (clamped at 0). Transitions state: armed NPCs
+    // turn Hostile, unarmed ones Fleeing; hp reaching 0 means Dead either
+    // way. No-op when already Dead.
+    void takeDamage(int amount);
+
+    NpcState combatState() const { return state_; }
+    int hp() const { return hp_; }
+    int hpMax() const { return hpMax_; }
+    bool isArmed() const { return persona_.armed; }
+
+    // Stands a surviving NPC down after the player respawns (Fleeing and
+    // Hostile return to Idle; the dead stay dead).
+    void calmDown() {
+        if (state_ != NpcState::Dead) state_ = NpcState::Idle;
+    }
+
+    // World-space feet position, writable so World::updateCombat can move
+    // fleeing/hostile NPCs (conversational movement stays in update()).
+    Vec3& position() { return position_; }
+
+    // Seconds before this NPC can fire again (armed only); World's combat
+    // tick decrements it and rolls the next shot.
+    float fireCooldown = 0.f;
+
    private:
     Persona persona_;
     LlmClient& client_;
@@ -129,6 +166,11 @@ class Npc {
     bool caughtPlayer_ = false;               // arrest reached the player
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
+
+    // Combat state — all zero/Idle until something hurts this NPC.
+    int hp_ = 100;
+    int hpMax_ = 100;
+    NpcState state_ = NpcState::Idle;
 
     // Routes a freshly parsed action into behavior/gesture state.
     void applyAction(NpcAction action);

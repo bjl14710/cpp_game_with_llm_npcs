@@ -181,4 +181,15 @@ void Npc::trimHistory() {
     history_.erase(history_.begin(), history_.begin() + drop);
 }
 
+void Npc::takeDamage(int amount) {
+    if (state_ == NpcState::Dead) return;
+    hp_ -= amount;
+    if (hp_ <= 0) {
+        hp_ = 0;
+        state_ = NpcState::Dead;
+        return;
+    }
+    state_ = persona_.armed ? NpcState::Hostile : NpcState::Fleeing;
+}
+
 }  // namespace llm_npc
