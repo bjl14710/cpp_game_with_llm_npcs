@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Linux launcher: verifies Ollama is reachable, builds, and runs the game.
+# Launcher: verifies Ollama is reachable, builds, and runs the game.
 # Run from anywhere; this script cds to its own directory.
+# raylib is fetched and built by CMake automatically — no graphics packages
+# to install (SFML is gone as of the raylib migration).
 cd "$(dirname "$0")"
 
 HOST="${OLLAMA_HOST:-localhost}"
@@ -14,15 +16,7 @@ if ! curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/tags" >/dev/null; then
     exit 1
 fi
 
-# On macOS, sfml@2 is keg-only and not in the default prefix.
-CMAKE_PREFIX=""
-if [[ -d /opt/homebrew/opt/sfml@2 ]]; then
-    CMAKE_PREFIX="-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/sfml@2"
-elif [[ -d /usr/local/opt/sfml@2 ]]; then
-    CMAKE_PREFIX="-DCMAKE_PREFIX_PATH=/usr/local/opt/sfml@2"
-fi
-
-cmake -S . -B build $CMAKE_PREFIX
+cmake -S . -B build
 cmake --build build -j
 
 exec ./build/cpp_game_with_llm_npcs
