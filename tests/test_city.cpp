@@ -90,3 +90,21 @@ TEST_CASE("resolveMovement clamps to world bounds") {
     const Vec3 res = city.resolveMovement(from, to, 0.6f);
     CHECK(res.z == doctest::Approx(h - 0.6f));
 }
+
+TEST_CASE("every visible street obstacle has real collision") {
+    // Traffic lights and park bushes are authored in City (the renderer
+    // draws them from this list), so their visual footprints and colliders
+    // can never diverge — walking through them is impossible by data.
+    const llm_npc::City city = llm_npc::City::makeDowntown();
+    const struct { const char* id; float x, z; } obstacles[] = {
+        {"trafficlight_a", -23.f, -23.f}, {"trafficlight_b", -23.f, 41.f},
+        {"trafficlight_c", 41.f, -23.f},  {"trafficlight_d", 41.f, 41.f},
+        {"bush_a", 48.f, 48.f},           {"bush_b", 80.f, 52.f},
+        {"bush_c", 52.f, 80.f},           {"bush_d", 76.f, 76.f},
+    };
+    for (const auto& o : obstacles) {
+        CAPTURE(o.id);
+        CHECK(city.findBuilding(o.id) != nullptr);
+        CHECK(city.circleIntersectsAny(o.x, o.z, 0.3f));
+    }
+}

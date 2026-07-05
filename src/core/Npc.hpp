@@ -135,6 +135,15 @@ class Npc {
         if (state_ != NpcState::Dead) state_ = NpcState::Idle;
     }
 
+    // Derives facing from the actual displacement since `prevPosition` —
+    // the ONE source of truth for "which way am I moving", called once per
+    // frame after every mover (behaviors AND combat) has run. Reorients
+    // only above a small speed threshold, so standing still never flips
+    // facing and deliberate standing turns (lookAt during chat) hold.
+    // Kills the moonwalk class of bugs at the source: any future system
+    // that moves an NPC gets correct facing for free.
+    void deriveFacingFromMotion(const Vec3& prevPosition, float dt);
+
     // World-space feet position, writable so World::updateCombat can move
     // fleeing/hostile NPCs (conversational movement stays in update()).
     Vec3& position() { return position_; }

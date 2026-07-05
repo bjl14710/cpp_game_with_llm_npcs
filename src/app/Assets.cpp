@@ -44,6 +44,10 @@ Assets::Assets(const std::string& assetsDir) {
         {"tower", "building_H"},    {"taxi_cab", "car_taxi"},
         {"bench", "bench"},         {"cart", "box_B"},
         {"fountain", "base"},
+        {"trafficlight_a", "trafficlight_A"}, {"trafficlight_b", "trafficlight_A"},
+        {"trafficlight_c", "trafficlight_A"}, {"trafficlight_d", "trafficlight_A"},
+        {"bush_a", "bush"}, {"bush_b", "bush"},
+        {"bush_c", "bush"}, {"bush_d", "bush"},
     };
     // Size contracts for everything that must not stretch to its collision
     // box. Heights are world meters, chosen against the 1.8-unit characters.
@@ -52,6 +56,14 @@ Assets::Assets(const std::string& assetsDir) {
         {"cart", {SizeSpec::Mode::Uniform, 1.9f}},
         {"bench", {SizeSpec::Mode::Uniform, 0.9f}},
         {"fountain", {SizeSpec::Mode::Uniform, 1.2f}},
+        {"trafficlight_a", {SizeSpec::Mode::Uniform, 4.5f}},
+        {"trafficlight_b", {SizeSpec::Mode::Uniform, 4.5f}},
+        {"trafficlight_c", {SizeSpec::Mode::Uniform, 4.5f}},
+        {"trafficlight_d", {SizeSpec::Mode::Uniform, 4.5f}},
+        {"bush_a", {SizeSpec::Mode::Uniform, 1.1f}},
+        {"bush_b", {SizeSpec::Mode::Uniform, 1.1f}},
+        {"bush_c", {SizeSpec::Mode::Uniform, 1.1f}},
+        {"bush_d", {SizeSpec::Mode::Uniform, 1.1f}},
     };
 
     genericBuildings_ = {"building_A", "building_B", "building_C", "building_D",
