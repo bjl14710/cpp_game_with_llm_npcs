@@ -71,7 +71,7 @@ PlayerPose playerPoseFromJson(const nlohmann::json& j) {
     return p;
 }
 
-nlohmann::json npcPoseToJson(const NpcPose& n) {
+nlohmann::json netNpcPoseToJson(const NetNpcPose& n) {
     return {{"i", n.npcIndex},
             {"pos", vec3ToJson(n.position)},
             {"facing", n.facingDeg},
@@ -79,8 +79,8 @@ nlohmann::json npcPoseToJson(const NpcPose& n) {
             {"behavior", n.behavior}};
 }
 
-NpcPose npcPoseFromJson(const nlohmann::json& j) {
-    NpcPose n;
+NetNpcPose netNpcPoseFromJson(const nlohmann::json& j) {
+    NetNpcPose n;
     n.npcIndex = j.value("i", -1);
     if (j.contains("pos")) n.position = vec3FromJson(j["pos"]);
     n.facingDeg = j.value("facing", 0.f);

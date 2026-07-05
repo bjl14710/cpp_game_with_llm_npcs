@@ -69,7 +69,12 @@ class NetServer {
 
     // Latest NPC state for snapshots; the host loop samples its World and
     // publishes here (the tick thread never touches World directly).
-    void publishNpcPoses(std::vector<NpcPose> poses);
+    void publishNpcPoses(std::vector<NetNpcPose> poses);
+
+    // Current poses of every connected remote player, for the host's own
+    // renderer (remote players are drawn from here, not from snapshots —
+    // the host never receives its own broadcast).
+    std::vector<PlayerPose> remotePlayerPoses() const;
 
     // One remote player's NPC-chat action, drained on the host loop.
     struct ChatEvent {
@@ -122,7 +127,7 @@ class NetServer {
 
     std::mutex stateMutex_;  // host pose + published NPC poses + tick counter
     PlayerPose hostPose_;
-    std::vector<NpcPose> npcPoses_;
+    std::vector<NetNpcPose> npcPoses_;
     std::uint64_t tick_ = 0;
 
     std::mutex chatMutex_;

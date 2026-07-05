@@ -3,6 +3,7 @@
 #include <SFML/Graphics.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -18,14 +19,31 @@ enum class MenuResult {
     Quit,    // close the window
 };
 
-// Mouse-driven pause menu: Resume / Controls / Quit on the main page, and a
-// Controls page where clicking a key chip arms capture of the next key press.
+// Mouse-driven pause menu: Resume / Controls / Multiplayer / Quit on the main
+// page, a Controls page where clicking a key chip arms capture of the next
+// key press, and a Multiplayer page for hosting or joining a session.
 // Rebinds use KeyBindings swap semantics and are saved to disk immediately.
 class Menu {
    public:
+    // Callbacks the Multiplayer page drives, injected by main.cpp so the
+    // menu stays free of networking types (same shape as the key-binding
+    // injection). onHost/onJoin return "" on success or a human-readable
+    // error shown as a toast.
+    struct MultiplayerHooks {
+        std::function<std::string(int port)> onHost;
+        std::function<std::string(const std::string& address)> onJoin;
+        std::function<void()> onLeave;
+        std::function<std::string()> status;  // one-line session summary
+        std::function<bool()> active;         // hosting or joined right now
+    };
+
     // `bindings` is shared with the main loop; `savePath` is where every
     // accepted rebind is persisted.
     Menu(KeyBindings& bindings, std::filesystem::path savePath);
+
+    // Installs the Multiplayer page's callbacks; without them the page
+    // shows nothing actionable (solo-only build of the menu still works).
+    void setMultiplayer(MultiplayerHooks hooks);
 
     // Resets to the main page (called when the menu is opened).
     void open();
@@ -45,7 +63,7 @@ class Menu {
     void render(sf::RenderWindow& window, const sf::Font& font) const;
 
    private:
-    enum class Page { Main, Controls };
+    enum class Page { Main, Controls, Multiplayer };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -61,12 +79,19 @@ class Menu {
     std::string toast_;
     float toastLeft_ = 0.f;
 
+    MultiplayerHooks multiplayer_;
+    std::string joinAddress_ = "127.0.0.1:40605";
+    bool editingAddress_ = false;  // typed characters go into joinAddress_
+
     // Clickable areas for the current page, derived from the window size so
     // render() and handleEvent() always agree.
     std::vector<Hit> layout(const sf::RenderWindow& window) const;
 
     // Applies a captured key press to the armed action; announces swaps.
     void applyCapture(sf::Keyboard::Key key);
+
+    // Validates joinAddress_ and fires onJoin; toasts the outcome.
+    void attemptJoin();
 
     // Shows a short status message under the controls list.
     void showToast(std::string text);
