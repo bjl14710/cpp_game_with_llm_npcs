@@ -120,6 +120,9 @@ ChatReply LlmClient::processOne(const ChatRequest& req) {
         {"keep_alive", config_.keepAlive},
         {"options", {{"temperature", config_.temperature}}},
     };
+    // Only reasoning models understand `think`; omit unless configured so
+    // ordinary models never receive an unknown field.
+    if (!config_.think.empty()) body["think"] = (config_.think == "true");
 
     httplib::Client cli(config_.host, config_.port);
     cli.set_read_timeout(config_.requestTimeoutSeconds, 0);
