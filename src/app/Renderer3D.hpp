@@ -7,6 +7,7 @@
 
 #include "City.hpp"
 #include "Math.hpp"
+#include "Weapon.hpp"
 
 namespace llm_npc {
 
@@ -55,6 +56,10 @@ class Renderer3D {
 
     // Draws one NPC as a simple capsule-ish figure facing `facingDeg`.
     void drawNpc(const NpcVisual& npc);
+
+    // Draws the equipped weapon in the bottom-right corner in screen-space.
+    // animFraction 0→1: 0 = rest position, 1 = fully kicked back (punch/recoil).
+    void drawWeaponOverlay(const sf::RenderWindow& window, WeaponKind weapon, float animFraction);
 
     // Projects a world point through the camera set by beginFrame. Returns
     // true and fills `out` with pixel coordinates when the point is in front
