@@ -32,12 +32,9 @@ TEST_CASE("playerAttack hits NPC within fist range") {
     world.addNpc(makeNpcAt(1.0f, 0.f));
     world.player().position = Vec3{0.f, 0.f, 0.f};
 
-    // TODO(combat): enable once World::playerAttack is implemented
-    // const bool attacked = world.playerAttack(Vec3{0.f, 0.f, 1.f});
-    // CHECK(attacked);
-    // CHECK(world.npcs()[0].hp() < 100);
-
-    CHECK(true);  // placeholder — remove when TODO above is active
+    const bool attacked = world.playerAttack(Vec3{0.f, 0.f, 1.f});
+    CHECK(attacked);
+    CHECK(world.npcs()[0].hp() < 100);
 }
 
 TEST_CASE("playerAttack does not hit NPC beyond fist range") {
@@ -45,11 +42,8 @@ TEST_CASE("playerAttack does not hit NPC beyond fist range") {
     world.addNpc(makeNpcAt(10.f, 0.f));  // well outside 1.8 unit fist range
     world.player().position = Vec3{0.f, 0.f, 0.f};
 
-    // TODO(combat): enable once World::playerAttack is implemented
-    // world.playerAttack(Vec3{1.f, 0.f, 0.f});
-    // CHECK(world.npcs()[0].hp() == 100);
-
-    CHECK(true);
+    world.playerAttack(Vec3{1.f, 0.f, 0.f});
+    CHECK(world.npcs()[0].hp() == 100);
 }
 
 TEST_CASE("playerAttack is suppressed during cooldown") {
@@ -57,12 +51,9 @@ TEST_CASE("playerAttack is suppressed during cooldown") {
     world.addNpc(makeNpcAt(1.0f, 0.f));
     world.player().position = Vec3{0.f, 0.f, 0.f};
 
-    // TODO(combat): enable once World::playerAttack is implemented
-    // world.playerAttack(Vec3{0.f, 0.f, 1.f});     // first hit succeeds
-    // const bool second = world.playerAttack(Vec3{0.f, 0.f, 1.f});  // suppressed
-    // CHECK_FALSE(second);
-
-    CHECK(true);
+    world.playerAttack(Vec3{0.f, 0.f, 1.f});
+    const bool second = world.playerAttack(Vec3{0.f, 0.f, 1.f});
+    CHECK_FALSE(second);
 }
 
 TEST_CASE("Pistol attack decrements ammo") {
@@ -74,11 +65,8 @@ TEST_CASE("Pistol attack decrements ammo") {
     const int ammoBefore = world.player().currentAmmo();
     CHECK(ammoBefore == 12);
 
-    // TODO(combat): enable once World::playerAttack spawns projectiles
-    // world.playerAttack(Vec3{0.f, 0.f, 1.f});
-    // CHECK(world.player().currentAmmo() == ammoBefore - 1);
-
-    CHECK(true);
+    world.playerAttack(Vec3{0.f, 0.f, 1.f});
+    CHECK(world.player().currentAmmo() == ammoBefore - 1);
 }
 
 TEST_CASE("Pistol attack blocked at 0 ammo") {
@@ -86,10 +74,9 @@ TEST_CASE("Pistol attack blocked at 0 ammo") {
     world.playerSwitchWeapon(WeaponKind::Pistol);
     world.player().ammo[static_cast<std::uint8_t>(WeaponKind::Pistol)] = 0;
 
-    // TODO(combat): enable once World::playerAttack checks ammo
-    // CHECK_FALSE(world.playerAttack(Vec3{0.f, 0.f, 1.f}));
-
-    CHECK(true);
+    // playerSwitchWeapon rejects 0-ammo switch, so force the weapon directly
+    world.player().weapon = WeaponKind::Pistol;
+    CHECK_FALSE(world.playerAttack(Vec3{0.f, 0.f, 1.f}));
 }
 
 // ---- updateCombat — cooldown tick ---------------------------------------

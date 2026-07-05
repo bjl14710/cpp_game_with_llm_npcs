@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "City.hpp"
@@ -24,6 +25,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "Renderer3D.hpp"
+#include "Weapon.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -39,7 +41,7 @@ constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 
 // What the main loop is currently showing.
-enum class AppMode { Playing, Dialogue, Menu };
+enum class AppMode { Playing, Dialogue, Menu, Dead };
 
 // Try a few likely font paths so the game runs on stock Linux and Windows
 // without bundling a font. Returns the first existing path or empty.
@@ -144,6 +146,13 @@ void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
 }
 #endif
 
+// A short in-world text bubble above an NPC's head triggered by combat events.
+struct CombatCallout {
+    int         npcIndex = -1;
+    std::string text;
+    float       ttl = 4.f;  // seconds before it disappears
+};
+
 // Draws `str` centered horizontally at height `y`, with a dark backdrop bar.
 void drawCenteredHudText(sf::RenderWindow& window, const sf::Font& font,
                          const std::string& str, unsigned size, float y) {
@@ -217,6 +226,11 @@ int main() {
     // Late replies for conversations the player already walked away from
     // still need to reach the right NPC's history.
     std::unordered_map<std::uint64_t, int> pendingRoutes;
+    // IDs of LLM requests that were combat reactions, not dialogue turns.
+    // Replies for these are rendered as floating callouts, not the dialog panel.
+    std::unordered_set<std::uint64_t> combatReplyIds;
+    // Live combat callouts: at most one per NPC at a time.
+    std::vector<CombatCallout> callouts;
 
     AppMode mode = AppMode::Playing;
     CameraPose camera;
@@ -250,7 +264,27 @@ int main() {
                                            npc.persona().role + "). Enter sends, Esc leaves."});
                     mode = AppMode::Dialogue;
                     window.setMouseCursorVisible(true);
+                } else if (event.key.code == sf::Keyboard::Num1) {
+                    world.playerSwitchWeapon(WeaponKind::Fist);
+                } else if (event.key.code == sf::Keyboard::Num2) {
+                    world.playerSwitchWeapon(WeaponKind::Pistol);
                 }
+                continue;
+            }
+
+            if (mode == AppMode::Playing &&
+                event.type == sf::Event::MouseButtonPressed &&
+                event.mouseButton.button == sf::Mouse::Left) {
+                world.playerAttack(flatForward(camera.yawDeg));
+                continue;
+            }
+
+            if (mode == AppMode::Dead && event.type == sf::Event::KeyPressed &&
+                event.key.code == sf::Keyboard::Space) {
+                world.player().hp = world.player().hpMax;
+                mode = AppMode::Playing;
+                window.setMouseCursorVisible(false);
+                centerMouse(window);
                 continue;
             }
 
@@ -308,6 +342,55 @@ int main() {
             wish = normalize(wish);
             const Vec3 target = camera.position + wish * (kWalkSpeed * dt);
             camera.position = world.city().resolveMovement(camera.position, target, kPlayerRadius);
+
+            // Keep World's player position in sync with the camera.
+            world.player().position = camera.position;
+            const auto combatResult = world.updateCombat(dt);
+
+            // Fire one-shot LLM reaction for each NPC that took damage this frame.
+            for (const auto& ev : combatResult.npcsDamaged) {
+                Npc& npc = world.npcs()[ev.npcIndex];
+                if (npc.waiting() || npc.combatState() == NpcState::Dead) continue;
+                // Remove any stale callout for this NPC so the new one replaces it.
+                callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
+                    [&](const CombatCallout& c){ return c.npcIndex == static_cast<int>(ev.npcIndex); }),
+                    callouts.end());
+                const std::string prompt = npc.isArmed()
+                    ? "[GAME EVENT] You've been attacked. React as your character — one short sentence, in character."
+                    : "[GAME EVENT] You've been attacked. React as your character — panic, surprise, one short sentence.";
+                const auto id = npc.ask(prompt);
+                pendingRoutes[id] = static_cast<int>(ev.npcIndex);
+                combatReplyIds.insert(id);
+            }
+
+            // Armed NPCs that hear a nearby shot also react.
+            for (const auto& ev : combatResult.shotsFired) {
+                for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                    Npc& npc = world.npcs()[i];
+                    if (!npc.isArmed() || npc.waiting() ||
+                        npc.combatState() == NpcState::Dead) continue;
+                    if (distanceXZ(npc.position(), world.player().position) >
+                        static_cast<float>(20)) continue;  // kCombatHearingRadius
+                    if (ev.hitNpc && ev.npcIndex == i) continue;  // already handled above
+                    callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
+                        [&](const CombatCallout& c){ return c.npcIndex == static_cast<int>(i); }),
+                        callouts.end());
+                    const auto id = npc.ask(
+                        "[GAME EVENT] You heard a gunshot nearby. React as your character — one short sentence.");
+                    pendingRoutes[id] = static_cast<int>(i);
+                    combatReplyIds.insert(id);
+                }
+            }
+
+            // Age existing callouts.
+            callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
+                [&](CombatCallout& c){ c.ttl -= dt; return c.ttl <= 0.f; }),
+                callouts.end());
+
+            if (!world.player().alive()) {
+                mode = AppMode::Dead;
+                window.setMouseCursorVisible(true);
+            }
         } else if (mode == AppMode::Menu) {
             menu.update(dt);
         }
@@ -325,9 +408,23 @@ int main() {
         for (const auto& reply : client.drainReplies()) {
             const auto route = pendingRoutes.find(reply.id);
             if (route == pendingRoutes.end()) continue;
-            Npc& npc = world.npcs()[static_cast<std::size_t>(route->second)];
+            const int npcIdx = route->second;
+            Npc& npc = world.npcs()[static_cast<std::size_t>(npcIdx)];
             const auto text = npc.onReplyArrived(reply);
+            const bool isCombat = combatReplyIds.erase(reply.id) > 0;
             pendingRoutes.erase(route);
+
+            if (isCombat) {
+                // Surface as a floating callout, not the dialogue panel.
+                if (text && npc.combatState() != NpcState::Dead) {
+                    // Replace any existing callout for this NPC.
+                    callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
+                        [&](const CombatCallout& c){ return c.npcIndex == npcIdx; }),
+                        callouts.end());
+                    callouts.push_back({npcIdx, *text, 4.f});
+                }
+                continue;
+            }
 
             if (session.replyArrived(reply.id, reply.ok)) {
                 dialog.endStreaming();
@@ -349,6 +446,8 @@ int main() {
             const Npc& npc = world.npcs()[i];
             renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i)});
         }
+        renderer.drawWeaponOverlay(window, world.player().weapon,
+                                   world.player().attackAnimFraction);
 
         // ---- SFML overlay pass ----
         window.pushGLStates();
@@ -366,6 +465,28 @@ int main() {
             window.draw(tag);
         }
 
+        // Combat callouts — short in-character lines above the NPC's head.
+        for (const CombatCallout& callout : callouts) {
+            const Npc& npc = world.npcs()[static_cast<std::size_t>(callout.npcIndex)];
+            if (distanceXZ(camera.position, npc.position()) > kNameplateRange) continue;
+            sf::Vector2f screen;
+            if (!renderer.worldToScreen(npc.position() + Vec3{0.f, 2.6f, 0.f}, window, screen)) continue;
+            // Fade alpha over the last second of TTL.
+            const std::uint8_t alpha = static_cast<std::uint8_t>(
+                255.f * std::min(1.f, callout.ttl));
+            sf::Text bubble(callout.text, font, 15);
+            const sf::FloatRect bb = bubble.getLocalBounds();
+            sf::RectangleShape bg(sf::Vector2f(bb.width + 14.f, bb.height + 10.f));
+            bg.setPosition(screen.x - bb.width * 0.5f - 7.f, screen.y - bb.height - 8.f);
+            bg.setFillColor(sf::Color(10, 10, 10, static_cast<std::uint8_t>(alpha * 0.75f)));
+            window.draw(bg);
+            bubble.setPosition(screen.x - bb.width * 0.5f, screen.y - bb.height - 4.f);
+            bubble.setFillColor(sf::Color(255, 240, 160, alpha));
+            bubble.setOutlineThickness(1.f);
+            bubble.setOutlineColor(sf::Color(0, 0, 0, alpha));
+            window.draw(bubble);
+        }
+
         if (mode == AppMode::Playing) {
             if (nearbyNpc >= 0) {
                 const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
@@ -380,6 +501,50 @@ int main() {
                             static_cast<float>(window.getSize().y) * 0.5f);
             dot.setFillColor(sf::Color(255, 255, 255, 200));
             window.draw(dot);
+
+            // HUD — health bar bottom-left.
+            const float W = static_cast<float>(window.getSize().x);
+            const float H = static_cast<float>(window.getSize().y);
+            const float hpRatio = static_cast<float>(world.player().hp) /
+                                  static_cast<float>(world.player().hpMax);
+            sf::RectangleShape hpBg(sf::Vector2f(160.f, 14.f));
+            hpBg.setPosition(16.f, H - 36.f);
+            hpBg.setFillColor(sf::Color(60, 0, 0, 200));
+            window.draw(hpBg);
+            sf::RectangleShape hpBar(sf::Vector2f(160.f * hpRatio, 14.f));
+            hpBar.setPosition(16.f, H - 36.f);
+            hpBar.setFillColor(sf::Color(220, 30, 30, 230));
+            window.draw(hpBar);
+            sf::Text hpText("HP: " + std::to_string(world.player().hp) + "/" +
+                            std::to_string(world.player().hpMax), font, 13);
+            hpText.setPosition(16.f, H - 56.f);
+            hpText.setFillColor(sf::Color::White);
+            window.draw(hpText);
+
+            // HUD — weapon + ammo bottom-right.
+            const WeaponDef& wDef = weaponDef(world.player().weapon);
+            std::string ammoStr = std::string(wDef.name);
+            if (wDef.ammoMax > 0) {
+                ammoStr += "  " + std::to_string(world.player().currentAmmo()) +
+                           "/" + std::to_string(wDef.ammoMax);
+            }
+            sf::Text wText(ammoStr, font, 16);
+            const sf::FloatRect wBounds = wText.getLocalBounds();
+            wText.setPosition(W - wBounds.width - 16.f, H - 48.f);
+            wText.setFillColor(sf::Color::White);
+            wText.setOutlineThickness(1.5f);
+            wText.setOutlineColor(sf::Color(0, 0, 0, 180));
+            window.draw(wText);
+        } else if (mode == AppMode::Dead) {
+            // Full-screen dark red overlay with death message.
+            sf::RectangleShape overlay(sf::Vector2f(static_cast<float>(window.getSize().x),
+                                                     static_cast<float>(window.getSize().y)));
+            overlay.setFillColor(sf::Color(80, 0, 0, 180));
+            window.draw(overlay);
+            drawCenteredHudText(window, font, "You Died", 64,
+                                static_cast<float>(window.getSize().y) * 0.38f);
+            drawCenteredHudText(window, font, "[Space] Restart", 24,
+                                static_cast<float>(window.getSize().y) * 0.58f);
         } else if (mode == AppMode::Dialogue) {
             sf::RectangleShape dim(sf::Vector2f(static_cast<float>(window.getSize().x),
                                                 static_cast<float>(window.getSize().y)));

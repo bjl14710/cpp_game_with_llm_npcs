@@ -35,12 +35,6 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
 }
 
 void Npc::takeDamage(int amount) {
-    // TODO(combat): implement full state-machine transitions
-    // Rules:
-    //   - No-op if already Dead.
-    //   - Clamp hp to [0, hpMax_].
-    //   - Armed NPC → Hostile; unarmed NPC → Fleeing.
-    //   - hp == 0 → Dead regardless of armed status.
     if (state_ == NpcState::Dead) return;
     hp_ -= amount;
     if (hp_ <= 0) {

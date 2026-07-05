@@ -343,6 +343,96 @@ void Renderer3D::drawNpc(const NpcVisual& npc) {
     glPopMatrix();
 }
 
+void Renderer3D::drawWeaponOverlay(const sf::RenderWindow& window, WeaponKind weapon,
+                                    float animFraction) {
+    const float W = static_cast<float>(window.getSize().x);
+    const float H = static_cast<float>(window.getSize().y);
+
+    // Switch to an orthographic screen-space projection.
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, W, H, 0.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+
+    // animFraction drives a small kick: up-left for fist, right-down for recoil.
+    const float kickX = (weapon == WeaponKind::Fist) ? -animFraction * 18.f
+                                                      :  animFraction * 12.f;
+    const float kickY = (weapon == WeaponKind::Fist) ? -animFraction * 14.f
+                                                      :  animFraction * 20.f;
+
+    // Anchor in the bottom-right quadrant.
+    const float ax = W * 0.72f + kickX;
+    const float ay = H * 0.55f + kickY;
+
+    if (weapon == WeaponKind::Fist) {
+        // Forearm — skin-colored rectangle.
+        glColor3f(0.80f, 0.62f, 0.47f);
+        glBegin(GL_QUADS);
+        glVertex2f(ax + 30.f, ay);
+        glVertex2f(ax + 95.f, ay);
+        glVertex2f(ax + 95.f, ay + 160.f);
+        glVertex2f(ax + 30.f, ay + 160.f);
+        glEnd();
+        // Fist knuckle box.
+        glColor3f(0.72f, 0.52f, 0.38f);
+        glBegin(GL_QUADS);
+        glVertex2f(ax,        ay - 10.f);
+        glVertex2f(ax + 100.f, ay - 10.f);
+        glVertex2f(ax + 100.f, ay + 50.f);
+        glVertex2f(ax,        ay + 50.f);
+        glEnd();
+        // Shirt cuff — dark blue strip.
+        glColor3f(0.12f, 0.16f, 0.30f);
+        glBegin(GL_QUADS);
+        glVertex2f(ax + 22.f, ay + 130.f);
+        glVertex2f(ax + 103.f, ay + 130.f);
+        glVertex2f(ax + 103.f, ay + 170.f);
+        glVertex2f(ax + 22.f, ay + 170.f);
+        glEnd();
+    } else {
+        // Grip — dark gray.
+        glColor3f(0.20f, 0.20f, 0.20f);
+        glBegin(GL_QUADS);
+        glVertex2f(ax + 40.f, ay + 50.f);
+        glVertex2f(ax + 70.f, ay + 50.f);
+        glVertex2f(ax + 60.f, ay + 160.f);
+        glVertex2f(ax + 30.f, ay + 160.f);
+        glEnd();
+        // Slide / barrel — medium gray box.
+        glColor3f(0.38f, 0.38f, 0.38f);
+        glBegin(GL_QUADS);
+        glVertex2f(ax,         ay);
+        glVertex2f(ax + 120.f, ay);
+        glVertex2f(ax + 120.f, ay + 55.f);
+        glVertex2f(ax,         ay + 55.f);
+        glEnd();
+        // Barrel end — slightly lighter nub.
+        glColor3f(0.50f, 0.50f, 0.50f);
+        glBegin(GL_QUADS);
+        glVertex2f(ax,        ay + 14.f);
+        glVertex2f(ax - 18.f, ay + 14.f);
+        glVertex2f(ax - 18.f, ay + 40.f);
+        glVertex2f(ax,        ay + 40.f);
+        glEnd();
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_TEXTURE_2D);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
 bool Renderer3D::worldToScreen(const Vec3& world, const sf::RenderWindow& window, sf::Vector2f& out) const {
     const Vec3 rel = world - eye_;
     const float zCam = dot(forward_, rel);
