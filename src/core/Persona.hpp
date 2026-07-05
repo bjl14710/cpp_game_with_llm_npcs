@@ -16,6 +16,7 @@ struct Persona {
     std::string knowledgeBoundary;    // what they do / do not know
     std::string extraDirectives;      // free-form constraints
     bool police = false;              // may arrest; others can only call police
+    bool armed = false;               // carries a weapon; retaliates when attacked
 
     // Renders the system prompt with a persisted first-person memory from
     // earlier sessions woven in, so the NPC picks up where things left off.

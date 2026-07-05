@@ -29,6 +29,7 @@ struct CharacterVisual {
     int variantSeed = 0;      // stable id → model/tint pick (NPC index, 1000+playerId)
     bool police = false;      // uniforms: police always get the Knight model
     bool walking = false;     // switches idle/walk animation clips
+    bool dead = false;        // collapsed: death pose overrides all clips
     float gesturePhase = 0.f; // seconds into wave/raise-hand; 0 = none
     NpcFace face = NpcFace::Neutral;
 };

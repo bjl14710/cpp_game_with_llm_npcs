@@ -90,6 +90,10 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                 // Grants the arrest action; everyone else can only summon
                 // the police. Accepts true/yes/1 (anything else is false).
                 result.value.persona.police = (val == "true" || val == "yes" || val == "1");
+            } else if (key == "armed") {
+                // Carries a weapon: retaliates (turns Hostile) when attacked
+                // instead of fleeing. Same true/yes/1 convention.
+                result.value.persona.armed = (val == "true" || val == "yes" || val == "1");
             } else {
                 result.error = id + ": unknown header key '" + key + "'";
                 return result;

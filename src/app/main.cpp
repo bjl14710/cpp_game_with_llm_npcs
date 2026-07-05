@@ -18,6 +18,7 @@
 
 #include "Assets.hpp"
 #include "City.hpp"
+#include "CombatEvents.hpp"
 #include "Config.hpp"
 #include "ConversationStore.hpp"
 #include "DialogUI.hpp"
@@ -33,6 +34,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "RaylibRenderer.hpp"
+#include "Weapon.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -51,13 +53,20 @@ constexpr float kMaxPitchDeg = 75.f;
 constexpr float kJailSeconds = 10.f;
 
 // What the main loop is currently showing.
-enum class AppMode { Playing, Dialogue, Menu };
+enum class AppMode { Playing, Dialogue, Menu, Dead };
 
 // First-person pose; position is the FEET on the ground plane (y = 0).
 struct LocalPlayer {
     Vec3 position{0.f, 0.f, 24.f};  // plaza south edge
     float yawDeg = 0.f;
     float pitchDeg = 0.f;
+};
+
+// A short in-world text line above an NPC's head, spawned by combat events.
+struct CombatCallout {
+    int npcIndex = -1;
+    std::string text;
+    float ttl = 3.f;  // seconds before it fades
 };
 
 // Walks up from the working directory until config/llm.cfg is found so the
@@ -300,6 +309,10 @@ int main(int argc, char** argv) {
     DisableCursor();
 
     int nearbyNpc = -1;
+    // Combat presentation state.
+    std::vector<CombatCallout> callouts;
+    float hurtFlash = 0.f;  // seconds of red vignette after being shot
+
     // Arrest bookkeeping: catch fires once per latch (see hasCaughtPlayer).
     float jailSecondsLeft = 0.f;
     std::vector<bool> wasCaught(world.npcs().size(), false);
@@ -340,6 +353,16 @@ int main(int argc, char** argv) {
                 player.position = world.city().resolveMovement(player.position, target, kPlayerRadius);
             }
 
+            // Combat input (solo/host only — combat is host-authoritative
+            // and not replicated to guests yet).
+            if (!joined && jailSecondsLeft <= 0.f) {
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    world.playerAttack(flatForward(player.yawDeg));
+                }
+                if (IsKeyPressed(KEY_ONE)) world.playerSwitchWeapon(WeaponKind::Fist);
+                if (IsKeyPressed(KEY_TWO)) world.playerSwitchWeapon(WeaponKind::Pistol);
+            }
+
             const bool menuKey =
                 isActionJustPressed(bindings, Action::OpenMenu) || IsKeyPressed(KEY_ESCAPE);
             if (menuKey) {
@@ -347,7 +370,9 @@ int main(int argc, char** argv) {
                 mode = AppMode::Menu;
                 EnableCursor();
             } else if (isActionJustPressed(bindings, Action::Talk) && nearbyNpc >= 0 &&
-                       nearbyNpc < static_cast<int>(world.npcs().size())) {
+                       nearbyNpc < static_cast<int>(world.npcs().size()) &&
+                       world.npcs()[static_cast<std::size_t>(nearbyNpc)].combatState() ==
+                           NpcState::Idle) {
                 session.open(nearbyNpc);
                 Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
                 if (joined) {
@@ -396,6 +421,16 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+        } else if (mode == AppMode::Dead) {
+            if (IsKeyPressed(KEY_ENTER)) {
+                // Respawn: full health at the spawn point; surviving NPCs
+                // stand down (the dead stay dead).
+                world.player().hp = world.player().hpMax;
+                player.position = Vec3{0.f, 0.f, 24.f};
+                for (Npc& npc : world.npcs()) npc.calmDown();
+                mode = AppMode::Playing;
+                DisableCursor();
+            }
         } else {  // Menu
             switch (menu.update(dt)) {
                 case MenuResult::Resume:
@@ -413,7 +448,13 @@ int main(int argc, char** argv) {
         // NPC behaviors keep running during dialogue, freeze in the menu;
         // joined clients never simulate (the host's snapshots are truth).
         if (mode != AppMode::Menu && !joined) {
-            for (Npc& npc : world.npcs()) npc.update(dt, player.position, world.city());
+            for (Npc& npc : world.npcs()) {
+                // Combat movement (flee/hostile/dead) owns non-Idle NPCs;
+                // conversational behaviors would fight it.
+                if (npc.combatState() == NpcState::Idle) {
+                    npc.update(dt, player.position, world.city());
+                }
+            }
         }
 
         // The moment an officer catches the player: short stay at the station.
@@ -437,6 +478,32 @@ int main(int argc, char** argv) {
             }
             wasCaught[i] = npc.hasCaughtPlayer();
         }
+
+        // ---- combat simulation (solo/host; guests replicate later) ----
+        if (mode != AppMode::Menu && mode != AppMode::Dead && !joined) {
+            world.player().position = player.position;
+            const CombatFrameResult combat = world.updateCombat(dt);
+            for (const auto& hit : combat.npcsDamaged) {
+                const Npc& npc = world.npcs()[hit.npcIndex];
+                callouts.push_back({static_cast<int>(hit.npcIndex),
+                                    hit.killedByHit
+                                        ? npc.persona().name + " collapses!"
+                                        : (npc.isArmed() ? "You'll regret that!" : "Ow! Help!"),
+                                    3.f});
+            }
+            for (const auto& shot : combat.npcShots) {
+                if (shot.landed) hurtFlash = 0.35f;
+            }
+            if (world.player().hp <= 0 && mode != AppMode::Dead) {
+                mode = AppMode::Dead;
+                EnableCursor();
+            }
+        }
+        for (auto& callout : callouts) callout.ttl -= dt;
+        callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
+                                      [](const CombatCallout& c) { return c.ttl <= 0.f; }),
+                       callouts.end());
+        if (hurtFlash > 0.f) hurtFlash -= dt;
 
         // ---- multiplayer per-frame traffic ----
         if (netServer) {
@@ -634,6 +701,7 @@ int main(int argc, char** argv) {
                 npcLastPos[i] = npc.position();
                 if (npc.pose() != NpcAction::None) visual.gesturePhase = npc.gesturePhase();
                 visual.face = faceForMood(npc.mood());
+                visual.dead = npc.combatState() == NpcState::Dead;
                 if (smokeRun) visual.face = static_cast<NpcFace>(i % 6);
                 renderer.drawCharacter(visual);
             }
@@ -674,6 +742,17 @@ int main(int argc, char** argv) {
             plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
         }
 
+        // Combat callouts float above their NPC like temporary nameplates.
+        for (const auto& callout : callouts) {
+            if (callout.npcIndex < 0 ||
+                callout.npcIndex >= static_cast<int>(world.npcs().size())) continue;
+            const Npc& npc = world.npcs()[static_cast<std::size_t>(callout.npcIndex)];
+            Vector2 screen;
+            if (renderer.worldToScreen(npc.position() + Vec3{0.f, 2.6f, 0.f}, screen)) {
+                drawNameplate(callout.text, screen, Color{255, 200, 120, 255});
+            }
+        }
+
         if (mode == AppMode::Playing) {
             if (nearbyNpc >= 0 && nearbyNpc < static_cast<int>(world.npcs().size())) {
                 const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
@@ -689,6 +768,31 @@ int main(int argc, char** argv) {
             }
             DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 2.f,
                        Color{255, 255, 255, 200});
+            // Weapon + health HUD (bottom-left), solo/host only.
+            if (!joined) {
+                const Player& p = world.player();
+                const WeaponDef& def = weaponDef(p.weapon);
+                std::string weaponLine = std::string("[1/2] ") + def.name;
+                if (def.ammoMax > 0) {
+                    const auto it = p.ammo.find(static_cast<std::uint8_t>(p.weapon));
+                    weaponLine += "  ammo " +
+                                  std::to_string(it != p.ammo.end() ? it->second : 0);
+                }
+                DrawText(weaponLine.c_str(), 24, GetScreenHeight() - 64, 18, RAYWHITE);
+                DrawRectangle(24, GetScreenHeight() - 40, 180, 14, Color{40, 20, 20, 220});
+                DrawRectangle(24, GetScreenHeight() - 40,
+                              static_cast<int>(180.f * static_cast<float>(p.hp) /
+                                               static_cast<float>(p.hpMax)),
+                              14, Color{200, 60, 60, 255});
+            }
+        } else if (mode == AppMode::Dead) {
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{40, 8, 8, 200});
+            const char* headline = "You died.";
+            DrawText(headline, (GetScreenWidth() - MeasureText(headline, 44)) / 2,
+                     GetScreenHeight() / 2 - 48, 44, RAYWHITE);
+            const char* hint = "Press Enter to wake up at the plaza.";
+            DrawText(hint, (GetScreenWidth() - MeasureText(hint, 20)) / 2,
+                     GetScreenHeight() / 2 + 12, 20, Color{220, 200, 200, 255});
         } else if (mode == AppMode::Dialogue) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
             dialog.render();
@@ -696,6 +800,11 @@ int main(int argc, char** argv) {
             menu.render();
         }
 
+        if (hurtFlash > 0.f) {
+            const auto alpha = static_cast<unsigned char>(180.f * (hurtFlash / 0.35f));
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(),
+                          Color{200, 30, 30, alpha});
+        }
         if (!assets.loaded()) {
             DrawText("Asset packs missing - run tools/fetch_assets.sh for the full look", 24,
                      GetScreenHeight() - 40, 18, Color{255, 225, 130, 255});

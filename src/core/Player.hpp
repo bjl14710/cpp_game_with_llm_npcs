@@ -1,0 +1,54 @@
+#pragma once
+
+#include <unordered_map>
+#include <cstdint>
+
+#include "Math.hpp"
+#include "Weapon.hpp"
+
+namespace llm_npc {
+
+// All mutable state for the human player. Owned by World so combat logic
+// in World::updateCombat can read and write it without touching main.cpp.
+// main.cpp syncs camera.position FROM player.position each frame.
+struct Player {
+    // World-space feet position. main.cpp writes this from camera movement;
+    // combat reads it for hit detection.
+    Vec3 position{};
+
+    // Hit points. 0 means dead → game over.
+    int hp     = 100;
+    int hpMax  = 100;
+
+    // Currently equipped weapon. Switch via world.playerSwitchWeapon().
+    WeaponKind weapon = WeaponKind::Fist;
+
+    // Ammo remaining per weapon kind. Melee weapons (Fist) are not tracked
+    // here — use weaponDef(k).ammoMax == 0 to detect melee.
+    std::unordered_map<std::uint8_t, int> ammo;
+
+    // Constructor initialises ranged ammo from the weapon definitions table.
+    Player() {
+        ammo[static_cast<std::uint8_t>(WeaponKind::Pistol)] =
+            weaponDef(WeaponKind::Pistol).ammoMax;
+    }
+
+    // Seconds remaining before the player can attack again.
+    float attackCooldown = 0.f;
+
+    // 0→1 fraction used to drive the weapon swing/recoil animation.
+    // Increments to 1 on attack, decays back to 0 over ~0.15 s.
+    float attackAnimFraction = 0.f;
+
+    bool alive() const { return hp > 0; }
+
+    // Returns current ammo for the equipped ranged weapon; -1 for melee.
+    int currentAmmo() const {
+        const auto& def = weaponDef(weapon);
+        if (def.ammoMax == 0) return -1;
+        const auto it = ammo.find(static_cast<std::uint8_t>(weapon));
+        return it != ammo.end() ? it->second : 0;
+    }
+};
+
+}  // namespace llm_npc

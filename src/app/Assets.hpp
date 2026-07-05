@@ -34,6 +34,24 @@ class Assets {
     // the "run tools/fetch_assets.sh" notice and primitives are drawn.
     bool loaded() const { return loaded_; }
 
+    // How an entity's model maps into world space — the size CONTRACT that
+    // makes relative scale independent of any specific asset's native
+    // dimensions (swap the art pack, keep the sizes):
+    //   Fill    — stretch to the collision AABB exactly (buildings: the
+    //             visual must occupy its whole footprint).
+    //   Uniform — scale uniformly to `worldHeight`, grounded and centered on
+    //             the footprint (vehicles/props: proportions are part of the
+    //             asset's identity; the AABB stays collision-only).
+    struct SizeSpec {
+        enum class Mode { Fill, Uniform };
+        Mode mode = Mode::Fill;
+        float worldHeight = 0.f;  // Uniform only; Fill takes the AABB height
+    };
+
+    // The size contract for a building/prop entity, by id. Unlisted ids
+    // default to Fill (dense city blocks must fill their footprints).
+    const SizeSpec& sizeSpecFor(const Building& building) const;
+
     // Model for a building; named spots (bakery, police, ...) get curated
     // picks, filler rotates through the generic buildings by id hash.
     // nullptr → caller draws the fallback cube.
@@ -52,6 +70,7 @@ class Assets {
         int idle = -1;     // "Idle"
         int walk = -1;     // "Walking_A"
         int gesture = -1;  // "Cheer" — stands in for wave/raise-hand
+        int death = -1;    // "Death_A_Pose" — collapsed on the ground
     };
 
     // Character for a stable variant seed; police always get the Knight (the
@@ -83,6 +102,11 @@ class Assets {
 
     // Building id → curated model stem for the hand-picked landmarks.
     std::unordered_map<std::string, std::string> curated_;
+
+    // Entity id → size contract for everything that must NOT stretch to its
+    // collision box (vehicles, street furniture). One table, no per-asset
+    // scale constants anywhere else.
+    std::unordered_map<std::string, SizeSpec> sizeSpecs_;
 
     // Stems of the generic building pool used for filler blocks.
     std::vector<std::string> genericBuildings_;
