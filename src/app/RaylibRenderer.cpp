@@ -141,9 +141,11 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
         return;
     }
 
-    // Pick the clip: gestures interrupt, then walk/idle by movement.
+    // Pick the clip: death overrides everything, gestures interrupt,
+    // then walk/idle by movement.
     int clip = visual.walking ? character->walk : character->idle;
     if (visual.gesturePhase > 0.f && character->gesture >= 0) clip = character->gesture;
+    if (visual.dead && character->death >= 0) clip = character->death;
 
     AnimState& state = anim_[visual.variantSeed];
     if (state.clip != clip) {
@@ -174,7 +176,8 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
 
     // Non-neutral moods float as an emote above the head — the same six
     // procedural faces the legacy renderer painted on, now billboarded.
-    if (visual.face != NpcFace::Neutral) {
+    // The dead don't emote.
+    if (!visual.dead && visual.face != NpcFace::Neutral) {
         DrawBillboard(camera_, assets_.faceTexture(visual.face),
                       Vector3{visual.position.x, 2.45f, visual.position.z}, 0.55f,
                       WHITE);

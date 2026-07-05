@@ -70,6 +70,7 @@ class Assets {
         int idle = -1;     // "Idle"
         int walk = -1;     // "Walking_A"
         int gesture = -1;  // "Cheer" — stands in for wave/raise-hand
+        int death = -1;    // "Death_A_Pose" — collapsed on the ground
     };
 
     // Character for a stable variant seed; police always get the Knight (the

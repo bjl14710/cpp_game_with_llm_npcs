@@ -126,6 +126,7 @@ void Assets::loadCharacter(const std::string& stem) {
         if (name == "Idle") character.idle = i;
         else if (name == "Walking_A") character.walk = i;
         else if (name == "Cheer") character.gesture = i;
+        else if (name == "Death_A_Pose") character.death = i;
     }
     if (stem == "Knight") knightIndex_ = static_cast<int>(characters_.size());
     characters_.push_back(character);
