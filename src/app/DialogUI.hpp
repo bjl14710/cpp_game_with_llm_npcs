@@ -1,7 +1,5 @@
 #pragma once
 
-#include <SFML/Graphics.hpp>
-
 #include <deque>
 #include <string>
 
@@ -15,24 +13,29 @@ struct TranscriptLine {
     std::string text;
 };
 
-// Minimal dialog box: scrolling transcript on top, single-line input at bottom,
-// a "thinking..." indicator, and an in-progress streamed NPC line that grows
-// word by word. Pure rendering + key handling — owns no LLM/Npc state.
+// Minimal dialog box: scrolling transcript on top, single-line input at
+// bottom, a "thinking..." indicator, and an in-progress streamed NPC line
+// that grows word by word. Pure rendering + input handling — owns no
+// LLM/Npc state. raylib is polled per frame, so instead of the SFML event
+// hook this exposes pollInput(), called once per frame while the dialog is
+// open.
 class DialogUI {
    public:
-    explicit DialogUI(const sf::Font& font);
+    DialogUI() = default;
 
-    // Returns the player's submitted text and clears the input. Empty string
-    // means nothing was submitted this frame.
-    std::string handleEvent(const sf::Event& event);
+    // Reads this frame's typed characters/backspace/enter into the input
+    // line. Returns the submitted text when Enter was pressed (and clears
+    // the input); empty string otherwise.
+    std::string pollInput();
 
     void appendLine(TranscriptLine line);
     void setThinking(bool thinking, const std::string& speaker = {});
     void setInputEnabled(bool enabled);
 
-    // Ignore the next TextEntered event. Call when a key press opens this
-    // dialog so that the key's character doesn't leak into the input box.
-    void swallowNextTextEntered();
+    // Ignore any characters already pending this frame. Call when a key
+    // press opens this dialog so the talk key's character doesn't leak into
+    // the input box.
+    void swallowPendingText();
 
     // Starts an in-progress streamed reply from `speaker`; shown live at the
     // bottom of the transcript until endStreaming().
@@ -48,16 +51,16 @@ class DialogUI {
     // Clears transcript, input, and streaming state for a fresh conversation.
     void reset();
 
-    void render(sf::RenderTarget& target) const;
+    // Draws the transcript + input box sized to the current window.
+    void render() const;
 
    private:
-    const sf::Font& font_;
     std::deque<TranscriptLine> transcript_;
     std::string input_;
     bool thinking_ = false;
     std::string thinkingSpeaker_;
     bool inputEnabled_ = true;
-    bool swallowNext_ = false;
+    bool swallowThisFrame_ = false;
     bool streaming_ = false;
     std::string streamingSpeaker_;
     std::string streamingText_;
