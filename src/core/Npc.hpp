@@ -99,6 +99,13 @@ class Npc {
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
 
+    // Persisted memory from earlier sessions, injected into every system
+    // prompt this NPC sends (Persona::renderSystemPrompt(memory)). Loaded
+    // from the ConversationStore at startup and refreshed after each
+    // summarization.
+    void setMemory(std::string summary) { memory_ = std::move(summary); }
+    const std::string& memory() const { return memory_; }
+
    private:
     Persona persona_;
     LlmClient& client_;
@@ -106,6 +113,7 @@ class Npc {
     std::vector<ChatTurn> history_;
     std::uint64_t pendingId_ = 0;
     std::string pendingUserLine_;
+    std::string memory_;  // persisted cross-session summary (may be empty)
 
     Vec3 position_{};
     float facingDeg_ = 0.f;

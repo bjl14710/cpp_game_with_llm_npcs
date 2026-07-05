@@ -20,6 +20,11 @@ TEST_SRCS := $(wildcard test_*.cpp)
 CORE_OBJS := $(patsubst ../src/core/%.cpp,$(BUILD)/core_%.o,$(CORE_SRCS))
 TEST_OBJS := $(patsubst %.cpp,$(BUILD)/%.o,$(TEST_SRCS))
 
+# Vendored C sources (SQLite amalgamation) — compiled with the C compiler,
+# without the C++ warning flags.
+CC        ?= cc
+SQLITE_OBJ := $(BUILD)/ext_sqlite3.o
+
 .PHONY: test build clean
 
 test: $(TARGET)
@@ -27,8 +32,11 @@ test: $(TARGET)
 
 build: $(TARGET)
 
-$(TARGET): $(CORE_OBJS) $(TEST_OBJS)
+$(TARGET): $(CORE_OBJS) $(TEST_OBJS) $(SQLITE_OBJ)
 	$(CXX) $(CXXFLAGS) $^ -o $@
+
+$(SQLITE_OBJ): ../external/sqlite3.c | $(BUILD)
+	$(CC) -O1 -c $< -o $@
 
 # -MMD -MP emits .d header-dependency files next to each object so editing a
 # header (e.g. changing the Npc class layout) recompiles every dependent

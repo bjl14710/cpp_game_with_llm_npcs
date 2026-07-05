@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(cpp_game_with_llm_npcs LANGUAGES CXX)
+# C is for the vendored SQLite amalgamation (external/sqlite3.c).
+project(cpp_game_with_llm_npcs LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,8 +23,10 @@ FetchContent_MakeAvailable(raylib)
 
 # Core: rendering-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
+    external/sqlite3.c
     src/core/City.cpp
     src/core/Config.cpp
+    src/core/ConversationStore.cpp
     src/core/DialogueSession.cpp
     src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
@@ -66,3 +69,8 @@ target_link_libraries(cpp_game_with_llm_npcs
         llm_npc_core
         raylib
 )
+
+# Prints a persona's exact system prompt — feeds the model benchmark
+# (tools/bench_npc_models.py) from the same code path the game uses.
+add_executable(persona_prompt tools/persona_prompt.cpp)
+target_link_libraries(persona_prompt PRIVATE llm_npc_core)

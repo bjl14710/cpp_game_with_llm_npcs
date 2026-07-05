@@ -19,6 +19,7 @@
 #include "Assets.hpp"
 #include "City.hpp"
 #include "Config.hpp"
+#include "ConversationStore.hpp"
 #include "DialogUI.hpp"
 #include "DialogueSession.hpp"
 #include "HostChatRouter.hpp"
@@ -171,6 +172,46 @@ int main(int argc, char** argv) {
         world.addNpc(std::move(npc));
     }
     std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs\n";
+
+    // Cross-session NPC memory: summaries persist in saves/ and are injected
+    // into each NPC's system prompt (plan: npc-memory-and-model).
+    ConversationStore memoryStore(projectRoot / "saves" / "conversations.sqlite3");
+    for (Npc& npc : world.npcs()) {
+        const NpcMemory memory = memoryStore.load(npc.persona().name);
+        if (!memory.summary.empty()) npc.setMemory(memory.summary);
+    }
+    // History length at the last save, per NPC — new turns above this mark
+    // trigger a summarization request when the conversation closes.
+    std::vector<std::size_t> savedTurns(world.npcs().size(), 0);
+    // In-flight summary request id → NPC index it belongs to.
+    std::unordered_map<std::uint64_t, int> summaryRoutes;
+
+    // Asks the NPC's own model to update its first-person memory note.
+    const auto requestSummary = [&](int npcIndex) {
+        if (npcIndex < 0 || npcIndex >= static_cast<int>(world.npcs().size())) return;
+        Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+        if (npc.history().size() <= savedTurns[static_cast<std::size_t>(npcIndex)]) return;
+        std::string transcript;
+        for (const auto& turn : npc.history()) {
+            transcript += (turn.role == "user" ? "Player: " : npc.persona().name + ": ");
+            transcript += turn.content + "\n";
+        }
+        std::string request =
+            "You are " + npc.persona().name + ". Here is your conversation with the "
+            "player so far:\n" + transcript;
+        if (!npc.memory().empty()) {
+            request += "You previously remembered: " + npc.memory() + "\n";
+        }
+        request +=
+            "In at most 3 sentences, first person, write the updated note you keep "
+            "about this player: who they are, what happened, anything to remember "
+            "next time. Reply with the note only.";
+        const std::uint64_t id = client.submit(
+            "You write concise first-person memory notes for a game character. "
+            "No preamble, no directives, just the note.",
+            {}, std::move(request));
+        summaryRoutes[id] = npcIndex;
+    };
 
     SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_MSAA_4X_HINT);
     InitWindow(1280, 720, "LLM NPC City");
@@ -325,6 +366,9 @@ int main(int argc, char** argv) {
             }
         } else if (mode == AppMode::Dialogue) {
             if (IsKeyPressed(KEY_ESCAPE)) {
+                // Leaving a conversation kicks off the NPC's memory update
+                // (solo/host only — a guest's conversations live host-side).
+                if (!joined) requestSummary(session.npcIndex());
                 session.close();
                 dialog.endStreaming();
                 mode = AppMode::Playing;
@@ -384,6 +428,7 @@ int main(int argc, char** argv) {
                 }
                 npc.commandReturnHome();
                 if (mode == AppMode::Dialogue) {  // hauled off mid-sentence
+                    if (!joined) requestSummary(session.npcIndex());
                     session.close();
                     dialog.endStreaming();
                     mode = AppMode::Playing;
@@ -498,6 +543,20 @@ int main(int argc, char** argv) {
         }
         for (const auto& reply : client.drainReplies()) {
             if (chatRouter && chatRouter->routeReply(reply)) continue;
+            // Summary notes: remember + persist, never shown in a dialog.
+            if (const auto summary = summaryRoutes.find(reply.id);
+                summary != summaryRoutes.end()) {
+                const int npcIndex = summary->second;
+                summaryRoutes.erase(summary);
+                if (reply.ok) {
+                    Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+                    npc.setMemory(reply.content);
+                    if (memoryStore.save(npc.persona().name, npc.memory(), npc.history())) {
+                        savedTurns[static_cast<std::size_t>(npcIndex)] = npc.history().size();
+                    }
+                }  // failure: keep the old note; retry at the next close
+                continue;
+            }
             const auto route = pendingRoutes.find(reply.id);
             if (route == pendingRoutes.end()) continue;
             const int npcIndex = route->second;
@@ -648,6 +707,16 @@ int main(int argc, char** argv) {
     }
 
 shutdown:
+    // Transcripts with unsaved turns persist on quit; their summary refresh
+    // happens at the next conversation close (summarizing here would block
+    // shutdown on the LLM).
+    for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+        const Npc& npc = world.npcs()[i];
+        if (npc.history().size() > savedTurns[i]) {
+            memoryStore.save(npc.persona().name, npc.memory(), npc.history());
+        }
+    }
+
     leaveSession();
     CloseWindow();
     return 0;
