@@ -4,47 +4,75 @@
 # (assets/models and assets/fonts are gitignored — see assets/LICENSES.md
 # for what each pack is and its license statement).
 #
-# Plan: .claude/plans/raylib-visual-overhaul.md (step 3).
+# Packs are pinned to immutable GitHub commit-archive URLs with sha256
+# verification, so a fresh clone always gets byte-identical assets.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS="$ROOT/assets/models"
-FONTS="$ROOT/assets/fonts"
-mkdir -p "$MODELS" "$FONTS"
+mkdir -p "$MODELS"
 
-# TODO(implement, step 3): pin exact pack versions + URLs when choosing the
-# final packs in-scene, and record a sha256 per archive. Candidate sources
-# (all CC0 — verify the license file inside each download):
-#   Kenney City Kit (Commercial / Suburban / Roads)  https://kenney.nl/assets
-#   KayKit City Builder Bits + Adventurers characters https://kaylousberg.itch.io
-#   Quaternius Ultimate Modular Buildings / Characters https://quaternius.com
-#   Kenney fonts (UI font)                            https://kenney.nl/assets/kenney-fonts
-#
-# Shape of each entry once pinned:
-#   fetch "kenney-city-kit-commercial" \
-#         "https://kenney.nl/media/pages/assets/city-kit-commercial/<hash>/kenney_city-kit-commercial.zip" \
-#         "<sha256>" "$MODELS/city-commercial"
+# KayKit City Builder Bits 1.0 (CC0) — buildings, roads, cars, props.
+CITY_SHA_COMMIT="63976910ca04d16f0fc531b9c614244be8128713"
+CITY_URL="https://github.com/KayKit-Game-Assets/KayKit-City-Builder-Bits-1.0/archive/${CITY_SHA_COMMIT}.zip"
+CITY_SHA256="dc101668e104968509740fcad1ed2a12f6123e1a75185f050abeef76dbefd151"
+
+# KayKit Character Pack: Adventures 1.0 (CC0) — 5 rigged characters,
+# ~75 animation clips each (Idle, Walking_A, Cheer, Death_A, ...).
+CHARS_SHA_COMMIT="672074b73ba276876a19e8816ecdc5241817ab47"
+CHARS_URL="https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/archive/${CHARS_SHA_COMMIT}.zip"
+CHARS_SHA256="00777a7b9811a7c7f8dd3fda4e56604f6a93b33673d64557153f354d677b47af"
+
+# Downloads + verifies one archive, then runs the caller-supplied unpack
+# function on the extracted tree.
 fetch() {
-    local name="$1" url="$2" sha="$3" dest="$4"
-    if [ -d "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
+    local name="$1" url="$2" sha="$3" marker="$4" unpack="$5"
+    if [ -e "$marker" ]; then
         echo "[fetch_assets] $name already present — skipping"
         return
     fi
     echo "[fetch_assets] downloading $name"
     local tmp
     tmp="$(mktemp -d)"
-    curl -fL --retry 3 -o "$tmp/pack.zip" "$url" || {
-        echo "[fetch_assets] FAILED: $name — download manually from $url into $dest" >&2
+    trap 'rm -rf "$tmp"' RETURN
+    if ! curl -fL --retry 3 -o "$tmp/pack.zip" "$url"; then
+        echo "[fetch_assets] FAILED downloading $name — get it manually:" >&2
+        echo "  $url" >&2
+        exit 1
+    fi
+    echo "$sha  $tmp/pack.zip" | shasum -a 256 -c - >/dev/null || {
+        echo "[fetch_assets] FAILED: $name checksum mismatch (upstream changed?) — re-pin needed" >&2
         exit 1
     }
-    echo "$sha  $tmp/pack.zip" | shasum -a 256 -c - || {
-        echo "[fetch_assets] FAILED: $name checksum mismatch — the upstream file changed; re-pin" >&2
-        exit 1
-    }
-    mkdir -p "$dest"
-    unzip -q "$tmp/pack.zip" -d "$dest"
-    rm -rf "$tmp"
+    unzip -q "$tmp/pack.zip" -d "$tmp/x"
+    "$unpack" "$tmp/x"
+    echo "[fetch_assets] $name ready"
 }
 
-echo "[fetch_assets] no packs pinned yet — pin them during plan step 3." >&2
-echo "[fetch_assets] the game falls back to primitive shapes until then." >&2
+# City: flatten the gltf dir and co-locate the texture the .gltf files
+# reference by sibling URI (the pack keeps it one directory up).
+unpack_city() {
+    local x="$1"
+    local src
+    src="$(find "$x" -type d -name gltf -path "*city_builder*" | head -1)"
+    mkdir -p "$MODELS/city"
+    cp "$src"/*.gltf "$src"/*.bin "$MODELS/city/"
+    cp "$src/../texture/citybits_texture.png" "$MODELS/city/"
+}
+
+# Characters: the five .glb files are self-contained (embedded buffers,
+# textures, and animations).
+unpack_chars() {
+    local x="$1"
+    local src
+    src="$(find "$x" -type d -path "*Characters/gltf" | head -1)"
+    mkdir -p "$MODELS/characters"
+    cp "$src"/*.glb "$MODELS/characters/"
+}
+
+fetch "KayKit City Builder Bits" "$CITY_URL" "$CITY_SHA256" \
+      "$MODELS/city/citybits_texture.png" unpack_city
+fetch "KayKit Character Pack: Adventures" "$CHARS_URL" "$CHARS_SHA256" \
+      "$MODELS/characters/Knight.glb" unpack_chars
+
+echo "[fetch_assets] all packs present under assets/models/"
