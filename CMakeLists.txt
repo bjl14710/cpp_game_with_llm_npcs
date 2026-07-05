@@ -16,6 +16,7 @@ add_library(llm_npc_core STATIC
     src/core/City.cpp
     src/core/Config.cpp
     src/core/DialogueSession.cpp
+    src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
     src/core/LlmClient.cpp
     src/core/NetClient.cpp
