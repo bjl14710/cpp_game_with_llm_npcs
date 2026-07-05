@@ -51,8 +51,10 @@ endif()
 add_executable(cpp_game_with_llm_npcs
     src/app/main.cpp
     src/app/Assets.cpp
+    src/app/DialogUI.cpp
     src/app/FaceTexture.cpp
     src/app/InputMap.cpp
+    src/app/Menu.cpp
     src/app/RaylibRenderer.cpp
 )
 target_include_directories(cpp_game_with_llm_npcs PRIVATE
