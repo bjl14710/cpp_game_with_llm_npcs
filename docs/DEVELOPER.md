@@ -32,6 +32,12 @@ way: **nothing in `src/core/` may include SFML or OpenGL headers.**
 | `DialogueSession` | Roaming → Talking → WaitingReply → Streaming state machine; routes streamed deltas by request id. |
 | `KeyBindings`     | Action → key-name map with swap-on-conflict rebinding and file persistence. Names are translated to SFML codes only in `src/app/InputMap`. |
 | `Config`          | Tiny key=value reader + `llm.cfg` loader. |
+| `NetMessage`      | Multiplayer wire protocol: type-tagged JSON envelope (`encodeMessage`/`decodeMessage`, nullopt on garbage), `kNetProtocolVersion` handshake constant, pose serialization helpers. |
+| `NetFraming`      | `FrameAssembler`: 4-byte big-endian length prefix + payload over TCP; rejects prefixes over 1 MiB (drop the connection — the stream can't resync). The TCP sibling of `StreamAssembler`. |
+| `NetSocket`       | Header-only winsock/POSIX shims: `sendAll`, recv timeouts, `SO_NOSIGPIPE` on macOS. |
+| `NetServer`       | Authoritative host. Threads: accept → per-connection reader (handshake: version, join code, `kMaxPlayers`) → tick (snapshot broadcast + connection reaping). Its threads touch only sockets and queues; the host loop feeds `setHostPose`/`publishNpcPoses` in and drains `drainChatEvents()` out, so `World`/`LlmClient` stay single-threaded. |
+| `NetClient`       | Joining side: `connect` (4s timeout + handshake), reader thread → `poll()` drain on the main loop (the `drainReplies` shape). Never simulates; renders what snapshots say. |
+| `HostChatRouter`  | Host-loop glue routing remote NPC chat: per-NPC queues serialize concurrent askers, deltas/replies return to the requesting player only, `NpcSpeechBubble`/`NpcMoodUpdate` broadcast to all. |
 
 ### App modules
 
@@ -43,8 +49,38 @@ way: **nothing in `src/core/` may include SFML or OpenGL headers.**
   push/pop pair corrupts state.
 - `DialogUI` — chat overlay with live streaming line; `swallowNextTextEntered()`
   keeps the talk key's character out of the input box.
-- `Menu` — mouse-driven pause menu and key rebinding.
+- `Menu` — mouse-driven pause menu, key rebinding, and the Multiplayer
+  host/join page (callbacks injected from `main.cpp` via `MultiplayerHooks`,
+  so the menu never sees networking types).
 - `InputMap` — portable key-name ↔ `sf::Keyboard::Key` table.
+
+### Multiplayer at a glance
+
+One process hosts: its `World` and `LlmClient` stay the single source of
+truth, exactly as in solo play. `NetServer` fans state out at ~12 Hz
+(`WorldSnapshot`: player poses + NPC pose/mood/behavior) and joined clients
+send `PlayerInput` up. Remote NPC chat rides `ChatOpen`/`ChatLine` up and
+`ChatDelta`/`ChatReply` back down to the asker only, with
+`NpcSpeechBubble`/`NpcMoodUpdate` broadcast so bystanders see effects.
+
+Wire format: every frame is `[4-byte big-endian length][JSON object]`, and
+every JSON object carries a `"type"` tag. Bump `kNetProtocolVersion`
+(NetMessage.hpp) whenever the format changes incompatibly — the handshake
+refuses mismatched builds instead of desyncing.
+
+Thread rule that keeps this safe: **no NetServer/NetClient thread ever
+touches `World`, `Npc`, or `LlmClient`.** Game state crosses the boundary
+only through value snapshots (`publishNpcPoses`) and drained queues
+(`drainChatEvents`, `poll`), all pumped by the host/client main loop.
+`tests/test_net_loopback.cpp` runs the full stack — server, clients, router,
+FakeOllama — over 127.0.0.1 with no real network or Ollama:
+
+```sh
+make -C tests test    # includes framing, protocol, and loopback suites
+```
+
+Both machines should run the same build and the same `personas/` roster
+(clients label NPC nameplates from their local persona files).
 
 ## Building and testing
 

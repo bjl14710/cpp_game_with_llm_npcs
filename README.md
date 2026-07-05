@@ -35,6 +35,34 @@ Powered locally by [Ollama](https://ollama.com) — no cloud, no API key.
 
 Full reference: [docs/CONTROLS.md](docs/CONTROLS.md).
 
+## Multiplayer (2-4 friends)
+
+One player hosts; up to three more walk the same city and talk to the same
+NPCs — one shared brain per character, so the baker remembers what your
+friend told her.
+
+**Hosting:** `Escape` → **Multiplayer** → **Host on port 40605**. Your machine
+runs the world and the LLM; nobody else needs Ollama. Tell your friends your
+IP address (`ipconfig` / `ifconfig`, e.g. `192.168.1.20`).
+
+**Joining:** `Escape` → **Multiplayer** → click the address field, type
+`<host-ip>:40605`, press `Enter`. Connection problems show up right there —
+wrong address, full session (4 players max), or mismatched game versions.
+
+What to expect in a session:
+
+- Everyone sees everyone walk around, plus each NPC's live position and mood.
+- NPC conversations are private to read, public in effect: if your friend
+  angers Officer Brooks, you'll see her scowl.
+- An NPC answers one person at a time; a second question waits its turn.
+- Only the host's world persists — when the host quits, the session ends.
+
+**Beyond your LAN:** the internet can't reach your living room uninvited.
+Either forward TCP port 40605 on the host's router, or skip router config
+entirely with [Tailscale](https://tailscale.com)/ZeroTier (both make a
+private network where your friends use the host's Tailscale IP). The game
+does not do NAT punching itself.
+
 ## Meet the city
 
 Ten residents, each with their own patch of downtown:
