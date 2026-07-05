@@ -7,7 +7,7 @@ namespace llm_npc {
 
 // Tracks the player's conversation with one NPC at a time, including the
 // in-flight LLM request and the partially streamed reply. Pure state machine
-// (no SFML, no networking) so the app layer stays a thin shell:
+// (no rendering, no networking) so the app layer stays a thin shell:
 //
 //   Roaming --open()--> Talking --submitted()--> WaitingReply
 //   WaitingReply --deltaArrived()--> Streaming

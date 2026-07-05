@@ -1,13 +1,13 @@
 @echo off
 REM Windows launcher: double-click to build and play. Mirrors run.ps1 — uses
-REM the MSYS2 UCRT64 toolchain for SFML and checks Ollama is running first.
+REM the MSYS2 UCRT64 toolchain and checks Ollama is running first.
 setlocal
 cd /d "%~dp0"
 
 set "UCRT_BIN=C:\msys64\ucrt64\bin"
 if not exist "%UCRT_BIN%" (
     echo MSYS2 ucrt64 toolchain not found at %UCRT_BIN%.
-    echo Install MSYS2 from https://www.msys2.org and the SFML/cmake packages.
+    echo Install MSYS2 from https://www.msys2.org and the gcc/cmake packages.
     pause
     exit /b 1
 )
