@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "Assets.hpp"
 #include "City.hpp"
 #include "Config.hpp"
 #include "InputMap.hpp"
@@ -24,6 +25,7 @@
 #include "Math.hpp"
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
+#include "RaylibRenderer.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -34,7 +36,6 @@ namespace {
 constexpr float kWalkSpeed = 7.0f;      // units (~meters) per second
 constexpr float kPlayerRadius = 0.45f;  // collision circle on the ground
 constexpr float kTalkRadius = 3.5f;     // how close "press T to talk" works
-constexpr float kEyeHeight = 1.7f;      // camera height above the feet
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 
@@ -43,7 +44,7 @@ enum class AppMode { Playing, Dialogue, Menu };
 
 // First-person pose; position is the FEET on the ground plane (y = 0) so
 // collision and NPC proximity share the legacy convention.
-struct PlayerPose {
+struct LocalPlayer {
     Vec3 position{0.f, 0.f, 24.f};  // plaza south edge
     float yawDeg = 0.f;
     float pitchDeg = 0.f;
@@ -71,25 +72,10 @@ Vec3 flatRight(float yawDeg) {
     return Vec3{-f.z, 0.f, f.x};
 }
 
-// raylib Camera3D for the current pose: eye at head height, target one unit
-// along the view direction (yaw around Y, pitch tilting it).
-Camera3D cameraFor(const PlayerPose& pose) {
-    Camera3D cam{};
-    const float pitchRad = degToRad(pose.pitchDeg);
-    const Vec3 flat = flatForward(pose.yawDeg);
-    const Vec3 dir{flat.x * std::cos(pitchRad), std::sin(pitchRad), flat.z * std::cos(pitchRad)};
-    cam.position = {pose.position.x, pose.position.y + kEyeHeight, pose.position.z};
-    cam.target = {cam.position.x + dir.x, cam.position.y + dir.y, cam.position.z + dir.z};
-    cam.up = {0.f, 1.f, 0.f};
-    cam.fovy = 70.f;
-    cam.projection = CAMERA_PERSPECTIVE;
-    return cam;
-}
-
 // One frame of mouse look from raylib's relative mouse delta (cursor is
 // disabled while playing, so the delta is raw movement — no re-centering,
 // no macOS cursor-disassociation workaround needed anymore).
-void applyMouseLook(PlayerPose& pose) {
+void applyMouseLook(LocalPlayer& pose) {
     const Vector2 delta = GetMouseDelta();
     // Mouse-right lowers yaw: the camera basis is right-handed with yaw
     // increasing toward +X (screen-left) — same derivation as the legacy
@@ -97,28 +83,6 @@ void applyMouseLook(PlayerPose& pose) {
     pose.yawDeg -= delta.x * kMouseSensitivity;
     pose.pitchDeg = clampf(pose.pitchDeg - delta.y * kMouseSensitivity,
                            -kMaxPitchDeg, kMaxPitchDeg);
-}
-
-// Placeholder city drawing until the asset-pack scene (issue #37): flat
-// ground, building boxes at their collision AABBs, NPC marker cylinders.
-void drawPlaceholderWorld(const World& world) {
-    DrawPlane({0.f, 0.f, 0.f},
-              {world.city().halfSize() * 2.f, world.city().halfSize() * 2.f},
-              Color{86, 125, 70, 255});
-    for (const Building& b : world.city().buildings()) {
-        const float w = b.maxX - b.minX;
-        const float d = b.maxZ - b.minZ;
-        const Vector3 center{(b.minX + b.maxX) * 0.5f, b.height * 0.5f,
-                             (b.minZ + b.maxZ) * 0.5f};
-        const unsigned char tint = static_cast<unsigned char>(120 + (b.facadeKind * 37) % 90);
-        DrawCube(center, w, b.height, d, Color{tint, tint, static_cast<unsigned char>(tint + 20), 255});
-        DrawCubeWires(center, w, b.height, d, Color{40, 45, 60, 255});
-    }
-    for (const Npc& npc : world.npcs()) {
-        const Vec3& p = npc.position();
-        DrawCylinder({p.x, 0.f, p.z}, 0.35f, 0.35f, 1.8f, 12, Color{200, 120, 80, 255});
-        DrawCylinderWires({p.x, 0.f, p.z}, 0.35f, 0.35f, 1.8f, 12, Color{60, 30, 20, 255});
-    }
 }
 
 // Dim the frame and center a message — the stand-in for Menu/DialogUI until
@@ -136,10 +100,13 @@ void drawPlaceholderOverlay(const std::string& title, const std::string& hint) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // --frames N: render N frames then exit 0 (scripted smoke runs).
+    // --frames N [shot.png]: render N frames then exit 0, optionally saving
+    // a screenshot of the last frame (scripted smoke runs + visual checks).
     long maxFrames = -1;
+    const char* screenshotPath = nullptr;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
+        if (argc >= 4) screenshotPath = argv[3];
     }
 
     const fs::path projectRoot = findProjectRoot();
@@ -169,10 +136,14 @@ int main(int argc, char** argv) {
     SetTargetFPS(60);
     SetExitKey(KEY_NULL);  // Escape is a game key (menu/back), not app-quit
 
+    // Models need the GL context, so Assets loads after InitWindow.
+    Assets assets((projectRoot / "assets").string());
+    RaylibRenderer renderer(assets);
+
     const Color sky{135, 190, 235, 255};
 
     AppMode mode = AppMode::Playing;
-    PlayerPose player;
+    LocalPlayer player;
     DisableCursor();  // relative mouse for first-person look
 
     int nearbyNpc = -1;
@@ -221,9 +192,20 @@ int main(int argc, char** argv) {
         // ---- render ----
         BeginDrawing();
         ClearBackground(sky);
-        BeginMode3D(cameraFor(player));
-        drawPlaceholderWorld(world);
-        EndMode3D();
+        renderer.beginFrame(CameraPose{player.position, player.yawDeg, player.pitchDeg});
+        renderer.drawCity(world.city());
+        for (const Npc& npc : world.npcs()) {
+            CharacterVisual visual;
+            visual.position = npc.position();
+            visual.facingDeg = npc.facingDeg();
+            renderer.drawCharacter(visual);  // marker until issue #38
+        }
+        renderer.endFrame();
+
+        if (!assets.loaded()) {
+            DrawText("Asset packs missing — run tools/fetch_assets.sh for the full look",
+                     24, GetScreenHeight() - 40, 18, Color{255, 225, 130, 255});
+        }
 
         if (mode == AppMode::Playing) {
             if (nearbyNpc >= 0) {
@@ -247,6 +229,10 @@ int main(int argc, char** argv) {
                                    "Menu arrives with issue #40 — Esc to resume.");
         }
         DrawFPS(24, 24);
+        // Screenshot on the smoke run's final frame, after everything drew.
+        if (screenshotPath && maxFrames >= 0 && frames >= maxFrames) {
+            TakeScreenshot(screenshotPath);
+        }
         EndDrawing();
     }
 
