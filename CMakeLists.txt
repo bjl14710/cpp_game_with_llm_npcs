@@ -11,6 +11,22 @@ find_package(Threads REQUIRED)
 find_package(SFML 2.6 COMPONENTS graphics window system QUIET)
 find_package(OpenGL QUIET)
 
+# ---- raylib migration (plan: .claude/plans/raylib-visual-overhaul.md) ----
+# Step 1 enables this block, REPLACING the SFML/OpenGL find_packages above.
+# The app target then swaps Renderer3D.cpp for RaylibRenderer.cpp,
+# Assets.cpp, and FaceTexture.cpp (skeletons already in src/app/), links
+# `raylib` instead of the sfml-*/OpenGL::GL set, and drops the ApplicationServices
+# framework (raylib owns relative mouse handling).
+#
+# include(FetchContent)
+# FetchContent_Declare(raylib
+#     GIT_REPOSITORY https://github.com/raysan5/raylib.git
+#     GIT_TAG        5.5   # TODO(step 1): confirm/pin the latest stable tag
+# )
+# set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+# FetchContent_MakeAvailable(raylib)
+# --------------------------------------------------------------------------
+
 # Core: SFML-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
     src/core/City.cpp
