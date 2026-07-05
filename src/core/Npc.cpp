@@ -34,6 +34,23 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
     return reply.content;
 }
 
+void Npc::takeDamage(int amount) {
+    // TODO(combat): implement full state-machine transitions
+    // Rules:
+    //   - No-op if already Dead.
+    //   - Clamp hp to [0, hpMax_].
+    //   - Armed NPC → Hostile; unarmed NPC → Fleeing.
+    //   - hp == 0 → Dead regardless of armed status.
+    if (state_ == NpcState::Dead) return;
+    hp_ -= amount;
+    if (hp_ <= 0) {
+        hp_ = 0;
+        state_ = NpcState::Dead;
+        return;
+    }
+    state_ = persona_.armed ? NpcState::Hostile : NpcState::Fleeing;
+}
+
 void Npc::trimHistory() {
     // History is a flat list of role/content turns. Two entries (user +
     // assistant) make one round-trip turn, hence the *2 cap.

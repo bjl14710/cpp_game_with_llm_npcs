@@ -11,6 +11,15 @@
 
 namespace llm_npc {
 
+// Combat state machine for an NPC. Civilians flee when damaged; armed NPCs
+// (cops) turn Hostile and fight back.
+enum class NpcState {
+    Idle,     // standing at spawn point, willing to chat
+    Fleeing,  // moving away from the player at flee speed
+    Hostile,  // armed NPC: moving to preferred range and firing
+    Dead,     // hp reached 0; rendered as collapsed, no further interaction
+};
+
 // An NPC that delegates dialogue to the shared LlmClient. Holds its own persona
 // and a bounded conversation history. Many NPCs can share one LlmClient.
 class Npc {
@@ -35,15 +44,34 @@ class Npc {
         spotId_ = std::move(spotId);
     }
 
-    // World-space feet position.
+    // --- Combat interface ------------------------------------------------
+
+    // Reduces hp by `amount`, clamps to [0, hpMax]. Transitions state:
+    //   - Armed NPC  → Hostile
+    //   - Unarmed NPC → Fleeing
+    //   - hp == 0    → Dead (regardless of armed status)
+    // No-op if already Dead.
+    // TODO(combat): implement in Npc.cpp
+    void takeDamage(int amount);
+
+    // Seconds remaining before this NPC can fire again (armed only).
+    // Decremented by World::updateCombat each frame.
+    // TODO(combat): implement fire cooldown tick in World::updateCombat
+    float fireCooldown = 0.f;
+
+    // Combat state accessors.
+    NpcState    combatState()  const { return state_; }
+    int         hp()           const { return hp_; }
+    bool        isArmed()      const { return persona_.armed; }
+
+    // World-space feet position (writable so combat can move fleeing NPCs).
+    Vec3& position() { return position_; }
+
+    // ---- Read-only accessors --------------------------------------------
+
     const Vec3& position() const { return position_; }
-
-    // Facing direction in degrees; 0 looks toward +Z.
     float facingDeg() const { return facingDeg_; }
-
-    // Id of the building or prop this NPC stands at ("bakery", "bench", ...).
     const std::string& spotId() const { return spotId_; }
-
     const Persona& persona() const { return persona_; }
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
@@ -59,6 +87,11 @@ class Npc {
     Vec3 position_{};
     float facingDeg_ = 0.f;
     std::string spotId_;
+
+    // Combat state — all zero/Idle by default.
+    int      hp_    = 100;
+    int      hpMax_ = 100;
+    NpcState state_ = NpcState::Idle;
 
     void trimHistory();
 };
