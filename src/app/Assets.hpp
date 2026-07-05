@@ -42,17 +42,32 @@ class Assets {
     // "car_police", ...). nullptr when absent.
     const Model* prop(const std::string& stem) const;
 
-    // Character model + clips for a stable variant seed (issue #38).
-    // nullptr → capsule fallback.
-    const Model* modelForCharacter(int variantSeed) const;
+    // One rigged character: the model plus its animation clips, with the
+    // clip indexes the renderer switches between resolved by name at load.
+    struct CharacterAsset {
+        Model model{};
+        ModelAnimation* clips = nullptr;
+        int clipCount = 0;
+        int idle = -1;     // "Idle"
+        int walk = -1;     // "Walking_A"
+        int gesture = -1;  // "Cheer" — stands in for wave/raise-hand
+    };
+
+    // Character for a stable variant seed; police always get the Knight (the
+    // armored silhouette reads as a uniform). nullptr → capsule fallback.
+    const CharacterAsset* characterFor(int variantSeed, bool police) const;
 
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
     bool loadCityModel(const std::string& stem);
 
+    // Loads one character glb + animations; resolves the named clips.
+    void loadCharacter(const std::string& stem);
+
     bool loaded_ = false;
     std::string cityDir_;
+    std::string charDir_;
 
     // All loaded city/prop models by file stem. Stable storage: the map
     // never changes after the constructor, so pointers into it live as long
@@ -64,6 +79,10 @@ class Assets {
 
     // Stems of the generic building pool used for filler blocks.
     std::vector<std::string> genericBuildings_;
+
+    // Loaded characters in file order; Knight's index for the police pick.
+    std::vector<CharacterAsset> characters_;
+    int knightIndex_ = -1;
 };
 
 }  // namespace llm_npc
