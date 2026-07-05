@@ -43,7 +43,10 @@ Assets::Assets(const std::string& assetsDir) {
         {"hardware", "building_C"}, {"office_a", "building_F"},
         {"tower", "building_H"},    {"taxi_cab", "car_taxi"},
         {"bench", "bench"},         {"cart", "box_B"},
-        {"fountain", "base"},
+        // No "fountain" entry: the pack has no fountain model, so the
+        // renderer composes one from primitives (drawFountain), taking its
+        // height from the SizeSpec below. An entry here would draw a model
+        // instead and skip the composite.
         {"trafficlight_a", "trafficlight_A"}, {"trafficlight_b", "trafficlight_A"},
         {"trafficlight_c", "trafficlight_A"}, {"trafficlight_d", "trafficlight_A"},
         {"bush_a", "bush"}, {"bush_b", "bush"},
@@ -55,7 +58,10 @@ Assets::Assets(const std::string& assetsDir) {
         {"taxi_cab", {SizeSpec::Mode::Uniform, 1.5f}},
         {"cart", {SizeSpec::Mode::Uniform, 1.9f}},
         {"bench", {SizeSpec::Mode::Uniform, 0.9f}},
-        {"fountain", {SizeSpec::Mode::Uniform, 1.2f}},
+        // Composite fountain (drawFountain): total height of basin + column
+        // + finial. 1.2 (the old base-tile pancake height) reads flat on the
+        // 8-unit footprint; 2.6 gives a recognizable centerpiece.
+        {"fountain", {SizeSpec::Mode::Uniform, 2.6f}},
         {"trafficlight_a", {SizeSpec::Mode::Uniform, 4.5f}},
         {"trafficlight_b", {SizeSpec::Mode::Uniform, 4.5f}},
         {"trafficlight_c", {SizeSpec::Mode::Uniform, 4.5f}},
