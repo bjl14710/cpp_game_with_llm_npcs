@@ -51,6 +51,26 @@ void drawModelFittedToAABB(const Model& model, float minX, float minZ, float max
     DrawModelEx(model, position, Vector3{0.f, 1.f, 0.f}, 0.f, scale, tint);
 }
 
+// Draws one KayKit road tile (origin-centered 2x2 slab) filling the world
+// footprint worldX x worldZ at (cx, cz). The Fill scaling happens in model
+// space, so a 90-degree yaw (X-running streets) swaps which model axis
+// covers which world axis. Thickness is pinned rather than scaled: a true
+// 8x fill of the 0.1-thick tile would raise a 0.8-unit curb over the flat
+// collision plane.
+void drawRoadTile(const Model& model, float cx, float cz, float worldX,
+                  float worldZ, bool rotate90) {
+    const BoundingBox bb = GetModelBoundingBox(model);
+    const Vector3 size{bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z};
+    if (size.x <= 0.f || size.y <= 0.f || size.z <= 0.f) return;
+    constexpr float kRoadThickness = 0.05f;
+    const Vector3 scale{(rotate90 ? worldZ : worldX) / size.x,
+                        kRoadThickness / size.y,
+                        (rotate90 ? worldX : worldZ) / size.z};
+    // Base floats a hair above the grass plane to avoid coplanar flicker.
+    DrawModelEx(model, Vector3{cx, 0.01f, cz}, Vector3{0.f, 1.f, 0.f},
+                rotate90 ? 90.f : 0.f, scale, WHITE);
+}
+
 // Composite plaza fountain — the KayKit city pack has no fountain model, so
 // it is built from primitives on the authored footprint: a stone basin wall,
 // two smaller tiers, and translucent water discs. `worldHeight` comes from
@@ -112,11 +132,43 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
 void RaylibRenderer::drawCity(const City& city) {
     const float half = city.halfSize();
 
-    // Ground: grass base with asphalt street strips and block slabs on top.
+    // Ground: grass base with the street grid and block slabs on top.
     DrawPlane({0.f, 0.f, 0.f}, {half * 2.f, half * 2.f}, kGrass);
-    for (const float c : {-kStreetCenter, kStreetCenter}) {
-        DrawCube({c, 0.02f, 0.f}, kStreetWidth, 0.04f, half * 2.f, kAsphalt);
-        DrawCube({0.f, 0.02f, c}, half * 2.f, 0.04f, kStreetWidth, kAsphalt);
+
+    // Streets: KayKit road tiles when the pack is present, flat asphalt
+    // strips otherwise. Tile pitch = street width (16), centers at multiples
+    // of 16 so the four junctions at (+-32, +-32) land exactly on tile
+    // centers; the arm tiles beside each junction (+-16, +-48) carry zebra
+    // crossings where the sidewalks meet. 13 tiles cover +-104; a compressed
+    // end-cap tile spans the last 6 units to the +-110 map edge.
+    const Model* straight = assets_.prop("road_straight");
+    const Model* crossing = assets_.prop("road_straight_crossing");
+    const Model* junction = assets_.prop("road_junction");
+    if (straight && crossing && junction) {
+        constexpr float kTile = 16.f;
+        for (const float sc : {-kStreetCenter, kStreetCenter}) {
+            for (float t = -96.f; t <= 96.f; t += kTile) {
+                if (t == -kStreetCenter || t == kStreetCenter) {
+                    // Both streets pass through this tile; draw the 4-way
+                    // junction art once (in the Z-running pass).
+                    drawRoadTile(*junction, sc, t, kStreetWidth, kTile, false);
+                    continue;
+                }
+                const float arm = std::fabs(std::fabs(t) - kStreetCenter);
+                const Model& tile = (arm == kTile) ? *crossing : *straight;
+                drawRoadTile(tile, sc, t, kStreetWidth, kTile, false);
+                drawRoadTile(tile, t, sc, kTile, kStreetWidth, true);
+            }
+            for (const float e : {-107.f, 107.f}) {
+                drawRoadTile(*straight, sc, e, kStreetWidth, 6.f, false);
+                drawRoadTile(*straight, e, sc, 6.f, kStreetWidth, true);
+            }
+        }
+    } else {
+        for (const float c : {-kStreetCenter, kStreetCenter}) {
+            DrawCube({c, 0.02f, 0.f}, kStreetWidth, 0.04f, half * 2.f, kAsphalt);
+            DrawCube({0.f, 0.02f, c}, half * 2.f, 0.04f, kStreetWidth, kAsphalt);
+        }
     }
     // Block slabs: plaza (center) is pale stone, park (north-east) stays
     // grass, every other block gets a sidewalk-toned slab.

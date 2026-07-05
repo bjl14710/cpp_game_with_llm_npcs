@@ -81,7 +81,7 @@ Assets::Assets(const std::string& assetsDir) {
         "building_F", "building_G", "building_H", "bench", "car_taxi",
         "car_police", "car_sedan", "car_hatchback", "box_B", "base", "bush",
         "watertower", "trafficlight_A", "dumpster", "trash_A",
-        "road_straight", "road_straight_crossing",
+        "road_straight", "road_straight_crossing", "road_junction",
     };
     bool any = false;
     for (const char* stem : stems) any = loadCityModel(stem) || any;
