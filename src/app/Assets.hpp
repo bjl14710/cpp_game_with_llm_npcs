@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "City.hpp"
+#include "FaceTexture.hpp"
 
 namespace llm_npc {
 
@@ -57,6 +58,12 @@ class Assets {
     // armored silhouette reads as a uniform). nullptr → capsule fallback.
     const CharacterAsset* characterFor(int variantSeed, bool police) const;
 
+    // The baked emote texture for a mood face (always available — baked at
+    // construction, no asset download involved).
+    const Texture2D& faceTexture(NpcFace face) const {
+        return faces_[static_cast<std::size_t>(face)];
+    }
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -83,6 +90,9 @@ class Assets {
     // Loaded characters in file order; Knight's index for the police pick.
     std::vector<CharacterAsset> characters_;
     int knightIndex_ = -1;
+
+    // One baked emote per NpcFace value, indexed by the enum.
+    Texture2D faces_[6] = {};
 };
 
 }  // namespace llm_npc

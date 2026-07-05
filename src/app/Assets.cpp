@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <iostream>
 
+#include "FaceTexture.hpp"
+
 namespace llm_npc {
 
 namespace {
@@ -21,6 +23,11 @@ std::size_t stableHash(const std::string& s) {
 }  // namespace
 
 Assets::Assets(const std::string& assetsDir) {
+    // Mood emotes are procedural — baked here regardless of downloads.
+    for (int i = 0; i < 6; ++i) {
+        faces_[i] = FaceTexture::bake(static_cast<NpcFace>(i));
+    }
+
     cityDir_ = assetsDir + "/models/city";
     charDir_ = assetsDir + "/models/characters";
     if (!std::filesystem::exists(cityDir_ + "/citybits_texture.png")) {
@@ -62,6 +69,7 @@ Assets::Assets(const std::string& assetsDir) {
 }
 
 Assets::~Assets() {
+    for (Texture2D& face : faces_) UnloadTexture(face);
     for (auto& [stem, model] : models_) UnloadModel(model);
     for (auto& character : characters_) {
         if (character.clips) UnloadModelAnimations(character.clips, character.clipCount);

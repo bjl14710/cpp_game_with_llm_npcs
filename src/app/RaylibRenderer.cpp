@@ -150,6 +150,14 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
     const Vector3 position{visual.position.x, -bb.min.y * s, visual.position.z};
     DrawModelEx(character->model, position, Vector3{0.f, 1.f, 0.f}, visual.facingDeg,
                 Vector3{s, s, s}, WHITE);
+
+    // Non-neutral moods float as an emote above the head — the same six
+    // procedural faces the legacy renderer painted on, now billboarded.
+    if (visual.face != NpcFace::Neutral) {
+        DrawBillboard(camera_, assets_.faceTexture(visual.face),
+                      Vector3{visual.position.x, 2.45f, visual.position.z}, 0.55f,
+                      WHITE);
+    }
 }
 
 void RaylibRenderer::endFrame() { EndMode3D(); }

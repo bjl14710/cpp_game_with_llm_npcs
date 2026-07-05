@@ -9,6 +9,7 @@
 
 #include "Assets.hpp"
 #include "City.hpp"
+#include "FaceTexture.hpp"
 #include "Math.hpp"
 
 namespace llm_npc {
@@ -20,10 +21,6 @@ struct CameraPose {
     float yawDeg = 0.f;
     float pitchDeg = 0.f;
 };
-
-// The renderer-facing mood face, mirroring NpcMood one-to-one (kept separate
-// so core never includes rendering headers — same split Renderer3D used).
-enum class NpcFace { Neutral, Happy, Angry, Sad, Embarrassed, Surprised };
 
 // Everything needed to draw one character this frame (NPC or remote player).
 struct CharacterVisual {

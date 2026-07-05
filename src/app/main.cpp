@@ -85,6 +85,20 @@ void applyMouseLook(LocalPlayer& pose) {
                            -kMaxPitchDeg, kMaxPitchDeg);
 }
 
+// Maps the NPC's core mood onto the renderer's face enum (same mapping the
+// legacy renderer used; the enums mirror each other by design).
+NpcFace faceForMood(NpcMood mood) {
+    switch (mood) {
+        case NpcMood::Happy: return NpcFace::Happy;
+        case NpcMood::Angry: return NpcFace::Angry;
+        case NpcMood::Sad: return NpcFace::Sad;
+        case NpcMood::Embarrassed: return NpcFace::Embarrassed;
+        case NpcMood::Surprised: return NpcFace::Surprised;
+        case NpcMood::Neutral: return NpcFace::Neutral;
+    }
+    return NpcFace::Neutral;
+}
+
 // Dim the frame and center a message — the stand-in for Menu/DialogUI until
 // their raylib port (issue #40).
 void drawPlaceholderOverlay(const std::string& title, const std::string& hint) {
@@ -215,6 +229,10 @@ int main(int argc, char** argv) {
             visual.walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
             npcLastPos[i] = npc.position();
             if (npc.pose() != NpcAction::None) visual.gesturePhase = npc.gesturePhase();
+            visual.face = faceForMood(npc.mood());
+            // Smoke runs force a mood spread so the emote path is visible in
+            // screenshots without needing a live conversation.
+            if (smokeRun) visual.face = static_cast<NpcFace>(i % 6);
             renderer.drawCharacter(visual);
         }
         renderer.endFrame();
