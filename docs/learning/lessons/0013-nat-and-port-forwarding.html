@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0013 — NAT, Port Forwarding, and Why "Send Me Your IP" Isn't Enough</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; }
+  ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0013 · Networking basics · from docs(multiplayer): hosting and joining guide</div>
+<h1>NAT, Port Forwarding, and Why "Send Me Your IP" Isn't Enough</h1>
+<p>Hosting works instantly on your LAN and mysteriously not for a friend across
+town. The reason is the router in your closet.</p>
+
+<h2>Private vs public addresses</h2>
+<p>Your machine's address (from <code>ifconfig</code>/<code>ipconfig</code>) is almost certainly
+something like <code>192.168.1.20</code> — a <strong>private</strong> address. Whole ranges
+(<code>10.x.x.x</code>, <code>172.16-31.x.x</code>, <code>192.168.x.x</code>) are reserved for
+home/office LANs and are <em>not routable</em> on the internet; millions of homes reuse
+the same numbers. Your household shares <em>one</em> public IP, held by the router.</p>
+
+<h2>NAT: the reason outbound works and inbound doesn't</h2>
+<p><strong>Network Address Translation</strong> is the router rewriting your traffic: when you
+connect out, it swaps your private source address for its public one and remembers
+the mapping so replies find their way back. That memory is keyed by <em>connections
+you initiated</em>. An unsolicited inbound connection — say, a friend's game client
+dialing your public IP on port 40605 — matches no mapping, so the router drops it.
+That asymmetry is why browsing works everywhere but <em>hosting</em> needs setup.</p>
+
+<h2>Three ways in</h2>
+<table>
+<tr><th>Approach</th><th>How</th><th>Trade-off</th></tr>
+<tr><td>Port forwarding</td><td>Router config: "TCP 40605 → 192.168.1.20". Friends use your <em>public</em> IP.</td><td>Free, standard; needs router admin access, exposes the port to the whole internet</td></tr>
+<tr><td>Overlay VPN (Tailscale, ZeroTier)</td><td>Every machine joins a private virtual network and gets a stable address (e.g. <code>100.x.y.z</code>); friends join your "tailnet" and use that</td><td>Zero router config, encrypted, invite-only; everyone installs an app</td></tr>
+<tr><td>Relay / NAT punching</td><td>A third-party server brokers or relays the connection (what commercial games do)</td><td>Someone must run that infrastructure — out of scope for v1</td></tr>
+</table>
+<div class="callout good">For "me and three friends", the overlay VPN is usually the best
+answer: no router menus, no open ports, and the game needs zero code changes —
+the host's Tailscale IP goes in the same join box as a LAN address.</div>
+
+<h2>Why the game itself stays out of it</h2>
+<p>NAT traversal (STUN/TURN/ICE, UPnP) is a deep well of protocol work that mostly
+exists so <em>strangers</em> can connect without configuring anything. This game's v1
+scope is friends who can coordinate ("install Tailscale" fits in one text
+message), so the engineering budget went into the game instead. The README says
+so explicitly — documenting a limitation honestly beats half-implementing a
+solution.</p>
+
+<h2>Debugging "can't connect" in this game</h2>
+<ol>
+<li>Same machine? <code>127.0.0.1:40605</code> must work — if not, the host isn't up
+(check the Multiplayer page status line).</li>
+<li>Same LAN? Use the host's <code>192.168.x.x</code>. Failure here is usually the OS
+firewall prompting the host to allow the app, or club Wi-Fi isolating clients.</li>
+<li>Across the internet? You need one of the three approaches above — a plain
+public IP will time out, and the game will say so via its 4-second connect
+timeout rather than hanging.</li>
+</ol>
+</div></body></html>

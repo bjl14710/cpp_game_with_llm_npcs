@@ -16,10 +16,12 @@ add_library(llm_npc_core STATIC
     src/core/City.cpp
     src/core/Config.cpp
     src/core/DialogueSession.cpp
+    src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
     src/core/LlmClient.cpp
     src/core/NetClient.cpp
     src/core/NetFraming.cpp
+    src/core/NetMessage.cpp
     src/core/NetServer.cpp
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp

@@ -166,3 +166,15 @@ TEST_CASE("warmUp loads the model without producing replies or deltas") {
     CHECK(client.drainReplies().empty());
     CHECK(client.drainDeltas().empty());
 }
+
+TEST_CASE("LlmClient destruction never loses the shutdown wakeup") {
+    // Regression: the destructor used to set stop_ and notify without holding
+    // the queue mutex, so the notify could land between the worker evaluating
+    // its wait predicate (false) and blocking — a lost wakeup that left
+    // join() hanging forever. Tight construct/destroy cycles hit exactly that
+    // window; pre-fix this test flakily hangs the suite.
+    for (int i = 0; i < 200; ++i) {
+        LlmClient client(testConfig(1));  // port unused: no requests submitted
+    }
+    CHECK(true);  // reaching here means every worker joined
+}

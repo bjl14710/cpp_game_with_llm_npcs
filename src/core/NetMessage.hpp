@@ -35,8 +35,12 @@ enum class MessageType {
     Disconnect,      // either direction: goodbye with a reason
 };
 
-// TODO(implement): messageTypeToString / messageTypeFromString mapping used by
-// encode/decode below. Unknown strings must decode to nullopt, not crash.
+// Wire name of a message type ("JoinRequest", "WorldSnapshot", ...).
+const char* messageTypeToString(MessageType type);
+
+// Inverse of messageTypeToString; nullopt for unknown names so a newer
+// peer's messages fail loudly at decode instead of desyncing.
+std::optional<MessageType> messageTypeFromString(const std::string& name);
 
 // One remote player's pose inside a WorldSnapshot.
 struct PlayerPose {
@@ -49,7 +53,7 @@ struct PlayerPose {
 // One NPC's replicated state inside a WorldSnapshot. Mood/behavior mirror the
 // fields the renderer reads from Npc (mood(), behavior(), position(),
 // facingDeg()) so clients can draw NPCs without simulating them.
-struct NpcPose {
+struct NetNpcPose {
     int npcIndex = -1;
     Vec3 position{};
     float facingDeg = 0.f;
@@ -67,18 +71,21 @@ struct NetMessage {
 
 // Serializes a message object (already containing its fields) with the given
 // type tag into the canonical wire JSON string.
-// TODO(implement): stamp payload["type"], dump to string.
 std::string encodeMessage(MessageType type, nlohmann::json payload);
 
 // Parses one frame's payload into a NetMessage. Returns nullopt when the
 // bytes are not valid JSON or carry an unknown/missing "type" — callers drop
 // the connection rather than guessing (see plan: malformed-frame edge case).
-// TODO(implement): parse with allow_exceptions=false, map "type".
 std::optional<NetMessage> decodeMessage(const std::string& bytes);
 
-// Vec3 <-> JSON helpers shared by snapshot encoding.
-// TODO(implement): {"x":..,"y":..,"z":..} both directions.
+// Vec3 <-> JSON helpers shared by snapshot encoding: {"x":..,"y":..,"z":..}.
 nlohmann::json vec3ToJson(const Vec3& v);
 Vec3 vec3FromJson(const nlohmann::json& j);
+
+// Pose <-> JSON helpers for WorldSnapshot's "players" and "npcs" arrays.
+nlohmann::json playerPoseToJson(const PlayerPose& p);
+PlayerPose playerPoseFromJson(const nlohmann::json& j);
+nlohmann::json netNpcPoseToJson(const NetNpcPose& n);
+NetNpcPose netNpcPoseFromJson(const nlohmann::json& j);
 
 }  // namespace llm_npc
