@@ -29,7 +29,7 @@ namespace llm_npc {
 //   }
 //
 // This keeps World and LlmClient single-threaded exactly as in solo play —
-// no locks leak into game logic. SFML-free so the loopback tests can drive
+// no locks leak into game logic. rendering-free so the loopback tests can drive
 // it headless.
 class NetServer {
    public:

@@ -9,7 +9,7 @@
 namespace llm_npc {
 
 // The complete game world: the city geometry plus every NPC living in it.
-// SFML-free so proximity and placement logic stays unit-testable.
+// Rendering-free so proximity and placement logic stays unit-testable.
 class World {
    public:
     explicit World(City city) : city_(std::move(city)) {}

@@ -22,7 +22,7 @@ enum class Action {
 constexpr std::size_t kActionCount = static_cast<std::size_t>(Action::Count);
 
 // Maps actions to keys by portable key *names* ("W", "Escape", "Space") so
-// the core stays SFML-free; the app layer translates names to sf::Keyboard
+// the core stays rendering-free; the app layer translates names to key
 // codes. An empty name means the action is unbound.
 class KeyBindings {
    public:
