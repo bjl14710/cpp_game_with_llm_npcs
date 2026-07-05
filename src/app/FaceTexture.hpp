@@ -1,25 +1,25 @@
 #pragma once
 
-// NOT YET IN THE BUILD — see the raylib migration block in CMakeLists.txt.
-// Plan: .claude/plans/raylib-visual-overhaul.md, step 5.
 #include "raylib.h"
 
 namespace llm_npc {
 
-enum class NpcFace;  // RaylibRenderer.hpp
+// The renderer-facing mood face, mirroring NpcMood one-to-one (kept separate
+// so core never includes rendering headers — same split the legacy renderer
+// used).
+enum class NpcFace { Neutral, Happy, Angry, Sad, Embarrassed, Surprised };
 
 // Bakes the game's signature procedural faces (brows/eyes/mouth per mood —
-// currently drawn in GL immediate mode inside Renderer3D::drawFace) into
-// 128x128 textures that map onto the character models' head material.
-// Bake once per mood at startup; swapping a head texture per frame is cheap.
+// previously drawn in GL immediate mode by Renderer3D::drawFace) into
+// textures shown as emote billboards above characters' heads. The KayKit
+// models share one atlas material, so painting the head per mood isn't
+// practical; a floating emote reads better at street distance anyway.
 namespace FaceTexture {
 
-// Renders one mood's face into a texture the caller owns (UnloadTexture).
-// TODO(implement): LoadRenderTexture(128,128); BeginTextureMode; port the
-// brow-tilt/eye/mouth shapes from the legacy drawFace() — KEEP the brow tilt
-// direction fixed by commit 6298566 (angry brows slant inward-down, sad
-// inward-up); EndTextureMode. Skin tone stays in the model's palette; this
-// texture carries features on a transparent background.
+// Renders one mood's face into a 128x128 texture the caller owns
+// (UnloadTexture). Features sit on a pale round bubble; geometry and the
+// brow-tilt direction are ported 1:1 from the legacy renderer (angry brows
+// slant inward-down, sad inward-up — regression fixed in commit 6298566).
 Texture2D bake(NpcFace face);
 
 }  // namespace FaceTexture
