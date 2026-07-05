@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0009 — Server-Authoritative Replication and the Thread Contract</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; }
+  ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); }
+  .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0009 · Multiplayer networking · from feat(net): NetServer and NetClient</div>
+<h1>Server-Authoritative Replication and the Thread Contract</h1>
+<p>How four players share one world without sharing one crash.</p>
+
+<h2>Who owns the truth?</h2>
+<p>In a networked game, some machine must be the referee. Two players both think
+they reached the hot-dog cart first — whose claim wins? This game answers the way
+most multiplayer games do: <strong>the host is authoritative</strong>. The host's
+<code>World</code>, its NPC positions, moods, and conversation histories are the only
+real ones. Clients hold a <em>replica</em>: a copy that's a few dozen milliseconds
+stale, refreshed ~12 times a second by <code>WorldSnapshot</code> broadcasts.</p>
+<table>
+<tr><th>Direction</th><th>Message</th><th>Content</th></tr>
+<tr><td>client → host</td><td><code>PlayerInput</code></td><td>my position + facing this frame</td></tr>
+<tr><td>host → all</td><td><code>WorldSnapshot</code></td><td>every player pose + every NPC pose/mood/behavior</td></tr>
+</table>
+<p>Joined clients <em>stop simulating entirely</em> — <code>main.cpp</code> skips
+<code>npc.update()</code> when joined and renders straight from the last snapshot. A replica
+that also simulates drifts from the authority; then you need reconciliation
+machinery. Not simulating is the simplest correct thing.</p>
+
+<h2>The three server threads</h2>
+<pre><code>accept thread    one blocking accept() loop; spawns a reader per connection
+reader threads   one per client: recv → FrameAssembler → decodeMessage → apply
+tick thread      every 1/12 s: build snapshot, broadcast, reap dead connections</code></pre>
+<p>Each blocking concern gets its own thread so nothing can starve anything else: a
+client that stalls mid-handshake only stalls <em>its own</em> reader. Shutdown is the
+subtle part — a blocked <code>recv()</code> doesn't return just because you set a flag. The
+trick used throughout <code>NetServer</code>/<code>NetClient</code>:
+<code>shutdown(fd, SHUT_RDWR)</code> forces the blocked call to return, <em>then</em>
+<code>join()</code> the thread, <em>then</em> <code>close(fd)</code>. Closing before joining risks the
+kernel recycling the fd number while the old thread still uses it.</p>
+
+<h2>The thread contract (the load-bearing decision)</h2>
+<div class="callout good"><strong>No network thread ever touches <code>World</code>, <code>Npc</code>, or
+<code>LlmClient</code>.</strong> Game state crosses the boundary only as values through
+mutex-guarded queues, pumped by the host's main loop.</div>
+<pre><code>// host main loop, once per frame:
+netServer-&gt;setHostPose(camera.position, camera.yawDeg);   // value in
+netServer-&gt;publishNpcPoses(posesCopiedFromWorld);          // values in
+chatRouter-&gt;update();   // drains drainChatEvents() — events out</code></pre>
+<p>Why so strict? The alternative is the tick thread reading
+<code>world.npcs()[i].position()</code> while the render loop writes it — a data race, which
+in C++ is undefined behavior even when it "mostly works". Locking World instead
+would leak mutexes into every system that touches NPCs, including solo play. The
+publish/drain contract keeps <em>all</em> game logic single-threaded — exactly as it was
+before multiplayer existed — which is why the solo code path didn't change.</p>
+<p>This is the same pattern <code>LlmClient</code> already used: its worker thread never
+touches NPCs either; the main loop drains <code>drainDeltas()</code>/<code>drainReplies()</code>.
+Multiplayer just applied the house pattern to a second subsystem.</p>
+
+<h2>The handshake: reject early, reject loudly</h2>
+<ol>
+<li>Client connects and sends <code>JoinRequest {version, name, code}</code>.</li>
+<li>Server checks, in order: <strong>protocol version</strong> (mismatched builds get told to
+update, not left to desync), <strong>join code</strong>, <strong>capacity</strong> (lowest free id
+1..3; none free → "session full").</li>
+<li><code>Welcome {accepted, playerId}</code> or <code>Welcome {accepted:false, reason}</code>.</li>
+</ol>
+<div class="callout">The version check is the cheapest insurance in the protocol: one int
+compared once per join, versus hours of debugging why your friend's older build
+renders everyone at the origin.</div>
+
+<h2>Where the ids live</h2>
+<p>The host is always player 0. Remote ids (1-3) are assigned at handshake and
+<em>reused</em> after a disconnect — the session-full test proves a slot frees up when
+someone leaves. NPCs are identified by roster index, which is safe because this
+codebase never deletes NPCs (an existing invariant the wire protocol now depends
+on).</p>
+</div></body></html>
