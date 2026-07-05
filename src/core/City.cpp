@@ -48,6 +48,23 @@ City City::makeDowntown() {
         {"bush_c", "", 50.8f, 78.8f, 53.2f, 81.2f, 1.1f, 12},
         {"bush_d", "", 74.8f, 74.8f, 77.2f, 77.2f, 1.1f, 12},
 
+        // Parked cars, curbside on the two Z-running streets (KayKit cars
+        // face along Z at identity and the Uniform draw path doesn't
+        // rotate). Spots avoid the zebra crossings (x/z +-16 and +-48), the
+        // junctions, shop doors, and every persona's home position. The
+        // police car parks beside its station block.
+        {"police_car", "", -27.4f, -62.8f, -23.6f, -58.8f, 1.5f, 13},
+        {"hatchback_b", "", 23.8f, -68.8f, 27.4f, -64.8f, 1.35f, 13},
+        {"sedan_a", "", 36.7f, -8.f, 40.4f, -4.f, 1.35f, 13},
+        {"sedan_b", "", 36.7f, 61.5f, 40.4f, 65.5f, 1.35f, 13},
+        {"hatchback_a", "", -40.4f, 59.5f, -36.7f, 63.5f, 1.35f, 13},
+
+        // Alley props: dumpster + trash between the SW apartments, a bin in
+        // the coffee/office alley.
+        {"dumpster_a", "", -67.2f, -86.f, -63.2f, -83.5f, 1.4f, 14},
+        {"trash_a", "", -62.5f, -87.4f, -61.1f, -86.f, 0.9f, 14},
+        {"trash_b", "", 45.f, -65.4f, 46.2f, -64.2f, 0.7f, 14},
+
         // Unnamed filler so every block reads as a dense city.
         {"apt_a", "", -88.f, -88.f, -68.f, -70.f, 22.f, 9},
         {"apt_b", "", -60.f, -88.f, -40.f, -72.f, 18.f, 9},

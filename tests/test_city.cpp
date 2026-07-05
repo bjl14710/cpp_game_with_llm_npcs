@@ -92,19 +92,44 @@ TEST_CASE("resolveMovement clamps to world bounds") {
 }
 
 TEST_CASE("every visible street obstacle has real collision") {
-    // Traffic lights and park bushes are authored in City (the renderer
-    // draws them from this list), so their visual footprints and colliders
-    // can never diverge — walking through them is impossible by data.
+    // Street furniture, parked cars, and alley props are authored in City
+    // (the renderer draws them from this list), so their visual footprints
+    // and colliders can never diverge — walking through them is impossible
+    // by data. The probe point is inside each obstacle's AABB.
     const llm_npc::City city = llm_npc::City::makeDowntown();
     const struct { const char* id; float x, z; } obstacles[] = {
         {"trafficlight_a", -23.f, -23.f}, {"trafficlight_b", -23.f, 41.f},
         {"trafficlight_c", 41.f, -23.f},  {"trafficlight_d", 41.f, 41.f},
         {"bush_a", 48.f, 48.f},           {"bush_b", 80.f, 52.f},
         {"bush_c", 52.f, 80.f},           {"bush_d", 76.f, 76.f},
+        {"police_car", -25.5f, -61.f},    {"hatchback_b", 25.5f, -67.f},
+        {"sedan_a", 38.5f, -6.f},         {"sedan_b", 38.5f, 63.f},
+        {"hatchback_a", -38.5f, 61.f},    {"dumpster_a", -65.f, -85.f},
+        {"trash_a", -61.8f, -86.7f},      {"trash_b", 45.6f, -64.8f},
     };
     for (const auto& o : obstacles) {
         CAPTURE(o.id);
         CHECK(city.findBuilding(o.id) != nullptr);
         CHECK(city.circleIntersectsAny(o.x, o.z, 0.3f));
+    }
+}
+
+TEST_CASE("parked cars leave persona home spots and crossings clear") {
+    // Set dressing must not trap an NPC: every persona home position from
+    // personas/ (hardware Hal at (36,0) is the closest call) keeps a clear
+    // walking circle, and the zebra-crossing tile centers stay walkable.
+    const llm_npc::City city = llm_npc::City::makeDowntown();
+    const struct { const char* who; float x, z; } spots[] = {
+        {"barista", 58.f, -36.f}, {"hardware", 36.f, 0.f},
+        {"librarian", -36.f, 0.f}, {"cop", 0.f, -36.f},
+        {"baker", -70.f, -36.f}, {"taxi", 30.f, 8.f},
+        {"tourist", -8.f, 10.f}, {"hotdog", 6.f, 0.f},
+        {"musician", 52.f, 52.f}, {"teacher", 68.f, 73.f},
+        {"crossing_w", -16.f, -32.f}, {"crossing_e", 16.f, -32.f},
+        {"crossing_n", 32.f, 48.f}, {"crossing_s", 32.f, -48.f},
+    };
+    for (const auto& s : spots) {
+        CAPTURE(s.who);
+        CHECK_FALSE(city.circleIntersectsAny(s.x, s.z, 0.5f));
     }
 }
