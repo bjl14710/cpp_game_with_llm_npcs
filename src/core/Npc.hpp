@@ -51,7 +51,6 @@ class Npc {
     //   - Unarmed NPC → Fleeing
     //   - hp == 0    → Dead (regardless of armed status)
     // No-op if already Dead.
-    // TODO(combat): implement in Npc.cpp
     void takeDamage(int amount);
 
     // Seconds remaining before this NPC can fire again (armed only).
@@ -62,6 +61,7 @@ class Npc {
     // Combat state accessors.
     NpcState    combatState()  const { return state_; }
     int         hp()           const { return hp_; }
+    int         hpMax()        const { return hpMax_; }
     bool        isArmed()      const { return persona_.armed; }
 
     // World-space feet position (writable so combat can move fleeing NPCs).
