@@ -1,6 +1,6 @@
-# Plain-make test runner for the SFML-free core library.
+# Plain-make test runner for the rendering-free core library.
 #
-# The dev container has g++/make but no cmake or SFML, so this Makefile is the
+# The dev container has g++/make but no cmake or graphics libs, so this is the
 # primary way to build and run unit tests there. It compiles every
 # src/core/*.cpp plus every tests/test_*.cpp into one doctest binary.
 #

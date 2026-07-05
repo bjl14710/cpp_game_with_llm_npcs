@@ -1,17 +1,22 @@
-#include <SFML/Graphics.hpp>
-#include <SFML/OpenGL.hpp>
+// Game entry point on raylib — full parity with the SFML loop it replaced
+// (that version remains at: git show feature/raylib-scaffold:src/app/main.cpp).
+// Modes: Playing / Dialogue / Menu. Solo simulates locally; hosting shares
+// this world through NetServer + HostChatRouter; joining renders the host's
+// snapshots and routes chat through NetClient.
+#include "raylib.h"
 
-#ifdef __APPLE__
-#include <ApplicationServices/ApplicationServices.h>
-#endif
-
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "Assets.hpp"
 #include "City.hpp"
 #include "Config.hpp"
 #include "DialogUI.hpp"
@@ -26,7 +31,7 @@
 #include "NetServer.hpp"
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
-#include "Renderer3D.hpp"
+#include "RaylibRenderer.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -34,10 +39,10 @@ using namespace llm_npc;
 
 namespace {
 
-constexpr float kWalkSpeed = 7.0f;        // units (~meters) per second
-constexpr float kPlayerRadius = 0.45f;    // collision circle on the ground
-constexpr float kTalkRadius = 3.5f;       // how close "press T to talk" works
-constexpr float kNameplateRange = 28.f;   // how far name tags stay visible
+constexpr float kWalkSpeed = 7.0f;       // units (~meters) per second
+constexpr float kPlayerRadius = 0.45f;   // collision circle on the ground
+constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
+constexpr float kNameplateRange = 28.f;  // how far name tags stay visible
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 // How long an arrest holds the player at the police station. Short, because
@@ -47,25 +52,12 @@ constexpr float kJailSeconds = 10.f;
 // What the main loop is currently showing.
 enum class AppMode { Playing, Dialogue, Menu };
 
-// Try a few likely font paths so the game runs on stock Linux and Windows
-// without bundling a font. Returns the first existing path or empty.
-fs::path findSystemFont() {
-    const char* candidates[] = {
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/Library/Fonts/Arial.ttf",
-        "/Library/Fonts/Arial Unicode.ttf",
-        "/System/Library/Fonts/Geneva.ttf",
-        "/System/Library/Fonts/Monaco.ttf",
-    };
-    for (const char* c : candidates) {
-        if (fs::exists(c)) return fs::path(c);
-    }
-    return {};
-}
+// First-person pose; position is the FEET on the ground plane (y = 0).
+struct LocalPlayer {
+    Vec3 position{0.f, 0.f, 24.f};  // plaza south edge
+    float yawDeg = 0.f;
+    float pitchDeg = 0.f;
+};
 
 // Walks up from the working directory until config/llm.cfg is found so the
 // binary can be launched from build/ or the project root.
@@ -83,80 +75,23 @@ Vec3 flatForward(float yawDeg) {
     return normalize(Vec3{std::sin(degToRad(yawDeg)), 0.f, std::cos(degToRad(yawDeg))});
 }
 
-// Ground-plane right vector for a yaw in degrees. Must match the camera's
-// right basis in Renderer3D (cross(forward, up)) or strafe is inverted —
-// cross((fx,0,fz),(0,1,0)) = (-fz, 0, fx).
+// Ground-plane right vector; must match the camera basis or strafe inverts.
 Vec3 flatRight(float yawDeg) {
     const Vec3 f = flatForward(yawDeg);
     return Vec3{-f.z, 0.f, f.x};
 }
 
-#ifdef __APPLE__
-// macOS mouse-look. SFML's cursor re-centering (and the earlier
-// warp-the-cursor-back workaround) lands the cursor ~1px off target every
-// frame — a HiDPI readback rounding mismatch — so the camera saw a constant
-// residual delta and slowly drifted left even with the mouse held still,
-// which curved forward walking. Instead, while playing we disassociate the
-// cursor from the physical mouse: the cursor freezes in place (no
-// screen-edge clamping, nothing to re-center) and CGGetLastMouseDelta
-// reports raw HID movement, which reads a clean zero when the mouse is idle.
-// Measured: idle drift drops from -0.92 px/frame to 0.
-
-// Freezes the cursor to the physical mouse and discards any movement that
-// accumulated while we were away, so look resumes without a jump. Called on
-// every (re)entry into first-person play.
-void centerMouse(sf::RenderWindow&) {
-    CGAssociateMouseAndMouseCursorPosition(false);
-    std::int32_t dx = 0, dy = 0;
-    CGGetLastMouseDelta(&dx, &dy);  // flush pending delta
+// One frame of mouse look from raylib's relative mouse delta.
+void applyMouseLook(LocalPlayer& pose) {
+    const Vector2 delta = GetMouseDelta();
+    // Mouse-right lowers yaw: right-handed basis, yaw grows toward +X.
+    pose.yawDeg -= delta.x * kMouseSensitivity;
+    pose.pitchDeg = clampf(pose.pitchDeg - delta.y * kMouseSensitivity,
+                           -kMaxPitchDeg, kMaxPitchDeg);
 }
 
-// Re-couples the cursor to the physical mouse. Called when leaving play for
-// the menu/dialogue (so the pointer is usable) and when focus is lost (so
-// the disassociation never leaks out and freezes the mouse system-wide).
-void releaseMouse() {
-    CGAssociateMouseAndMouseCursorPosition(true);
-}
-
-// Applies one frame of mouse look from the raw HID movement delta.
-void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
-    if (!window.hasFocus()) return;
-    std::int32_t dx = 0, dy = 0;
-    CGGetLastMouseDelta(&dx, &dy);
-    // Mouse-right must lower yaw: screen-right is cross(forward, up) = -X at
-    // yaw 0, but increasing yaw rotates forward toward +X (screen-left).
-    camera.yawDeg -= static_cast<float>(dx) * kMouseSensitivity;
-    camera.pitchDeg = clampf(camera.pitchDeg - static_cast<float>(dy) * kMouseSensitivity,
-                             -kMaxPitchDeg, kMaxPitchDeg);
-}
-#else
-// Re-centers the OS cursor so relative mouse-look deltas keep working.
-void centerMouse(sf::RenderWindow& window) {
-    sf::Mouse::setPosition(sf::Vector2i(static_cast<int>(window.getSize().x / 2),
-                                        static_cast<int>(window.getSize().y / 2)),
-                           window);
-}
-
-// No cursor decoupling to undo off macOS; menus rely on SFML's own cursor.
-void releaseMouse() {}
-
-// Applies one frame of mouse look to the camera and re-centers the cursor.
-void handleMouseLook(sf::RenderWindow& window, CameraPose& camera) {
-    const sf::Vector2i center(static_cast<int>(window.getSize().x / 2),
-                              static_cast<int>(window.getSize().y / 2));
-    const sf::Vector2i delta = sf::Mouse::getPosition(window) - center;
-    // Mouse-right lowers yaw to match the camera's right-handed basis; see
-    // the macOS path for the derivation.
-    camera.yawDeg -= static_cast<float>(delta.x) * kMouseSensitivity;
-    camera.pitchDeg = clampf(camera.pitchDeg - static_cast<float>(delta.y) * kMouseSensitivity,
-                             -kMaxPitchDeg, kMaxPitchDeg);
-    if (window.hasFocus()) centerMouse(window);
-}
-#endif
-
-// A short third-person description of an action an NPC just took, shown in the
-// transcript so the player gets feedback even when the model answered with only
-// an action tag (and no spoken words). Empty for None.
+// A short third-person description of an action an NPC just took, shown in
+// the transcript so a wordless tag-only reply still gives feedback.
 std::string stageDirection(NpcAction action) {
     switch (action) {
         case NpcAction::Follow: return "falls into step with you.";
@@ -185,41 +120,47 @@ NpcFace faceForMood(NpcMood mood) {
     return NpcFace::Neutral;
 }
 
-// Draws `str` centered horizontally at height `y`, with a dark backdrop bar.
-void drawCenteredHudText(sf::RenderWindow& window, const sf::Font& font,
-                         const std::string& str, unsigned size, float y) {
-    sf::Text text(str, font, size);
-    const sf::FloatRect bounds = text.getLocalBounds();
-    const float x = (static_cast<float>(window.getSize().x) - bounds.width) * 0.5f;
+// Draws `str` centered horizontally at height `y` with a dark backdrop bar.
+void drawCenteredHudText(const std::string& str, int size, float y) {
+    const int width = MeasureText(str.c_str(), size);
+    const float x = (static_cast<float>(GetScreenWidth()) - static_cast<float>(width)) * 0.5f;
+    DrawRectangleRec(Rectangle{x - 12.f, y - 6.f, static_cast<float>(width) + 24.f,
+                               static_cast<float>(size) + 16.f},
+                     Color{10, 14, 22, 170});
+    DrawText(str.c_str(), static_cast<int>(x), static_cast<int>(y), size, WHITE);
+}
 
-    sf::RectangleShape backdrop(sf::Vector2f(bounds.width + 24.f, bounds.height + 16.f));
-    backdrop.setPosition(x - 12.f, y - 6.f);
-    backdrop.setFillColor(sf::Color(10, 14, 22, 170));
-    window.draw(backdrop);
-
-    text.setPosition(x, y);
-    text.setFillColor(sf::Color::White);
-    window.draw(text);
+// Nameplate: centered text with an outline-ish shadow at a projected point.
+void drawNameplate(const std::string& name, Vector2 screen, Color color) {
+    const int width = MeasureText(name.c_str(), 14);
+    const int x = static_cast<int>(screen.x) - width / 2;
+    const int y = static_cast<int>(screen.y) - 14;
+    DrawText(name.c_str(), x + 1, y + 1, 14, Color{0, 0, 0, 200});
+    DrawText(name.c_str(), x, y, 14, color);
 }
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // --frames N [shot.png]: render N frames then exit 0, optionally saving
+    // a screenshot of the last frame (scripted smoke runs + visual checks).
+    long maxFrames = -1;
+    const char* screenshotPath = nullptr;
+    if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
+        maxFrames = std::strtol(argv[2], nullptr, 10);
+        if (argc >= 4) screenshotPath = argv[3];
+    }
+
     const fs::path projectRoot = findProjectRoot();
     const fs::path configDir = projectRoot / "config";
-
-    const LlmConfig llmConfig = loadLlmConfig(configDir);
-    std::cerr << "[llm_npc] model=" << llmConfig.model << " host=" << llmConfig.host << ":"
-              << llmConfig.port << "\n";
 
     KeyBindings bindings = KeyBindings::defaults();
     const fs::path bindingsPath = configDir / "keybindings.cfg";
     bindings.load(bindingsPath);
 
     // World: the downtown map plus one NPC per persona file.
-    LlmClient client(llmConfig);
+    LlmClient client(loadLlmConfig(configDir));
     client.warmUp();  // preload the model so the first reply starts fast
-
     World world(City::makeDowntown());
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
@@ -231,28 +172,16 @@ int main() {
     }
     std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs\n";
 
-    // Window with a legacy-GL 2.1 context (same recipe as cpp_shooter_game).
-    sf::ContextSettings settings;
-    settings.depthBits = 24;
-    settings.stencilBits = 8;
-    settings.antialiasingLevel = 4;
-    settings.majorVersion = 2;
-    settings.minorVersion = 1;
-    sf::RenderWindow window(sf::VideoMode(1280, 720), "LLM NPC City", sf::Style::Default, settings);
-    window.setVerticalSyncEnabled(true);
-    window.setActive(true);
+    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_MSAA_4X_HINT);
+    InitWindow(1280, 720, "LLM NPC City");
+    SetTargetFPS(60);
+    SetExitKey(KEY_NULL);  // Escape is a game key (menu/back), not app-quit
 
-    sf::Font font;
-    const fs::path fontPath = findSystemFont();
-    if (fontPath.empty() || !font.loadFromFile(fontPath.string())) {
-        std::cerr << "[llm_npc] no system font found; UI cannot render text.\n";
-        return 1;
-    }
+    // Models need the GL context, so Assets loads after InitWindow.
+    Assets assets((projectRoot / "assets").string());
+    RaylibRenderer renderer(assets);
 
-    Renderer3D renderer;
-    renderer.init();
-
-    DialogUI dialog(font);
+    DialogUI dialog;
     DialogueSession session;
     Menu menu(bindings, bindingsPath);
     // Late replies for conversations the player already walked away from
@@ -260,16 +189,13 @@ int main() {
     std::unordered_map<std::uint64_t, int> pendingRoutes;
 
     // ---- Multiplayer state (all empty in solo play) ----
-    // Hosting: this process stays authoritative — NetServer fans our world
-    // out and HostChatRouter lets remote players use our NPCs/LLM.
-    // Joining: NetClient replicates the host's world; we stop simulating.
     std::unique_ptr<NetServer> netServer;
     std::unique_ptr<HostChatRouter> chatRouter;
     std::unique_ptr<NetClient> netClient;
-    std::vector<PlayerPose> remotePlayers;          // avatars to draw (both modes)
-    std::vector<NetNpcPose> netNpcs;                // join mode: NPCs from snapshots
+    std::vector<PlayerPose> remotePlayers;              // avatars to draw (both modes)
+    std::vector<NetNpcPose> netNpcs;                    // join mode: NPCs from snapshots
     std::vector<int> netMoods(world.npcs().size(), 0);  // join mode: mood per NPC
-    bool netChatWaiting = false;                    // join mode: reply pending
+    bool netChatWaiting = false;                        // join mode: reply pending
 
     const auto leaveSession = [&] {
         if (netClient) {
@@ -291,15 +217,15 @@ int main() {
     netHooks.active = [&] { return netServer != nullptr || netClient != nullptr; };
     netHooks.status = [&]() -> std::string {
         if (netServer) {
-            return "Hosting on port " + std::to_string(netServer->port()) + " — " +
+            return "Hosting on port " + std::to_string(netServer->port()) + " - " +
                    std::to_string(netServer->playerCount()) + " player(s) joined";
         }
         if (netClient) {
-            return netClient->connected() ? "Joined as player " +
-                                                std::to_string(netClient->playerId())
-                                          : "Connection lost: " + netClient->lastError();
+            return netClient->connected()
+                       ? "Joined as player " + std::to_string(netClient->playerId())
+                       : "Connection lost: " + netClient->lastError();
         }
-        return "Solo — host a game or join a friend's.";
+        return "Solo - host a game or join a friend's.";
     };
     netHooks.onHost = [&](int port) -> std::string {
         if (netClient) return "Leave the joined session first";
@@ -316,83 +242,99 @@ int main() {
         if (netServer) return "Stop hosting first";
         const auto colon = address.rfind(':');
         const std::string host = address.substr(0, colon);
-        const int port = std::stoi(address.substr(colon + 1));  // menu validated
-        auto client = std::make_unique<NetClient>();
-        if (!client->connect(host, port, "guest", "")) return client->lastError();
-        netClient = std::move(client);
+        const int port = std::atoi(address.c_str() + colon + 1);  // menu validated
+        auto joined = std::make_unique<NetClient>();
+        if (!joined->connect(host, port, "guest", "")) return joined->lastError();
+        netClient = std::move(joined);
         return "";
     };
     netHooks.onLeave = leaveSession;
     menu.setMultiplayer(netHooks);
 
     AppMode mode = AppMode::Playing;
-    CameraPose camera;
-    camera.position = Vec3{0.f, 0.f, 24.f};  // plaza south edge, facing the cart
-    window.setMouseCursorVisible(false);
-    centerMouse(window);
+    LocalPlayer player;
+    // Smoke runs are deterministic: fixed plaza-facing camera, no look drift.
+    const bool smokeRun = maxFrames >= 0;
+    if (smokeRun) player.yawDeg = 180.f;
+    DisableCursor();
 
     int nearbyNpc = -1;
-    // Arrest bookkeeping: when an officer catches the player, the player is
-    // held at the police station for a short sentence. wasCaught tracks each
-    // NPC's previous catch latch so the moment of capture fires exactly once.
+    // Arrest bookkeeping: catch fires once per latch (see hasCaughtPlayer).
     float jailSecondsLeft = 0.f;
     std::vector<bool> wasCaught(world.npcs().size(), false);
-    sf::Clock frameClock;
-    while (window.isOpen()) {
-        sf::Event event{};
-        while (window.pollEvent(event)) {
-            if (event.type == sf::Event::Closed) window.close();
-            if (event.type == sf::Event::GainedFocus && mode == AppMode::Playing) centerMouse(window);
-            // Release the cursor when focus leaves so the macOS disassociation
-            // (see centerMouse) can't freeze the mouse in other apps.
-            if (event.type == sf::Event::LostFocus) releaseMouse();
+    // Previous frame's NPC positions, for walk-animation detection.
+    std::vector<Vec3> npcLastPos(world.npcs().size());
+    for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+        npcLastPos[i] = world.npcs()[i].position();
+    }
 
-            if (mode == AppMode::Playing && event.type == sf::Event::KeyPressed) {
-                const bool menuKey = event.key.code == keyFromName(bindings.key(Action::OpenMenu)) ||
-                                     event.key.code == sf::Keyboard::Escape;
-                if (menuKey) {
-                    menu.open();
-                    mode = AppMode::Menu;
-                    window.setMouseCursorVisible(true);
-                    releaseMouse();
-                } else if (event.key.code == keyFromName(bindings.key(Action::Talk)) &&
-                           nearbyNpc >= 0 &&
-                           nearbyNpc < static_cast<int>(world.npcs().size())) {
-                    session.open(nearbyNpc);
-                    Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
-                    if (netClient && netClient->connected()) {
-                        netClient->sendChatOpen(nearbyNpc);  // host may react later
-                    } else {
-                        npc.lookAt(camera.position);  // turn to the player as the chat opens
-                    }
-                    dialog.reset();
-                    dialog.setInputEnabled(true);
-                    dialog.swallowNextTextEntered();
-                    dialog.appendLine({TranscriptLine::Kind::System, "",
-                                       "You are talking to " + npc.persona().name + " (" +
-                                           npc.persona().role + "). Enter sends, Esc leaves."});
-                    mode = AppMode::Dialogue;
-                    window.setMouseCursorVisible(true);
-                    releaseMouse();
-                }
-                continue;
+    long frames = 0;
+    while (!WindowShouldClose() && (maxFrames < 0 || frames++ < maxFrames)) {
+        const float dt = std::fmin(0.03f, GetFrameTime());
+
+        // A dropped link falls back to solo play; the menu status explains.
+        if (netClient && !netClient->connected()) {
+            leaveSession();
+            if (mode == AppMode::Dialogue) {
+                session.close();
+                dialog.endStreaming();
+                mode = AppMode::Playing;
+                DisableCursor();
+            }
+        }
+        const bool joined = netClient != nullptr;  // connected, per the check above
+
+        // ---- input ----
+        if (mode == AppMode::Playing) {
+            if (IsWindowFocused() && !smokeRun) applyMouseLook(player);
+
+            if (jailSecondsLeft <= 0.f) {  // no walking out of a sentence
+                Vec3 wish{};
+                if (isActionPressed(bindings, Action::MoveForward)) wish += flatForward(player.yawDeg);
+                if (isActionPressed(bindings, Action::MoveBackward)) wish += flatForward(player.yawDeg) * -1.f;
+                if (isActionPressed(bindings, Action::StrafeRight)) wish += flatRight(player.yawDeg);
+                if (isActionPressed(bindings, Action::StrafeLeft)) wish += flatRight(player.yawDeg) * -1.f;
+                wish = normalize(wish);
+                const Vec3 target = player.position + wish * (kWalkSpeed * dt);
+                player.position = world.city().resolveMovement(player.position, target, kPlayerRadius);
             }
 
-            if (mode == AppMode::Dialogue) {
-                if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Escape) {
-                    session.close();
-                    dialog.endStreaming();
-                    mode = AppMode::Playing;
-                    window.setMouseCursorVisible(false);
-                    centerMouse(window);
-                    continue;
+            const bool menuKey =
+                isActionJustPressed(bindings, Action::OpenMenu) || IsKeyPressed(KEY_ESCAPE);
+            if (menuKey) {
+                menu.open();
+                mode = AppMode::Menu;
+                EnableCursor();
+            } else if (isActionJustPressed(bindings, Action::Talk) && nearbyNpc >= 0 &&
+                       nearbyNpc < static_cast<int>(world.npcs().size())) {
+                session.open(nearbyNpc);
+                Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
+                if (joined) {
+                    netClient->sendChatOpen(nearbyNpc);
+                } else {
+                    npc.lookAt(player.position);
                 }
-                const std::string submitted = dialog.handleEvent(event);
+                dialog.reset();
+                dialog.setInputEnabled(true);
+                dialog.swallowPendingText();
+                dialog.appendLine({TranscriptLine::Kind::System, "",
+                                   "You are talking to " + npc.persona().name + " (" +
+                                       npc.persona().role + "). Enter sends, Esc leaves."});
+                mode = AppMode::Dialogue;
+                EnableCursor();
+            }
+        } else if (mode == AppMode::Dialogue) {
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                session.close();
+                dialog.endStreaming();
+                mode = AppMode::Playing;
+                DisableCursor();
+            } else {
+                const std::string submitted = dialog.pollInput();
                 if (!submitted.empty() && session.isOpen()) {
                     Npc& npc = world.npcs()[static_cast<std::size_t>(session.npcIndex())];
-                    if (netClient && netClient->connected()) {
-                        // Joined: the host owns the NPC — send the line up
-                        // and stream whatever comes back.
+                    if (joined) {
+                        // Joined: the host owns the NPC — send the line up.
                         if (!netChatWaiting) {
                             dialog.appendLine({TranscriptLine::Kind::Player, "You", submitted});
                             netClient->sendChatLine(session.npcIndex(), submitted);
@@ -409,98 +351,51 @@ int main() {
                         dialog.setInputEnabled(false);
                     }
                 }
-                continue;
             }
-
-            if (mode == AppMode::Menu) {
-                switch (menu.handleEvent(event, window)) {
-                    case MenuResult::Resume:
-                        mode = AppMode::Playing;
-                        window.setMouseCursorVisible(false);
-                        centerMouse(window);
-                        break;
-                    case MenuResult::Quit:
-                        window.close();
-                        break;
-                    case MenuResult::None:
-                        break;
-                }
+        } else {  // Menu
+            switch (menu.update(dt)) {
+                case MenuResult::Resume:
+                    mode = AppMode::Playing;
+                    DisableCursor();
+                    break;
+                case MenuResult::Quit:
+                    goto shutdown;  // single exit point below the loop
+                case MenuResult::None:
+                    break;
             }
-        }
-        if (!window.isOpen()) break;
-
-        const float dt = std::min(0.03f, frameClock.restart().asSeconds());
-
-        // A dropped link falls back to solo play; the menu status explains.
-        if (netClient && !netClient->connected()) {
-            leaveSession();
-            if (mode == AppMode::Dialogue) {
-                session.close();
-                dialog.endStreaming();
-                mode = AppMode::Playing;
-                window.setMouseCursorVisible(false);
-                centerMouse(window);
-            }
-        }
-        const bool joined = netClient != nullptr;  // connected, per the check above
-
-        if (mode == AppMode::Playing) {
-            if (window.hasFocus()) handleMouseLook(window, camera);
-
-            // No walking out of a sentence; looking around is still allowed.
-            if (jailSecondsLeft <= 0.f) {
-                Vec3 wish{};
-                if (isActionPressed(bindings, Action::MoveForward)) wish += flatForward(camera.yawDeg);
-                if (isActionPressed(bindings, Action::MoveBackward)) wish += flatForward(camera.yawDeg) * -1.f;
-                if (isActionPressed(bindings, Action::StrafeRight)) wish += flatRight(camera.yawDeg);
-                if (isActionPressed(bindings, Action::StrafeLeft)) wish += flatRight(camera.yawDeg) * -1.f;
-                wish = normalize(wish);
-                const Vec3 target = camera.position + wish * (kWalkSpeed * dt);
-                camera.position = world.city().resolveMovement(camera.position, target, kPlayerRadius);
-            }
-        } else if (mode == AppMode::Menu) {
-            menu.update(dt);
         }
         if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
 
-        // NPCs act on whatever instruction they last accepted (follow, chase,
-        // face, gesture). This keeps running during dialogue so a companion
-        // trails you while you talk, but the pause menu freezes the world.
-        // Joined clients never simulate — the host's snapshots are the truth.
+        // NPC behaviors keep running during dialogue, freeze in the menu;
+        // joined clients never simulate (the host's snapshots are truth).
         if (mode != AppMode::Menu && !joined) {
-            for (Npc& npc : world.npcs()) npc.update(dt, camera.position, world.city());
+            for (Npc& npc : world.npcs()) npc.update(dt, player.position, world.city());
         }
 
-        // The moment an officer catches the player: a short stay at the
-        // station. The officer heads back to their post, and the player is
-        // released where they were dropped off once the sentence runs out.
+        // The moment an officer catches the player: short stay at the station.
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             Npc& npc = world.npcs()[i];
             const bool caughtNow = npc.hasCaughtPlayer();
             if (caughtNow && !wasCaught[i] && npc.persona().police) {
                 jailSecondsLeft = kJailSeconds;
                 if (const Building* station = world.city().findBuilding("police")) {
-                    camera.position = Vec3{(station->minX + station->maxX) * 0.5f, 0.f,
+                    player.position = Vec3{(station->minX + station->maxX) * 0.5f, 0.f,
                                            station->maxZ + 2.f};
                 }
                 npc.commandReturnHome();
-                if (mode == AppMode::Dialogue) {
-                    // Being hauled off ends any open conversation.
+                if (mode == AppMode::Dialogue) {  // hauled off mid-sentence
                     session.close();
                     dialog.endStreaming();
                     mode = AppMode::Playing;
-                    window.setMouseCursorVisible(false);
-                    centerMouse(window);
+                    DisableCursor();
                 }
             }
             wasCaught[i] = npc.hasCaughtPlayer();
         }
 
-        // ---- Multiplayer per-frame traffic ----
+        // ---- multiplayer per-frame traffic ----
         if (netServer) {
-            // Publish our authoritative state for the snapshot broadcaster
-            // and apply remote players' chat through our NPCs.
-            netServer->setHostPose(camera.position, camera.yawDeg);
+            netServer->setHostPose(player.position, player.yawDeg);
             std::vector<NetNpcPose> poses;
             poses.reserve(world.npcs().size());
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
@@ -518,7 +413,7 @@ int main() {
             remotePlayers = netServer->remotePlayerPoses();
         }
         if (joined) {
-            netClient->sendInput(camera.position, camera.yawDeg);
+            netClient->sendInput(player.position, player.yawDeg);
             for (const auto& msg : netClient->poll()) {
                 switch (msg.type) {
                     case MessageType::WorldSnapshot: {
@@ -538,21 +433,18 @@ int main() {
                     case MessageType::ChatDelta:
                         if (session.isOpen() &&
                             msg.payload.value("npc", -1) == session.npcIndex()) {
-                            dialog.appendStreamingDelta(
-                                msg.payload.value("text", std::string{}));
+                            dialog.appendStreamingDelta(msg.payload.value("text", std::string{}));
                         }
                         break;
                     case MessageType::ChatReply:
                         if (session.isOpen() &&
                             msg.payload.value("npc", -1) == session.npcIndex()) {
                             dialog.endStreaming();
+                            const std::string name =
+                                world.npcs()[static_cast<std::size_t>(session.npcIndex())]
+                                    .persona().name;
                             if (msg.payload.value("ok", false)) {
-                                const std::string text =
-                                    msg.payload.value("text", std::string{});
-                                const std::string name =
-                                    world.npcs()[static_cast<std::size_t>(session.npcIndex())]
-                                        .persona()
-                                        .name;
+                                const std::string text = msg.payload.value("text", std::string{});
                                 if (!text.empty()) {
                                     dialog.appendLine({TranscriptLine::Kind::Npc, name, text});
                                 } else {
@@ -572,8 +464,7 @@ int main() {
                     case MessageType::NpcMoodUpdate: {
                         const int idx = msg.payload.value("npc", -1);
                         if (idx >= 0 && idx < static_cast<int>(netMoods.size())) {
-                            netMoods[static_cast<std::size_t>(idx)] =
-                                msg.payload.value("mood", 0);
+                            netMoods[static_cast<std::size_t>(idx)] = msg.payload.value("mood", 0);
                         }
                         break;
                     }
@@ -583,32 +474,28 @@ int main() {
             }
         }
 
+        // Proximity: replicated poses when joined, live world otherwise.
         if (joined) {
-            // Proximity from replicated NPC poses — local Npc positions are
-            // stale on a client (it does not simulate).
             nearbyNpc = -1;
             float best = kTalkRadius;
             for (const auto& npc : netNpcs) {
-                const float d = distanceXZ(camera.position, npc.position);
+                const float d = distanceXZ(player.position, npc.position);
                 if (d <= best) {
                     best = d;
                     nearbyNpc = npc.npcIndex;
                 }
             }
         } else {
-            nearbyNpc = world.nearestNpcWithin(camera.position, kTalkRadius);
+            nearbyNpc = world.nearestNpcWithin(player.position, kTalkRadius);
         }
 
-        // Streamed fragments for the open conversation appear immediately.
-        // Remote players' streams route to them instead of our dialog.
+        // ---- LLM traffic (solo/host; remote players' routes go first) ----
         for (const auto& delta : client.drainDeltas()) {
             if (chatRouter && chatRouter->routeDelta(delta)) continue;
             if (session.deltaArrived(delta.id, delta.text)) {
                 dialog.appendStreamingDelta(delta.text);
             }
         }
-
-        // Completed replies land in NPC history even after the dialog closed.
         for (const auto& reply : client.drainReplies()) {
             if (chatRouter && chatRouter->routeReply(reply)) continue;
             const auto route = pendingRoutes.find(reply.id);
@@ -618,8 +505,8 @@ int main() {
             const auto text = npc.onReplyArrived(reply);
             pendingRoutes.erase(route);
 
-            // Hosting: our own conversations are just as public — bystanders
-            // get the same speech/mood broadcast remote-initiated ones do.
+            // Hosting: our own conversations broadcast the same speech/mood
+            // updates remote-initiated ones do.
             if (chatRouter && text) {
                 chatRouter->announceNpcSpeech(npcIndex, *text);
                 chatRouter->announceNpcMood(npcIndex);
@@ -631,12 +518,10 @@ int main() {
                     if (!text->empty()) {
                         dialog.appendLine({TranscriptLine::Kind::Npc, npc.persona().name, *text});
                     }
-                    // Narrate any physical action so it's visible in the log,
-                    // and so a wordless "tag-only" reply still shows something.
                     const std::string sd = stageDirection(npc.lastAction());
                     if (!sd.empty()) {
-                        dialog.appendLine({TranscriptLine::Kind::System, "",
-                                           npc.persona().name + " " + sd});
+                        dialog.appendLine(
+                            {TranscriptLine::Kind::System, "", npc.persona().name + " " + sd});
                     } else if (text->empty()) {
                         dialog.appendLine({TranscriptLine::Kind::System, "",
                                            "(" + npc.persona().name + " says nothing.)"});
@@ -649,118 +534,121 @@ int main() {
                     }
                 } else {
                     dialog.appendLine({TranscriptLine::Kind::System, "",
-                                       "[" + npc.persona().name + " seems distracted: " +
-                                           reply.errorMessage + "]"});
+                                       "[" + npc.persona().name +
+                                           " seems distracted: " + reply.errorMessage + "]"});
                 }
                 dialog.setInputEnabled(true);
             }
         }
 
-        // ---- 3D pass ----
-        renderer.beginFrame(window, camera);
+        // ---- render ----
+        BeginDrawing();
+        ClearBackground(Color{135, 190, 235, 255});
+        renderer.beginFrame(CameraPose{player.position, player.yawDeg, player.pitchDeg});
         renderer.drawCity(world.city());
         if (joined) {
-            // Replicated world: poses and moods come from the host's
-            // snapshots (no gesture data on the wire yet — v1).
             for (const auto& netNpc : netNpcs) {
+                CharacterVisual visual;
+                visual.position = netNpc.position;
+                visual.facingDeg = netNpc.facingDeg;
+                visual.variantSeed = netNpc.npcIndex;
                 const int mood = netNpc.npcIndex < static_cast<int>(netMoods.size())
                                      ? netMoods[static_cast<std::size_t>(netNpc.npcIndex)]
                                      : netNpc.mood;
-                renderer.drawNpc(NpcVisual{netNpc.position, netNpc.facingDeg, netNpc.npcIndex,
-                                           NpcPose::None, 0.f,
-                                           faceForMood(static_cast<NpcMood>(mood))});
+                visual.face = faceForMood(static_cast<NpcMood>(mood));
+                if (netNpc.npcIndex >= 0 &&
+                    netNpc.npcIndex < static_cast<int>(world.npcs().size())) {
+                    visual.police =
+                        world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().police;
+                }
+                renderer.drawCharacter(visual);
             }
         } else {
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 const Npc& npc = world.npcs()[i];
-                NpcPose pose = NpcPose::None;
-                if (npc.pose() == NpcAction::RaiseHand) pose = NpcPose::RaiseHand;
-                else if (npc.pose() == NpcAction::Wave) pose = NpcPose::Wave;
-                renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i),
-                                           pose, npc.gesturePhase(), faceForMood(npc.mood())});
+                CharacterVisual visual;
+                visual.position = npc.position();
+                visual.facingDeg = npc.facingDeg();
+                visual.variantSeed = static_cast<int>(i);
+                visual.police = npc.persona().police;
+                visual.walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
+                npcLastPos[i] = npc.position();
+                if (npc.pose() != NpcAction::None) visual.gesturePhase = npc.gesturePhase();
+                visual.face = faceForMood(npc.mood());
+                if (smokeRun) visual.face = static_cast<NpcFace>(i % 6);
+                renderer.drawCharacter(visual);
             }
         }
-        // Fellow players, drawn with the NPC body mesh; the id offset picks
-        // a body tint no NPC uses.
-        for (const auto& player : remotePlayers) {
-            renderer.drawNpc(NpcVisual{player.position, player.facingDeg,
-                                       1000 + player.playerId, NpcPose::None, 0.f,
-                                       NpcFace::Happy});
+        // Fellow players, drawn with the character mesh (id offset picks a
+        // variant no NPC uses).
+        for (const auto& remote : remotePlayers) {
+            CharacterVisual visual;
+            visual.position = remote.position;
+            visual.facingDeg = remote.facingDeg;
+            visual.variantSeed = 1000 + remote.playerId;
+            renderer.drawCharacter(visual);
         }
+        renderer.endFrame();
 
-        // ---- SFML overlay pass ----
-        window.pushGLStates();
-
-        // Nameplates: a shared helper because three sources need them
-        // (local NPCs, replicated NPCs, fellow players).
-        const auto drawNameplate = [&](const Vec3& feet, const std::string& name,
-                                       sf::Color color) {
-            if (distanceXZ(camera.position, feet) > kNameplateRange) return;
-            sf::Vector2f screen;
-            if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, window, screen)) return;
-            sf::Text tag(name, font, 14);
-            const sf::FloatRect bounds = tag.getLocalBounds();
-            tag.setPosition(screen.x - bounds.width * 0.5f, screen.y - bounds.height);
-            tag.setOutlineThickness(2.f);
-            tag.setOutlineColor(sf::Color(0, 0, 0, 200));
-            tag.setFillColor(color);
-            window.draw(tag);
+        // ---- 2D overlay ----
+        // Nameplates from whichever pose source is authoritative right now.
+        const auto plateFor = [&](const Vec3& feet, const std::string& name, Color color) {
+            if (distanceXZ(player.position, feet) > kNameplateRange) return;
+            Vector2 screen;
+            if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
+            drawNameplate(name, screen, color);
         };
-
         if (joined) {
-            // Persona names come from the local roster; both machines load
-            // the same personas/ directory (documented requirement).
             for (const auto& netNpc : netNpcs) {
                 if (netNpc.npcIndex < 0 ||
                     netNpc.npcIndex >= static_cast<int>(world.npcs().size())) continue;
-                drawNameplate(netNpc.position,
-                              world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)]
-                                  .persona().name,
-                              sf::Color::White);
+                plateFor(netNpc.position,
+                         world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().name,
+                         WHITE);
             }
         } else {
             for (const Npc& npc : world.npcs()) {
-                drawNameplate(npc.position(), npc.persona().name, sf::Color::White);
+                plateFor(npc.position(), npc.persona().name, WHITE);
             }
         }
-        for (const auto& player : remotePlayers) {
-            drawNameplate(player.position, player.name, sf::Color(150, 220, 255));
+        for (const auto& remote : remotePlayers) {
+            plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
         }
 
         if (mode == AppMode::Playing) {
-            if (nearbyNpc >= 0) {
+            if (nearbyNpc >= 0 && nearbyNpc < static_cast<int>(world.npcs().size())) {
                 const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
-                drawCenteredHudText(window, font,
-                                    "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name,
-                                    20, static_cast<float>(window.getSize().y) - 84.f);
+                drawCenteredHudText(
+                    "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name, 20,
+                    static_cast<float>(GetScreenHeight()) - 84.f);
             }
-            // Serving time: show the countdown while movement is locked.
             if (jailSecondsLeft > 0.f) {
                 const int secs = static_cast<int>(jailSecondsLeft) + 1;
-                drawCenteredHudText(window, font,
-                                    "Arrested: disturbing the peace. Released in " +
+                drawCenteredHudText("Arrested: disturbing the peace. Released in " +
                                         std::to_string(secs) + "s",
-                                    22, static_cast<float>(window.getSize().y) - 120.f);
+                                    22, static_cast<float>(GetScreenHeight()) - 120.f);
             }
-            // Crosshair dot.
-            sf::CircleShape dot(2.f);
-            dot.setOrigin(2.f, 2.f);
-            dot.setPosition(static_cast<float>(window.getSize().x) * 0.5f,
-                            static_cast<float>(window.getSize().y) * 0.5f);
-            dot.setFillColor(sf::Color(255, 255, 255, 200));
-            window.draw(dot);
+            DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 2.f,
+                       Color{255, 255, 255, 200});
         } else if (mode == AppMode::Dialogue) {
-            sf::RectangleShape dim(sf::Vector2f(static_cast<float>(window.getSize().x),
-                                                static_cast<float>(window.getSize().y)));
-            dim.setFillColor(sf::Color(8, 10, 16, 150));
-            window.draw(dim);
-            dialog.render(window);
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
+            dialog.render();
         } else {
-            menu.render(window, font);
+            menu.render();
         }
 
-        window.popGLStates();
-        window.display();
+        if (!assets.loaded()) {
+            DrawText("Asset packs missing - run tools/fetch_assets.sh for the full look", 24,
+                     GetScreenHeight() - 40, 18, Color{255, 225, 130, 255});
+        }
+        if (screenshotPath && maxFrames >= 0 && frames >= maxFrames) {
+            TakeScreenshot(screenshotPath);
+        }
+        EndDrawing();
     }
+
+shutdown:
+    leaveSession();
+    CloseWindow();
     return 0;
 }

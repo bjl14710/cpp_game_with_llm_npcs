@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 # Windows launcher: matches the style of the shooter/racing games. Uses MSYS2
-# UCRT64 for SFML, and verifies Ollama is reachable before building.
+# UCRT64 toolchain, and verifies Ollama is reachable before building.
 
 $ucrtBin = 'C:\msys64\ucrt64\bin'
 if (!(Test-Path $ucrtBin)) {

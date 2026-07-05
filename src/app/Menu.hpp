@@ -1,18 +1,18 @@
 #pragma once
 
-#include <SFML/Graphics.hpp>
-
 #include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "raylib.h"
+
 #include "KeyBindings.hpp"
 
 namespace llm_npc {
 
-// What the main loop should do after the menu handled an event.
+// What the main loop should do after the menu handled this frame's input.
 enum class MenuResult {
     None,    // keep showing the menu
     Resume,  // close the menu and return to the game
@@ -23,12 +23,13 @@ enum class MenuResult {
 // page, a Controls page where clicking a key chip arms capture of the next
 // key press, and a Multiplayer page for hosting or joining a session.
 // Rebinds use KeyBindings swap semantics and are saved to disk immediately.
+// raylib is polled, so update() handles input and returns the result each
+// frame; render() draws.
 class Menu {
    public:
     // Callbacks the Multiplayer page drives, injected by main.cpp so the
-    // menu stays free of networking types (same shape as the key-binding
-    // injection). onHost/onJoin return "" on success or a human-readable
-    // error shown as a toast.
+    // menu stays free of networking types. onHost/onJoin return "" on
+    // success or a human-readable error shown as a toast.
     struct MultiplayerHooks {
         std::function<std::string(int port)> onHost;
         std::function<std::string(const std::string& address)> onJoin;
@@ -51,23 +52,20 @@ class Menu {
     // True while the Controls page is waiting for a key press to bind.
     bool capturingKey() const { return awaiting_.has_value(); }
 
-    // Routes one SFML event (mouse move/click, key press during capture).
-    // Escape closes the menu from the main page, backs out of the Controls
-    // page, or cancels an armed capture — in that priority order.
-    MenuResult handleEvent(const sf::Event& event, const sf::RenderWindow& window);
+    // Handles this frame's mouse/keyboard input and ages the toast.
+    // Escape closes the menu from the main page, backs out of a sub-page,
+    // or cancels an armed capture — in that priority order.
+    MenuResult update(float dt);
 
-    // Ages the transient toast message.
-    void update(float dt);
-
-    // Draws the menu; call between pushGLStates/popGLStates.
-    void render(sf::RenderWindow& window, const sf::Font& font) const;
+    // Draws the menu over the dimmed frame.
+    void render() const;
 
    private:
     enum class Page { Main, Controls, Multiplayer };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
-        sf::FloatRect rect;
+        Rectangle rect;
         int id = 0;  // page-specific meaning, see layout helpers
     };
 
@@ -75,7 +73,6 @@ class Menu {
     std::filesystem::path savePath_;
     Page page_ = Page::Main;
     std::optional<Action> awaiting_;
-    sf::Vector2f mouse_{};
     std::string toast_;
     float toastLeft_ = 0.f;
 
@@ -84,16 +81,16 @@ class Menu {
     bool editingAddress_ = false;  // typed characters go into joinAddress_
 
     // Clickable areas for the current page, derived from the window size so
-    // render() and handleEvent() always agree.
-    std::vector<Hit> layout(const sf::RenderWindow& window) const;
+    // render() and update() always agree.
+    std::vector<Hit> layout() const;
 
-    // Applies a captured key press to the armed action; announces swaps.
-    void applyCapture(sf::Keyboard::Key key);
+    // Applies a captured raylib key code to the armed action; announces swaps.
+    void applyCapture(int key);
 
     // Validates joinAddress_ and fires onJoin; toasts the outcome.
     void attemptJoin();
 
-    // Shows a short status message under the controls list.
+    // Shows a short status message near the bottom of the screen.
     void showToast(std::string text);
 };
 
