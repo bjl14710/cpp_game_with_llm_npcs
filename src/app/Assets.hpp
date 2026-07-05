@@ -83,6 +83,15 @@ class Assets {
         return faces_[static_cast<std::size_t>(face)];
     }
 
+    // The atmosphere shader (distance fog + warm tint), assigned to every
+    // model material at load. The renderer also wraps the primitive batch
+    // in it (BeginShaderMode) so ground/props haze consistently with
+    // models. nullptr when shader compilation failed (plain look).
+    const Shader* fogShader() const { return fogLoaded_ ? &fogShader_ : nullptr; }
+
+    // Location of the shader's per-frame camera-position uniform.
+    int fogCameraLoc() const { return fogCameraLoc_; }
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -117,6 +126,11 @@ class Assets {
 
     // One baked emote per NpcFace value, indexed by the enum.
     Texture2D faces_[6] = {};
+
+    // Distance-fog + warm-tint shader shared by every material.
+    Shader fogShader_{};
+    bool fogLoaded_ = false;
+    int fogCameraLoc_ = -1;
 };
 
 }  // namespace llm_npc

@@ -20,12 +20,75 @@ std::size_t stableHash(const std::string& s) {
     return h;
 }
 
+// Atmosphere shader: distance fog toward the sky color plus a subtle warm
+// tint, over the standard texture * diffuse * vertex-color pipeline. The
+// vertex stage passes world-space position (matModel is identity for rlgl
+// batch primitives, whose vertices are already world-space, so the same
+// shader serves models AND primitives). GLSL 330 — the core profile raylib
+// uses on desktop.
+constexpr const char* kFogVertexShader = R"(
+#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+uniform mat4 mvp;
+uniform mat4 matModel;
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragPosition;
+void main() {
+    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0));
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+)";
+
+constexpr const char* kFogFragmentShader = R"(
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragPosition;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+uniform vec3 cameraPos;
+uniform vec4 fogColor;
+uniform float fogDensity;
+out vec4 finalColor;
+void main() {
+    vec4 texel = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
+    vec3 warm = texel.rgb * vec3(1.06, 1.0, 0.92);
+    float d = length(cameraPos - fragPosition) * fogDensity;
+    float fog = 1.0 - exp(-d * d);
+    finalColor = vec4(mix(warm, fogColor.rgb, fog), texel.a);
+}
+)";
+
 }  // namespace
 
 Assets::Assets(const std::string& assetsDir) {
     // Mood emotes are procedural — baked here regardless of downloads.
     for (int i = 0; i < 6; ++i) {
         faces_[i] = FaceTexture::bake(static_cast<NpcFace>(i));
+    }
+
+    // Atmosphere shader first, so every model loaded below can adopt it.
+    // Failure (no GL context, GLSL mismatch) degrades to the plain look.
+    fogShader_ = LoadShaderFromMemory(kFogVertexShader, kFogFragmentShader);
+    fogLoaded_ = IsShaderValid(fogShader_);
+    if (fogLoaded_) {
+        fogCameraLoc_ = GetShaderLocation(fogShader_, "cameraPos");
+        // Fog melts distant geometry into the sky clear color; density is
+        // tuned so the plaza (~40 units) stays crisp and the far city edge
+        // (~150+) visibly hazes.
+        const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
+        const float density = 0.006f;
+        SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogColor"),
+                       skyColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogDensity"),
+                       &density, SHADER_UNIFORM_FLOAT);
+    } else {
+        std::cerr << "[llm_npc] fog shader failed to compile — plain look\n";
     }
 
     cityDir_ = assetsDir + "/models/city";
@@ -109,6 +172,7 @@ Assets::Assets(const std::string& assetsDir) {
 }
 
 Assets::~Assets() {
+    if (fogLoaded_) UnloadShader(fogShader_);
     for (Texture2D& face : faces_) UnloadTexture(face);
     for (auto& [stem, model] : models_) UnloadModel(model);
     for (auto& character : characters_) {
@@ -151,6 +215,15 @@ void Assets::loadCharacter(const std::string& stem) {
         return;
     }
 
+    // Characters fog too. CPU skinning is unaffected: it writes animated
+    // vertices into the mesh before drawing, and the fog shader consumes
+    // only the standard position/texcoord/color attributes.
+    if (fogLoaded_) {
+        for (int i = 0; i < character.model.materialCount; ++i) {
+            character.model.materials[i].shader = fogShader_;
+        }
+    }
+
     character.clips = LoadModelAnimations(path.c_str(), &character.clipCount);
     for (int i = 0; i < character.clipCount; ++i) {
         const std::string name = character.clips[i].name;
@@ -179,6 +252,15 @@ bool Assets::loadCityModel(const std::string& stem) {
     if (model.meshCount == 0) {
         std::cerr << "[llm_npc] failed to load model: " << path << "\n";
         return false;
+    }
+    // Atmosphere: every material renders through the shared fog shader.
+    // (UnloadModel leaves material shaders alone — raylib treats them as
+    // user-owned precisely so they can be shared; the destructor unloads
+    // fogShader_ exactly once.)
+    if (fogLoaded_) {
+        for (int i = 0; i < model.materialCount; ++i) {
+            model.materials[i].shader = fogShader_;
+        }
     }
     models_.emplace(stem, model);
     return true;
