@@ -45,6 +45,15 @@ Assets::Assets(const std::string& assetsDir) {
         {"bench", "bench"},         {"cart", "box_B"},
         {"fountain", "base"},
     };
+    // Size contracts for everything that must not stretch to its collision
+    // box. Heights are world meters, chosen against the 1.8-unit characters.
+    sizeSpecs_ = {
+        {"taxi_cab", {SizeSpec::Mode::Uniform, 1.5f}},
+        {"cart", {SizeSpec::Mode::Uniform, 1.9f}},
+        {"bench", {SizeSpec::Mode::Uniform, 0.9f}},
+        {"fountain", {SizeSpec::Mode::Uniform, 1.2f}},
+    };
+
     genericBuildings_ = {"building_A", "building_B", "building_C", "building_D",
                          "building_E", "building_F", "building_G", "building_H"};
 
@@ -141,6 +150,12 @@ bool Assets::loadCityModel(const std::string& stem) {
     }
     models_.emplace(stem, model);
     return true;
+}
+
+const Assets::SizeSpec& Assets::sizeSpecFor(const Building& building) const {
+    static const SizeSpec fill{};  // Mode::Fill — the default contract
+    const auto it = sizeSpecs_.find(building.id);
+    return it != sizeSpecs_.end() ? it->second : fill;
 }
 
 const Model* Assets::modelForBuilding(const Building& building) const {

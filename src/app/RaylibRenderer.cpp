@@ -19,10 +19,26 @@ constexpr Color kAsphalt{68, 70, 78, 255};
 constexpr Color kPlaza{188, 178, 158, 255};
 constexpr Color kSidewalk{158, 152, 140, 255};
 
+// Draws `model` scaled UNIFORMLY to stand `worldHeight` tall, feet on the
+// ground, centered on (centerX, centerZ) — the Uniform size contract:
+// the asset keeps its proportions regardless of any collision box.
+void drawModelUniform(const Model& model, float centerX, float centerZ,
+                      float worldHeight, Color tint) {
+    const BoundingBox bb = GetModelBoundingBox(model);
+    const float h = bb.max.y - bb.min.y;
+    if (h <= 0.f) return;
+    const float s = worldHeight / h;
+    const Vector3 position{centerX - (bb.min.x + bb.max.x) * 0.5f * s,
+                           -bb.min.y * s,
+                           centerZ - (bb.min.z + bb.max.z) * 0.5f * s};
+    DrawModelEx(model, position, Vector3{0.f, 1.f, 0.f}, 0.f, Vector3{s, s, s}, tint);
+}
+
 // Draws `model` scaled and translated so its bounding box exactly fills the
 // axis-aligned footprint [minX,maxX]x[minZ,maxZ] with the given height,
-// sitting on the ground plane. Rotation-free: KayKit city pieces face +Z at
-// identity, which matches the street-facing fronts of the downtown layout.
+// sitting on the ground plane — the Fill size contract (buildings).
+// Rotation-free: KayKit city pieces face +Z at identity, which matches the
+// street-facing fronts of the downtown layout.
 void drawModelFittedToAABB(const Model& model, float minX, float minZ, float maxX,
                            float maxZ, float height, Color tint) {
     const BoundingBox bb = GetModelBoundingBox(model);
@@ -76,8 +92,7 @@ void RaylibRenderer::drawCity(const City& city) {
     if (const Model* light = assets_.prop("trafficlight_A")) {
         for (const float x : {-kStreetCenter, kStreetCenter}) {
             for (const float z : {-kStreetCenter, kStreetCenter}) {
-                drawModelFittedToAABB(*light, x + 8.5f, z + 8.5f, x + 9.5f, z + 9.5f,
-                                      4.5f, WHITE);
+                drawModelUniform(*light, x + 9.f, z + 9.f, 4.5f, WHITE);
             }
         }
     }
@@ -85,8 +100,7 @@ void RaylibRenderer::drawCity(const City& city) {
     if (const Model* bush = assets_.prop("bush")) {
         for (const Vec3 p : {Vec3{48.f, 0.f, 48.f}, Vec3{80.f, 0.f, 52.f},
                              Vec3{52.f, 0.f, 80.f}, Vec3{76.f, 0.f, 76.f}}) {
-            drawModelFittedToAABB(*bush, p.x - 1.2f, p.z - 1.2f, p.x + 1.2f, p.z + 1.2f,
-                                  1.4f, WHITE);
+            drawModelUniform(*bush, p.x, p.z, 1.1f, WHITE);
         }
     }
 
@@ -94,7 +108,14 @@ void RaylibRenderer::drawCity(const City& city) {
     // to fit the authoritative footprints, never the other way around.
     for (const Building& b : city.buildings()) {
         if (const Model* model = assets_.modelForBuilding(b)) {
-            drawModelFittedToAABB(*model, b.minX, b.minZ, b.maxX, b.maxZ, b.height, WHITE);
+            const Assets::SizeSpec& spec = assets_.sizeSpecFor(b);
+            if (spec.mode == Assets::SizeSpec::Mode::Uniform) {
+                drawModelUniform(*model, (b.minX + b.maxX) * 0.5f,
+                                 (b.minZ + b.maxZ) * 0.5f, spec.worldHeight, WHITE);
+            } else {
+                drawModelFittedToAABB(*model, b.minX, b.minZ, b.maxX, b.maxZ, b.height,
+                                      WHITE);
+            }
         } else {
             // Fallback primitive, tinted like the legacy renderer's boxes.
             const unsigned char tint =
