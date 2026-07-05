@@ -29,7 +29,7 @@ using llm_npc::MessageType;
 using llm_npc::NetClient;
 using llm_npc::NetMessage;
 using llm_npc::NetServer;
-using llm_npc::NpcPose;
+using llm_npc::NetNpcPose;
 using llm_npc::Vec3;
 
 namespace {
@@ -131,7 +131,7 @@ TEST_CASE("player movement propagates through server snapshots") {
 
     // The host's own pose and published NPCs ride the same snapshot.
     net.server.setHostPose(Vec3{1.f, 0.f, 2.f}, 45.f);
-    NpcPose npc;
+    NetNpcPose npc;
     npc.npcIndex = 3;
     npc.position = {9.f, 0.f, 9.f};
     npc.mood = 2;

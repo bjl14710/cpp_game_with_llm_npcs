@@ -10,7 +10,7 @@ using llm_npc::encodeMessage;
 using llm_npc::kNetProtocolVersion;
 using llm_npc::MessageType;
 using llm_npc::NetMessage;
-using llm_npc::NpcPose;
+using llm_npc::NetNpcPose;
 using llm_npc::PlayerPose;
 using llm_npc::Vec3;
 
@@ -80,13 +80,13 @@ TEST_CASE("WorldSnapshot round-trips player and NPC poses") {
 
     nlohmann::json npcs = nlohmann::json::array();
     for (int i = 0; i < 3; ++i) {
-        NpcPose n;
+        NetNpcPose n;
         n.npcIndex = i;
         n.position = {static_cast<float>(i), 0.f, static_cast<float>(-i)};
         n.facingDeg = 45.f * static_cast<float>(i);
         n.mood = i;
         n.behavior = 2 - i;
-        npcs.push_back(llm_npc::npcPoseToJson(n));
+        npcs.push_back(llm_npc::netNpcPoseToJson(n));
     }
 
     auto decoded = decodeMessage(encodeMessage(
@@ -102,7 +102,7 @@ TEST_CASE("WorldSnapshot round-trips player and NPC poses") {
     CHECK(back1.facingDeg == doctest::Approx(270.f));
 
     REQUIRE(decoded->payload["npcs"].size() == 3);
-    const NpcPose backN = llm_npc::npcPoseFromJson(decoded->payload["npcs"][2]);
+    const NetNpcPose backN = llm_npc::netNpcPoseFromJson(decoded->payload["npcs"][2]);
     CHECK(backN.npcIndex == 2);
     CHECK(backN.position.z == doctest::Approx(-2.f));
     CHECK(backN.mood == 2);

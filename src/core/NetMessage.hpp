@@ -53,7 +53,7 @@ struct PlayerPose {
 // One NPC's replicated state inside a WorldSnapshot. Mood/behavior mirror the
 // fields the renderer reads from Npc (mood(), behavior(), position(),
 // facingDeg()) so clients can draw NPCs without simulating them.
-struct NpcPose {
+struct NetNpcPose {
     int npcIndex = -1;
     Vec3 position{};
     float facingDeg = 0.f;
@@ -85,7 +85,7 @@ Vec3 vec3FromJson(const nlohmann::json& j);
 // Pose <-> JSON helpers for WorldSnapshot's "players" and "npcs" arrays.
 nlohmann::json playerPoseToJson(const PlayerPose& p);
 PlayerPose playerPoseFromJson(const nlohmann::json& j);
-nlohmann::json npcPoseToJson(const NpcPose& n);
-NpcPose npcPoseFromJson(const nlohmann::json& j);
+nlohmann::json netNpcPoseToJson(const NetNpcPose& n);
+NetNpcPose netNpcPoseFromJson(const nlohmann::json& j);
 
 }  // namespace llm_npc

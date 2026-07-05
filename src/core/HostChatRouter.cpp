@@ -77,6 +77,12 @@ bool HostChatRouter::routeReply(const ChatReply& reply) {
     return true;
 }
 
+void HostChatRouter::announceNpcSpeech(int npcIndex, const std::string& text) {
+    if (text.empty()) return;
+    if (npcIndex < 0 || npcIndex >= static_cast<int>(world_.npcs().size())) return;
+    server_.broadcast(MessageType::NpcSpeechBubble, {{"npc", npcIndex}, {"text", text}});
+}
+
 void HostChatRouter::announceNpcMood(int npcIndex) {
     if (npcIndex < 0 || npcIndex >= static_cast<int>(world_.npcs().size())) return;
     const Npc& npc = world_.npcs()[static_cast<std::size_t>(npcIndex)];

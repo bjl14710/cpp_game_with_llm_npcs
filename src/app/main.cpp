@@ -16,11 +16,14 @@
 #include "Config.hpp"
 #include "DialogUI.hpp"
 #include "DialogueSession.hpp"
+#include "HostChatRouter.hpp"
 #include "InputMap.hpp"
 #include "KeyBindings.hpp"
 #include "LlmClient.hpp"
 #include "Math.hpp"
 #include "Menu.hpp"
+#include "NetClient.hpp"
+#include "NetServer.hpp"
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "Renderer3D.hpp"
@@ -256,6 +259,72 @@ int main() {
     // still need to reach the right NPC's history.
     std::unordered_map<std::uint64_t, int> pendingRoutes;
 
+    // ---- Multiplayer state (all empty in solo play) ----
+    // Hosting: this process stays authoritative — NetServer fans our world
+    // out and HostChatRouter lets remote players use our NPCs/LLM.
+    // Joining: NetClient replicates the host's world; we stop simulating.
+    std::unique_ptr<NetServer> netServer;
+    std::unique_ptr<HostChatRouter> chatRouter;
+    std::unique_ptr<NetClient> netClient;
+    std::vector<PlayerPose> remotePlayers;          // avatars to draw (both modes)
+    std::vector<NetNpcPose> netNpcs;                // join mode: NPCs from snapshots
+    std::vector<int> netMoods(world.npcs().size(), 0);  // join mode: mood per NPC
+    bool netChatWaiting = false;                    // join mode: reply pending
+
+    const auto leaveSession = [&] {
+        if (netClient) {
+            netClient->disconnect();
+            netClient.reset();
+        }
+        if (netServer) {
+            chatRouter.reset();
+            netServer->stop();
+            netServer.reset();
+        }
+        remotePlayers.clear();
+        netNpcs.clear();
+        std::fill(netMoods.begin(), netMoods.end(), 0);
+        netChatWaiting = false;
+    };
+
+    Menu::MultiplayerHooks netHooks;
+    netHooks.active = [&] { return netServer != nullptr || netClient != nullptr; };
+    netHooks.status = [&]() -> std::string {
+        if (netServer) {
+            return "Hosting on port " + std::to_string(netServer->port()) + " — " +
+                   std::to_string(netServer->playerCount()) + " player(s) joined";
+        }
+        if (netClient) {
+            return netClient->connected() ? "Joined as player " +
+                                                std::to_string(netClient->playerId())
+                                          : "Connection lost: " + netClient->lastError();
+        }
+        return "Solo — host a game or join a friend's.";
+    };
+    netHooks.onHost = [&](int port) -> std::string {
+        if (netClient) return "Leave the joined session first";
+        if (netServer) return "";  // already hosting
+        NetServer::Settings settings;
+        settings.port = port;
+        auto server = std::make_unique<NetServer>(settings);
+        if (!server->start()) return server->lastError();
+        netServer = std::move(server);
+        chatRouter = std::make_unique<HostChatRouter>(world, *netServer);
+        return "";
+    };
+    netHooks.onJoin = [&](const std::string& address) -> std::string {
+        if (netServer) return "Stop hosting first";
+        const auto colon = address.rfind(':');
+        const std::string host = address.substr(0, colon);
+        const int port = std::stoi(address.substr(colon + 1));  // menu validated
+        auto client = std::make_unique<NetClient>();
+        if (!client->connect(host, port, "guest", "")) return client->lastError();
+        netClient = std::move(client);
+        return "";
+    };
+    netHooks.onLeave = leaveSession;
+    menu.setMultiplayer(netHooks);
+
     AppMode mode = AppMode::Playing;
     CameraPose camera;
     camera.position = Vec3{0.f, 0.f, 24.f};  // plaza south edge, facing the cart
@@ -286,10 +355,16 @@ int main() {
                     mode = AppMode::Menu;
                     window.setMouseCursorVisible(true);
                     releaseMouse();
-                } else if (event.key.code == keyFromName(bindings.key(Action::Talk)) && nearbyNpc >= 0) {
+                } else if (event.key.code == keyFromName(bindings.key(Action::Talk)) &&
+                           nearbyNpc >= 0 &&
+                           nearbyNpc < static_cast<int>(world.npcs().size())) {
                     session.open(nearbyNpc);
                     Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
-                    npc.lookAt(camera.position);  // turn to the player as the chat opens
+                    if (netClient && netClient->connected()) {
+                        netClient->sendChatOpen(nearbyNpc);  // host may react later
+                    } else {
+                        npc.lookAt(camera.position);  // turn to the player as the chat opens
+                    }
                     dialog.reset();
                     dialog.setInputEnabled(true);
                     dialog.swallowNextTextEntered();
@@ -315,7 +390,17 @@ int main() {
                 const std::string submitted = dialog.handleEvent(event);
                 if (!submitted.empty() && session.isOpen()) {
                     Npc& npc = world.npcs()[static_cast<std::size_t>(session.npcIndex())];
-                    if (!npc.waiting()) {
+                    if (netClient && netClient->connected()) {
+                        // Joined: the host owns the NPC — send the line up
+                        // and stream whatever comes back.
+                        if (!netChatWaiting) {
+                            dialog.appendLine({TranscriptLine::Kind::Player, "You", submitted});
+                            netClient->sendChatLine(session.npcIndex(), submitted);
+                            netChatWaiting = true;
+                            dialog.beginStreaming(npc.persona().name);
+                            dialog.setInputEnabled(false);
+                        }
+                    } else if (!npc.waiting()) {
                         dialog.appendLine({TranscriptLine::Kind::Player, "You", submitted});
                         const std::uint64_t id = npc.ask(submitted);
                         session.submitted(id);
@@ -346,6 +431,19 @@ int main() {
 
         const float dt = std::min(0.03f, frameClock.restart().asSeconds());
 
+        // A dropped link falls back to solo play; the menu status explains.
+        if (netClient && !netClient->connected()) {
+            leaveSession();
+            if (mode == AppMode::Dialogue) {
+                session.close();
+                dialog.endStreaming();
+                mode = AppMode::Playing;
+                window.setMouseCursorVisible(false);
+                centerMouse(window);
+            }
+        }
+        const bool joined = netClient != nullptr;  // connected, per the check above
+
         if (mode == AppMode::Playing) {
             if (window.hasFocus()) handleMouseLook(window, camera);
 
@@ -368,7 +466,8 @@ int main() {
         // NPCs act on whatever instruction they last accepted (follow, chase,
         // face, gesture). This keeps running during dialogue so a companion
         // trails you while you talk, but the pause menu freezes the world.
-        if (mode != AppMode::Menu) {
+        // Joined clients never simulate — the host's snapshots are the truth.
+        if (mode != AppMode::Menu && !joined) {
             for (Npc& npc : world.npcs()) npc.update(dt, camera.position, world.city());
         }
 
@@ -397,10 +496,113 @@ int main() {
             wasCaught[i] = npc.hasCaughtPlayer();
         }
 
-        nearbyNpc = world.nearestNpcWithin(camera.position, kTalkRadius);
+        // ---- Multiplayer per-frame traffic ----
+        if (netServer) {
+            // Publish our authoritative state for the snapshot broadcaster
+            // and apply remote players' chat through our NPCs.
+            netServer->setHostPose(camera.position, camera.yawDeg);
+            std::vector<NetNpcPose> poses;
+            poses.reserve(world.npcs().size());
+            for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                const Npc& npc = world.npcs()[i];
+                NetNpcPose pose;
+                pose.npcIndex = static_cast<int>(i);
+                pose.position = npc.position();
+                pose.facingDeg = npc.facingDeg();
+                pose.mood = static_cast<int>(npc.mood());
+                pose.behavior = static_cast<int>(npc.behavior());
+                poses.push_back(pose);
+            }
+            netServer->publishNpcPoses(std::move(poses));
+            chatRouter->update();
+            remotePlayers = netServer->remotePlayerPoses();
+        }
+        if (joined) {
+            netClient->sendInput(camera.position, camera.yawDeg);
+            for (const auto& msg : netClient->poll()) {
+                switch (msg.type) {
+                    case MessageType::WorldSnapshot: {
+                        remotePlayers.clear();
+                        for (const auto& p : msg.payload["players"]) {
+                            PlayerPose pose = playerPoseFromJson(p);
+                            if (pose.playerId != netClient->playerId()) {
+                                remotePlayers.push_back(std::move(pose));
+                            }
+                        }
+                        netNpcs.clear();
+                        for (const auto& n : msg.payload["npcs"]) {
+                            netNpcs.push_back(netNpcPoseFromJson(n));
+                        }
+                        break;
+                    }
+                    case MessageType::ChatDelta:
+                        if (session.isOpen() &&
+                            msg.payload.value("npc", -1) == session.npcIndex()) {
+                            dialog.appendStreamingDelta(
+                                msg.payload.value("text", std::string{}));
+                        }
+                        break;
+                    case MessageType::ChatReply:
+                        if (session.isOpen() &&
+                            msg.payload.value("npc", -1) == session.npcIndex()) {
+                            dialog.endStreaming();
+                            if (msg.payload.value("ok", false)) {
+                                const std::string text =
+                                    msg.payload.value("text", std::string{});
+                                const std::string name =
+                                    world.npcs()[static_cast<std::size_t>(session.npcIndex())]
+                                        .persona()
+                                        .name;
+                                if (!text.empty()) {
+                                    dialog.appendLine({TranscriptLine::Kind::Npc, name, text});
+                                } else {
+                                    dialog.appendLine({TranscriptLine::Kind::System, "",
+                                                       "(" + name + " says nothing.)"});
+                                }
+                            } else {
+                                dialog.appendLine(
+                                    {TranscriptLine::Kind::System, "",
+                                     "[They seem distracted: " +
+                                         msg.payload.value("error", std::string{}) + "]"});
+                            }
+                            dialog.setInputEnabled(true);
+                            netChatWaiting = false;
+                        }
+                        break;
+                    case MessageType::NpcMoodUpdate: {
+                        const int idx = msg.payload.value("npc", -1);
+                        if (idx >= 0 && idx < static_cast<int>(netMoods.size())) {
+                            netMoods[static_cast<std::size_t>(idx)] =
+                                msg.payload.value("mood", 0);
+                        }
+                        break;
+                    }
+                    default:
+                        break;  // NpcSpeechBubble has no floating-text UI yet
+                }
+            }
+        }
+
+        if (joined) {
+            // Proximity from replicated NPC poses — local Npc positions are
+            // stale on a client (it does not simulate).
+            nearbyNpc = -1;
+            float best = kTalkRadius;
+            for (const auto& npc : netNpcs) {
+                const float d = distanceXZ(camera.position, npc.position);
+                if (d <= best) {
+                    best = d;
+                    nearbyNpc = npc.npcIndex;
+                }
+            }
+        } else {
+            nearbyNpc = world.nearestNpcWithin(camera.position, kTalkRadius);
+        }
 
         // Streamed fragments for the open conversation appear immediately.
+        // Remote players' streams route to them instead of our dialog.
         for (const auto& delta : client.drainDeltas()) {
+            if (chatRouter && chatRouter->routeDelta(delta)) continue;
             if (session.deltaArrived(delta.id, delta.text)) {
                 dialog.appendStreamingDelta(delta.text);
             }
@@ -408,11 +610,20 @@ int main() {
 
         // Completed replies land in NPC history even after the dialog closed.
         for (const auto& reply : client.drainReplies()) {
+            if (chatRouter && chatRouter->routeReply(reply)) continue;
             const auto route = pendingRoutes.find(reply.id);
             if (route == pendingRoutes.end()) continue;
-            Npc& npc = world.npcs()[static_cast<std::size_t>(route->second)];
+            const int npcIndex = route->second;
+            Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
             const auto text = npc.onReplyArrived(reply);
             pendingRoutes.erase(route);
+
+            // Hosting: our own conversations are just as public — bystanders
+            // get the same speech/mood broadcast remote-initiated ones do.
+            if (chatRouter && text) {
+                chatRouter->announceNpcSpeech(npcIndex, *text);
+                chatRouter->announceNpcMood(npcIndex);
+            }
 
             if (session.replyArrived(reply.id, reply.ok)) {
                 dialog.endStreaming();
@@ -448,29 +659,72 @@ int main() {
         // ---- 3D pass ----
         renderer.beginFrame(window, camera);
         renderer.drawCity(world.city());
-        for (std::size_t i = 0; i < world.npcs().size(); ++i) {
-            const Npc& npc = world.npcs()[i];
-            NpcPose pose = NpcPose::None;
-            if (npc.pose() == NpcAction::RaiseHand) pose = NpcPose::RaiseHand;
-            else if (npc.pose() == NpcAction::Wave) pose = NpcPose::Wave;
-            renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i),
-                                       pose, npc.gesturePhase(), faceForMood(npc.mood())});
+        if (joined) {
+            // Replicated world: poses and moods come from the host's
+            // snapshots (no gesture data on the wire yet — v1).
+            for (const auto& netNpc : netNpcs) {
+                const int mood = netNpc.npcIndex < static_cast<int>(netMoods.size())
+                                     ? netMoods[static_cast<std::size_t>(netNpc.npcIndex)]
+                                     : netNpc.mood;
+                renderer.drawNpc(NpcVisual{netNpc.position, netNpc.facingDeg, netNpc.npcIndex,
+                                           NpcPose::None, 0.f,
+                                           faceForMood(static_cast<NpcMood>(mood))});
+            }
+        } else {
+            for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                const Npc& npc = world.npcs()[i];
+                NpcPose pose = NpcPose::None;
+                if (npc.pose() == NpcAction::RaiseHand) pose = NpcPose::RaiseHand;
+                else if (npc.pose() == NpcAction::Wave) pose = NpcPose::Wave;
+                renderer.drawNpc(NpcVisual{npc.position(), npc.facingDeg(), static_cast<int>(i),
+                                           pose, npc.gesturePhase(), faceForMood(npc.mood())});
+            }
+        }
+        // Fellow players, drawn with the NPC body mesh; the id offset picks
+        // a body tint no NPC uses.
+        for (const auto& player : remotePlayers) {
+            renderer.drawNpc(NpcVisual{player.position, player.facingDeg,
+                                       1000 + player.playerId, NpcPose::None, 0.f,
+                                       NpcFace::Happy});
         }
 
         // ---- SFML overlay pass ----
         window.pushGLStates();
 
-        for (const Npc& npc : world.npcs()) {
-            if (distanceXZ(camera.position, npc.position()) > kNameplateRange) continue;
+        // Nameplates: a shared helper because three sources need them
+        // (local NPCs, replicated NPCs, fellow players).
+        const auto drawNameplate = [&](const Vec3& feet, const std::string& name,
+                                       sf::Color color) {
+            if (distanceXZ(camera.position, feet) > kNameplateRange) return;
             sf::Vector2f screen;
-            if (!renderer.worldToScreen(npc.position() + Vec3{0.f, 2.15f, 0.f}, window, screen)) continue;
-            sf::Text tag(npc.persona().name, font, 14);
+            if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, window, screen)) return;
+            sf::Text tag(name, font, 14);
             const sf::FloatRect bounds = tag.getLocalBounds();
             tag.setPosition(screen.x - bounds.width * 0.5f, screen.y - bounds.height);
             tag.setOutlineThickness(2.f);
             tag.setOutlineColor(sf::Color(0, 0, 0, 200));
-            tag.setFillColor(sf::Color::White);
+            tag.setFillColor(color);
             window.draw(tag);
+        };
+
+        if (joined) {
+            // Persona names come from the local roster; both machines load
+            // the same personas/ directory (documented requirement).
+            for (const auto& netNpc : netNpcs) {
+                if (netNpc.npcIndex < 0 ||
+                    netNpc.npcIndex >= static_cast<int>(world.npcs().size())) continue;
+                drawNameplate(netNpc.position,
+                              world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)]
+                                  .persona().name,
+                              sf::Color::White);
+            }
+        } else {
+            for (const Npc& npc : world.npcs()) {
+                drawNameplate(npc.position(), npc.persona().name, sf::Color::White);
+            }
+        }
+        for (const auto& player : remotePlayers) {
+            drawNameplate(player.position, player.name, sf::Color(150, 220, 255));
         }
 
         if (mode == AppMode::Playing) {

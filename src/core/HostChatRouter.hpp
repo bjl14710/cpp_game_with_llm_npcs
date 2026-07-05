@@ -54,6 +54,10 @@ class HostChatRouter {
     // bystanders see mood shifts no matter who caused them.
     void announceNpcMood(int npcIndex);
 
+    // Announces one NPC's spoken line to all players (NpcSpeechBubble) —
+    // the host-conversation counterpart of the broadcast remote replies get.
+    void announceNpcSpeech(int npcIndex, const std::string& text);
+
    private:
     struct PendingLine {
         int playerId = -1;

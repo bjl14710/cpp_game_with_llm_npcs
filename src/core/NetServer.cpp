@@ -129,9 +129,20 @@ void NetServer::setHostPose(const Vec3& position, float facingDeg) {
     hostPose_.facingDeg = facingDeg;
 }
 
-void NetServer::publishNpcPoses(std::vector<NpcPose> poses) {
+void NetServer::publishNpcPoses(std::vector<NetNpcPose> poses) {
     std::lock_guard<std::mutex> lock(stateMutex_);
     npcPoses_ = std::move(poses);
+}
+
+std::vector<PlayerPose> NetServer::remotePlayerPoses() const {
+    std::vector<PlayerPose> out;
+    std::lock_guard<std::mutex> lock(connectionsMutex_);
+    for (const auto& conn : connections_) {
+        if (!conn->alive || conn->playerId < 0) continue;
+        std::lock_guard<std::mutex> poseLock(conn->poseMutex);
+        out.push_back(conn->pose);
+    }
+    return out;
 }
 
 std::vector<NetServer::ChatEvent> NetServer::drainChatEvents() {
@@ -331,7 +342,7 @@ nlohmann::json NetServer::buildSnapshot() {
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         players.push_back(playerPoseToJson(hostPose_));
-        for (const auto& npc : npcPoses_) npcs.push_back(npcPoseToJson(npc));
+        for (const auto& npc : npcPoses_) npcs.push_back(netNpcPoseToJson(npc));
         tick = ++tick_;
     }
     {
