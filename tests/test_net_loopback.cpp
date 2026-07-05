@@ -10,8 +10,16 @@
 #include <thread>
 #include <vector>
 
+#include "City.hpp"
+#include "FakeOllama.hpp"
+#include "HostChatRouter.hpp"
+#include "LlmClient.hpp"
 #include "NetClient.hpp"
 #include "NetServer.hpp"
+#include "Npc.hpp"
+#include "NpcAction.hpp"
+#include "Persona.hpp"
+#include "World.hpp"
 #include "doctest.h"
 
 using namespace std::chrono_literals;
@@ -228,26 +236,198 @@ TEST_CASE("protocol version mismatch is rejected at the handshake") {
     CHECK(eventually([&] { return net.server.playerCount() == 0; }));
 }
 
-TEST_CASE("shared NPC chat updates mood for the bystander too" * doctest::skip()) {
-    // Chat-routing issue: client A chats with NPC 0 (FakeOllama streams a
-    // reply with a [[MOOD:...]] directive); A receives ChatDelta/ChatReply,
-    // and client B — who never opened the chat — receives NpcMoodUpdate/
-    // NpcSpeechBubble for NPC 0.
+namespace {
+
+// Loopback plus a real World + LlmClient (against FakeOllama) + the router —
+// the same wiring main.cpp uses when hosting, minus rendering.
+struct ChatLoopback : Loopback {
+    llm_npc_test::FakeOllama fake;
+    llm_npc::LlmClient llm;
+    llm_npc::World world;
+    llm_npc::HostChatRouter router;
+
+    // `fake` is declared before `llm`, so its port is ready when the
+    // LlmConfig is built (member initialization order matters here).
+    ChatLoopback()
+        : llm(llm_npc::LlmConfig{"127.0.0.1", fake.port(), "test-model", 0.0, 5, "1m"}),
+          world(llm_npc::City{}),
+          router(world, server) {}
+
+    // One frame of the host loop: chat events in, LLM traffic out.
+    void hostFrame() {
+        router.update();
+        for (auto& d : llm.drainDeltas()) router.routeDelta(d);
+        for (auto& r : llm.drainReplies()) router.routeReply(r);
+    }
+
+    // Messages of `type` that client i has received for NPC `npc`.
+    std::vector<const NetMessage*> chatMessages(std::size_t i, MessageType type,
+                                                int npc = 0) const {
+        std::vector<const NetMessage*> out;
+        for (const auto& msg : received[i]) {
+            if (msg.type == type && msg.payload.value("npc", -1) == npc) {
+                out.push_back(&msg);
+            }
+        }
+        return out;
+    }
+};
+
+}  // namespace
+
+TEST_CASE("shared NPC chat updates mood for the bystander too") {
+    ChatLoopback net;
+    net.fake.setReply("Grr, watch it! [MOOD: angry]");
+
+    llm_npc::Persona grump;
+    grump.name = "Grump";
+    net.world.addNpc(llm_npc::Npc(grump, net.llm));
+
+    REQUIRE(net.join("asker"));
+    REQUIRE(net.join("bystander"));
+
+    net.clients[0]->sendChatOpen(0);
+    net.clients[0]->sendChatLine(0, "hello there");
+
+    // Asker streams deltas and gets the final directive-stripped reply.
+    CHECK(eventually(
+        [&] {
+            const auto replies = net.chatMessages(0, MessageType::ChatReply);
+            return !replies.empty() && replies[0]->payload.value("ok", false) &&
+                   replies[0]->payload.value("text", std::string{}) == "Grr, watch it!";
+        },
+        [&] {
+            net.hostFrame();
+            net.pump();
+        }));
+    CHECK_FALSE(net.chatMessages(0, MessageType::ChatDelta).empty());
+
+    // The bystander — who never opened a chat — sees the bubble and the mood.
+    CHECK(eventually(
+        [&] {
+            const auto bubbles = net.chatMessages(1, MessageType::NpcSpeechBubble);
+            const auto moods = net.chatMessages(1, MessageType::NpcMoodUpdate);
+            return !bubbles.empty() &&
+                   bubbles[0]->payload.value("text", std::string{}) == "Grr, watch it!" &&
+                   !moods.empty() &&
+                   moods.back()->payload.value("mood", 0) ==
+                       static_cast<int>(llm_npc::NpcMood::Angry);
+        },
+        [&] {
+            net.hostFrame();
+            net.pump();
+        }));
+
+    // And the host's world agrees — one shared NPC, one shared mood.
+    CHECK(net.world.npcs()[0].mood() == llm_npc::NpcMood::Angry);
+    CHECK(net.world.npcs()[0].history().size() == 2);
 }
 
-TEST_CASE("LLM failure is reported only to the requesting client" * doctest::skip()) {
-    // Chat-routing issue: FakeOllama in Http500 mode — client A's ChatReply
-    // carries the error text, client B receives nothing chat-related and
-    // stays connected.
+TEST_CASE("LLM failure is reported only to the requesting client") {
+    ChatLoopback net;
+    net.fake.setMode(llm_npc_test::FakeOllama::Mode::Http500);
+
+    llm_npc::Persona p;
+    p.name = "Clerk";
+    net.world.addNpc(llm_npc::Npc(p, net.llm));
+
+    REQUIRE(net.join("asker"));
+    REQUIRE(net.join("bystander"));
+
+    net.clients[0]->sendChatLine(0, "hello?");
+
+    CHECK(eventually(
+        [&] {
+            const auto replies = net.chatMessages(0, MessageType::ChatReply);
+            return !replies.empty() && !replies[0]->payload.value("ok", true) &&
+                   replies[0]->payload.value("error", std::string{}).find("500") !=
+                       std::string::npos;
+        },
+        [&] {
+            net.hostFrame();
+            net.pump();
+        }));
+
+    // The bystander saw nothing chat-related and is still connected.
+    CHECK(net.chatMessages(1, MessageType::ChatReply).empty());
+    CHECK(net.chatMessages(1, MessageType::ChatDelta).empty());
+    CHECK(net.chatMessages(1, MessageType::NpcSpeechBubble).empty());
+    CHECK(net.chatMessages(1, MessageType::NpcMoodUpdate).empty());
+    CHECK(net.clients[1]->connected());
 }
 
-TEST_CASE("two clients messaging the same NPC both get answered in order" * doctest::skip()) {
-    // Chat-routing issue: concurrent ChatLines to NPC 0 serialize through
-    // the single LlmClient worker; each client gets exactly its own reply,
-    // no interleaving or crash.
+TEST_CASE("two clients messaging the same NPC both get answered in order") {
+    ChatLoopback net;
+    net.fake.setReply("One at a time, please.");
+
+    llm_npc::Persona p;
+    p.name = "Barkeep";
+    net.world.addNpc(llm_npc::Npc(p, net.llm));
+
+    REQUIRE(net.join("first"));
+    REQUIRE(net.join("second"));
+
+    net.clients[0]->sendChatLine(0, "line from first");
+    // Ensure first's line is submitted (NPC busy) before second's arrives,
+    // so the queue order is deterministic.
+    CHECK(eventually([&] {
+        net.hostFrame();
+        return net.world.npcs()[0].waiting();
+    }));
+    net.clients[1]->sendChatLine(0, "line from second");
+
+    // Both get exactly their own reply, serialized through the one NPC.
+    CHECK(eventually(
+        [&] {
+            return net.chatMessages(0, MessageType::ChatReply).size() == 1 &&
+                   net.chatMessages(1, MessageType::ChatReply).size() == 1;
+        },
+        [&] {
+            net.hostFrame();
+            net.pump();
+        }));
+    CHECK(net.chatMessages(0, MessageType::ChatReply)[0]->payload.value("ok", false));
+    CHECK(net.chatMessages(1, MessageType::ChatReply)[0]->payload.value("ok", false));
+
+    // The shared history holds both exchanges in submission order.
+    const auto& history = net.world.npcs()[0].history();
+    REQUIRE(history.size() == 4);
+    CHECK(history[0].content == "line from first");
+    CHECK(history[2].content == "line from second");
 }
 
-TEST_CASE("client disconnect mid-conversation leaves the server healthy" * doctest::skip()) {
-    // Chat-routing issue: A disconnects while its reply streams; the server
-    // drops A's in-flight routing, B can immediately chat with the same NPC.
+TEST_CASE("client disconnect mid-conversation leaves the server healthy") {
+    ChatLoopback net;
+    net.fake.setReply("Anyone there?");
+
+    llm_npc::Persona p;
+    p.name = "Greeter";
+    net.world.addNpc(llm_npc::Npc(p, net.llm));
+
+    REQUIRE(net.join("quitter"));
+    REQUIRE(net.join("stayer"));
+
+    // Quitter asks, then leaves before the host processes anything.
+    net.clients[0]->sendChatLine(0, "hello and goodbye");
+    CHECK(eventually([&] {
+        net.hostFrame();
+        return net.world.npcs()[0].waiting();
+    }));
+    net.clients[0]->disconnect();
+
+    // The orphaned reply resolves without harm and the NPC frees up.
+    CHECK(eventually([&] {
+        net.hostFrame();
+        return !net.world.npcs()[0].waiting();
+    }));
+
+    // The stayer can immediately use the same NPC.
+    net.clients[1]->sendChatLine(0, "still here");
+    CHECK(eventually(
+        [&] { return net.chatMessages(1, MessageType::ChatReply).size() == 1; },
+        [&] {
+            net.hostFrame();
+            net.pump();
+        }));
+    CHECK(net.chatMessages(1, MessageType::ChatReply)[0]->payload.value("ok", false));
 }
