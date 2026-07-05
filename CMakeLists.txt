@@ -18,6 +18,9 @@ add_library(llm_npc_core STATIC
     src/core/DialogueSession.cpp
     src/core/KeyBindings.cpp
     src/core/LlmClient.cpp
+    src/core/NetClient.cpp
+    src/core/NetFraming.cpp
+    src/core/NetServer.cpp
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp
     src/core/World.cpp
