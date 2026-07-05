@@ -30,7 +30,7 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // history only once a successful reply arrives. That way a failed request
     // can be retried without polluting context with unanswered user turns.
     pendingUserLine_ = playerLine;
-    pendingId_ = client_.submit(persona_.renderSystemPrompt(), history_, playerLine);
+    pendingId_ = client_.submit(persona_.renderSystemPrompt(memory_), history_, playerLine);
     return pendingId_;
 }
 

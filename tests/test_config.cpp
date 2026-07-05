@@ -75,3 +75,13 @@ TEST_CASE("loadLlmConfig keeps defaults when llm.cfg is absent") {
     CHECK(cfg.port == 11434);
     CHECK_FALSE(cfg.model.empty());
 }
+
+TEST_CASE("loadLlmConfig reads the think toggle and defaults to omitted") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "model = qwen3:8b\nthink = false\n");
+    auto cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.think == "false");
+
+    TempDir empty;
+    CHECK(llm_npc::loadLlmConfig(empty.path).think.empty());
+}

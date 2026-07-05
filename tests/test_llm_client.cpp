@@ -178,3 +178,27 @@ TEST_CASE("LlmClient destruction never loses the shutdown wakeup") {
     }
     CHECK(true);  // reaching here means every worker joined
 }
+
+TEST_CASE("LlmClient sends think:false only when configured") {
+    FakeOllama fake;
+    LlmConfig config = testConfig(fake.port());
+    config.think = "false";
+    LlmClient client(config);
+    const auto id = client.submit("sys", {}, "hi");
+    waitForReply(client, id);
+    const auto bodies = fake.requestBodies();
+    REQUIRE(!bodies.empty());
+    const json body = json::parse(bodies.back());
+    REQUIRE(body.contains("think"));
+    CHECK(body["think"] == false);
+}
+
+TEST_CASE("LlmClient omits think entirely by default") {
+    FakeOllama fake;
+    LlmClient client(testConfig(fake.port()));
+    const auto id = client.submit("sys", {}, "hi");
+    waitForReply(client, id);
+    const auto bodies = fake.requestBodies();
+    REQUIRE(!bodies.empty());
+    CHECK_FALSE(json::parse(bodies.back()).contains("think"));
+}

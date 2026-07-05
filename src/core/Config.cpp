@@ -48,6 +48,7 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
         cfg.requestTimeoutSeconds = std::stoi(it->second);
     }
     if (auto it = kv.find("keep_alive"); it != kv.end()) cfg.keepAlive = it->second;
+    if (auto it = kv.find("think"); it != kv.end()) cfg.think = it->second;
     return cfg;
 }
 

@@ -119,3 +119,21 @@ TEST_CASE("parsePersonaText rejects bad positions and unknown keys") {
     CHECK_FALSE(unknown.ok);
     CHECK(unknown.error.find("unknown header key") != std::string::npos);
 }
+
+TEST_CASE("renderSystemPrompt(memory) injects memory before the action protocol") {
+    llm_npc::Persona p;
+    p.name = "Marge Holloway";
+    const std::string plain = p.renderSystemPrompt();
+    const std::string withMemory =
+        p.renderSystemPrompt("The player's name is Sam; they love rye bread.");
+
+    // Empty memory renders byte-identically to the plain prompt.
+    CHECK(p.renderSystemPrompt("") == plain);
+
+    const auto memoryAt = withMemory.find("What you remember from earlier meetings");
+    const auto actionsAt = withMemory.find("ACTIONS: ");
+    REQUIRE(memoryAt != std::string::npos);
+    REQUIRE(actionsAt != std::string::npos);
+    CHECK(memoryAt < actionsAt);  // directives stay last for small models
+    CHECK(withMemory.find("rye bread") != std::string::npos);
+}
