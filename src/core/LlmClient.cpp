@@ -16,7 +16,14 @@ LlmClient::LlmClient(LlmConfig config) : config_(std::move(config)) {
 }
 
 LlmClient::~LlmClient() {
-    stop_.store(true);
+    {
+        // Setting stop_ under the queue mutex serializes with the worker's
+        // predicate check: without it, the store+notify can land between the
+        // worker evaluating the predicate (false) and blocking on the CV — a
+        // lost wakeup that leaves join() hanging forever.
+        std::lock_guard<std::mutex> lock(requestMutex_);
+        stop_.store(true);
+    }
     requestCv_.notify_all();
     if (worker_.joinable()) worker_.join();
 }
