@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "Assets.hpp"
+#include "CharacterParts.hpp"
 #include "City.hpp"
 #include "FaceTexture.hpp"
 #include "Math.hpp"
@@ -56,6 +57,13 @@ class RaylibRenderer {
     // `walking`, gesture clip while gesturePhase > 0, face texture by `face`.
     // TODO(implement): steps 4-5.
     void drawCharacter(const CharacterVisual& visual);
+
+    // Draws one player-created character: parts snapped by the core's
+    // socket assembly, scaled ONCE so the whole figure meets the same
+    // 1.8-unit height contract as pack characters, colored by the look's
+    // palette. `phase` drives the procedural walk bob (no skeleton in v1).
+    void drawCompositeCharacter(const CharacterLook& look, const Vec3& position,
+                                float facingDeg, bool walking, float phase);
 
     // First-person weapon prop anchored lower-right of the camera, driven
     // solely by the authoritative equipped state: the WeaponKind index and

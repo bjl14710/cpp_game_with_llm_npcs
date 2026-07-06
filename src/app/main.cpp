@@ -9,7 +9,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
+#include <sstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -17,6 +19,8 @@
 #include <vector>
 
 #include "Assets.hpp"
+#include "CharacterParts.hpp"
+#include "CharacterStore.hpp"
 #include "City.hpp"
 #include "CombatEvents.hpp"
 #include "Config.hpp"
@@ -194,7 +198,28 @@ int main(int argc, char** argv) {
         npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
         world.addNpc(std::move(npc));
     }
-    std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs\n";
+
+    // Player-created characters (plan: character-creator): the persona
+    // record goes through the SAME parser as designer .persona files; the
+    // look record is registered so the render loop draws the composite
+    // instead of a pack model. Bad rows were already skipped by loadAll.
+    CharacterStore characterStore(projectRoot / "saves" / "characters.sqlite3");
+    std::unordered_map<std::size_t, CharacterLook> customLooks;
+    for (const StoredCharacter& stored : characterStore.loadAll()) {
+        const PersonaParseResult parsed =
+            parsePersonaText(stored.personaText, stored.characterId);
+        if (!parsed.ok) {
+            std::cerr << "[llm_npc] stored persona error: " << parsed.error << "\n";
+            continue;
+        }
+        Npc npc(parsed.value.persona, client);
+        npc.setPlacement(parsed.value.position, parsed.value.facingDeg,
+                         parsed.value.spotId);
+        customLooks[world.npcs().size()] = stored.look;
+        world.addNpc(std::move(npc));
+    }
+    std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs ("
+              << customLooks.size() << " player-created)\n";
 
     // Cross-session NPC memory: summaries persist in saves/ and are injected
     // into each NPC's system prompt (plan: npc-memory-and-model).
@@ -342,6 +367,69 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < world.npcs().size(); ++i) {
         npcLastPos[i] = world.npcs()[i].position();
     }
+
+    // Character creator: persists BOTH records (independently) and spawns
+    // the new citizen immediately. Declared after the per-NPC bookkeeping
+    // vectors because a runtime spawn must grow them all.
+    Menu::CreatorHooks creatorHooks;
+    creatorHooks.onCreate = [&](const std::string& name, const std::string& backstory,
+                                const std::string& traits,
+                                const CharacterLook& look) -> std::string {
+        std::string why;
+        if (!lookIsValid(look, &why)) return why;
+
+        LoadedPersona loaded;
+        loaded.persona.name = name;
+        loaded.persona.extraDirectives = backstory;
+        std::istringstream traitsIn(traits);
+        std::string trait;
+        while (std::getline(traitsIn, trait, ',')) {
+            trait = trim(trait);
+            if (!trait.empty()) loaded.persona.traits.push_back(trait);
+        }
+        loaded.spotId = "plaza";
+        loaded.facingDeg = 180.f;
+        // First clear standing spot on rings around the plaza center.
+        loaded.position = Vec3{0.f, 0.f, -10.f};
+        for (const float radius : {8.f, 11.f, 14.f, 17.f}) {
+            bool placed = false;
+            for (int step = 0; step < 12 && !placed; ++step) {
+                const float angle = degToRad(static_cast<float>(step) * 30.f);
+                const Vec3 spot{std::sin(angle) * radius, 0.f,
+                                std::cos(angle) * radius};
+                if (!world.city().circleIntersectsAny(spot.x, spot.z, 0.7f)) {
+                    loaded.position = spot;
+                    placed = true;
+                }
+            }
+            if (placed) break;
+        }
+
+        const std::string characterId =
+            "custom_" + std::to_string(static_cast<long long>(std::time(nullptr))) +
+            "_" + std::to_string(world.npcs().size());
+        loaded.id = characterId;
+        const bool persisted = characterStore.savePersona(
+                                   characterId, renderPersonaText(loaded)) &&
+                               characterStore.saveLook(characterId, look);
+
+        Npc npc(loaded.persona, client);
+        npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
+        customLooks[world.npcs().size()] = look;
+        world.addNpc(std::move(npc));
+        wasCaught.push_back(false);
+        npcLastPos.push_back(loaded.position);
+        savedTurns.push_back(0);
+
+        if (!persisted) {
+            std::cerr << "[llm_npc] character \"" << name
+                      << "\" spawned but could not be persisted\n";
+        }
+        return "";
+    };
+    menu.setCreator(creatorHooks);
+    // Slow turntable for the creator preview figure.
+    float previewSpinDeg = 0.f;
 
     long frames = 0;
     while (!WindowShouldClose() && (maxFrames < 0 || frames++ < maxFrames)) {
@@ -732,7 +820,16 @@ int main(int argc, char** argv) {
                 visual.face = faceForMood(npc.mood());
                 visual.dead = npc.combatState() == NpcState::Dead;
                 if (smokeRun) visual.face = static_cast<NpcFace>(i % 6);
-                renderer.drawCharacter(visual);
+                // Player-created characters draw as their socketed part
+                // composite; everyone else uses a pack model.
+                if (const auto customLook = customLooks.find(i);
+                    customLook != customLooks.end()) {
+                    renderer.drawCompositeCharacter(
+                        customLook->second, npc.position(), npc.facingDeg(),
+                        visual.walking, static_cast<float>(GetTime()));
+                } else {
+                    renderer.drawCharacter(visual);
+                }
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a
@@ -743,6 +840,15 @@ int main(int argc, char** argv) {
             visual.facingDeg = remote.facingDeg;
             visual.variantSeed = 1000 + remote.playerId;
             renderer.drawCharacter(visual);
+        }
+        // Creator preview: the draft look turns slowly a few steps in front
+        // of the camera while the Creator page is open (the page's lighter
+        // overlay keeps it readable).
+        if (mode == AppMode::Menu && menu.creatorPreview()) {
+            previewSpinDeg += dt * 35.f;
+            const Vec3 previewAt = player.position + flatForward(player.yawDeg) * 3.4f;
+            renderer.drawCompositeCharacter(*menu.creatorPreview(), previewAt,
+                                            previewSpinDeg, false, 0.f);
         }
         if (!joined && mode != AppMode::Dead) {
             renderer.drawViewmodel(static_cast<int>(world.player().weapon),

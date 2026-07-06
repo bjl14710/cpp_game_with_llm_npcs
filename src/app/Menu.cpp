@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "Config.hpp"  // trim
 #include "InputMap.hpp"
 
 namespace llm_npc {
@@ -21,6 +22,32 @@ constexpr int kIdHost = 300;
 constexpr int kIdAddress = 301;
 constexpr int kIdJoin = 302;
 constexpr int kIdLeave = 303;
+// Creator-page widgets. Field ids map to editingField_ values 1-3; the
+// part cyclers encode category and direction in their id.
+constexpr int kIdCreator = 4;
+constexpr int kIdFieldBase = 400;      // +1 name, +2 backstory, +3 traits
+constexpr int kIdPartPrev = 410;       // +category
+constexpr int kIdPartNext = 420;       // +category
+constexpr int kIdPalette = 430;
+constexpr int kIdRandomize = 431;
+constexpr int kIdCreate = 432;
+
+// Display name for a catalog part id: the text after the category prefix
+// ("hair_bowl" → "bowl"), title-ish enough for a picker chip.
+std::string partLabel(const std::string& id) {
+    const auto underscore = id.find('_');
+    return underscore == std::string::npos ? id : id.substr(underscore + 1);
+}
+
+const char* categoryLabel(PartCategory category) {
+    switch (category) {
+        case PartCategory::Body: return "Body";
+        case PartCategory::Head: return "Head";
+        case PartCategory::Eyes: return "Eyes";
+        case PartCategory::Hair: return "Hair";
+    }
+    return "?";
+}
 
 constexpr float kToastSeconds = 3.f;
 
@@ -63,10 +90,13 @@ Menu::Menu(KeyBindings& bindings, std::filesystem::path savePath)
 
 void Menu::setMultiplayer(MultiplayerHooks hooks) { multiplayer_ = std::move(hooks); }
 
+void Menu::setCreator(CreatorHooks hooks) { creator_ = std::move(hooks); }
+
 void Menu::open() {
     page_ = Page::Main;
     awaiting_.reset();
     editingAddress_ = false;
+    editingField_ = 0;  // draft look and typed fields survive a reopen
     toast_.clear();
     toastLeft_ = 0.f;
 }
@@ -78,11 +108,36 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 146.f;
-        for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdQuit}) {
+        float y = h * 0.5f - 182.f;
+        for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator, kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
+    } else if (page_ == Page::Creator) {
+        // Left column: persona text fields (label drawn above each box).
+        const float fieldX = w * 0.07f;
+        float y = h * 0.26f;
+        for (int f = 1; f <= 3; ++f) {
+            hits.push_back({Rectangle{fieldX, y, w * 0.34f, 44.f}, kIdFieldBase + f});
+            y += 92.f;
+        }
+        // Right column: a [<] label [>] row per category, then palette,
+        // then the action buttons. The preview renders in-world between
+        // the columns (main.cpp draws it while this page is open).
+        const float rowX = w * 0.62f;
+        const float rowW = w * 0.31f;
+        y = h * 0.26f;
+        for (int c = 0; c < kPartCategoryCount; ++c) {
+            hits.push_back({Rectangle{rowX, y, 44.f, 40.f}, kIdPartPrev + c});
+            hits.push_back({Rectangle{rowX + rowW - 44.f, y, 44.f, 40.f}, kIdPartNext + c});
+            y += 56.f;
+        }
+        hits.push_back({Rectangle{rowX, y, rowW, 40.f}, kIdPalette});
+        y += 64.f;
+        hits.push_back({Rectangle{rowX, y, rowW * 0.47f, 48.f}, kIdRandomize});
+        hits.push_back(
+            {Rectangle{rowX + rowW * 0.53f, y, rowW * 0.47f, 48.f}, kIdCreate});
+        hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 48.f}, kIdBack});
     } else if (page_ == Page::Multiplayer) {
         const float x = (w - 420.f) * 0.5f;
         float y = h * 0.30f;
@@ -128,6 +183,30 @@ MenuResult Menu::update(float dt) {
         return MenuResult::None;
     }
 
+    // Creator field editing: typed characters go into the focused field.
+    if (editingField_ != 0) {
+        std::string& field = editingField_ == 1   ? creatorName_
+                             : editingField_ == 2 ? creatorBackstory_
+                                                  : creatorTraits_;
+        const std::size_t cap = editingField_ == 1 ? 32 : 160;
+        int ch = GetCharPressed();
+        while (ch != 0) {
+            if (ch >= 32 && ch < 127 && field.size() < cap) {
+                field.push_back(static_cast<char>(ch));
+            }
+            ch = GetCharPressed();
+        }
+        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) &&
+            !field.empty()) {
+            field.pop_back();
+        }
+        if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_ENTER)) {
+            editingField_ = 0;
+            return MenuResult::None;  // the Escape ends the edit, not the page
+        }
+        // Clicking elsewhere also drops focus (fall through to clicks).
+    }
+
     // Address editing: typed characters go into the field.
     if (editingAddress_) {
         int ch = GetCharPressed();
@@ -170,10 +249,37 @@ MenuResult Menu::update(float dt) {
             } else if (hit.id == kIdMultiplayer) {
                 page_ = Page::Multiplayer;
                 editingAddress_ = false;
+            } else if (hit.id == kIdCreator) {
+                page_ = Page::Creator;
+                editingField_ = 0;
             } else if (hit.id == kIdBack) {
                 awaiting_.reset();
                 editingAddress_ = false;
+                editingField_ = 0;
                 page_ = Page::Main;
+            } else if (hit.id >= kIdFieldBase + 1 && hit.id <= kIdFieldBase + 3) {
+                editingField_ = hit.id - kIdFieldBase;
+            } else if (hit.id >= kIdPartPrev && hit.id < kIdPartPrev + kPartCategoryCount) {
+                editingField_ = 0;
+                cycleCreatorPart(static_cast<PartCategory>(hit.id - kIdPartPrev), -1);
+            } else if (hit.id >= kIdPartNext && hit.id < kIdPartNext + kPartCategoryCount) {
+                editingField_ = 0;
+                cycleCreatorPart(static_cast<PartCategory>(hit.id - kIdPartNext), +1);
+            } else if (hit.id == kIdPalette) {
+                editingField_ = 0;
+                const auto& palettes = paletteCatalog();
+                std::size_t index = 0;
+                for (std::size_t i = 0; i < palettes.size(); ++i) {
+                    if (palettes[i].id == draftLook_.paletteId) index = i;
+                }
+                draftLook_.paletteId = palettes[(index + 1) % palettes.size()].id;
+            } else if (hit.id == kIdRandomize) {
+                editingField_ = 0;
+                creatorSeed_ = creatorSeed_ * 7919u + 13u;
+                draftLook_ = randomizeLook(creatorSeed_);
+            } else if (hit.id == kIdCreate) {
+                editingField_ = 0;
+                attemptCreate();
             } else if (hit.id == kIdHost) {
                 if (multiplayer_.onHost) {
                     const std::string error = multiplayer_.onHost(kDefaultHostPort);
@@ -194,10 +300,11 @@ MenuResult Menu::update(float dt) {
             }
             break;
         }
-        // Clicking empty space cancels an armed capture or address edit.
+        // Clicking empty space cancels an armed capture or field edit.
         if (!hitSomething) {
             awaiting_.reset();
             editingAddress_ = false;
+            editingField_ = 0;
         }
     }
 
@@ -224,6 +331,57 @@ void Menu::applyCapture(int key) {
     }
 }
 
+void Menu::cycleCreatorPart(PartCategory category, int direction) {
+    // Options are gated by the BODY's style family (the body is the style
+    // anchor); cycling the body itself offers every body, then re-validates
+    // the other categories against the new family.
+    const PartDef* body = findPart(draftLook_.part(PartCategory::Body));
+    const std::string gate =
+        category == PartCategory::Body ? "any" : (body ? body->styleTag : "any");
+    const auto options = partsForCategory(category, gate);
+    if (options.empty()) return;
+
+    std::size_t index = 0;
+    for (std::size_t i = 0; i < options.size(); ++i) {
+        if (options[i]->id == draftLook_.part(category)) index = i;
+    }
+    index = (index + options.size() + static_cast<std::size_t>(direction)) %
+            options.size();
+    draftLook_.part(category) = options[index]->id;
+
+    if (category == PartCategory::Body) {
+        const PartDef* newBody = options[index];
+        for (const CategorySpec& spec : categorySpecs()) {
+            if (spec.category == PartCategory::Body) continue;
+            const PartDef* current = findPart(draftLook_.part(spec.category));
+            if (current && styleCompatible(*newBody, *current)) continue;
+            const auto valid = partsForCategory(spec.category, newBody->styleTag);
+            if (!valid.empty()) draftLook_.part(spec.category) = valid.front()->id;
+        }
+    }
+}
+
+void Menu::attemptCreate() {
+    if (!creator_.onCreate) return;
+    if (trim(creatorName_).empty()) {
+        showToast("Name required");
+        return;
+    }
+    const std::string error =
+        creator_.onCreate(trim(creatorName_), trim(creatorBackstory_),
+                          trim(creatorTraits_), draftLook_);
+    if (!error.empty()) {
+        showToast(error);
+        return;
+    }
+    showToast(trim(creatorName_) + " has moved into town!");
+    creatorName_.clear();
+    creatorBackstory_.clear();
+    creatorTraits_.clear();
+    creatorSeed_ = creatorSeed_ * 7919u + 13u;
+    draftLook_ = randomizeLook(creatorSeed_);
+}
+
 void Menu::attemptJoin() {
     if (!multiplayer_.onJoin) return;
     std::string host;
@@ -245,10 +403,14 @@ void Menu::render() const {
     const float w = static_cast<float>(GetScreenWidth());
     const float h = static_cast<float>(GetScreenHeight());
 
-    DrawRectangle(0, 0, static_cast<int>(w), static_cast<int>(h), Color{8, 10, 16, 170});
+    // The Creator page dims less: its live preview is a real in-world
+    // render behind the overlay and must stay readable.
+    const unsigned char dim = page_ == Page::Creator ? 90 : 170;
+    DrawRectangle(0, 0, static_cast<int>(w), static_cast<int>(h), Color{8, 10, 16, dim});
 
     const char* title = page_ == Page::Main       ? "Paused"
                         : page_ == Page::Controls ? "Controls"
+                        : page_ == Page::Creator  ? "Create a Character"
                                                   : "Multiplayer";
     drawCenteredLine(title, 40, h * 0.12f, Color{235, 240, 250, 255});
 
@@ -276,8 +438,38 @@ void Menu::render() const {
         if (hit.id == kIdResume) label = "Resume";
         else if (hit.id == kIdControls) label = "Controls";
         else if (hit.id == kIdMultiplayer) label = "Multiplayer";
+        else if (hit.id == kIdCreator) label = "Create Character";
         else if (hit.id == kIdQuit) label = "Quit";
         else if (hit.id == kIdBack) label = "Back";
+        else if (hit.id >= kIdFieldBase + 1 && hit.id <= kIdFieldBase + 3) {
+            const int f = hit.id - kIdFieldBase;
+            const std::string& value = f == 1 ? creatorName_
+                                     : f == 2 ? creatorBackstory_
+                                              : creatorTraits_;
+            label = value + (editingField_ == f ? "_" : "");
+            if (label.empty()) label = "(click to type)";
+            const char* caption = f == 1   ? "Name (required):"
+                                  : f == 2 ? "Backstory:"
+                                           : "Traits (comma-separated):";
+            DrawText(caption, static_cast<int>(hit.rect.x),
+                     static_cast<int>(hit.rect.y - 24.f), 16, Color{170, 180, 200, 255});
+        } else if (hit.id >= kIdPartPrev && hit.id < kIdPartPrev + kPartCategoryCount) {
+            label = "<";
+            // The row's category and current pick draw once, between the
+            // two arrow buttons (this is the prev arrow; the next arrow is
+            // 44 px inside the row's right edge — see layout()).
+            const auto category = static_cast<PartCategory>(hit.id - kIdPartPrev);
+            DrawText(categoryLabel(category), static_cast<int>(hit.rect.x),
+                     static_cast<int>(hit.rect.y - 20.f), 16, Color{170, 180, 200, 255});
+            const Rectangle between{hit.rect.x + 44.f, hit.rect.y, w * 0.31f - 88.f,
+                                    hit.rect.height};
+            drawCentered(partLabel(draftLook_.part(category)), 20, between, WHITE);
+        } else if (hit.id >= kIdPartNext && hit.id < kIdPartNext + kPartCategoryCount) {
+            label = ">";
+        } else if (hit.id == kIdPalette) {
+            label = "Palette: " + draftLook_.paletteId;
+        } else if (hit.id == kIdRandomize) label = "Randomize";
+        else if (hit.id == kIdCreate) label = "Save & Spawn";
         else if (hit.id == kIdHost) label = "Host on port " + std::to_string(kDefaultHostPort);
         else if (hit.id == kIdJoin) label = "Join";
         else if (hit.id == kIdLeave) label = "Leave session";
