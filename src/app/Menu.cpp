@@ -25,6 +25,11 @@ constexpr int kIdLeave = 303;
 // Creator-page widgets. Field ids map to editingField_ values 1-3; the
 // part cyclers encode category and direction in their id.
 constexpr int kIdCreator = 4;
+constexpr int kIdJournal = 5;
+// Journal-page widgets.
+constexpr int kIdJournalPrev = 500;
+constexpr int kIdJournalNext = 501;
+constexpr int kJournalRowsPerPage = 7;
 constexpr int kIdFieldBase = 400;      // +1 name, +2 backstory, +3 traits
 constexpr int kIdPartPrev = 410;       // +category
 constexpr int kIdPartNext = 420;       // +category
@@ -92,6 +97,8 @@ void Menu::setMultiplayer(MultiplayerHooks hooks) { multiplayer_ = std::move(hoo
 
 void Menu::setCreator(CreatorHooks hooks) { creator_ = std::move(hooks); }
 
+void Menu::setJournal(JournalHooks hooks) { journal_ = std::move(hooks); }
+
 void Menu::open() {
     page_ = Page::Main;
     awaiting_.reset();
@@ -108,11 +115,18 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 182.f;
-        for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator, kIdQuit}) {
+        float y = h * 0.5f - 218.f;
+        for (int id :
+             {kIdResume, kIdControls, kIdMultiplayer, kIdCreator, kIdJournal, kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
+    } else if (page_ == Page::Journal) {
+        // Rows draw in render(); only paging + back are clickable.
+        const float y = h * 0.86f;
+        hits.push_back({Rectangle{w * 0.20f, y, 120.f, 44.f}, kIdJournalPrev});
+        hits.push_back({Rectangle{w * 0.80f - 120.f, y, 120.f, 44.f}, kIdJournalNext});
+        hits.push_back({Rectangle{(w - 320.f) * 0.5f, y, 320.f, 44.f}, kIdBack});
     } else if (page_ == Page::Creator) {
         // Left column: persona text fields (label drawn above each box).
         const float fieldX = w * 0.07f;
@@ -252,6 +266,16 @@ MenuResult Menu::update(float dt) {
             } else if (hit.id == kIdCreator) {
                 page_ = Page::Creator;
                 editingField_ = 0;
+            } else if (hit.id == kIdJournal) {
+                page_ = Page::Journal;
+                journalPage_ = 0;
+            } else if (hit.id == kIdJournalPrev) {
+                if (journalPage_ > 0) --journalPage_;
+            } else if (hit.id == kIdJournalNext) {
+                const int rows = journal_.entries
+                                     ? static_cast<int>(journal_.entries().size())
+                                     : 0;
+                if ((journalPage_ + 1) * kJournalRowsPerPage < rows) ++journalPage_;
             } else if (hit.id == kIdBack) {
                 awaiting_.reset();
                 editingAddress_ = false;
@@ -411,8 +435,44 @@ void Menu::render() const {
     const char* title = page_ == Page::Main       ? "Paused"
                         : page_ == Page::Controls ? "Controls"
                         : page_ == Page::Creator  ? "Create a Character"
+                        : page_ == Page::Journal  ? "Journal"
                                                   : "Multiplayer";
     drawCenteredLine(title, 40, h * 0.12f, Color{235, 240, 250, 255});
+
+    if (page_ == Page::Journal) {
+        const std::vector<JournalRow> rows =
+            journal_.entries ? journal_.entries() : std::vector<JournalRow>{};
+        if (rows.empty()) {
+            drawCenteredLine("You haven't been told anything yet.", 22, h * 0.4f,
+                             Color{170, 180, 200, 255});
+        }
+        const int first = journalPage_ * kJournalRowsPerPage;
+        float y = h * 0.22f;
+        std::string lastSubject;
+        for (int i = first;
+             i < static_cast<int>(rows.size()) && i < first + kJournalRowsPerPage;
+             ++i) {
+            const JournalRow& row = rows[static_cast<std::size_t>(i)];
+            const float x = w * 0.14f;
+            if (row.subject != lastSubject) {  // one header per topic group
+                lastSubject = row.subject;
+                DrawText(row.subject.c_str(), static_cast<int>(x),
+                         static_cast<int>(y), 20, Color{130, 190, 250, 255});
+                y += 28.f;
+            }
+            const Color ink = row.conflicting ? Color{255, 170, 130, 255}
+                                              : Color{225, 230, 240, 255};
+            std::string line = row.content + "  (" + row.attribution + ")";
+            if (row.conflicting) line += "  [conflicting accounts]";
+            DrawText(line.c_str(), static_cast<int>(x + 18.f), static_cast<int>(y),
+                     18, ink);
+            y += 30.f;
+        }
+        if (static_cast<int>(rows.size()) > kJournalRowsPerPage) {
+            drawCenteredLine("page " + std::to_string(journalPage_ + 1), 16,
+                             h * 0.80f, Color{140, 150, 170, 255});
+        }
+    }
 
     if (page_ == Page::Multiplayer) {
         const std::string status = multiplayer_.status ? multiplayer_.status() : "";
@@ -439,6 +499,9 @@ void Menu::render() const {
         else if (hit.id == kIdControls) label = "Controls";
         else if (hit.id == kIdMultiplayer) label = "Multiplayer";
         else if (hit.id == kIdCreator) label = "Create Character";
+        else if (hit.id == kIdJournal) label = "Journal";
+        else if (hit.id == kIdJournalPrev) label = "< Prev";
+        else if (hit.id == kIdJournalNext) label = "Next >";
         else if (hit.id == kIdQuit) label = "Quit";
         else if (hit.id == kIdBack) label = "Back";
         else if (hit.id >= kIdFieldBase + 1 && hit.id <= kIdFieldBase + 3) {
