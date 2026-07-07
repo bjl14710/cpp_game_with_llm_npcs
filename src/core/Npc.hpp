@@ -134,6 +134,12 @@ class Npc {
     void setMemory(std::string summary) { memory_ = std::move(summary); }
     const std::string& memory() const { return memory_; }
 
+    // Town gossip THIS character has heard, rendered by main from the
+    // shared fact bus whenever this NPC's knowledge set changes; injected
+    // into every system prompt alongside the memory.
+    void setGossip(std::string gossip) { gossip_ = std::move(gossip); }
+    const std::string& gossip() const { return gossip_; }
+
     // --- Combat interface --------------------------------------------------
 
     // Reduces hp by `amount` (clamped at 0). Transitions state: armed NPCs
@@ -177,6 +183,7 @@ class Npc {
     std::uint64_t pendingId_ = 0;
     std::string pendingUserLine_;
     std::string memory_;  // persisted cross-session summary (may be empty)
+    std::string gossip_;  // facts heard around town (may be empty)
 
     Vec3 position_{};
     float facingDeg_ = 0.f;

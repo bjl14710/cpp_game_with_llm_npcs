@@ -2,15 +2,29 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace llm_npc {
 
 // One shared fact on the world bus: a number, a piece of text, or both.
-// Gossip rumors and journal entries will ride the same shape later; the
-// world clock is the first resident.
+// The world clock is the first resident.
 struct WorldFact {
     double number = 0.0;
     std::string text;
+};
+
+// One piece of structured town knowledge (gossip). Normalized fields —
+// not free paragraphs — because the journal's contradiction check
+// compares subjects exactly. `source` is who first said it ("player" or
+// a persona name); who has HEARD it lives in the knowledge sets, not in
+// the fact.
+struct KnownFact {
+    std::string factId;        // stable hash of subject+content
+    std::string subject;       // normalized: lowercase, [a-z0-9_]
+    std::string content;       // one short statement, <= 140 chars
+    std::string source;
+    double learnedAtSeconds = 0.0;  // world time when first recorded
 };
 
 // The world bus: a single string-keyed store every system reads shared
@@ -54,8 +68,31 @@ class WorldState {
     // Overrides the clock (smoke runs' --hour flag, tests).
     void setTimeOfDayHours(double hours);
 
+    // ---- structured town knowledge (gossip) --------------------------------
+    // Commit a fact to the bus. Idempotent: an existing factId keeps its
+    // original source and timestamp (first teller wins). Returns whether
+    // the fact was new.
+    bool addFact(const KnownFact& fact);
+
+    // Marks `agent` ("player" or a persona name) as having heard `factId`.
+    // Unknown fact ids are ignored (no phantom knowledge).
+    void grantKnowledge(const std::string& agent, const std::string& factId);
+
+    bool knows(const std::string& agent, const std::string& factId) const;
+
+    // Facts `agent` has heard, in commit order.
+    std::vector<const KnownFact*> factsKnownBy(const std::string& agent) const;
+
+    // Every fact on the bus, in commit order (persistence, journal).
+    const std::vector<KnownFact>& facts() const { return knownFacts_; }
+
+    const KnownFact* findFact(const std::string& factId) const;
+
    private:
     std::unordered_map<std::string, WorldFact> facts_;
+    std::vector<KnownFact> knownFacts_;  // commit order preserved
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        knowledge_;  // agent -> fact ids heard
 };
 
 }  // namespace llm_npc
