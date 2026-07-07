@@ -54,10 +54,11 @@ uniform vec4 colDiffuse;
 uniform vec3 cameraPos;
 uniform vec4 fogColor;
 uniform float fogDensity;
+uniform float lightLevel;
 out vec4 finalColor;
 void main() {
     vec4 texel = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
-    vec3 warm = texel.rgb * vec3(1.06, 1.0, 0.92);
+    vec3 warm = texel.rgb * vec3(1.06, 1.0, 0.92) * lightLevel;
     float d = length(cameraPos - fragPosition) * fogDensity;
     float fog = 1.0 - exp(-d * d);
     finalColor = vec4(mix(warm, fogColor.rgb, fog), texel.a);
@@ -78,15 +79,19 @@ Assets::Assets(const std::string& assetsDir) {
     fogLoaded_ = IsShaderValid(fogShader_);
     if (fogLoaded_) {
         fogCameraLoc_ = GetShaderLocation(fogShader_, "cameraPos");
-        // Fog melts distant geometry into the sky clear color; density is
-        // tuned so the plaza (~40 units) stays crisp and the far city edge
-        // (~150+) visibly hazes.
+        fogColorLoc_ = GetShaderLocation(fogShader_, "fogColor");
+        fogLightLoc_ = GetShaderLocation(fogShader_, "lightLevel");
+        // Daylight defaults; the renderer re-drives fogColor and lightLevel
+        // each frame from the shared world clock's day/night curves. The
+        // density is tuned so the plaza (~40 units) stays crisp and the far
+        // city edge (~150+) visibly hazes.
         const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
         const float density = 0.006f;
-        SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogColor"),
-                       skyColor, SHADER_UNIFORM_VEC4);
+        const float light = 1.f;
+        SetShaderValue(fogShader_, fogColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogDensity"),
                        &density, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(fogShader_, fogLightLoc_, &light, SHADER_UNIFORM_FLOAT);
     } else {
         std::cerr << "[llm_npc] fog shader failed to compile — plain look\n";
     }

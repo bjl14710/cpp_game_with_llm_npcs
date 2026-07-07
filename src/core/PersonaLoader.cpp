@@ -22,6 +22,37 @@ std::vector<std::string> splitCsv(const std::string& s) {
     return out;
 }
 
+// Parses one "HH-HH, x, z, activity" schedule value. Hours may be
+// fractional; the activity is everything after the third comma (it may
+// itself contain commas). Returns false on any malformed piece.
+bool parseScheduleEntry(const std::string& s, ScheduleEntry& out) {
+    const auto c1 = s.find(',');
+    if (c1 == std::string::npos) return false;
+    const auto c2 = s.find(',', c1 + 1);
+    if (c2 == std::string::npos) return false;
+    const auto c3 = s.find(',', c2 + 1);
+    if (c3 == std::string::npos) return false;
+
+    const std::string hours = trim(s.substr(0, c1));
+    const auto dash = hours.find('-');
+    if (dash == std::string::npos || dash == 0 || dash + 1 >= hours.size()) return false;
+    try {
+        out.startHour = std::stof(hours.substr(0, dash));
+        out.endHour = std::stof(hours.substr(dash + 1));
+        out.position.x = std::stof(trim(s.substr(c1 + 1, c2 - c1 - 1)));
+        out.position.z = std::stof(trim(s.substr(c2 + 1, c3 - c2 - 1)));
+        out.position.y = 0.f;
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (out.startHour < 0.f || out.startHour >= 24.f || out.endHour < 0.f ||
+        out.endHour >= 24.f) {
+        return false;
+    }
+    out.activity = trim(s.substr(c3 + 1));
+    return !out.activity.empty();
+}
+
 // Parse "x, z" into a ground-plane position. Returns false on bad input.
 bool parsePosition(const std::string& s, Vec3& out) {
     auto parts = splitCsv(s);
@@ -94,6 +125,16 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                 // Carries a weapon: retaliates (turns Hostile) when attacked
                 // instead of fleeing. Same true/yes/1 convention.
                 result.value.persona.armed = (val == "true" || val == "yes" || val == "1");
+            } else if (key == "schedule") {
+                // Repeated key: one daily-routine block per line, driven by
+                // the shared world clock (never a private timer).
+                ScheduleEntry entry;
+                if (!parseScheduleEntry(val, entry)) {
+                    result.error = id + ": bad schedule '" + val +
+                                   "' (want: HH-HH, x, z, activity)";
+                    return result;
+                }
+                result.value.schedule.push_back(std::move(entry));
             } else {
                 result.error = id + ": unknown header key '" + key + "'";
                 return result;
@@ -143,6 +184,11 @@ std::string renderPersonaText(const LoadedPersona& loaded) {
     if (!loaded.spotId.empty()) out << "spot = " << loaded.spotId << '\n';
     out << "position = " << loaded.position.x << ", " << loaded.position.z << '\n';
     out << "facing = " << loaded.facingDeg << '\n';
+    for (const ScheduleEntry& entry : loaded.schedule) {
+        out << "schedule = " << entry.startHour << '-' << entry.endHour << ", "
+            << entry.position.x << ", " << entry.position.z << ", "
+            << entry.activity << '\n';
+    }
     if (p.police) out << "police = true\n";
     if (p.armed) out << "armed = true\n";
     if (!p.extraDirectives.empty()) out << "---\n" << p.extraDirectives << '\n';

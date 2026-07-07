@@ -5,6 +5,7 @@
 
 #include "rlgl.h"
 
+#include "DayNight.hpp"
 #include "Math.hpp"
 
 namespace llm_npc {
@@ -116,6 +117,22 @@ void drawFountain(const Building& b, float worldHeight) {
 }  // namespace
 
 RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {}
+
+void RaylibRenderer::setTimeOfDay(float hours) {
+    // Sky, fog, and light all read the same curves from the same clock —
+    // fog keeps melting distant geometry into the horizon at any hour.
+    const SkyColor sky = skyColorAt(hours);
+    skyColor_ = Color{static_cast<unsigned char>(sky.r * 255.f),
+                      static_cast<unsigned char>(sky.g * 255.f),
+                      static_cast<unsigned char>(sky.b * 255.f), 255};
+    lightLevel_ = lightLevelAt(hours);
+    if (const Shader* fog = assets_.fogShader()) {
+        const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
+        SetShaderValue(*fog, assets_.fogColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(*fog, assets_.fogLightLoc(), &lightLevel_,
+                       SHADER_UNIFORM_FLOAT);
+    }
+}
 
 void RaylibRenderer::beginFrame(const CameraPose& pose) {
     camera_.position = {pose.position.x, pose.position.y + 1.7f, pose.position.z};

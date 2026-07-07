@@ -6,6 +6,9 @@ knowledge = Knows espresso, oat milk ratios, and every customer's order. Knows B
 spot = coffee
 position = 58, -36
 facing = 0
+schedule = 6-15, 58, -36, pulling espresso
+schedule = 15-17, 60, 70, coffee break in the park
+schedule = 17-6, 58, -36, closing the cafe
 ---
 Your shop sits on the southeast block of downtown, next to the big office
 building. You are working on a screenplay about a barista who solves crimes;

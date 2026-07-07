@@ -156,26 +156,35 @@ void drawNameplate(const std::string& name, Vector2 screen, Color color) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // --frames N [shot.png] [--camera x z yaw]: render N frames then exit 0,
-    // optionally saving a screenshot of the last frame (scripted smoke runs +
-    // visual checks). --camera overrides the default plaza vantage so
-    // different parts of the city can be verified without a human at the
-    // mouse.
+    // --frames N [shot.png] [--camera x z yaw] [--hour H]: render N frames
+    // then exit 0, optionally saving a screenshot of the last frame
+    // (scripted smoke runs + visual checks). --camera overrides the default
+    // plaza vantage; --hour pins the world clock so day/night-dependent
+    // screenshots stay deterministic.
     long maxFrames = -1;
     const char* screenshotPath = nullptr;
     bool cameraOverride = false;
     float cameraX = 0.f, cameraZ = 0.f, cameraYaw = 180.f;
+    float hourOverride = -1.f;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
         int arg = 3;
-        if (arg < argc && std::strcmp(argv[arg], "--camera") != 0) {
+        if (arg < argc && argv[arg][0] != '-') {
             screenshotPath = argv[arg++];
         }
-        if (arg + 3 < argc && std::strcmp(argv[arg], "--camera") == 0) {
-            cameraOverride = true;
-            cameraX = std::strtof(argv[arg + 1], nullptr);
-            cameraZ = std::strtof(argv[arg + 2], nullptr);
-            cameraYaw = std::strtof(argv[arg + 3], nullptr);
+        while (arg < argc) {
+            if (arg + 3 < argc && std::strcmp(argv[arg], "--camera") == 0) {
+                cameraOverride = true;
+                cameraX = std::strtof(argv[arg + 1], nullptr);
+                cameraZ = std::strtof(argv[arg + 2], nullptr);
+                cameraYaw = std::strtof(argv[arg + 3], nullptr);
+                arg += 4;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--hour") == 0) {
+                hourOverride = std::strtof(argv[arg + 1], nullptr);
+                arg += 2;
+            } else {
+                ++arg;
+            }
         }
     }
 
@@ -190,12 +199,15 @@ int main(int argc, char** argv) {
     LlmClient client(loadLlmConfig(configDir));
     client.warmUp();  // preload the model so the first reply starts fast
     World world(City::makeDowntown());
+    // Smoke runs pin the clock so day/night screenshots are deterministic.
+    if (hourOverride >= 0.f) world.state().setTimeOfDayHours(hourOverride);
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
     for (const auto& err : personaErrors) std::cerr << "[llm_npc] persona error: " << err << "\n";
     for (const auto& loaded : roster) {
         Npc npc(loaded.persona, client);
         npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
+        npc.setSchedule(loaded.schedule);
         world.addNpc(std::move(npc));
     }
 
@@ -215,6 +227,7 @@ int main(int argc, char** argv) {
         Npc npc(parsed.value.persona, client);
         npc.setPlacement(parsed.value.position, parsed.value.facingDeg,
                          parsed.value.spotId);
+        npc.setSchedule(parsed.value.schedule);
         customLooks[world.npcs().size()] = stored.look;
         world.addNpc(std::move(npc));
     }
@@ -554,6 +567,12 @@ int main(int argc, char** argv) {
         }
         if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
 
+        // The ONE world clock advances here; every time-aware system below
+        // (schedules, day/night) reads this shared value — none keeps its
+        // own. The town keeps living while the menu is open.
+        world.state().advanceTime(dt);
+        const float worldHour = static_cast<float>(world.state().timeOfDayHours());
+
         // NPC behaviors keep running during dialogue, freeze in the menu;
         // joined clients never simulate (the host's snapshots are truth).
         if (mode != AppMode::Menu && !joined) {
@@ -561,7 +580,7 @@ int main(int argc, char** argv) {
                 // Combat movement (flee/hostile/dead) owns non-Idle NPCs;
                 // conversational behaviors would fight it.
                 if (npc.combatState() == NpcState::Idle) {
-                    npc.update(dt, player.position, world.city());
+                    npc.update(dt, player.position, world.city(), worldHour);
                 }
             }
         }
@@ -786,7 +805,8 @@ int main(int argc, char** argv) {
 
         // ---- render ----
         BeginDrawing();
-        ClearBackground(Color{135, 190, 235, 255});
+        renderer.setTimeOfDay(worldHour);  // sky, fog, light: one clock
+        ClearBackground(renderer.skyColor());
         renderer.beginFrame(CameraPose{player.position, player.yawDeg, player.pitchDeg});
         renderer.drawCity(world.city());
         if (joined) {
@@ -874,7 +894,13 @@ int main(int argc, char** argv) {
             }
         } else {
             for (const Npc& npc : world.npcs()) {
-                plateFor(npc.position(), npc.persona().name, WHITE);
+                // Nameplate carries the schedule activity ("Marge - baking
+                // bread") so the routine reads at a glance.
+                plateFor(npc.position(),
+                         npc.activity().empty()
+                             ? npc.persona().name
+                             : npc.persona().name + " - " + npc.activity(),
+                         WHITE);
             }
         }
         for (const auto& remote : remotePlayers) {

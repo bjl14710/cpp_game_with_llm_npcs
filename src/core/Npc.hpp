@@ -10,6 +10,7 @@
 #include "Math.hpp"
 #include "NpcAction.hpp"
 #include "Persona.hpp"
+#include "Schedule.hpp"
 
 namespace llm_npc {
 
@@ -68,7 +69,23 @@ class Npc {
     // turns to face them per the current behavior, sliding around buildings
     // via `city`, and counts down any active gesture pose. Pure game logic
     // (no LLM, no graphics) so it stays unit-testable.
-    void update(float dt, const Vec3& playerPos, const City& city);
+    //
+    // `timeOfDayHours` is the SHARED world clock (World::state()) injected
+    // per tick — the NPC keeps no clock of its own. Pass a negative value
+    // (the default) to disable schedule behavior (tests, callers without a
+    // clock); everything else behaves as before.
+    void update(float dt, const Vec3& playerPos, const City& city,
+                float timeOfDayHours = -1.f);
+
+    // Daily routine (from the persona file). Empty = stand at home.
+    void setSchedule(std::vector<ScheduleEntry> schedule) {
+        schedule_ = std::move(schedule);
+    }
+
+    // The active schedule entry's activity label at the last update
+    // ("baking bread"); empty when nothing is scheduled. Shown in the
+    // nameplate.
+    const std::string& activity() const { return activity_; }
 
     // The persistent movement behavior set by the last obeyed instruction.
     NpcAction behavior() const { return behavior_; }
@@ -175,6 +192,8 @@ class Npc {
     bool caughtPlayer_ = false;               // arrest reached the player
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
+    std::vector<ScheduleEntry> schedule_;     // daily routine (may be empty)
+    std::string activity_;                    // active entry's label
 
     // Combat state — all zero/Idle until something hurts this NPC.
     int hp_ = 100;

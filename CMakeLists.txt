@@ -40,6 +40,7 @@ add_library(llm_npc_core STATIC
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp
     src/core/World.cpp
+    src/core/WorldState.cpp
 )
 target_include_directories(llm_npc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
