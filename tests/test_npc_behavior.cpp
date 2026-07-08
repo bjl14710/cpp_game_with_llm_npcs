@@ -215,3 +215,49 @@ TEST_CASE("Gestures pose the NPC and expire on their own") {
     // A gesture is an overlay: it must not have set a movement behavior.
     CHECK(npc.behavior() == NpcAction::None);
 }
+
+TEST_CASE("deriveFacingFromMotion points facing along actual displacement") {
+    // Combat movement (flee/hostile) writes position directly without
+    // touching facing — the derivation must reorient from motion alone,
+    // killing the moonwalk at the source.
+    LlmClient client(LlmConfig{"localhost", 1});
+    Persona p;
+    p.name = "Runner";
+    Npc npc(p, client);
+    npc.setPlacement(Vec3{0.f, 0.f, 0.f}, 0.f, "spot");
+
+    const Vec3 prev = npc.position();
+    npc.position() = Vec3{1.f, 0.f, 0.f};  // moved toward +X in one frame
+    npc.deriveFacingFromMotion(prev, 1.f / 60.f);
+    CHECK(npc.facingDeg() == doctest::Approx(90.f).epsilon(0.02));  // +X = 90°
+
+    // Diagonal motion toward -Z/+X lands between.
+    const Vec3 prev2 = npc.position();
+    npc.position() = npc.position() + Vec3{0.5f, 0.f, -0.5f};
+    npc.deriveFacingFromMotion(prev2, 1.f / 60.f);
+    CHECK(npc.facingDeg() == doctest::Approx(135.f).epsilon(0.02));
+}
+
+TEST_CASE("deriveFacingFromMotion ignores sub-threshold drift and the dead") {
+    LlmClient client(LlmConfig{"localhost", 1});
+    Persona p;
+    p.name = "Idler";
+    Npc npc(p, client);
+    npc.setPlacement(Vec3{0.f, 0.f, 0.f}, 0.f, "spot");
+    npc.lookAt(Vec3{-5.f, 0.f, 0.f});  // deliberate standing turn: -X = -90°
+    const float held = npc.facingDeg();
+
+    // A nudge far below walking pace must not flip the held facing.
+    const Vec3 prev = npc.position();
+    npc.position() = npc.position() + Vec3{0.001f, 0.f, 0.f};
+    npc.deriveFacingFromMotion(prev, 1.f / 60.f);
+    CHECK(npc.facingDeg() == doctest::Approx(held));
+
+    // Corpses keep their final pose no matter how far they are moved.
+    npc.takeDamage(1000);
+    REQUIRE(npc.combatState() == NpcState::Dead);
+    const Vec3 prev2 = npc.position();
+    npc.position() = npc.position() + Vec3{0.f, 0.f, 9.f};
+    npc.deriveFacingFromMotion(prev2, 1.f / 60.f);
+    CHECK(npc.facingDeg() == doctest::Approx(held));
+}

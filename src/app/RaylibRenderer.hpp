@@ -57,6 +57,12 @@ class RaylibRenderer {
     // TODO(implement): steps 4-5.
     void drawCharacter(const CharacterVisual& visual);
 
+    // First-person weapon prop anchored lower-right of the camera, driven
+    // solely by the authoritative equipped state: the WeaponKind index and
+    // the core's attackAnimFraction (1 at swing start, decaying to 0).
+    // Call inside the 3D pass, after the world is drawn.
+    void drawViewmodel(int weaponKind, float attackFraction);
+
     // Ends the 3D pass (EndMode3D). 2D overlay (DialogUI/Menu/nameplates)
     // draws after this, before EndDrawing.
     // TODO(implement): step 3.

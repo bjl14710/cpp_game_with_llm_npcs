@@ -181,6 +181,19 @@ void Npc::trimHistory() {
     history_.erase(history_.begin(), history_.begin() + drop);
 }
 
+void Npc::deriveFacingFromMotion(const Vec3& prevPosition, float dt) {
+    if (state_ == NpcState::Dead || dt <= 0.f) return;  // corpses hold their pose
+    const float dx = position_.x - prevPosition.x;
+    const float dz = position_.z - prevPosition.z;
+    // Below walking pace, keep the current facing (idle jitter, tiny nudges,
+    // and conversation turns must not fight the derivation).
+    constexpr float kFacingSpeedThreshold = 0.5f;  // units per second
+    if ((dx * dx + dz * dz) < (kFacingSpeedThreshold * dt) * (kFacingSpeedThreshold * dt)) {
+        return;
+    }
+    facingDeg_ = std::atan2(dx, dz) * 180.f / 3.14159265358979323846f;
+}
+
 void Npc::takeDamage(int amount) {
     if (state_ == NpcState::Dead) return;
     hp_ -= amount;
