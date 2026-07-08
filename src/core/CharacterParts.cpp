@@ -63,6 +63,24 @@ const std::vector<PartDef>& partCatalog() {
         {"hair_tuft", PartCategory::Hair, "round", {0.30f, 0.26f, 0.30f}, {}},
         {"hair_bowl", PartCategory::Hair, "any", {0.76f, 0.28f, 0.76f}, {}},
         {"hair_spikes", PartCategory::Hair, "blocky", {0.70f, 0.30f, 0.70f}, {}},
+
+        // --- More variety (issue #92), additive within the same contract ---
+        // Bodies (blocky bodies render as the declared box like body_block).
+        {"body_slim", PartCategory::Body, "round", {0.70f, 1.04f, 0.44f},
+         {{"head", {0.f, 1.02f, 0.f}}}},
+        {"body_bulk", PartCategory::Body, "blocky", {1.04f, 0.94f, 0.60f},
+         {{"head", {0.f, 0.92f, 0.f}}}},
+        // Heads (blocky heads render as the declared box like head_block).
+        {"head_oval", PartCategory::Head, "round", {0.66f, 0.84f, 0.66f},
+         {{"eyes", {0.f, 0.48f, 0.28f}}, {"hair", {0.f, 0.78f, 0.f}}}},
+        {"head_tall", PartCategory::Head, "blocky", {0.70f, 0.90f, 0.70f},
+         {{"eyes", {0.f, 0.52f, 0.36f}}, {"hair", {0.f, 0.86f, 0.f}}}},
+        // Eyes (both use the shared two-pupil eye recipe, sized by localSize).
+        {"eyes_round", PartCategory::Eyes, "round", {0.44f, 0.20f, 0.08f}, {}},
+        {"eyes_happy", PartCategory::Eyes, "any", {0.40f, 0.12f, 0.08f}, {}},
+        // Hair.
+        {"hair_pony", PartCategory::Hair, "round", {0.34f, 0.30f, 0.34f}, {}},
+        {"hair_mohawk", PartCategory::Hair, "blocky", {0.26f, 0.42f, 0.62f}, {}},
     };
     return parts;
 }
@@ -74,6 +92,10 @@ const std::vector<PartPalette>& paletteCatalog() {
         {"sunny", {242, 200, 160}, {214, 172, 60}, {188, 84, 60}},
         {"forest", {208, 158, 122}, {70, 46, 28}, {74, 128, 82}},
         {"mono", {228, 214, 198}, {150, 150, 158}, {64, 66, 74}},
+        // More palettes (issue #92) — purely additive; the picker cycles them.
+        {"berry", {228, 176, 150}, {88, 30, 52}, {150, 54, 92}},
+        {"slate", {206, 184, 170}, {54, 60, 70}, {88, 104, 124}},
+        {"mint", {224, 196, 168}, {60, 92, 74}, {96, 176, 140}},
     };
     return palettes;
 }

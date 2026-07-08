@@ -94,9 +94,9 @@ TEST_CASE("style gate rejects cross-family looks with a reason") {
 
 TEST_CASE("unknown part and unknown palette are rejected") {
     CharacterLook look = roundLook();
-    look.part(PartCategory::Hair) = "hair_mohawk";  // not in the catalog
+    look.part(PartCategory::Hair) = "hair_dreadlocks";  // not in the catalog
     CHECK_FALSE(lookIsValid(look));
-    CHECK(findPart("hair_mohawk") == nullptr);
+    CHECK(findPart("hair_dreadlocks") == nullptr);
 
     look = roundLook();
     look.paletteId = "neon";
