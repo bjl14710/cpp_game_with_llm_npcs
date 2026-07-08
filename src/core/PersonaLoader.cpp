@@ -125,6 +125,30 @@ PersonaParseResult parsePersonaFile(const std::filesystem::path& path) {
     return parsePersonaText(buf.str(), id);
 }
 
+std::string renderPersonaText(const LoadedPersona& loaded) {
+    std::ostringstream out;
+    const Persona& p = loaded.persona;
+    out << "name = " << p.name << '\n';
+    if (!p.role.empty()) out << "role = " << p.role << '\n';
+    if (!p.traits.empty()) {
+        out << "traits = ";
+        for (std::size_t i = 0; i < p.traits.size(); ++i) {
+            if (i) out << ", ";
+            out << p.traits[i];
+        }
+        out << '\n';
+    }
+    if (!p.speakingStyle.empty()) out << "style = " << p.speakingStyle << '\n';
+    if (!p.knowledgeBoundary.empty()) out << "knowledge = " << p.knowledgeBoundary << '\n';
+    if (!loaded.spotId.empty()) out << "spot = " << loaded.spotId << '\n';
+    out << "position = " << loaded.position.x << ", " << loaded.position.z << '\n';
+    out << "facing = " << loaded.facingDeg << '\n';
+    if (p.police) out << "police = true\n";
+    if (p.armed) out << "armed = true\n";
+    if (!p.extraDirectives.empty()) out << "---\n" << p.extraDirectives << '\n';
+    return out.str();
+}
+
 std::vector<LoadedPersona> loadAllPersonas(const std::filesystem::path& dir,
                                            std::vector<std::string>* errors) {
     std::vector<std::filesystem::path> files;

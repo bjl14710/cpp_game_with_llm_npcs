@@ -8,6 +8,7 @@
 
 #include "raylib.h"
 
+#include "CharacterParts.hpp"
 #include "KeyBindings.hpp"
 
 namespace llm_npc {
@@ -38,6 +39,15 @@ class Menu {
         std::function<bool()> active;         // hosting or joined right now
     };
 
+    // Callback the Creator page drives; injected by main.cpp so the menu
+    // stays free of world/storage types. Returns "" on success (character
+    // saved and spawned) or a human-readable error shown as a toast.
+    struct CreatorHooks {
+        std::function<std::string(const std::string& name, const std::string& backstory,
+                                  const std::string& traits, const CharacterLook& look)>
+            onCreate;
+    };
+
     // `bindings` is shared with the main loop; `savePath` is where every
     // accepted rebind is persisted.
     Menu(KeyBindings& bindings, std::filesystem::path savePath);
@@ -45,6 +55,16 @@ class Menu {
     // Installs the Multiplayer page's callbacks; without them the page
     // shows nothing actionable (solo-only build of the menu still works).
     void setMultiplayer(MultiplayerHooks hooks);
+
+    // Installs the Creator page's save callback.
+    void setCreator(CreatorHooks hooks);
+
+    // The draft look while the Creator page is open, nullptr otherwise.
+    // main.cpp renders it as a slowly turning in-world preview in front of
+    // the camera (the menu overlay dims less on that page so it reads).
+    const CharacterLook* creatorPreview() const {
+        return page_ == Page::Creator ? &draftLook_ : nullptr;
+    }
 
     // Resets to the main page (called when the menu is opened).
     void open();
@@ -61,7 +81,7 @@ class Menu {
     void render() const;
 
    private:
-    enum class Page { Main, Controls, Multiplayer };
+    enum class Page { Main, Controls, Multiplayer, Creator };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -79,6 +99,24 @@ class Menu {
     MultiplayerHooks multiplayer_;
     std::string joinAddress_ = "127.0.0.1:40605";
     bool editingAddress_ = false;  // typed characters go into joinAddress_
+
+    // ---- Creator page state ----
+    CreatorHooks creator_;
+    std::string creatorName_;
+    std::string creatorBackstory_;
+    std::string creatorTraits_;
+    int editingField_ = 0;  // 0 none, 1 name, 2 backstory, 3 traits
+    CharacterLook draftLook_ = randomizeLook(7);
+    unsigned creatorSeed_ = 7;
+
+    // Steps the draft's part for `category` by ±1 within the options
+    // compatible with the current body style; cycling the body re-validates
+    // the other categories.
+    void cycleCreatorPart(PartCategory category, int direction);
+
+    // Validates and fires onCreate; toasts the outcome and clears the form
+    // on success.
+    void attemptCreate();
 
     // Clickable areas for the current page, derived from the window size so
     // render() and update() always agree.

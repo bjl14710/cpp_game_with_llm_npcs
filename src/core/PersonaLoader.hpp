@@ -52,4 +52,11 @@ PersonaParseResult parsePersonaFile(const std::filesystem::path& path);
 std::vector<LoadedPersona> loadAllPersonas(const std::filesystem::path& dir,
                                            std::vector<std::string>* errors = nullptr);
 
+// Inverse of parsePersonaText: renders a LoadedPersona back to the .persona
+// key=value text format. Player-created characters serialize through this
+// so stored personas and designer-authored files share ONE format and ONE
+// parser. Round-trip guarantee: parsePersonaText(renderPersonaText(p)) == p
+// for values expressible in the format (header values must be single-line).
+std::string renderPersonaText(const LoadedPersona& loaded);
+
 }  // namespace llm_npc

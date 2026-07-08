@@ -24,6 +24,8 @@ FetchContent_MakeAvailable(raylib)
 # Core: rendering-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
     external/sqlite3.c
+    src/core/CharacterParts.cpp
+    src/core/CharacterStore.cpp
     src/core/City.cpp
     src/core/Config.cpp
     src/core/ConversationStore.cpp
