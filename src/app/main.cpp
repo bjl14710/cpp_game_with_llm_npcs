@@ -29,6 +29,7 @@
 #include "DialogUI.hpp"
 #include "FactStore.hpp"
 #include "Gossip.hpp"
+#include "Journal.hpp"
 #include "DialogueSession.hpp"
 #include "HostChatRouter.hpp"
 #include "InputMap.hpp"
@@ -488,6 +489,24 @@ int main(int argc, char** argv) {
         return "";
     };
     menu.setCreator(creatorHooks);
+
+    // Journal: a pure read of the shared fact store — what the player was
+    // personally told, grouped by subject, conflicts pre-flagged by core.
+    Menu::JournalHooks journalHooks;
+    journalHooks.entries = [&]() {
+        std::vector<Menu::JournalRow> rows;
+        for (const JournalEntry& entry : journalEntries(world.state())) {
+            Menu::JournalRow row;
+            row.subject = entry.fact->subject;
+            row.content = entry.fact->content;
+            row.attribution = "heard from " + entry.fact->source + " at " +
+                              clockLabel(entry.fact->learnedAtSeconds);
+            row.conflicting = entry.conflicting;
+            rows.push_back(std::move(row));
+        }
+        return rows;
+    };
+    menu.setJournal(journalHooks);
     // Slow turntable for the creator preview figure.
     float previewSpinDeg = 0.f;
 

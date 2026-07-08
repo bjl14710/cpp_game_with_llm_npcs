@@ -48,6 +48,18 @@ class Menu {
             onCreate;
     };
 
+    // One display row of the player's journal, pre-rendered by main.cpp
+    // from the shared fact store so the menu never touches WorldState.
+    struct JournalRow {
+        std::string subject;      // normalized topic key ("bakery_fire")
+        std::string content;      // what was said
+        std::string attribution;  // "heard from Marge at 09:30"
+        bool conflicting = false; // clashes with another row on the subject
+    };
+    struct JournalHooks {
+        std::function<std::vector<JournalRow>()> entries;
+    };
+
     // `bindings` is shared with the main loop; `savePath` is where every
     // accepted rebind is persisted.
     Menu(KeyBindings& bindings, std::filesystem::path savePath);
@@ -58,6 +70,10 @@ class Menu {
 
     // Installs the Creator page's save callback.
     void setCreator(CreatorHooks hooks);
+
+    // Installs the Journal page's read hook (pure read path — the journal
+    // owns no data and never writes).
+    void setJournal(JournalHooks hooks);
 
     // The draft look while the Creator page is open, nullptr otherwise.
     // main.cpp renders it as a slowly turning in-world preview in front of
@@ -81,7 +97,7 @@ class Menu {
     void render() const;
 
    private:
-    enum class Page { Main, Controls, Multiplayer, Creator };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -117,6 +133,10 @@ class Menu {
     // Validates and fires onCreate; toasts the outcome and clears the form
     // on success.
     void attemptCreate();
+
+    // ---- Journal page state ----
+    JournalHooks journal_;
+    int journalPage_ = 0;  // paging offset, kJournalRowsPerPage rows each
 
     // Clickable areas for the current page, derived from the window size so
     // render() and update() always agree.
