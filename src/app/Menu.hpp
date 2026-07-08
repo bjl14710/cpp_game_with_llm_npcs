@@ -76,11 +76,18 @@ class Menu {
     void setJournal(JournalHooks hooks);
 
     // The draft look while the Creator page is open, nullptr otherwise.
-    // main.cpp renders it as a slowly turning in-world preview in front of
-    // the camera (the menu overlay dims less on that page so it reads).
+    // main.cpp renders it as an in-world preview in front of the camera that
+    // the player rotates by dragging/arrow keys and that eases back to facing
+    // the camera when idle (the overlay dims less on that page so it reads).
     const CharacterLook* creatorPreview() const {
         return page_ == Page::Creator ? &draftLook_ : nullptr;
     }
+
+    // True when `p` lies over any interactive control on the current page (a
+    // layout() hit-rect). main.cpp uses this so a left-drag that starts over
+    // the creator preview rotates the figure, while a press over a control
+    // stays a click — clicking a cycler/button never spins the preview.
+    bool pointOverInteractive(Vector2 p) const;
 
     // Resets to the main page (called when the menu is opened).
     void open();

@@ -62,6 +62,14 @@ inline float clampf(float v, float lo, float hi) { return std::max(lo, std::min(
 // Degrees -> radians.
 inline float degToRad(float deg) { return deg * 3.14159265358979323846f / 180.f; }
 
+// Signed shortest angular difference (toDeg - fromDeg) wrapped to [-180, 180].
+// Used to ease a rotation toward a target along the short way round.
+inline float shortestAngleDelta(float fromDeg, float toDeg) {
+    float d = std::fmod(toDeg - fromDeg + 180.f, 360.f);
+    if (d < 0.f) d += 360.f;
+    return d - 180.f;
+}
+
 // Player eye height above the ground position. The renderer camera and the
 // weapon spawn origin BOTH read this so a shot always leaves from the same
 // point the player is looking through (the camera literal at

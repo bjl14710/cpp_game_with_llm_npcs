@@ -335,6 +335,16 @@ MenuResult Menu::update(float dt) {
     return MenuResult::None;
 }
 
+bool Menu::pointOverInteractive(Vector2 p) const {
+    // True over any clickable control on the current page. main.cpp uses this
+    // so a left-drag that starts over the creator preview (empty space) rotates
+    // the figure, while a press over a cycler/field/button stays a click.
+    for (const Hit& h : layout()) {
+        if (CheckCollisionPointRec(p, h.rect)) return true;
+    }
+    return false;
+}
+
 void Menu::applyCapture(int key) {
     const std::string name = keyNameOf(key);
     if (name.empty()) {

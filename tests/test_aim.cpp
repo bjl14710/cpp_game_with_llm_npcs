@@ -85,3 +85,20 @@ TEST_CASE("player aim is derived per-shot, not stored") {
     CHECK(levelY == doctest::Approx(0.f));
     CHECK(upY != doctest::Approx(levelY));
 }
+
+// shortestAngleDelta drives the creator preview's ease-back-to-front (#93):
+// it must always turn the short way and stay in [-180, 180].
+TEST_CASE("shortestAngleDelta takes the short way around") {
+    CHECK(shortestAngleDelta(0.f, 90.f) == doctest::Approx(90.f));
+    CHECK(shortestAngleDelta(0.f, 270.f) == doctest::Approx(-90.f));   // short way is back
+    CHECK(shortestAngleDelta(350.f, 10.f) == doctest::Approx(20.f));   // forward across 0
+    CHECK(shortestAngleDelta(10.f, 350.f) == doctest::Approx(-20.f));  // back across 0
+    CHECK(shortestAngleDelta(45.f, 45.f) == doctest::Approx(0.f));
+    for (float from : {-200.f, -30.f, 0.f, 175.f, 540.f}) {
+        for (float to : {-360.f, -1.f, 88.f, 200.f, 719.f}) {
+            const float d = shortestAngleDelta(from, to);
+            CHECK(d >= -180.f);
+            CHECK(d <= 180.f);
+        }
+    }
+}
