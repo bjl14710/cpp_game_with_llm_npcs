@@ -135,11 +135,10 @@ void RaylibRenderer::setTimeOfDay(float hours) {
 }
 
 void RaylibRenderer::beginFrame(const CameraPose& pose) {
-    camera_.position = {pose.position.x, pose.position.y + 1.7f, pose.position.z};
-    const float pitchRad = degToRad(pose.pitchDeg);
-    const float yawRad = degToRad(pose.yawDeg);
-    const Vector3 dir{std::sin(yawRad) * std::cos(pitchRad), std::sin(pitchRad),
-                      std::cos(yawRad) * std::cos(pitchRad)};
+    camera_.position = {pose.position.x, pose.position.y + kEyeHeight, pose.position.z};
+    // Same authoritative look vector the weapon aims along (issue #91), so the
+    // crosshair and the shot can never disagree.
+    const Vec3 dir = lookDirection(pose.yawDeg, pose.pitchDeg);
     camera_.target = {camera_.position.x + dir.x, camera_.position.y + dir.y,
                       camera_.position.z + dir.z};
     camera_.up = {0.f, 1.f, 0.f};

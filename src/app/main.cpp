@@ -550,7 +550,11 @@ int main(int argc, char** argv) {
             // and not replicated to guests yet).
             if (!joined && jailSecondsLeft <= 0.f) {
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    world.playerAttack(flatForward(player.yawDeg));
+                    // Fire along the authoritative look vector (yaw AND pitch),
+                    // the same one the camera aims — so the shot goes exactly
+                    // where the crosshair points (issue #91). flatForward is
+                    // kept above for WASD, which is intentionally horizontal.
+                    world.playerAttack(lookDirection(player.yawDeg, player.pitchDeg));
                 }
                 if (IsKeyPressed(KEY_ONE)) world.playerSwitchWeapon(WeaponKind::Fist);
                 if (IsKeyPressed(KEY_TWO)) world.playerSwitchWeapon(WeaponKind::Pistol);
@@ -991,6 +995,16 @@ int main(int argc, char** argv) {
         // of the camera while the Creator page is open (the page's lighter
         // overlay keeps it readable).
         if (mode == AppMode::Menu && menu.creatorPreview()) {
+            // TODO(preview): REMOVE this unconditional spin. Replace with the
+            // two-state model from .claude/plans/aim-styles-preview.md (Part C):
+            //   (1) DRAG: while the player left-drags over the preview
+            //       (menu.pointOverInteractive(mouse) == false) or holds
+            //       Left/Right, rotate previewYaw by the input and reset
+            //       previewIdleSeconds.
+            //   (2) IDLE RETURN: otherwise previewIdleSeconds += dt, and ONLY
+            //       once it exceeds kPreviewIdleTimeout (2.5s) ease previewYaw
+            //       toward defaultYaw (= player.yawDeg + 180, front to camera).
+            // No code path may advance rotation without input or idle-return.
             previewSpinDeg += dt * 35.f;
             const Vec3 previewAt = player.position + flatForward(player.yawDeg) * 3.4f;
             renderer.drawCompositeCharacter(*menu.creatorPreview(), previewAt,
