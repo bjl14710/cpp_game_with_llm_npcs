@@ -49,13 +49,15 @@ if(WIN32)
     target_link_libraries(llm_npc_core PUBLIC ws2_32)
 endif()
 
-# Game executable. Migration in progress (issues #35-#42): DialogUI, Menu,
-# and InputMap rejoin the target as their SFML draw layers are ported.
+# Game executable (raylib renderer — replaced the original SFML+legacy-GL
+# app across issues #35-#42).
 add_executable(cpp_game_with_llm_npcs
     src/app/main.cpp
     src/app/Assets.cpp
+    src/app/DialogUI.cpp
     src/app/FaceTexture.cpp
     src/app/InputMap.cpp
+    src/app/Menu.cpp
     src/app/RaylibRenderer.cpp
 )
 target_include_directories(cpp_game_with_llm_npcs PRIVATE

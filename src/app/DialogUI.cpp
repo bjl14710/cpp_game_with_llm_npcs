@@ -1,5 +1,7 @@
 #include "DialogUI.hpp"
 
+#include "raylib.h"
+
 #include <algorithm>
 #include <utility>
 #include <vector>
@@ -10,15 +12,15 @@ namespace {
 constexpr float kPadding = 16.f;
 constexpr float kInputHeight = 48.f;
 constexpr float kLineHeight = 22.f;
-constexpr unsigned kFontSize = 16;
+constexpr int kFontSize = 16;
 
-sf::Color colorFor(TranscriptLine::Kind k) {
+Color colorFor(TranscriptLine::Kind k) {
     switch (k) {
-        case TranscriptLine::Kind::Player: return sf::Color(180, 220, 255);
-        case TranscriptLine::Kind::Npc:    return sf::Color(255, 230, 180);
-        case TranscriptLine::Kind::System: return sf::Color(180, 180, 180);
+        case TranscriptLine::Kind::Player: return Color{180, 220, 255, 255};
+        case TranscriptLine::Kind::Npc:    return Color{255, 230, 180, 255};
+        case TranscriptLine::Kind::System: return Color{180, 180, 180, 255};
     }
-    return sf::Color::White;
+    return WHITE;
 }
 
 // Wrap a string to roughly `maxChars` per line. Word-aware: never splits a
@@ -66,29 +68,23 @@ std::vector<std::string> wrap(const std::string& s, std::size_t maxChars) {
 }
 }  // namespace
 
-DialogUI::DialogUI(const sf::Font& font) : font_(font) {}
-
-std::string DialogUI::handleEvent(const sf::Event& event) {
-    if (event.type == sf::Event::TextEntered && swallowNext_) {
-        swallowNext_ = false;
-        return {};
+std::string DialogUI::pollInput() {
+    // Drain this frame's typed characters even when swallowed/disabled so a
+    // burst of keystrokes can't replay later.
+    int ch = GetCharPressed();
+    const bool accept = inputEnabled_ && !swallowThisFrame_;
+    while (ch != 0) {
+        if (accept && ch >= 32 && ch < 127) input_ += static_cast<char>(ch);
+        ch = GetCharPressed();
     }
+    swallowThisFrame_ = false;
     if (!inputEnabled_) return {};
 
-    if (event.type == sf::Event::TextEntered) {
-        const auto unicode = event.text.unicode;
-        if (unicode == 8) {  // backspace
-            if (!input_.empty()) input_.pop_back();
-        } else if (unicode == 13 || unicode == 10) {  // enter
-            // Handled in KeyPressed below to avoid double-fire on some platforms.
-        } else if (unicode >= 32 && unicode < 127) {
-            input_ += static_cast<char>(unicode);
-        }
-        return {};
+    if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) &&
+        !input_.empty()) {
+        input_.pop_back();
     }
-
-    if (event.type == sf::Event::KeyPressed && event.key.code == sf::Keyboard::Enter) {
-        if (input_.empty()) return {};
+    if (IsKeyPressed(KEY_ENTER) && !input_.empty()) {
         std::string submitted = std::move(input_);
         input_.clear();
         return submitted;
@@ -110,7 +106,7 @@ void DialogUI::setThinking(bool thinking, const std::string& speaker) {
 
 void DialogUI::setInputEnabled(bool enabled) { inputEnabled_ = enabled; }
 
-void DialogUI::swallowNextTextEntered() { swallowNext_ = true; }
+void DialogUI::swallowPendingText() { swallowThisFrame_ = true; }
 
 void DialogUI::beginStreaming(const std::string& speaker) {
     streaming_ = true;
@@ -133,21 +129,24 @@ void DialogUI::reset() {
     input_.clear();
     thinking_ = false;
     thinkingSpeaker_.clear();
-    swallowNext_ = false;
+    swallowThisFrame_ = false;
     endStreaming();
 }
 
-void DialogUI::render(sf::RenderTarget& target) const {
-    const sf::Vector2u sz = target.getSize();
-    const float w = static_cast<float>(sz.x);
-    const float h = static_cast<float>(sz.y);
+void DialogUI::render() const {
+    const float w = static_cast<float>(GetScreenWidth());
+    const float h = static_cast<float>(GetScreenHeight());
 
     const float transcriptBottom = h - kInputHeight - kPadding;
-    const std::size_t wrapChars = std::max<std::size_t>(20, static_cast<std::size_t>((w - 2 * kPadding) / 9.0f));
+    const std::size_t wrapChars =
+        std::max<std::size_t>(20, static_cast<std::size_t>((w - 2 * kPadding) / 9.0f));
 
     // Collect wrapped, colored lines from newest backward until we run out of
     // vertical space. Then render them in chronological order.
-    struct RenderedLine { std::string text; sf::Color color; };
+    struct RenderedLine {
+        std::string text;
+        Color color;
+    };
     std::vector<RenderedLine> rendered;
     float used = 0.f;
     const float available = transcriptBottom - kPadding;
@@ -165,7 +164,7 @@ void DialogUI::render(sf::RenderTarget& target) const {
         const std::string speaker = streaming_ ? streamingSpeaker_ : thinkingSpeaker_;
         std::string indicator = "... " + (speaker.empty() ? std::string("(thinking)")
                                                           : speaker + " is thinking...");
-        rendered.push_back({indicator, sf::Color(140, 140, 140)});
+        rendered.push_back({indicator, Color{140, 140, 140, 255}});
         used += kLineHeight;
     }
 
@@ -173,7 +172,7 @@ void DialogUI::render(sf::RenderTarget& target) const {
         const auto& line = *it;
         std::string prefix = line.speaker.empty() ? "" : line.speaker + ": ";
         auto wrapped = wrap(prefix + line.text, wrapChars);
-        // Push in reverse so chronological order is preserved once we reverse the whole vector.
+        // Reverse push preserves chronological order after the final reverse.
         for (auto wi = wrapped.rbegin(); wi != wrapped.rend(); ++wi) {
             if (used + kLineHeight > available) break;
             rendered.push_back({*wi, colorFor(line.kind)});
@@ -186,25 +185,22 @@ void DialogUI::render(sf::RenderTarget& target) const {
 
     float y = transcriptBottom - static_cast<float>(rendered.size()) * kLineHeight;
     for (const auto& rl : rendered) {
-        sf::Text t(rl.text, font_, kFontSize);
-        t.setFillColor(rl.color);
-        t.setPosition(kPadding, y);
-        target.draw(t);
+        DrawText(rl.text.c_str(), static_cast<int>(kPadding), static_cast<int>(y),
+                 kFontSize, rl.color);
         y += kLineHeight;
     }
 
     // Input box.
-    sf::RectangleShape box(sf::Vector2f(w - 2 * kPadding, kInputHeight));
-    box.setPosition(kPadding, h - kInputHeight - kPadding * 0.5f);
-    box.setFillColor(sf::Color(30, 30, 36));
-    box.setOutlineColor(inputEnabled_ ? sf::Color(120, 160, 220) : sf::Color(70, 70, 70));
-    box.setOutlineThickness(2.f);
-    target.draw(box);
+    const Rectangle box{kPadding, h - kInputHeight - kPadding * 0.5f,
+                        w - 2 * kPadding, kInputHeight};
+    DrawRectangleRec(box, Color{30, 30, 36, 255});
+    DrawRectangleLinesEx(box, 2.f,
+                         inputEnabled_ ? Color{120, 160, 220, 255} : Color{70, 70, 70, 255});
 
-    sf::Text prompt(std::string("> ") + input_ + (inputEnabled_ ? "_" : ""), font_, kFontSize);
-    prompt.setFillColor(inputEnabled_ ? sf::Color::White : sf::Color(120, 120, 120));
-    prompt.setPosition(kPadding + 10.f, h - kInputHeight - kPadding * 0.5f + 12.f);
-    target.draw(prompt);
+    const std::string prompt = "> " + input_ + (inputEnabled_ ? "_" : "");
+    DrawText(prompt.c_str(), static_cast<int>(kPadding + 10.f),
+             static_cast<int>(box.y + 12.f), kFontSize,
+             inputEnabled_ ? WHITE : Color{120, 120, 120, 255});
 }
 
 }  // namespace llm_npc

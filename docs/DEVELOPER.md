@@ -6,17 +6,18 @@ The codebase is split so that all game logic builds and tests on a headless
 machine, while graphics stay isolated:
 
 ```
-src/core/   SFML-free, GL-free. Everything here is unit-tested.
-src/app/    SFML + OpenGL. Only builds where graphics libs exist (Windows).
+src/core/   Rendering-free. Everything here is unit-tested.
+src/app/    raylib (windowing, input, 3D, UI overlay).
 external/   Vendored single-header deps: httplib, nlohmann/json, doctest.
 tests/      doctest suites + a plain-make runner for cmake-less containers.
 personas/   One .persona file per NPC (identity + world placement).
+assets/     CC0 model packs, fetched by tools/fetch_assets.sh (gitignored).
 config/     llm.cfg (model/host/latency) and keybindings.cfg.
 ```
 
-CMake builds the `llm_npc_core` static library unconditionally; the game
-executable is added only when `SFML_FOUND AND OPENGL_FOUND`. Keep it that
-way: **nothing in `src/core/` may include SFML or OpenGL headers.**
+CMake fetches a pinned raylib via FetchContent at configure time — a clean
+clone builds with no graphics packages installed. Keep the split absolute:
+**nothing in `src/core/` may include raylib (or any rendering) headers.**
 
 ### Core modules
 
@@ -41,18 +42,25 @@ way: **nothing in `src/core/` may include SFML or OpenGL headers.**
 
 ### App modules
 
-- `Renderer3D` — legacy GL 2.1 immediate mode, procedural textures, the
-  first-person camera, and `worldToScreen` for SFML nameplates.
+- `RaylibRenderer` — the 3D pass: asset-pack city fitted to the collision
+  AABBs, animated glTF characters with per-entity clip clocks, mood emote
+  billboards, and `worldToScreen` for nameplates.
+- `Assets` — loads every model/animation once at startup; maps building ids
+  and character variant seeds to models; bakes the six mood faces. Missing
+  packs degrade to primitives with an on-screen fetch_assets.sh hint.
+- `FaceTexture` — bakes the procedural mood faces to textures (brow-tilt
+  semantics preserved from the legacy renderer).
 - `main.cpp` — mode machine (Playing / Dialogue / Menu) and the frame loop:
-  GL 3D pass → `pushGLStates()` → SFML overlay → `popGLStates()` → `display()`.
-  Always restore that order; mixing raw GL with SFML drawing outside the
-  push/pop pair corrupts state.
-- `DialogUI` — chat overlay with live streaming line; `swallowNextTextEntered()`
-  keeps the talk key's character out of the input box.
-- `Menu` — mouse-driven pause menu, key rebinding, and the Multiplayer
-  host/join page (callbacks injected from `main.cpp` via `MultiplayerHooks`,
-  so the menu never sees networking types).
-- `InputMap` — portable key-name ↔ `sf::Keyboard::Key` table.
+  BeginDrawing → 3D pass → 2D overlay (nameplates, HUD, dialog/menu) →
+  EndDrawing. `--frames N [shot.png]` runs headless-style smoke checks.
+- `DialogUI` — chat overlay with live streaming line; per-frame `pollInput()`
+  (raylib is polled, not event-driven); `swallowPendingText()` keeps the talk
+  key's character out of the input box.
+- `Menu` — mouse-driven pause menu, key rebinding (GetKeyPressed capture),
+  and the Multiplayer host/join page (callbacks injected from `main.cpp` via
+  `MultiplayerHooks`, so the menu never sees networking types).
+- `InputMap` — portable key-name ↔ raylib key-code table (same names as the
+  original SFML build, so saved keybindings.cfg files still load).
 
 ### Multiplayer at a glance
 
@@ -84,7 +92,7 @@ Both machines should run the same build and the same `personas/` roster
 
 ## Building and testing
 
-### Container / Linux (no SFML needed)
+### Container / Linux (headless tests)
 
 ```sh
 make -C tests test          # builds core + all unit tests with g++, runs them
@@ -110,7 +118,7 @@ OLLAMA_TEST_MODEL=llama3.2:1b OLLAMA_LIVE=1 make -C tests test
 run.bat        # double-clickable: checks MSYS2 + Ollama, cmake, build, play
 ```
 
-or the equivalent `run.ps1`. Requires MSYS2 UCRT64 with `mingw-w64-ucrt-x86_64-{gcc,cmake,sfml}` and an Ollama install with the model pulled.
+or the equivalent `run.ps1`. Requires MSYS2 UCRT64 with `mingw-w64-ucrt-x86_64-{gcc,cmake}` (raylib is fetched by CMake) and an Ollama install with the model pulled. Run `tools/fetch_assets.sh` (or download the packs per assets/LICENSES.md) for the full look.
 
 ```sh
 cmake -S . -B build -G "MinGW Makefiles" && cmake --build build -j

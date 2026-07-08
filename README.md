@@ -19,11 +19,14 @@ Powered locally by [Ollama](https://ollama.com) — no cloud, no API key.
 2. **Install MSYS2** from <https://www.msys2.org> and, in the *UCRT64* shell:
 
    ```
-   pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-sfml
+   pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake
    ```
 
-3. **Double-click `run.bat`** (or run `./run.ps1`). It checks Ollama is up,
-   builds, and launches the game.
+3. **Fetch the art packs** (once): `bash tools/fetch_assets.sh` — two CC0
+   low-poly packs, pinned and checksummed (see `assets/LICENSES.md`).
+
+4. **Double-click `run.bat`** (or run `./run.ps1`). It checks Ollama is up,
+   builds (CMake fetches raylib automatically), and launches the game.
 
 ## Playing
 
@@ -97,5 +100,5 @@ Architecture, headless test workflow, and the latency playbook live in
 [docs/DEVELOPER.md](docs/DEVELOPER.md). Short version:
 
 ```sh
-make -C tests test      # full offline unit-test suite, no SFML required
+make -C tests test      # full offline unit-test suite, no graphics libs required
 ```

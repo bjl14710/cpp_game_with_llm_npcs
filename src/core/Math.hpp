@@ -6,7 +6,7 @@
 namespace llm_npc {
 
 // Minimal 3D vector used for world positions, movement, and the camera.
-// Kept SFML-free so core logic and unit tests build without graphics libs.
+// Kept rendering-free so core logic and unit tests build without graphics libs.
 struct Vec3 {
     float x = 0.f;
     float y = 0.f;
