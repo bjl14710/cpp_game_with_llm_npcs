@@ -126,6 +126,20 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
     camera_.up = {0.f, 1.f, 0.f};
     camera_.fovy = 70.f;
     camera_.projection = CAMERA_PERSPECTIVE;
+
+    // Atmosphere: models carry the fog shader on their materials; wrapping
+    // the whole 3D pass in BeginShaderMode routes the primitive batch
+    // (ground plane, slabs, fountain, viewmodel) through the same shader so
+    // everything hazes consistently. Fog distance needs the camera each
+    // frame.
+    if (const Shader* fog = assets_.fogShader()) {
+        const float eye[3] = {camera_.position.x, camera_.position.y,
+                              camera_.position.z};
+        SetShaderValue(*fog, assets_.fogCameraLoc(), eye, SHADER_UNIFORM_VEC3);
+        BeginMode3D(camera_);
+        BeginShaderMode(*fog);
+        return;
+    }
     BeginMode3D(camera_);
 }
 
@@ -313,7 +327,10 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     }
 }
 
-void RaylibRenderer::endFrame() { EndMode3D(); }
+void RaylibRenderer::endFrame() {
+    if (assets_.fogShader()) EndShaderMode();
+    EndMode3D();
+}
 
 bool RaylibRenderer::worldToScreen(const Vec3& world, Vector2& out) const {
     // Reject points behind the camera: GetWorldToScreen would mirror them.
