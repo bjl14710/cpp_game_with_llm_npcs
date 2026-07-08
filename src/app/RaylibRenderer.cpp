@@ -1,5 +1,6 @@
 #include "RaylibRenderer.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include "Math.hpp"
@@ -50,6 +51,46 @@ void drawModelFittedToAABB(const Model& model, float minX, float minZ, float max
     DrawModelEx(model, position, Vector3{0.f, 1.f, 0.f}, 0.f, scale, tint);
 }
 
+// Composite plaza fountain — the KayKit city pack has no fountain model, so
+// it is built from primitives on the authored footprint: a stone basin wall,
+// two smaller tiers, and translucent water discs. `worldHeight` comes from
+// the fountain's SizeSpec (the single sizing source); radii derive from the
+// collision AABB so visuals and collider always match.
+void drawFountain(const Building& b, float worldHeight) {
+    const float cx = (b.minX + b.maxX) * 0.5f;
+    const float cz = (b.minZ + b.maxZ) * 0.5f;
+    const float radius = std::min(b.maxX - b.minX, b.maxZ - b.minZ) * 0.5f;
+
+    constexpr Color kStone{172, 168, 156, 255};
+    constexpr Color kStoneDark{136, 132, 122, 255};
+    constexpr Color kWater{70, 140, 200, 170};
+
+    // Tier proportions (fraction of footprint radius / total height).
+    const float basinH = worldHeight * 0.25f;
+    const float midH = worldHeight * 0.50f;
+    const float topH = worldHeight * 0.25f;
+
+    // DrawCylinder renders capped solids, so each "water surface" is a thin
+    // translucent disc floated just above its stone cap — recessed water
+    // would be hidden by the cap itself.
+
+    // Basin: outer wall filled to the brim with water.
+    DrawCylinder({cx, 0.f, cz}, radius, radius, basinH, 24, kStone);
+    DrawCylinderWires({cx, 0.f, cz}, radius, radius, basinH, 24, kStoneDark);
+    DrawCylinder({cx, basinH, cz}, radius * 0.88f, radius * 0.88f, 0.03f, 24, kWater);
+
+    // Middle tier: column carrying a smaller bowl with its own water disc.
+    DrawCylinder({cx, basinH, cz}, radius * 0.18f, radius * 0.26f, midH, 12, kStone);
+    DrawCylinder({cx, basinH + midH * 0.7f, cz}, radius * 0.45f, radius * 0.45f,
+                 midH * 0.3f, 20, kStone);
+    DrawCylinder({cx, basinH + midH, cz}, radius * 0.38f, radius * 0.38f, 0.03f,
+                 20, kWater);
+
+    // Top spout: a slim finial peaking at exactly worldHeight.
+    DrawCylinder({cx, basinH + midH, cz}, radius * 0.07f, radius * 0.14f, topH,
+                 10, kStoneDark);
+}
+
 }  // namespace
 
 RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {}
@@ -95,6 +136,13 @@ void RaylibRenderer::drawCity(const City& city) {
     // Buildings and street props from the collision AABBs — the models scale
     // to fit the authoritative footprints, never the other way around.
     for (const Building& b : city.buildings()) {
+        // The fountain is composed from primitives (no pack model). Must be
+        // dispatched by id BEFORE the model lookup: modelForBuilding falls
+        // back to a hashed generic building for uncurated ids.
+        if (b.id == "fountain") {
+            drawFountain(b, assets_.sizeSpecFor(b).worldHeight);
+            continue;
+        }
         if (const Model* model = assets_.modelForBuilding(b)) {
             const Assets::SizeSpec& spec = assets_.sizeSpecFor(b);
             if (spec.mode == Assets::SizeSpec::Mode::Uniform) {

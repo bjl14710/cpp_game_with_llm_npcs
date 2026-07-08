@@ -152,13 +152,27 @@ void drawNameplate(const std::string& name, Vector2 screen, Color color) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // --frames N [shot.png]: render N frames then exit 0, optionally saving
-    // a screenshot of the last frame (scripted smoke runs + visual checks).
+    // --frames N [shot.png] [--camera x z yaw]: render N frames then exit 0,
+    // optionally saving a screenshot of the last frame (scripted smoke runs +
+    // visual checks). --camera overrides the default plaza vantage so
+    // different parts of the city can be verified without a human at the
+    // mouse.
     long maxFrames = -1;
     const char* screenshotPath = nullptr;
+    bool cameraOverride = false;
+    float cameraX = 0.f, cameraZ = 0.f, cameraYaw = 180.f;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
-        if (argc >= 4) screenshotPath = argv[3];
+        int arg = 3;
+        if (arg < argc && std::strcmp(argv[arg], "--camera") != 0) {
+            screenshotPath = argv[arg++];
+        }
+        if (arg + 3 < argc && std::strcmp(argv[arg], "--camera") == 0) {
+            cameraOverride = true;
+            cameraX = std::strtof(argv[arg + 1], nullptr);
+            cameraZ = std::strtof(argv[arg + 2], nullptr);
+            cameraYaw = std::strtof(argv[arg + 3], nullptr);
+        }
     }
 
     const fs::path projectRoot = findProjectRoot();
@@ -303,9 +317,16 @@ int main(int argc, char** argv) {
 
     AppMode mode = AppMode::Playing;
     LocalPlayer player;
-    // Smoke runs are deterministic: fixed plaza-facing camera, no look drift.
+    // Smoke runs are deterministic: fixed camera (default plaza-facing, or
+    // the --camera override), no look drift.
     const bool smokeRun = maxFrames >= 0;
-    if (smokeRun) player.yawDeg = 180.f;
+    if (smokeRun) {
+        player.yawDeg = cameraYaw;
+        if (cameraOverride) {
+            player.position.x = cameraX;
+            player.position.z = cameraZ;
+        }
+    }
     DisableCursor();
 
     int nearbyNpc = -1;
