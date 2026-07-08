@@ -518,6 +518,7 @@ int main(int argc, char** argv) {
     float previewYaw = 0.f;
     float previewIdleSeconds = 0.f;
     bool previewWasOpen = false;  // detects the frame the Creator page opens
+    bool previewDragging = false;  // latched at press: is this a preview drag or a control click?
 
     // Gossip propagation cadence (real seconds between ticks) and its rng
     // (seeded for reproducible town behavior in a session).
@@ -1010,6 +1011,7 @@ int main(int argc, char** argv) {
             if (!previewWasOpen) {
                 previewYaw = player.yawDeg + 180.f;
                 previewIdleSeconds = 0.f;
+                previewDragging = false;
             }
             // Two states, no autonomous spin (issue #93):
             //   (1) INPUT — a left-drag over the preview (not over a menu
@@ -1019,14 +1021,29 @@ int main(int argc, char** argv) {
             //       does it ease back toward facing the camera. Before that it
             //       simply holds still.
             // (A future opt-in auto-rotate would be a third branch here.)
+            //
+            // Whether a left-press is a preview drag or a control click is
+            // decided ONCE, at the press, and latched until release: a click
+            // that starts on a control never rotates even if the cursor slides
+            // off, and a drag that starts on empty space keeps rotating even if
+            // the cursor crosses a control. Sampling the cursor per-frame
+            // instead would let a control-click flicked off its rect spin the
+            // figure, and stall a legitimate drag that grazes a hit-rect.
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                previewDragging = !menu.pointOverInteractive(GetMousePosition());
+            }
+            if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                previewDragging = false;
+            }
+
             float rotateInput = 0.f;
             if (IsKeyDown(KEY_LEFT))  rotateInput -= kPreviewKeyDegPerSec * dt;
             if (IsKeyDown(KEY_RIGHT)) rotateInput += kPreviewKeyDegPerSec * dt;
-            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
-                !menu.pointOverInteractive(GetMousePosition())) {
-                rotateInput += GetMouseDelta().x * kPreviewDragDegPerPx;
-            }
-            if (rotateInput != 0.f) {
+            if (previewDragging) rotateInput += GetMouseDelta().x * kPreviewDragDegPerPx;
+
+            // A held drag counts as active even while momentarily still, so the
+            // figure never eases away from under a grabbing cursor.
+            if (rotateInput != 0.f || previewDragging) {
                 previewYaw += rotateInput;
                 previewIdleSeconds = 0.f;
             } else {

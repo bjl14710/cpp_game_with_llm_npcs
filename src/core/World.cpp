@@ -73,7 +73,11 @@ void World::tickProjectiles(float dt, CombatFrameResult& out) {
 
     auto it = projectiles_.begin();
     while (it != projectiles_.end()) {
-        if (it->lifetime >= it->maxLifetime) {
+        // Retire on age, or once a downward shot has passed below the ground —
+        // now that aim follows pitch (#91), a missed downward shot would
+        // otherwise keep travelling underground until its lifetime expired.
+        if (it->lifetime >= it->maxLifetime ||
+            (it->position.y < 0.f && it->direction.y < 0.f)) {
             it = projectiles_.erase(it);
             continue;
         }
