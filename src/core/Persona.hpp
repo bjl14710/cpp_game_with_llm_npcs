@@ -22,12 +22,27 @@ struct Persona {
     // earlier sessions woven in, so the NPC picks up where things left off.
     // An empty memory renders identically to renderSystemPrompt().
     std::string renderSystemPrompt(const std::string& memory) const {
+        return renderSystemPrompt(memory, "");
+    }
+
+    // Memory plus town gossip: the facts THIS character has heard (from the
+    // shared world bus), so knowledge stays per-NPC. Both sections insert
+    // before the action protocol — directive instructions stay last (small
+    // models weight trailing instructions most). Empty strings render
+    // identically to the plain prompt.
+    std::string renderSystemPrompt(const std::string& memory,
+                                   const std::string& gossip) const {
         std::string prompt = renderSystemPrompt();
-        if (memory.empty()) return prompt;
-        // Insert before the action protocol so the directive instructions
-        // stay last (small models weight trailing instructions most).
-        const std::string section =
-            "What you remember from earlier meetings with this player: " + memory + "\n";
+        std::string section;
+        if (!memory.empty()) {
+            section += "What you remember from earlier meetings with this player: " +
+                       memory + "\n";
+        }
+        if (!gossip.empty()) {
+            section += "Things you have heard around town (bring them up when "
+                       "relevant): " + gossip + "\n";
+        }
+        if (section.empty()) return prompt;
         const auto at = prompt.find("ACTIONS: ");
         if (at == std::string::npos) return prompt + section;
         prompt.insert(at, section);

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <random>
 #include <sstream>
 #include <iostream>
 #include <memory>
@@ -26,6 +27,8 @@
 #include "Config.hpp"
 #include "ConversationStore.hpp"
 #include "DialogUI.hpp"
+#include "FactStore.hpp"
+#include "Gossip.hpp"
 #include "DialogueSession.hpp"
 #include "HostChatRouter.hpp"
 #include "InputMap.hpp"
@@ -247,6 +250,50 @@ int main(int argc, char** argv) {
     // In-flight summary request id → NPC index it belongs to.
     std::unordered_map<std::uint64_t, int> summaryRoutes;
 
+    // Town gossip: structured facts on the world bus, persisted across
+    // sessions (plan: gossip-facts). Facts and knowledge sets load before
+    // the per-NPC gossip strings render below.
+    FactStore factStore(projectRoot / "saves" / "facts.sqlite3");
+    factStore.loadInto(world.state());
+    // In-flight fact-extraction request id → NPC index it belongs to.
+    std::unordered_map<std::uint64_t, int> factRoutes;
+
+    // Re-renders one NPC's gossip prompt block from the facts THAT NPC has
+    // heard on the bus (knowledge is per-agent by design).
+    const auto refreshGossip = [&](Npc& npc) {
+        std::string gossip;
+        for (const KnownFact* fact : world.state().factsKnownBy(npc.persona().name)) {
+            gossip += fact->content + " (heard from " + fact->source + "). ";
+        }
+        npc.setGossip(std::move(gossip));
+    };
+    for (Npc& npc : world.npcs()) refreshGossip(npc);
+
+    // PROPOSE step of propose->validate->commit: after a conversation, ask
+    // the NPC's own model for at most two structured facts as strict JSON.
+    // The reply is validated by validateProposedFacts before anything is
+    // committed to the bus — model output never writes directly.
+    const auto requestFacts = [&](int npcIndex) {
+        if (npcIndex < 0 || npcIndex >= static_cast<int>(world.npcs().size())) return;
+        Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+        if (npc.history().empty()) return;
+        std::string transcript;
+        for (const auto& turn : npc.history()) {
+            transcript += (turn.role == "user" ? "Player: " : npc.persona().name + ": ");
+            transcript += turn.content + "\n";
+        }
+        const std::uint64_t id = client.submit(
+            "You extract concrete facts from a game conversation. Reply with "
+            "ONLY a JSON array (no prose, no code fences) of at most 2 "
+            "objects, each {\"subject\": short_topic, \"content\": one short "
+            "sentence, \"direction\": \"npc_learned\" or \"player_learned\"}. "
+            "npc_learned = the player told the character something new; "
+            "player_learned = the character told the player something. Only "
+            "specific, memorable facts — no pleasantries. Reply [] if none.",
+            {}, "Conversation:\n" + transcript);
+        factRoutes[id] = npcIndex;
+    };
+
     // Asks the NPC's own model to update its first-person memory note.
     const auto requestSummary = [&](int npcIndex) {
         if (npcIndex < 0 || npcIndex >= static_cast<int>(world.npcs().size())) return;
@@ -444,6 +491,11 @@ int main(int argc, char** argv) {
     // Slow turntable for the creator preview figure.
     float previewSpinDeg = 0.f;
 
+    // Gossip propagation cadence (real seconds between ticks) and its rng
+    // (seeded for reproducible town behavior in a session).
+    float gossipTickTimer = 0.f;
+    std::mt19937 gossipRng(20260706u);
+
     long frames = 0;
     while (!WindowShouldClose() && (maxFrames < 0 || frames++ < maxFrames)) {
         const float dt = std::fmin(0.03f, GetFrameTime());
@@ -514,8 +566,12 @@ int main(int argc, char** argv) {
         } else if (mode == AppMode::Dialogue) {
             if (IsKeyPressed(KEY_ESCAPE)) {
                 // Leaving a conversation kicks off the NPC's memory update
-                // (solo/host only — a guest's conversations live host-side).
-                if (!joined) requestSummary(session.npcIndex());
+                // and fact extraction (solo/host only — a guest's
+                // conversations live host-side).
+                if (!joined) {
+                    requestSummary(session.npcIndex());
+                    requestFacts(session.npcIndex());
+                }
                 session.close();
                 dialog.endStreaming();
                 mode = AppMode::Playing;
@@ -585,6 +641,32 @@ int main(int argc, char** argv) {
             }
         }
 
+        // Gossip spreads between NPCs who are actually near each other
+        // (schedules make them meet): conservative proximity + age + chance
+        // gates, at most one fact per pair per tick. Knowledge only ever
+        // flips on the shared bus — there is no NPC-to-NPC message channel.
+        if (!joined) {
+            gossipTickTimer += dt;
+            if (gossipTickTimer >= 15.f) {
+                gossipTickTimer = 0.f;
+                std::vector<AgentAt> agents;
+                for (const Npc& npc : world.npcs()) {
+                    if (npc.combatState() != NpcState::Dead) {
+                        agents.push_back({npc.persona().name, npc.position()});
+                    }
+                }
+                if (propagateGossip(world.state(), agents, gossipRng) > 0) {
+                    for (Npc& npc : world.npcs()) {
+                        refreshGossip(npc);
+                        for (const KnownFact* fact :
+                             world.state().factsKnownBy(npc.persona().name)) {
+                            factStore.saveKnowledge(npc.persona().name, fact->factId);
+                        }
+                    }
+                }
+            }
+        }
+
         // The moment an officer catches the player: short stay at the station.
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             Npc& npc = world.npcs()[i];
@@ -597,7 +679,10 @@ int main(int argc, char** argv) {
                 }
                 npc.commandReturnHome();
                 if (mode == AppMode::Dialogue) {  // hauled off mid-sentence
-                    if (!joined) requestSummary(session.npcIndex());
+                    if (!joined) {
+                        requestSummary(session.npcIndex());
+                        requestFacts(session.npcIndex());
+                    }
                     session.close();
                     dialog.endStreaming();
                     mode = AppMode::Playing;
@@ -758,6 +843,28 @@ int main(int argc, char** argv) {
                         savedTurns[static_cast<std::size_t>(npcIndex)] = npc.history().size();
                     }
                 }  // failure: keep the old note; retry at the next close
+                continue;
+            }
+            // Fact proposals: VALIDATE then COMMIT — a reply that isn't a
+            // clean JSON array of well-formed facts commits nothing.
+            if (const auto facts = factRoutes.find(reply.id); facts != factRoutes.end()) {
+                const int npcIndex = facts->second;
+                factRoutes.erase(facts);
+                if (reply.ok && npcIndex >= 0 &&
+                    npcIndex < static_cast<int>(world.npcs().size())) {
+                    Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+                    const auto proposals = validateProposedFacts(reply.content);
+                    for (const ProposedFact& proposal : proposals) {
+                        const KnownFact record =
+                            commitFact(world.state(), proposal, npc.persona().name);
+                        factStore.saveFact(record);
+                        factStore.saveKnowledge(npc.persona().name, record.factId);
+                        if (proposal.playerLearned) {
+                            factStore.saveKnowledge("player", record.factId);
+                        }
+                    }
+                    if (!proposals.empty()) refreshGossip(npc);
+                }
                 continue;
             }
             const auto route = pendingRoutes.find(reply.id);

@@ -137,3 +137,23 @@ TEST_CASE("renderSystemPrompt(memory) injects memory before the action protocol"
     CHECK(memoryAt < actionsAt);  // directives stay last for small models
     CHECK(withMemory.find("rye bread") != std::string::npos);
 }
+
+TEST_CASE("gossip block injects before the action protocol; empty is identity") {
+    llm_npc::Persona p;
+    p.name = "Marge";
+    const std::string plain = p.renderSystemPrompt();
+    CHECK(p.renderSystemPrompt("", "") == plain);
+
+    const std::string withGossip =
+        p.renderSystemPrompt("", "The oven caught fire. (heard from player).");
+    CHECK(withGossip.find("Things you have heard around town") != std::string::npos);
+    CHECK(withGossip.find("The oven caught fire.") != std::string::npos);
+    // Directives stay last: the gossip block sits before the protocol.
+    CHECK(withGossip.find("Things you have heard") <
+          withGossip.find("ACTIONS: "));
+
+    // Memory and gossip compose; memory renders first.
+    const std::string both = p.renderSystemPrompt("We met yesterday.", "Rumor.");
+    CHECK(both.find("We met yesterday.") < both.find("Rumor."));
+    CHECK(both.find("Rumor.") < both.find("ACTIONS: "));
+}
