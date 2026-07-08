@@ -36,6 +36,18 @@ City City::makeDowntown() {
         {"fountain", "", 60.f, 56.f, 68.f, 64.f, 1.5f, 7},
         {"bench", "", 66.f, 70.f, 70.f, 71.f, 0.6f, 8},
 
+        // Street furniture with real collision — everything that renders
+        // as a solid object is authored here so visuals and colliders can
+        // never diverge (the renderer draws these from this list).
+        {"trafficlight_a", "", -23.5f, -23.5f, -22.5f, -22.5f, 4.5f, 11},
+        {"trafficlight_b", "", -23.5f, 40.5f, -22.5f, 41.5f, 4.5f, 11},
+        {"trafficlight_c", "", 40.5f, -23.5f, 41.5f, -22.5f, 4.5f, 11},
+        {"trafficlight_d", "", 40.5f, 40.5f, 41.5f, 41.5f, 4.5f, 11},
+        {"bush_a", "", 46.8f, 46.8f, 49.2f, 49.2f, 1.1f, 12},
+        {"bush_b", "", 78.8f, 50.8f, 81.2f, 53.2f, 1.1f, 12},
+        {"bush_c", "", 50.8f, 78.8f, 53.2f, 81.2f, 1.1f, 12},
+        {"bush_d", "", 74.8f, 74.8f, 77.2f, 77.2f, 1.1f, 12},
+
         // Unnamed filler so every block reads as a dense city.
         {"apt_a", "", -88.f, -88.f, -68.f, -70.f, 22.f, 9},
         {"apt_b", "", -60.f, -88.f, -40.f, -72.f, 18.f, 9},

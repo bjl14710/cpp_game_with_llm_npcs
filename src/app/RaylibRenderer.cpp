@@ -88,21 +88,9 @@ void RaylibRenderer::drawCity(const City& city) {
         }
     }
 
-    // Street dressing at the four crossings, when the pack is present.
-    if (const Model* light = assets_.prop("trafficlight_A")) {
-        for (const float x : {-kStreetCenter, kStreetCenter}) {
-            for (const float z : {-kStreetCenter, kStreetCenter}) {
-                drawModelUniform(*light, x + 9.f, z + 9.f, 4.5f, WHITE);
-            }
-        }
-    }
-    // A little life in the park corner.
-    if (const Model* bush = assets_.prop("bush")) {
-        for (const Vec3 p : {Vec3{48.f, 0.f, 48.f}, Vec3{80.f, 0.f, 52.f},
-                             Vec3{52.f, 0.f, 80.f}, Vec3{76.f, 0.f, 76.f}}) {
-            drawModelUniform(*bush, p.x, p.z, 1.1f, WHITE);
-        }
-    }
+    // Street furniture (traffic lights, bushes) renders through the same
+    // buildings pass below — City authors their positions AND colliders,
+    // so nothing visible can be walk-through.
 
     // Buildings and street props from the collision AABBs — the models scale
     // to fit the authoritative footprints, never the other way around.
@@ -181,6 +169,47 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
         DrawBillboard(camera_, assets_.faceTexture(visual.face),
                       Vector3{visual.position.x, 2.45f, visual.position.z}, 0.55f,
                       WHITE);
+    }
+}
+
+void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
+    // Per-weapon visuals live in this table; adding a WeaponKind means
+    // adding a row, never a new code branch. Sizes are camera-space meters.
+    struct ViewSpec {
+        Vector3 size;        // main body (fist / gun body)
+        Color color;
+        float thrust;        // + pushes forward on attack (punch), - recoils
+        bool grip;           // draw a pistol-style grip under the body
+    };
+    static const ViewSpec kSpecs[] = {
+        {{0.11f, 0.09f, 0.14f}, Color{224, 172, 138, 255}, 0.45f, false},  // Fist
+        {{0.05f, 0.07f, 0.30f}, Color{55, 58, 66, 255}, -0.14f, true},     // Pistol
+    };
+    const int count = static_cast<int>(sizeof(kSpecs) / sizeof(kSpecs[0]));
+    if (weaponKind < 0 || weaponKind >= count) return;
+    const ViewSpec& spec = kSpecs[weaponKind];
+
+    // Camera basis for a lower-right anchored prop.
+    const Vector3 fwd{camera_.target.x - camera_.position.x,
+                      camera_.target.y - camera_.position.y,
+                      camera_.target.z - camera_.position.z};
+    const float flen = std::sqrt(fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z);
+    if (flen < 1e-4f) return;
+    const Vector3 f{fwd.x / flen, fwd.y / flen, fwd.z / flen};
+    // Same right-vector convention as the game's strafe (flatRight in
+    // main.cpp): cross(forward, up) = (-fz, 0, fx).
+    const Vector3 r{-f.z, 0.f, f.x};
+
+    const float push = spec.thrust * attackFraction;
+    const Vector3 base{
+        camera_.position.x + f.x * (0.85f + push) + r.x * 0.32f,
+        camera_.position.y - 0.28f + f.y * (0.85f + push),
+        camera_.position.z + f.z * (0.85f + push) + r.z * 0.32f};
+
+    DrawCubeV(base, spec.size, spec.color);
+    if (spec.grip) {
+        DrawCubeV(Vector3{base.x - f.x * 0.10f, base.y - 0.07f, base.z - f.z * 0.10f},
+                  Vector3{0.045f, 0.10f, 0.06f}, spec.color);
     }
 }
 

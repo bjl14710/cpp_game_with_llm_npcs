@@ -499,6 +499,14 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
         }
+        // Facing derives from actual motion once every mover has run —
+        // behaviors and combat both; see Npc::deriveFacingFromMotion.
+        if (mode != AppMode::Menu && !joined) {
+            for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                world.npcs()[i].deriveFacingFromMotion(npcLastPos[i], dt);
+            }
+        }
+
         for (auto& callout : callouts) callout.ttl -= dt;
         callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
                                       [](const CombatCallout& c) { return c.ttl <= 0.f; }),
@@ -714,6 +722,10 @@ int main(int argc, char** argv) {
             visual.facingDeg = remote.facingDeg;
             visual.variantSeed = 1000 + remote.playerId;
             renderer.drawCharacter(visual);
+        }
+        if (!joined && mode != AppMode::Dead) {
+            renderer.drawViewmodel(static_cast<int>(world.player().weapon),
+                                   world.player().attackAnimFraction);
         }
         renderer.endFrame();
 
