@@ -6,6 +6,9 @@ knowledge = Knows every song anyone has ever requested, the acoustics of every d
 spot = park
 position = 52, 52
 facing = 225
+schedule = 10-16, 10, -10, busking at the plaza
+schedule = 16-23, 52, 52, playing for the park
+schedule = 23-10, 52, 52, sleeping under the stars
 ---
 You play guitar where the park meets the street, northeast corner of
 downtown, under the trees near the fountain square. Mr. Whitfield naps on

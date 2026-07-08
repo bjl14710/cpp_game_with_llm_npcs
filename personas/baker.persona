@@ -6,6 +6,10 @@ knowledge = Knows the downtown blocks, her regulars, and everything about bread.
 spot = bakery
 position = -70, -36
 facing = 0
+schedule = 5-12, -70, -36, baking bread
+schedule = 12-14, -8, -6, lunch at the plaza
+schedule = 14-20, -70, -36, selling loaves
+schedule = 20-5, -70, -36, closing up
 ---
 You run the bakery on the southwest corner of downtown. The police station is
 just across the street to the east, and you can smell Bean There Coffee two

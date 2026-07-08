@@ -48,6 +48,15 @@ class RaylibRenderer {
     // TODO(implement): step 3 of the plan.
     void beginFrame(const CameraPose& pose);
 
+    // Feeds the day/night pass from the SHARED world clock (call once per
+    // frame, before beginFrame): sky/fog color and scene light level all
+    // derive from this one hour value — no renderer-private timers.
+    void setTimeOfDay(float hours);
+
+    // The sky clear color for the current time of day (main passes it to
+    // ClearBackground so sky and fog always agree).
+    Color skyColor() const { return skyColor_; }
+
     // Draws ground, roads, and one asset-pack model per City building
     // (facadeKind/spotId → model via Assets), plus street props.
     // TODO(implement): step 3.
@@ -85,6 +94,8 @@ class RaylibRenderer {
    private:
     Assets& assets_;
     Camera3D camera_{};  // rebuilt each beginFrame; kept for worldToScreen
+    Color skyColor_{135, 190, 235, 255};  // daylight until the clock speaks
+    float lightLevel_ = 1.f;              // scene brightness multiplier
 
     // Per-entity animation playback (keyed by variantSeed, which is unique
     // per entity): which clip is playing and the running frame clock. The

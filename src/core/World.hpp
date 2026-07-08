@@ -8,6 +8,7 @@
 #include "Math.hpp"
 #include "Npc.hpp"
 #include "Player.hpp"
+#include "WorldState.hpp"
 
 namespace llm_npc {
 
@@ -31,6 +32,11 @@ class World {
     explicit World(City city);
 
     const City& city() const { return city_; }
+
+    // The world bus: shared facts every system reads instead of keeping a
+    // private copy — the clock lives here (see WorldState).
+    WorldState&       state()       { return state_; }
+    const WorldState& state() const { return state_; }
 
     // Adds an NPC (already placed via setPlacement).
     void addNpc(Npc npc) { npcs_.push_back(std::move(npc)); }
@@ -66,6 +72,7 @@ class World {
 
    private:
     City   city_;
+    WorldState state_;
     Player player_;
     std::vector<Npc>        npcs_;
     std::vector<Projectile> projectiles_;

@@ -6,6 +6,7 @@
 
 #include "Math.hpp"
 #include "Persona.hpp"
+#include "Schedule.hpp"
 
 namespace llm_npc {
 
@@ -16,6 +17,9 @@ struct LoadedPersona {
     Vec3 position;          // world position on the ground plane (y = 0)
     float facingDeg = 0.f;  // initial facing, degrees around +y (0 = +z)
     std::string spotId;     // landmark tag, e.g. "bakery" or "park"
+    // Optional daily routine, driven by the shared world clock: repeated
+    // "schedule = HH-HH, x, z, activity" header lines, in file order.
+    std::vector<ScheduleEntry> schedule;
 };
 
 // Result of parsing one persona definition.
