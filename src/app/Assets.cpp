@@ -51,6 +51,11 @@ Assets::Assets(const std::string& assetsDir) {
         {"trafficlight_c", "trafficlight_A"}, {"trafficlight_d", "trafficlight_A"},
         {"bush_a", "bush"}, {"bush_b", "bush"},
         {"bush_c", "bush"}, {"bush_d", "bush"},
+        {"police_car", "car_police"},
+        {"sedan_a", "car_sedan"}, {"sedan_b", "car_sedan"},
+        {"hatchback_a", "car_hatchback"}, {"hatchback_b", "car_hatchback"},
+        {"dumpster_a", "dumpster"},
+        {"trash_a", "trash_A"}, {"trash_b", "trash_B"},
     };
     // Size contracts for everything that must not stretch to its collision
     // box. Heights are world meters, chosen against the 1.8-unit characters.
@@ -70,6 +75,14 @@ Assets::Assets(const std::string& assetsDir) {
         {"bush_b", {SizeSpec::Mode::Uniform, 1.1f}},
         {"bush_c", {SizeSpec::Mode::Uniform, 1.1f}},
         {"bush_d", {SizeSpec::Mode::Uniform, 1.1f}},
+        {"police_car", {SizeSpec::Mode::Uniform, 1.5f}},
+        {"sedan_a", {SizeSpec::Mode::Uniform, 1.35f}},
+        {"sedan_b", {SizeSpec::Mode::Uniform, 1.35f}},
+        {"hatchback_a", {SizeSpec::Mode::Uniform, 1.35f}},
+        {"hatchback_b", {SizeSpec::Mode::Uniform, 1.35f}},
+        {"dumpster_a", {SizeSpec::Mode::Uniform, 1.4f}},
+        {"trash_a", {SizeSpec::Mode::Uniform, 0.9f}},
+        {"trash_b", {SizeSpec::Mode::Uniform, 0.7f}},
     };
 
     genericBuildings_ = {"building_A", "building_B", "building_C", "building_D",
@@ -80,7 +93,7 @@ Assets::Assets(const std::string& assetsDir) {
         "building_A", "building_B", "building_C", "building_D", "building_E",
         "building_F", "building_G", "building_H", "bench", "car_taxi",
         "car_police", "car_sedan", "car_hatchback", "box_B", "base", "bush",
-        "watertower", "trafficlight_A", "dumpster", "trash_A",
+        "watertower", "trafficlight_A", "dumpster", "trash_A", "trash_B",
         "road_straight", "road_straight_crossing", "road_junction",
     };
     bool any = false;
