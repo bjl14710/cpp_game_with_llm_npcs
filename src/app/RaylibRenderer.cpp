@@ -453,44 +453,61 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
 }
 
 void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
-    // Per-weapon visuals live in this table; adding a WeaponKind means
-    // adding a row, never a new code branch. Sizes are camera-space meters.
-    struct ViewSpec {
-        Vector3 size;        // main body (fist / gun body)
-        Color color;
-        float thrust;        // + pushes forward on attack (punch), - recoils
-        bool grip;           // draw a pistol-style grip under the body
-    };
-    static const ViewSpec kSpecs[] = {
-        {{0.11f, 0.09f, 0.14f}, Color{224, 172, 138, 255}, 0.45f, false},  // Fist
-        {{0.05f, 0.07f, 0.30f}, Color{55, 58, 66, 255}, -0.14f, true},     // Pistol
-    };
-    const int count = static_cast<int>(sizeof(kSpecs) / sizeof(kSpecs[0]));
-    if (weaponKind < 0 || weaponKind >= count) return;
-    const ViewSpec& spec = kSpecs[weaponKind];
+    if (weaponKind < 0 || weaponKind > 1) return;
+    // The fist is invisible at rest — nothing floats in front of the
+    // camera — and only appears as a punch while the swing plays out.
+    const bool fist = weaponKind == 0;
+    if (fist && attackFraction <= 0.01f) return;
 
-    // Camera basis for a lower-right anchored prop.
+    // Everything below draws in CAMERA-LOCAL space: translate to the eye,
+    // rotate by the camera's yaw and pitch, then draw axis-aligned shapes
+    // with +z forward. The prop therefore pivots with the view instead of
+    // reading as a world-axis-aligned floating block. In this local frame
+    // +x is screen-LEFT (right-handed, y-up), so right-of-center offsets
+    // are negative x.
     const Vector3 fwd{camera_.target.x - camera_.position.x,
                       camera_.target.y - camera_.position.y,
                       camera_.target.z - camera_.position.z};
     const float flen = std::sqrt(fwd.x * fwd.x + fwd.y * fwd.y + fwd.z * fwd.z);
     if (flen < 1e-4f) return;
     const Vector3 f{fwd.x / flen, fwd.y / flen, fwd.z / flen};
-    // Same right-vector convention as the game's strafe (flatRight in
-    // main.cpp): cross(forward, up) = (-fz, 0, fx).
-    const Vector3 r{-f.z, 0.f, f.x};
+    const float yawDeg = std::atan2(f.x, f.z) * RAD2DEG;
+    const float pitchDeg = std::asin(std::max(-1.f, std::min(1.f, f.y))) * RAD2DEG;
 
-    const float push = spec.thrust * attackFraction;
-    const Vector3 base{
-        camera_.position.x + f.x * (0.85f + push) + r.x * 0.32f,
-        camera_.position.y - 0.28f + f.y * (0.85f + push),
-        camera_.position.z + f.z * (0.85f + push) + r.z * 0.32f};
+    const Color skin{224, 172, 138, 255};
+    const Color sleeve{60, 64, 74, 255};
+    const Color gunmetal{55, 58, 66, 255};
+    const Color gripTone{38, 40, 46, 255};
 
-    DrawCubeV(base, spec.size, spec.color);
-    if (spec.grip) {
-        DrawCubeV(Vector3{base.x - f.x * 0.10f, base.y - 0.07f, base.z - f.z * 0.10f},
-                  Vector3{0.045f, 0.10f, 0.06f}, spec.color);
+    rlPushMatrix();
+    rlTranslatef(camera_.position.x, camera_.position.y, camera_.position.z);
+    rlRotatef(yawDeg, 0.f, 1.f, 0.f);
+    rlRotatef(-pitchDeg, 1.f, 0.f, 0.f);
+
+    if (fist) {
+        // attackFraction runs 1 → 0 across the swing; sin turns that into
+        // extend-then-retract, so the arm shoots out from the lower right
+        // and pulls back — a punch, not a hovering prop.
+        const float ext = std::sin(attackFraction * PI);
+        const float reach = 0.34f + 0.55f * ext;
+        // Sleeve forearm rising slightly toward screen center, fist at the
+        // end. Local vectors — the matrix above carries them to the world.
+        DrawCylinderEx(Vector3{-0.26f, -0.40f, 0.16f},
+                       Vector3{-0.22f, -0.30f + 0.08f * ext, reach},
+                       0.055f, 0.045f, 10, sleeve);
+        DrawSphere(Vector3{-0.22f, -0.30f + 0.08f * ext, reach}, 0.075f, skin);
+    } else {
+        // Pistol: held silhouette (slide + barrel + grip + hand) with a
+        // recoil kick — back and muzzle-up — driven by attackFraction.
+        rlTranslatef(0.f, 0.f, -0.07f * attackFraction);
+        rlRotatef(-7.f * attackFraction, 1.f, 0.f, 0.f);
+        DrawCube(Vector3{-0.26f, -0.26f, 0.50f}, 0.045f, 0.075f, 0.26f, gunmetal);
+        DrawCylinderEx(Vector3{-0.26f, -0.25f, 0.60f}, Vector3{-0.26f, -0.25f, 0.75f},
+                       0.018f, 0.018f, 10, gunmetal);
+        DrawCube(Vector3{-0.26f, -0.345f, 0.44f}, 0.04f, 0.11f, 0.055f, gripTone);
+        DrawSphere(Vector3{-0.26f, -0.31f, 0.43f}, 0.042f, skin);  // hand
     }
+    rlPopMatrix();
 }
 
 void RaylibRenderer::endFrame() {
