@@ -81,6 +81,15 @@ const std::vector<PartDef>& partCatalog() {
         // Hair.
         {"hair_pony", PartCategory::Hair, "round", {0.34f, 0.30f, 0.34f}, {}},
         {"hair_mohawk", PartCategory::Hair, "blocky", {0.26f, 0.42f, 0.62f}, {}},
+
+        // --- Shared hairstyle pool expansion (issue #97) — additive rows,
+        // picked up by the creator picker AND every NPC from the one pool.
+        {"hair_cap", PartCategory::Hair, "any", {0.60f, 0.22f, 0.78f}, {}},
+        {"hair_buzz", PartCategory::Hair, "any", {0.60f, 0.12f, 0.60f}, {}},
+        {"hair_bob", PartCategory::Hair, "round", {0.74f, 0.34f, 0.74f}, {}},
+        {"hair_curls", PartCategory::Hair, "round", {0.66f, 0.30f, 0.66f}, {}},
+        {"hair_bun", PartCategory::Hair, "round", {0.46f, 0.40f, 0.46f}, {}},
+        {"hair_side", PartCategory::Hair, "blocky", {0.78f, 0.24f, 0.72f}, {}},
     };
     return parts;
 }
