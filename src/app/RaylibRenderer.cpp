@@ -306,7 +306,8 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
 
 void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
-                                            bool walking, float phase) {
+                                            bool walking, float phase, NpcFace face,
+                                            bool dead) {
     const AssembledLook assembled = assembleLook(look);
     if (!assembled.ok) {
         // Invalid/stale look: the same marker cylinder the pack path uses.
@@ -330,10 +331,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
 
     // Whole-figure transform: facing + procedural walk bob. Parts then draw
     // at their assembly-local positions and rotate correctly for free.
-    const float bob = walking ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
+    // Death pose: the figure tips onto its back (a rigid tip-over, the
+    // composite counterpart of the pack models' death clip), lifted a
+    // little so the torso doesn't sink through the ground slab.
+    const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
     rlPushMatrix();
-    rlTranslatef(position.x, position.y + bob, position.z);
+    rlTranslatef(position.x, position.y + bob + (dead ? 0.30f : 0.f), position.z);
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
+    if (dead) rlRotatef(-90.f, 1.f, 0.f, 0.f);
 
     for (const PlacedPart& placed : assembled.parts) {
         const PartDef& part = *placed.part;
@@ -397,6 +402,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         }
     }
     rlPopMatrix();
+
+    // Same emote billboard the pack path draws, at the same height — the
+    // two render paths must stay indistinguishable to the player. The dead
+    // don't emote.
+    if (!dead && face != NpcFace::Neutral) {
+        DrawBillboard(camera_, assets_.faceTexture(face),
+                      Vector3{position.x, 2.45f, position.z}, 0.55f, WHITE);
+    }
 }
 
 void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
