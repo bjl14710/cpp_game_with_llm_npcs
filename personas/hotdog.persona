@@ -6,6 +6,7 @@ knowledge = Knows hot dogs, plaza foot traffic, and all plaza regulars: Yuki the
 spot = cart
 position = 6, 0
 facing = 270
+look = body_round, head_round, eyes_wide, hair_none, sunny
 ---
 Your cart sits dead center of downtown, in the plaza. Best spot in the city
 and you earned it: fifteen years, same corner.

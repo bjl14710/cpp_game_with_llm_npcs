@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "CharacterParts.hpp"
 #include "PersonaLoader.hpp"
 #include "doctest.h"
 
@@ -30,6 +31,25 @@ TEST_CASE("the shipped personas directory yields the full ten-citizen roster") {
             const bool samePlace = other.position.x == loaded.position.x &&
                                    other.position.z == loaded.position.z;
             CHECK_FALSE(samePlace);
+        }
+    }
+
+    // Shared character library (issue #98): every shipped persona carries an
+    // AUTHORED look that validates against the live catalog — never the
+    // hashed fallback, so the cast stays art-directed — and no two citizens
+    // wear the identical look. Variety therefore meets and exceeds the old
+    // five-rigged-model baseline by construction.
+    for (const auto& loaded : roster) {
+        REQUIRE_MESSAGE(loaded.hasLook, (loaded.id + " has no authored look"));
+        std::string why;
+        CHECK_MESSAGE(llm_npc::lookIsValid(loaded.look, &why), (loaded.id + ": " + why));
+        for (const auto& other : roster) {
+            if (&other == &loaded) continue;
+            bool identical = other.look.paletteId == loaded.look.paletteId;
+            for (int c = 0; c < llm_npc::kPartCategoryCount; ++c) {
+                identical = identical && other.look.partIds[c] == loaded.look.partIds[c];
+            }
+            CHECK_MESSAGE(!identical, (loaded.id + " and " + other.id + " wear the same look"));
         }
     }
 }
