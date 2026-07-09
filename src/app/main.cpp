@@ -52,6 +52,11 @@ namespace {
 
 constexpr float kWalkSpeed = 7.0f;       // units (~meters) per second
 constexpr float kPlayerRadius = 0.45f;   // collision circle on the ground
+// Jump arc (user request: hop the curb-line props instead of snagging on
+// them). Apex = v^2/2g ~ 1.45u: clears benches (0.6), bushes (1.1) and
+// lands on car roofs (~1.35); building walls stay walls.
+constexpr float kGravity = 22.f;         // units per second^2
+constexpr float kJumpSpeed = 8.0f;       // takeoff speed, units per second
 constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
 constexpr float kNameplateRange = 28.f;  // how far name tags stay visible
 constexpr float kMouseSensitivity = 0.12f;
@@ -423,6 +428,9 @@ int main(int argc, char** argv) {
 
     AppMode mode = AppMode::Playing;
     LocalPlayer player;
+    // Vertical motion state for jumping; position.y is the feet height and
+    // everything downstream (camera, gun muzzle, net pose) derives from it.
+    float playerVerticalSpeed = 0.f;
     // Smoke runs are deterministic: fixed camera (default plaza-facing, or
     // the --camera override), no look drift.
     const bool smokeRun = maxFrames >= 0;
@@ -568,6 +576,29 @@ int main(int argc, char** argv) {
                 wish = normalize(wish);
                 const Vec3 target = player.position + wish * (kWalkSpeed * dt);
                 player.position = world.city().resolveMovement(player.position, target, kPlayerRadius);
+
+                // Vertical: gravity + jump (user request: curb-line props
+                // snagged the player). Support is whatever the feet rest on
+                // — the ground or a low prop's top — so a hop clears
+                // benches/bushes, lands on car roofs, and walking off an
+                // edge falls. The 0.05 tolerance re-catches a top the fall
+                // integrated slightly past this frame.
+                const float support = world.city().supportHeightAt(
+                    player.position.x, player.position.z, kPlayerRadius,
+                    player.position.y + 0.05f);
+                const bool grounded = playerVerticalSpeed <= 0.f &&
+                                      player.position.y <= support + 0.001f;
+                if (grounded) {
+                    player.position.y = support;
+                    playerVerticalSpeed = 0.f;
+                    if (isActionJustPressed(bindings, Action::Jump)) {
+                        playerVerticalSpeed = kJumpSpeed;
+                    }
+                } else {
+                    playerVerticalSpeed -= kGravity * dt;
+                }
+                player.position.y += playerVerticalSpeed * dt;
+                if (player.position.y < 0.f) player.position.y = 0.f;  // ground floor
             }
 
             // Combat input (solo/host only — combat is host-authoritative

@@ -82,12 +82,28 @@ const Building* City::findBuilding(const std::string& id) const {
     return nullptr;
 }
 
-bool City::circleIntersectsAny(float x, float z, float radius) const {
+bool City::circleIntersectsAny(float x, float z, float radius, float feetY) const {
     const float r2 = radius * radius;
+    // A building stops being solid once the mover's feet reach its top
+    // (small tolerance so standing exactly on a roof doesn't wedge).
+    const float clearance = feetY + 0.01f;
     for (const auto& b : buildings_) {
+        if (b.height <= clearance) continue;
         if (distSqToBuilding(b, x, z) < r2) return true;
     }
     return false;
+}
+
+float City::supportHeightAt(float x, float z, float radius, float feetY) const {
+    const float r2 = radius * radius;
+    float support = 0.f;  // the ground plane
+    for (const auto& b : buildings_) {
+        // Only tops at or below the feet can hold them up; anything higher
+        // is a wall beside the mover, not a floor beneath them.
+        if (b.height > feetY + 0.01f || b.height <= support) continue;
+        if (distSqToBuilding(b, x, z) < r2) support = b.height;
+    }
+    return support;
 }
 
 Vec3 City::resolveMovement(const Vec3& from, const Vec3& to, float radius) const {
@@ -96,9 +112,9 @@ Vec3 City::resolveMovement(const Vec3& from, const Vec3& to, float radius) const
 
     Vec3 pos = from;
     const float nx = clampf(to.x, lo, hi);
-    if (!circleIntersectsAny(nx, pos.z, radius)) pos.x = nx;
+    if (!circleIntersectsAny(nx, pos.z, radius, from.y)) pos.x = nx;
     const float nz = clampf(to.z, lo, hi);
-    if (!circleIntersectsAny(pos.x, nz, radius)) pos.z = nz;
+    if (!circleIntersectsAny(pos.x, nz, radius, from.y)) pos.z = nz;
     pos.y = to.y;
     return pos;
 }
