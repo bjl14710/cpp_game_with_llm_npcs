@@ -105,4 +105,14 @@ AssembledLook assembleLook(const CharacterLook& look);
 // Deterministic, always-valid random look for a seed (picker "Randomize").
 CharacterLook randomizeLook(unsigned seed);
 
+// The one look source for named NPCs: the authored look when it validates,
+// otherwise a deterministic randomizeLook(hash(name)) — stable across runs,
+// so every persona (authored or not) always spawns with a valid look from
+// the SAME shared catalog the creator picks from. When an authored look is
+// rejected, `whyFallback` (if non-null) gets the reason so the spawn site
+// can log it.
+CharacterLook lookForPersona(const std::string& name,
+                             const CharacterLook* authored = nullptr,
+                             std::string* whyFallback = nullptr);
+
 }  // namespace llm_npc

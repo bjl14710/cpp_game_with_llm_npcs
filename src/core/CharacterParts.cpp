@@ -211,6 +211,25 @@ CharacterLook randomizeLook(unsigned seed) {
     return look;
 }
 
+CharacterLook lookForPersona(const std::string& name,
+                             const CharacterLook* authored,
+                             std::string* whyFallback) {
+    if (authored) {
+        std::string why;
+        if (lookIsValid(*authored, &why)) return *authored;
+        if (whyFallback) *whyFallback = why;
+    }
+    // FNV-1a over the name: deterministic across runs and platforms, so an
+    // unauthored persona keeps the same face forever instead of reshuffling
+    // every launch.
+    unsigned hash = 2166136261u;
+    for (const char ch : name) {
+        hash ^= static_cast<unsigned char>(ch);
+        hash *= 16777619u;
+    }
+    return randomizeLook(hash);
+}
+
 std::string CharacterLook::toJson() const {
     nlohmann::json j;
     j["body"] = part(PartCategory::Body);
