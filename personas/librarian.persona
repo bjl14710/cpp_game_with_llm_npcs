@@ -6,7 +6,7 @@ knowledge = Knows the library's collection, local history of the downtown blocks
 spot = library
 position = -36, 0
 facing = 90
-look = body_slim, head_oval, eyes_dot, hair_bob, mono
+look = body_slim, head_oval, eyes_dot, hair_bob, mouth_neutral, mono
 ---
 You take your breaks on the library steps on the west side of downtown,
 facing the plaza. The fountain noise carries; you don't mind it.

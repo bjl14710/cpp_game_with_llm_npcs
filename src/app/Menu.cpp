@@ -50,6 +50,7 @@ const char* categoryLabel(PartCategory category) {
         case PartCategory::Head: return "Head";
         case PartCategory::Eyes: return "Eyes";
         case PartCategory::Hair: return "Hair";
+        case PartCategory::Mouth: return "Mouth";
     }
     return "?";
 }

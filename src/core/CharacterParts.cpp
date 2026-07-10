@@ -33,6 +33,7 @@ const std::vector<CategorySpec>& categorySpecs() {
         {PartCategory::Head, PartCategory::Body, "head"},
         {PartCategory::Eyes, PartCategory::Head, "eyes"},
         {PartCategory::Hair, PartCategory::Head, "hair"},
+        {PartCategory::Mouth, PartCategory::Head, "mouth"},
     };
     return specs;
 }
@@ -60,13 +61,21 @@ const std::vector<PartDef>& partCatalog() {
          {{"head", {0.f, 0.78f, 0.f}}}},
         // Heads (declare where eyes, hair — and later mouths — sit on THEM).
         {"head_round", PartCategory::Head, "round", {0.98f, 0.98f, 0.98f},
-         {{"eyes", {0.f, 0.54f, 0.41f}}, {"hair", {0.f, 0.88f, 0.f}}}},
+         {{"eyes", {0.f, 0.54f, 0.41f}},
+          {"hair", {0.f, 0.88f, 0.f}},
+          {"mouth", {0.f, 0.30f, 0.44f}}}},
         {"head_block", PartCategory::Head, "blocky", {1.00f, 1.00f, 1.00f},
-         {{"eyes", {0.f, 0.58f, 0.50f}}, {"hair", {0.f, 0.95f, 0.f}}}},
+         {{"eyes", {0.f, 0.58f, 0.50f}},
+          {"hair", {0.f, 0.95f, 0.f}},
+          {"mouth", {0.f, 0.30f, 0.50f}}}},
         {"head_oval", PartCategory::Head, "round", {0.90f, 1.10f, 0.90f},
-         {{"eyes", {0.f, 0.62f, 0.38f}}, {"hair", {0.f, 1.02f, 0.f}}}},
+         {{"eyes", {0.f, 0.62f, 0.38f}},
+          {"hair", {0.f, 1.02f, 0.f}},
+          {"mouth", {0.f, 0.34f, 0.41f}}}},
         {"head_tall", PartCategory::Head, "blocky", {0.94f, 1.16f, 0.94f},
-         {{"eyes", {0.f, 0.66f, 0.48f}}, {"hair", {0.f, 1.10f, 0.f}}}},
+         {{"eyes", {0.f, 0.66f, 0.48f}},
+          {"hair", {0.f, 1.10f, 0.f}},
+          {"mouth", {0.f, 0.36f, 0.47f}}}},
         // Eyes, sized against the grown heads (recipes split pupils by the
         // declared width; the visor renders its declared box).
         {"eyes_dot", PartCategory::Eyes, "any", {0.42f, 0.13f, 0.10f}, {}},
@@ -89,6 +98,12 @@ const std::vector<PartDef>& partCatalog() {
         {"hair_curls", PartCategory::Hair, "round", {0.88f, 0.38f, 0.88f}, {}},
         {"hair_bun", PartCategory::Hair, "round", {0.60f, 0.50f, 0.60f}, {}},
         {"hair_side", PartCategory::Hair, "blocky", {1.02f, 0.30f, 0.94f}, {}},
+        // Mouths (issue #104) — simple Tomodachi-style marks; all "any"
+        // so every face can wear every expression.
+        {"mouth_smile", PartCategory::Mouth, "any", {0.30f, 0.10f, 0.08f}, {}},
+        {"mouth_open", PartCategory::Mouth, "any", {0.26f, 0.18f, 0.08f}, {}},
+        {"mouth_neutral", PartCategory::Mouth, "any", {0.28f, 0.06f, 0.08f}, {}},
+        {"mouth_o", PartCategory::Mouth, "any", {0.16f, 0.16f, 0.08f}, {}},
     };
     return parts;
 }
@@ -246,6 +261,7 @@ std::string CharacterLook::toJson() const {
     j["head"] = part(PartCategory::Head);
     j["eyes"] = part(PartCategory::Eyes);
     j["hair"] = part(PartCategory::Hair);
+    j["mouth"] = part(PartCategory::Mouth);
     j["palette"] = paletteId;
     return j.dump();
 }
@@ -253,9 +269,19 @@ std::string CharacterLook::toJson() const {
 bool CharacterLook::fromJson(const std::string& json, CharacterLook& out) {
     const nlohmann::json j = nlohmann::json::parse(json, nullptr, false);
     if (!j.is_object()) return false;
-    const char* keys[kPartCategoryCount] = {"body", "head", "eyes", "hair"};
+    const char* keys[kPartCategoryCount] = {"body", "head", "eyes", "hair", "mouth"};
     for (int c = 0; c < kPartCategoryCount; ++c) {
-        if (!j.contains(keys[c]) || !j[keys[c]].is_string()) return false;
+        // Looks stored before the Mouth category (issue #104) have no
+        // "mouth" key: default the canonical smile so the character keeps
+        // its authored identity instead of demoting to the hash fallback.
+        if (!j.contains(keys[c])) {
+            if (static_cast<PartCategory>(c) == PartCategory::Mouth) {
+                out.partIds[c] = "mouth_smile";
+                continue;
+            }
+            return false;
+        }
+        if (!j[keys[c]].is_string()) return false;
         out.partIds[c] = j[keys[c]].get<std::string>();
     }
     if (!j.contains("palette") || !j["palette"].is_string()) return false;

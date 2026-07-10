@@ -7,6 +7,7 @@
 #include <string>
 
 #include "CharacterParts.hpp"
+#include "PersonaLoader.hpp"
 #include "doctest.h"
 
 using namespace llm_npc;
@@ -45,21 +46,43 @@ TEST_CASE("Mii proportions: heads read as ~half the body+head silhouette") {
     }
 }
 
-TEST_CASE("Mouth is a fifth category with sockets on every head" *
-          doctest::skip()) {
-    // Step 4. TODO(mii-style): kPartCategoryCount == 5; every Head part
-    // declares a "mouth" socket; partsForCategory(Mouth, "any") is
-    // non-empty; the existing exhaustive combo test in
-    // test_character_parts.cpp absorbs the new axis automatically.
+TEST_CASE("Mouth is a fifth category with sockets on every head") {
+    // Step 4. The combo test in test_character_parts.cpp covers the new
+    // axis exhaustively; this pins the wiring itself.
+    CHECK(kPartCategoryCount == 5);
+    CHECK_FALSE(partsForCategory(PartCategory::Mouth, "any").empty());
+    for (const PartDef* head : partsForCategory(PartCategory::Head, "any")) {
+        CAPTURE(head->id);
+        CHECK(head->sockets.count("mouth") == 1);
+    }
+    bool mouthRow = false;
+    for (const CategorySpec& spec : categorySpecs()) {
+        if (spec.category != PartCategory::Mouth) continue;
+        mouthRow = true;
+        CHECK(spec.parent == PartCategory::Head);
+        CHECK(std::string(spec.socket) == "mouth");
+    }
+    CHECK(mouthRow);
 }
 
-TEST_CASE("a five-item look line still parses, mouth defaults deterministically" *
-          doctest::skip()) {
-    // Step 4 back-compat. TODO(mii-style): parsePersonaText accepts the
-    // old five-item `look =` (mouth filled via lookForPersona's
-    // deterministic rule) AND the new six-item form; renderPersonaText
-    // emits six items; round-trip holds. Likely lives beside the other
-    // look tests in test_persona_look.cpp — keep or move this stub there.
+TEST_CASE("a five-item look line still parses, mouth defaults to the smile") {
+    // Step 4 back-compat: pre-Mouth persona files keep their authored
+    // identity — the mouth slot fills with the canonical smile (a fixed,
+    // documented default; simpler than a per-name hash for one slot, and
+    // Tomodachi mouths are mostly smiles anyway — decision logged in
+    // OVERNIGHT_REPORT.md).
+    const auto parsed = llm_npc::parsePersonaText(
+        "name = Piper\n"
+        "look = body_round, head_round, eyes_wide, hair_tuft, warm\n",
+        "piper");
+    REQUIRE_MESSAGE(parsed.ok, parsed.error);
+    REQUIRE(parsed.value.hasLook);
+    CHECK(parsed.value.look.part(PartCategory::Mouth) == "mouth_smile");
+    CHECK(parsed.value.look.paletteId == "warm");
+    CHECK(lookIsValid(parsed.value.look));
+    // Written back, the line is always the six-item current format.
+    const std::string rendered = llm_npc::renderPersonaText(parsed.value);
+    CHECK(rendered.find("hair_tuft, mouth_smile, warm") != std::string::npos);
 }
 
 TEST_CASE("catalog growth targets: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes>=12" *

@@ -10,14 +10,10 @@ namespace llm_npc {
 
 // Part categories for the character creator. Extending the system is a
 // data change: add an enum value, a CategorySpec row (who it attaches to,
-// via which socket), and catalog parts that declare that socket.
-// TODO(mii-style step 4): add Mouth here (+ bump the count, + a
-// CategorySpec row Mouth->Head via "mouth", + "mouth" sockets on every
-// head part, + mouth parts with recipes, + the Menu category label).
-// NOTE: adding the enum value alone breaks lookIsValid (empty slot) and
-// the exhaustive combo test — land the whole step as one commit.
-enum class PartCategory { Body, Head, Eyes, Hair };
-constexpr int kPartCategoryCount = 4;
+// via which socket), and catalog parts that declare that socket — Mouth
+// (issue #104) landed exactly that way.
+enum class PartCategory { Body, Head, Eyes, Hair, Mouth };
+constexpr int kPartCategoryCount = 5;
 
 // How a category attaches into the assembly: every non-root category names
 // its parent category and the SOCKET NAME it snaps to. The socket's

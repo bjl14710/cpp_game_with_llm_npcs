@@ -6,7 +6,7 @@ knowledge = Knows fasteners, paint, plumbing, and which downtown buildings have 
 spot = hardware
 position = 36, 0
 facing = 270
-look = body_bulk, head_block, eyes_dot, hair_buzz, forest
+look = body_bulk, head_block, eyes_dot, hair_buzz, mouth_neutral, forest
 ---
 Your store faces the plaza from the east block, and you've sold a hinge or a
 washer to every shopkeeper downtown. The fountain pump? You fixed it. Twice.

@@ -406,6 +406,23 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                  dim.z, c.hair);
         DrawCube({at.x - dim.x * 0.45f, at.y - dim.y * 0.60f, at.z},
                  dim.x * 0.20f, dim.y * 1.60f, dim.z * 0.80f, c.hair);
+    } else if (part.id == "mouth_smile") {
+        // A wide low bar with raised end dots reads as an upturned smile.
+        DrawCube({at.x, cy - dim.y * 0.20f, at.z}, dim.x * 0.68f,
+                 dim.y * 0.38f, dim.z, c.dark);
+        DrawSphere({at.x - dim.x * 0.42f, cy + dim.y * 0.15f, at.z},
+                   dim.y * 0.30f, c.dark);
+        DrawSphere({at.x + dim.x * 0.42f, cy + dim.y * 0.15f, at.z},
+                   dim.y * 0.30f, c.dark);
+    } else if (part.id == "mouth_open" || part.id == "mouth_o") {
+        // A flattened dark sphere: tall ellipse (open) or small ring (o).
+        rlPushMatrix();
+        rlTranslatef(at.x, cy, at.z);
+        rlScalef(1.f, dim.y / dim.x, 0.35f);
+        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, c.dark);
+        rlPopMatrix();
+    } else if (part.id == "mouth_neutral") {
+        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
     } else if (part.category == PartCategory::Eyes) {
         if (part.id == "eyes_visor") {
             DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
