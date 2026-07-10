@@ -24,11 +24,25 @@ TEST_CASE("every part and palette carries a pack tag (default core)") {
     }
 }
 
-TEST_CASE("Mii proportions: heads read as ~40-45% of assembled height" *
-          doctest::skip()) {
-    // Step 2. TODO(mii-style): for every valid body+head pairing, assemble
-    // a look and CHECK the head part's localSize.y is 0.38-0.48 of
-    // assembled.height (pre-contract-scale, so the ratio survives scaling).
+TEST_CASE("Mii proportions: heads read as ~half the body+head silhouette") {
+    // Step 2. Metric refined from the scaffold stub (logged in
+    // OVERNIGHT_REPORT.md): hair height varies per look, so the STABLE
+    // measure is head.y / (headSocket.y + head.y) — the body+head
+    // silhouette. 0.48-0.60 lands the plan's "head reads ~40-45% of
+    // standing height" once a typical hair crown joins the assembly.
+    for (const PartDef* body : partsForCategory(PartCategory::Body, "any")) {
+        const auto socket = body->sockets.find("head");
+        REQUIRE_MESSAGE(socket != body->sockets.end(), body->id);
+        for (const PartDef* head :
+             partsForCategory(PartCategory::Head, body->styleTag)) {
+            const float fraction =
+                head->localSize.y / (socket->second.y + head->localSize.y);
+            CAPTURE(body->id);
+            CAPTURE(head->id);
+            CHECK(fraction >= 0.48f);
+            CHECK(fraction <= 0.60f);
+        }
+    }
 }
 
 TEST_CASE("Mouth is a fifth category with sockets on every head" *
