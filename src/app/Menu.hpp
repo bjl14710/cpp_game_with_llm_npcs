@@ -71,6 +71,16 @@ class Menu {
     // Installs the Creator page's save callback.
     void setCreator(CreatorHooks hooks);
 
+    // The player's own avatar (issue #106): the SAME creator page opens in
+    // avatar mode from "Edit My Avatar" — same picker, same Randomize, same
+    // preview — but Save writes the avatar instead of spawning an NPC.
+    // `current` seeds the draft; `onSave` returns "" or a toast-able error.
+    struct AvatarHooks {
+        std::function<CharacterLook()> current;
+        std::function<std::string(const CharacterLook&)> onSave;
+    };
+    void setAvatar(AvatarHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -125,6 +135,8 @@ class Menu {
 
     // ---- Creator page state ----
     CreatorHooks creator_;
+    AvatarHooks avatar_;
+    bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
     std::string creatorName_;
     std::string creatorBackstory_;
     std::string creatorTraits_;

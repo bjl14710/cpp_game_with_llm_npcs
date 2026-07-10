@@ -585,6 +585,16 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     }
 }
 
+void RaylibRenderer::setAvatarPalette(const std::string& paletteId) {
+    for (const PartPalette& palette : paletteCatalog()) {
+        if (palette.id != paletteId) continue;
+        avatarSkin_ = Color{palette.skin[0], palette.skin[1], palette.skin[2], 255};
+        avatarOutfit_ =
+            Color{palette.outfit[0], palette.outfit[1], palette.outfit[2], 255};
+        return;
+    }
+}
+
 void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     if (weaponKind < 0 || weaponKind > 1) return;
     // The fist is invisible at rest — nothing floats in front of the
@@ -607,8 +617,10 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     const float yawDeg = std::atan2(f.x, f.z) * RAD2DEG;
     const float pitchDeg = std::asin(std::max(-1.f, std::min(1.f, f.y))) * RAD2DEG;
 
-    const Color skin{224, 172, 138, 255};
-    const Color sleeve{60, 64, 74, 255};
+    // The avatar's palette colors the arm and hand — the one first-person
+    // surface where the player sees their own look (issue #106).
+    const Color skin = avatarSkin_;
+    const Color sleeve = avatarOutfit_;
     const Color gunmetal{55, 58, 66, 255};
     const Color gripTone{38, 40, 46, 255};
 

@@ -356,6 +356,24 @@ int main(int argc, char** argv) {
     Assets assets((projectRoot / "assets").string());
     RaylibRenderer renderer(assets);
 
+    // The player's own avatar (issue #106): a look-only row under the
+    // reserved id in the SAME store created characters use (look-only rows
+    // never join the spawn pass — loadAll requires both records). Absent or
+    // stale looks demote to the fixed-name deterministic fallback, exactly
+    // like personas.
+    CharacterLook avatarLook;
+    {
+        CharacterLook stored;
+        const bool has = characterStore.loadLook("player_avatar", stored);
+        std::string why;
+        avatarLook = lookForPersona("player", has ? &stored : nullptr, &why);
+        if (!why.empty()) {
+            std::cerr << "[llm_npc] player avatar look invalid (" << why
+                      << ") — using the default\n";
+        }
+    }
+    renderer.setAvatarPalette(avatarLook.paletteId);
+
     DialogUI dialog;
     DialogueSession session;
     Menu menu(bindings, bindingsPath);
@@ -517,6 +535,23 @@ int main(int argc, char** argv) {
         return "";
     };
     menu.setCreator(creatorHooks);
+
+    // Avatar mode on the same creator page (issue #106): Save validates,
+    // persists under the reserved id, and retints the first-person arm —
+    // the surface where the player actually sees their choice.
+    Menu::AvatarHooks avatarHooks;
+    avatarHooks.current = [&]() { return avatarLook; };
+    avatarHooks.onSave = [&](const CharacterLook& look) -> std::string {
+        std::string why;
+        if (!lookIsValid(look, &why)) return "Invalid look: " + why;
+        avatarLook = look;
+        renderer.setAvatarPalette(look.paletteId);
+        if (!characterStore.saveLook("player_avatar", look)) {
+            return "Saved for this session only (store unavailable)";
+        }
+        return "";
+    };
+    menu.setAvatar(avatarHooks);
 
     // Journal: a pure read of the shared fact store — what the player was
     // personally told, grouped by subject, conflicts pre-flagged by core.

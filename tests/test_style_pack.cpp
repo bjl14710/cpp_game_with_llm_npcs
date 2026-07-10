@@ -95,11 +95,3 @@ TEST_CASE("catalog growth floors: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes
     CHECK(partsForCategory(PartCategory::Mouth, "any").size() >= 4);
     CHECK(paletteCatalog().size() >= 12);
 }
-
-TEST_CASE("player avatar look round-trips through CharacterStore" *
-          doctest::skip()) {
-    // Step 6. TODO(mii-style): saveLook/loadAll under the reserved
-    // "player_avatar" id — persists across a store reopen, validates on
-    // load, stale look demotes to the fixed-seed fallback. Likely lives in
-    // test_character_store.cpp with its temp-dir fixtures — keep or move.
-}
