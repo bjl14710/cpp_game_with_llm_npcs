@@ -59,6 +59,10 @@ const std::vector<PartDef>& partCatalog() {
          {{"head", {0.f, 0.82f, 0.f}}}},
         {"body_bulk", PartCategory::Body, "blocky", {1.06f, 0.80f, 0.62f},
          {{"head", {0.f, 0.78f, 0.f}}}},
+        {"body_pear", PartCategory::Body, "round", {0.98f, 0.76f, 0.56f},
+         {{"head", {0.f, 0.74f, 0.f}}}},
+        {"body_broad", PartCategory::Body, "blocky", {1.14f, 0.78f, 0.58f},
+         {{"head", {0.f, 0.80f, 0.f}}}},
         // Heads (declare where eyes, hair — and later mouths — sit on THEM).
         {"head_round", PartCategory::Head, "round", {0.98f, 0.98f, 0.98f},
          {{"eyes", {0.f, 0.54f, 0.41f}},
@@ -83,6 +87,11 @@ const std::vector<PartDef>& partCatalog() {
         {"eyes_visor", PartCategory::Eyes, "blocky", {0.72f, 0.18f, 0.10f}, {}},
         {"eyes_round", PartCategory::Eyes, "round", {0.54f, 0.25f, 0.10f}, {}},
         {"eyes_happy", PartCategory::Eyes, "any", {0.50f, 0.15f, 0.10f}, {}},
+        {"eyes_sleepy", PartCategory::Eyes, "any", {0.48f, 0.10f, 0.10f}, {}},
+        {"eyes_star", PartCategory::Eyes, "round", {0.52f, 0.22f, 0.10f}, {}},
+        {"eyes_wink", PartCategory::Eyes, "any", {0.50f, 0.16f, 0.10f}, {}},
+        {"eyes_glasses", PartCategory::Eyes, "any", {0.66f, 0.24f, 0.10f}, {}},
+        {"eyes_angry", PartCategory::Eyes, "blocky", {0.56f, 0.16f, 0.10f}, {}},
         // Hair, scaled to crown the bigger heads. "hair_none" is a real
         // part with zero size so the assembly never has holes and the
         // picker has an explicit bald option.
@@ -98,6 +107,12 @@ const std::vector<PartDef>& partCatalog() {
         {"hair_curls", PartCategory::Hair, "round", {0.88f, 0.38f, 0.88f}, {}},
         {"hair_bun", PartCategory::Hair, "round", {0.60f, 0.50f, 0.60f}, {}},
         {"hair_side", PartCategory::Hair, "blocky", {1.02f, 0.30f, 0.94f}, {}},
+        {"hair_long", PartCategory::Hair, "round", {1.02f, 0.60f, 0.98f}, {}},
+        {"hair_afro", PartCategory::Hair, "round", {1.10f, 0.70f, 1.10f}, {}},
+        {"hair_braids", PartCategory::Hair, "round", {0.90f, 0.50f, 0.90f}, {}},
+        {"hair_flat_top", PartCategory::Hair, "blocky", {0.95f, 0.42f, 0.95f}, {}},
+        {"hair_helmet", PartCategory::Hair, "blocky", {1.06f, 0.40f, 1.06f}, {}},
+        {"hair_wave", PartCategory::Hair, "any", {0.98f, 0.36f, 1.00f}, {}},
         // Mouths (issue #104) — simple Tomodachi-style marks; all "any"
         // so every face can wear every expression.
         {"mouth_smile", PartCategory::Mouth, "any", {0.30f, 0.10f, 0.08f}, {}},
@@ -121,6 +136,10 @@ const std::vector<PartPalette>& paletteCatalog() {
         {"berry", {245, 203, 178}, {120, 46, 74}, {244, 143, 177}},
         {"slate", {235, 205, 182}, {62, 70, 82}, {100, 149, 196}},
         {"mint", {242, 212, 182}, {74, 110, 88}, {128, 203, 196}},
+        {"peach", {250, 218, 190}, {226, 148, 120}, {255, 171, 145}},
+        {"sky", {244, 206, 180}, {140, 110, 80}, {121, 190, 235}},
+        {"lilac", {238, 198, 175}, {104, 88, 130}, {197, 164, 226}},
+        {"lemon", {248, 214, 182}, {206, 178, 94}, {250, 230, 140}},
     };
     return palettes;
 }

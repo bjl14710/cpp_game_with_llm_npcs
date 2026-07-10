@@ -406,6 +406,67 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                  dim.z, c.hair);
         DrawCube({at.x - dim.x * 0.45f, at.y - dim.y * 0.60f, at.z},
                  dim.x * 0.20f, dim.y * 1.60f, dim.z * 0.80f, c.hair);
+    } else if (part.id == "body_pear") {
+        // Bottom-heavy rounded trunk — motherly Tomodachi silhouette.
+        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.28f, dim.x * 0.52f,
+                     dim.y, 16, c.outfit);
+    } else if (part.id == "hair_long") {
+        // Crown plus a long fall down the back.
+        DrawSphere({at.x, at.y - dim.y * 0.55f, at.z}, dim.x * 0.50f, c.hair);
+        DrawCube({at.x, at.y - dim.y * 1.05f, at.z - dim.z * 0.42f},
+                 dim.x * 0.82f, dim.y * 1.9f, dim.z * 0.22f, c.hair);
+    } else if (part.id == "hair_afro") {
+        // One big proud sphere.
+        DrawSphere({at.x, at.y + dim.y * 0.20f, at.z}, dim.x * 0.52f, c.hair);
+    } else if (part.id == "hair_braids") {
+        // Crown with a stacked braid hanging at each side.
+        DrawSphere({at.x, at.y - dim.y * 0.30f, at.z}, dim.x * 0.48f, c.hair);
+        for (const float side : {-1.f, 1.f}) {
+            DrawSphere({at.x + side * dim.x * 0.46f, at.y - dim.y * 0.95f, at.z},
+                       dim.x * 0.15f, c.hair);
+            DrawSphere({at.x + side * dim.x * 0.46f, at.y - dim.y * 1.35f, at.z},
+                       dim.x * 0.12f, c.hair);
+        }
+    } else if (part.id == "hair_flat_top") {
+        DrawCube({at.x, cy, at.z}, dim.x * 0.92f, dim.y, dim.z * 0.92f, c.hair);
+    } else if (part.id == "hair_helmet") {
+        // A shell sunk over the skull, open at the face.
+        DrawCube({at.x, at.y - dim.y * 0.30f, at.z - dim.z * 0.06f},
+                 dim.x, dim.y * 1.5f, dim.z * 0.88f, c.hair);
+    } else if (part.id == "hair_wave") {
+        // A slab with a lip swept up over the forehead.
+        DrawCube({at.x, at.y - dim.y * 0.15f, at.z}, dim.x * 0.94f,
+                 dim.y * 0.7f, dim.z * 0.94f, c.hair);
+        DrawCube({at.x, at.y + dim.y * 0.45f, at.z + dim.z * 0.38f},
+                 dim.x * 0.55f, dim.y * 0.8f, dim.z * 0.24f, c.hair);
+    } else if (part.id == "eyes_sleepy") {
+        // Two low flat lids.
+        const float dx = dim.x * 0.5f - dim.y * 0.5f;
+        DrawCube({at.x - dx, cy, at.z}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.dark);
+        DrawCube({at.x + dx, cy, at.z}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.dark);
+    } else if (part.id == "eyes_wink") {
+        // One open pupil, one closed lid.
+        const float dx = dim.x * 0.5f - dim.y * 0.5f;
+        DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
+        DrawCube({at.x + dx, cy, at.z}, dim.y * 1.5f, dim.y * 0.4f, dim.z, c.dark);
+    } else if (part.id == "eyes_glasses") {
+        // Two framed lenses joined by a bridge, pupils inside.
+        const float dx = dim.x * 0.5f - dim.y * 0.55f;
+        for (const float side : {-1.f, 1.f}) {
+            DrawCube({at.x + side * dx, cy, at.z}, dim.y * 1.15f,
+                     dim.y * 1.15f, dim.z * 0.6f, c.dark);
+            DrawSphere({at.x + side * dx, cy, at.z + dim.z * 0.15f},
+                       dim.y * 0.32f, c.skin);
+        }
+        DrawCube({at.x, cy + dim.y * 0.12f, at.z}, dx * 0.9f, dim.y * 0.18f,
+                 dim.z * 0.5f, c.dark);
+    } else if (part.id == "eyes_angry") {
+        // Pupils under a heavy single brow bar.
+        const float dx = dim.x * 0.5f - dim.y * 0.5f;
+        DrawSphere({at.x - dx, cy - dim.y * 0.15f, at.z}, dim.y * 0.45f, c.dark);
+        DrawSphere({at.x + dx, cy - dim.y * 0.15f, at.z}, dim.y * 0.45f, c.dark);
+        DrawCube({at.x, cy + dim.y * 0.42f, at.z}, dim.x * 0.94f,
+                 dim.y * 0.30f, dim.z, c.dark);
     } else if (part.id == "mouth_smile") {
         // A wide low bar with raised end dots reads as an upturned smile.
         DrawCube({at.x, cy - dim.y * 0.20f, at.z}, dim.x * 0.68f,

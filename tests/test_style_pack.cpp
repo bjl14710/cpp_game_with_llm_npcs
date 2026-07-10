@@ -85,12 +85,15 @@ TEST_CASE("a five-item look line still parses, mouth defaults to the smile") {
     CHECK(rendered.find("hair_tuft, mouth_smile, warm") != std::string::npos);
 }
 
-TEST_CASE("catalog growth targets: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes>=12" *
-          doctest::skip()) {
-    // Step 5. TODO(mii-style): count partsForCategory(<cat>, "any") per
-    // category and paletteCatalog().size() against the plan's floors, and
-    // CHECK all ten roster looks stay valid + pairwise-distinct (the
-    // roster test already enforces the latter — this pins the floors).
+TEST_CASE("catalog growth floors: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes>=12") {
+    // Step 5. The roster test keeps the ten shipped looks valid and
+    // pairwise-distinct; this pins the pool floors so a future cleanup
+    // can't quietly shrink the variety the creator and NPCs share.
+    CHECK(partsForCategory(PartCategory::Hair, "any").size() >= 18);
+    CHECK(partsForCategory(PartCategory::Eyes, "any").size() >= 10);
+    CHECK(partsForCategory(PartCategory::Body, "any").size() >= 6);
+    CHECK(partsForCategory(PartCategory::Mouth, "any").size() >= 4);
+    CHECK(paletteCatalog().size() >= 12);
 }
 
 TEST_CASE("player avatar look round-trips through CharacterStore" *
