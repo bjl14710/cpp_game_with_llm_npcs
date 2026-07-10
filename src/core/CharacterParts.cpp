@@ -82,6 +82,15 @@ const std::vector<PartDef>& partCatalog() {
         {"hair_pony", PartCategory::Hair, "round", {0.34f, 0.30f, 0.34f}, {}},
         {"hair_mohawk", PartCategory::Hair, "blocky", {0.26f, 0.42f, 0.62f}, {}},
 
+        // TODO(mii-style step 2): rework the sizes/sockets ABOVE toward Mii
+        // proportions — heads ~0.95-1.05u over ~0.75-0.85u bodies so the
+        // head reads as ~40-45% of standing height. Sockets are per-part,
+        // so each row re-authors its own attach points; the exhaustive
+        // combo + roster tests are the safety net.
+        // TODO(mii-style step 5): expand the catalog below (+6 hair,
+        // +4 eyes, +2 bodies, mouths with step 4) — all pack "core",
+        // style-tagged, contract-conforming, each with a renderer recipe.
+
         // --- Shared hairstyle pool expansion (issue #97) — additive rows,
         // picked up by the creator picker AND every NPC from the one pool.
         {"hair_cap", PartCategory::Hair, "any", {0.60f, 0.22f, 0.78f}, {}},
@@ -95,6 +104,8 @@ const std::vector<PartDef>& partCatalog() {
 }
 
 const std::vector<PartPalette>& paletteCatalog() {
+    // TODO(mii-style steps 2+5): shift these toward one cohesive
+    // Tomodachi-style pastel set and add ~4 more rows (pack "core").
     static const std::vector<PartPalette> palettes = {
         {"warm", {236, 188, 150}, {92, 60, 34}, {70, 120, 168}},
         {"cool", {224, 172, 138}, {36, 32, 30}, {96, 78, 140}},

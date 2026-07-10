@@ -10,3 +10,6 @@ assets/fonts/
 # Per-player NPC memory + benchmark outputs
 saves/
 bench/out/
+
+# Visual-QA screenshot sets (generated per run by the visual-qa agent)
+docs/qa/screenshots/
