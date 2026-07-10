@@ -314,6 +314,10 @@ struct RecipeColors {
     Color dark;
 };
 
+// Rim color for the inverted-hull outline pass (issue #103) — near-black
+// with a hint of blue so lines feel inked, not void.
+constexpr Color kOutlineColor{32, 30, 38, 255};
+
 // The ONE place part ids map to shapes — the graphics-pack seam (issue
 // #101). A content pack is exactly: catalog rows (PartDef/PartPalette
 // with their `pack` tag) + recipe branches HERE. Nothing else — not the
@@ -450,12 +454,6 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         Color{palette->outfit[0], palette->outfit[1], palette->outfit[2], 255},
         Color{38, 38, 44, 255}};
 
-    // TODO(mii-style step 3): wrap the recipe loop in an inverted-hull
-    // outline pass — same draws re-issued first at ~1.05 scale about each
-    // part's center, near-black, with rlSetCullFace(RL_CULL_FACE_FRONT),
-    // then restored. Boxes are the risk case (corner gaps): tune scale or
-    // give recipes an outline opt-out. Screenshot-verify both shapes.
-
     // Whole-figure transform: facing + procedural walk bob. Parts then draw
     // at their assembly-local positions and rotate correctly for free.
     // Death pose: the figure tips onto its back (a rigid tip-over, the
@@ -466,6 +464,31 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     rlTranslatef(position.x, position.y + bob + (dead ? 0.30f : 0.f), position.z);
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
     if (dead) rlRotatef(-90.f, 1.f, 0.f, 0.f);
+
+    // Cartoon outline, classic inverted hull (issue #103): every recipe is
+    // issued TWICE — first inflated about its part's center, near-black,
+    // with FRONT faces culled (so only a rim of the enlarged copy survives
+    // around the real geometry), then normally. The passes are grouped —
+    // not interleaved per part — because the cull-face switch must drain
+    // the rlgl batch; two drains per character instead of two per part.
+    constexpr float kHullScale = 1.06f;
+    const RecipeColors outlineColors{kOutlineColor, kOutlineColor,
+                                     kOutlineColor, kOutlineColor};
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_FRONT);
+    for (const PlacedPart& placed : assembled.parts) {
+        const Vec3 at = placed.position * s;
+        const Vec3 dim = placed.part->localSize * s;
+        const float cy = at.y + dim.y * 0.5f;
+        rlPushMatrix();  // inflate about the part's center, not the feet
+        rlTranslatef(at.x, cy, at.z);
+        rlScalef(kHullScale, kHullScale, kHullScale);
+        rlTranslatef(-at.x, -cy, -at.z);
+        drawPartRecipe(*placed.part, at, dim, outlineColors);
+        rlPopMatrix();
+    }
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_BACK);
 
     for (const PlacedPart& placed : assembled.parts) {
         // Anchor and size in world units — the contract scale is applied
