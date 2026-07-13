@@ -80,6 +80,11 @@ class RaylibRenderer {
                                 float facingDeg, bool walking, float phase,
                                 NpcFace face = NpcFace::Neutral, bool dead = false);
 
+    // The player avatar's palette (issue #106): the punch arm/fist and the
+    // pistol hand tint from it, so the avatar choice is visible in first
+    // person. Unknown/empty ids keep the previous colors.
+    void setAvatarPalette(const std::string& paletteId);
+
     // First-person weapon prop anchored lower-right of the camera, driven
     // solely by the authoritative equipped state: the WeaponKind index and
     // the core's attackAnimFraction (1 at swing start, decaying to 0).
@@ -99,6 +104,9 @@ class RaylibRenderer {
 
    private:
     Assets& assets_;
+    // Avatar-driven viewmodel colors (defaults match the pre-avatar look).
+    Color avatarSkin_{224, 172, 138, 255};
+    Color avatarOutfit_{60, 64, 74, 255};
     Camera3D camera_{};  // rebuilt each beginFrame; kept for worldToScreen
     Color skyColor_{135, 190, 235, 255};  // daylight until the clock speaks
     float lightLevel_ = 1.f;              // scene brightness multiplier

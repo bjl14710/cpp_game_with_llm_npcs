@@ -6,7 +6,7 @@ knowledge = Knows every street, alley, and pothole downtown, plus who tips well 
 spot = taxi_cab
 position = 30, 8
 facing = 180
-look = body_bulk, head_block, eyes_happy, hair_side, mint
+look = body_bulk, head_block, eyes_happy, hair_side, mouth_smile, mint
 ---
 Your cab is parked on the east street beside the plaza, engine ticking.
 Business is slow; conversation is the real fare.

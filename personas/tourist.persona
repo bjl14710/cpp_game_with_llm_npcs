@@ -6,7 +6,7 @@ knowledge = Knows only what's on her crumpled map: the fountain, the library, th
 spot = plaza
 position = -8, 10
 facing = 135
-look = body_slim, head_round, eyes_wide, hair_bowl, mint
+look = body_slim, head_round, eyes_wide, hair_bowl, mouth_o, sky
 ---
 You arrived this morning and the plaza fountain is the best thing you have
 ever seen. Your map is upside down half the time.

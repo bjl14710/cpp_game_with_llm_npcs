@@ -10,9 +10,10 @@ namespace llm_npc {
 
 // Part categories for the character creator. Extending the system is a
 // data change: add an enum value, a CategorySpec row (who it attaches to,
-// via which socket), and catalog parts that declare that socket.
-enum class PartCategory { Body, Head, Eyes, Hair };
-constexpr int kPartCategoryCount = 4;
+// via which socket), and catalog parts that declare that socket — Mouth
+// (issue #104) landed exactly that way.
+enum class PartCategory { Body, Head, Eyes, Hair, Mouth };
+constexpr int kPartCategoryCount = 5;
 
 // How a category attaches into the assembly: every non-root category names
 // its parent category and the SOCKET NAME it snaps to. The socket's
@@ -35,6 +36,11 @@ struct PartDef {
     std::string styleTag;
     Vec3 localSize{};
     std::unordered_map<std::string, Vec3> sockets;
+    // Graphics-pack seam (plan: mii-style-visual-overhaul step 1): which
+    // content pack this part ships in. A purchased/downloaded pack is
+    // catalog rows + renderer recipes + palettes under a new tag — never
+    // changes to assembly or picker logic. Everything built-in is "core".
+    std::string pack = "core";
 };
 
 // A named flat-color palette (RGB 0-255) the renderer maps onto recipes.
@@ -43,6 +49,9 @@ struct PartPalette {
     unsigned char skin[3];
     unsigned char hair[3];
     unsigned char outfit[3];
+    // Same pack seam as PartDef (aggregate-initialized rows without a pack
+    // value default to "core" via this initializer).
+    std::string pack = "core";
 };
 
 // The look half of a created character: one part id per category plus a

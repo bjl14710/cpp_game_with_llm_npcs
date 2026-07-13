@@ -26,6 +26,7 @@ constexpr int kIdLeave = 303;
 // part cyclers encode category and direction in their id.
 constexpr int kIdCreator = 4;
 constexpr int kIdJournal = 5;
+constexpr int kIdAvatar = 6;
 // Journal-page widgets.
 constexpr int kIdJournalPrev = 500;
 constexpr int kIdJournalNext = 501;
@@ -50,6 +51,7 @@ const char* categoryLabel(PartCategory category) {
         case PartCategory::Head: return "Head";
         case PartCategory::Eyes: return "Eyes";
         case PartCategory::Hair: return "Hair";
+        case PartCategory::Mouth: return "Mouth";
     }
     return "?";
 }
@@ -97,6 +99,8 @@ void Menu::setMultiplayer(MultiplayerHooks hooks) { multiplayer_ = std::move(hoo
 
 void Menu::setCreator(CreatorHooks hooks) { creator_ = std::move(hooks); }
 
+void Menu::setAvatar(AvatarHooks hooks) { avatar_ = std::move(hooks); }
+
 void Menu::setJournal(JournalHooks hooks) { journal_ = std::move(hooks); }
 
 void Menu::open() {
@@ -115,9 +119,9 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 218.f;
-        for (int id :
-             {kIdResume, kIdControls, kIdMultiplayer, kIdCreator, kIdJournal, kIdQuit}) {
+        float y = h * 0.5f - 254.f;
+        for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator,
+                       kIdAvatar, kIdJournal, kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
@@ -131,9 +135,11 @@ std::vector<Menu::Hit> Menu::layout() const {
         // Left column: persona text fields (label drawn above each box).
         const float fieldX = w * 0.07f;
         float y = h * 0.26f;
-        for (int f = 1; f <= 3; ++f) {
-            hits.push_back({Rectangle{fieldX, y, w * 0.34f, 44.f}, kIdFieldBase + f});
-            y += 92.f;
+        if (!avatarMode_) {  // the avatar has no persona; look-only editing
+            for (int f = 1; f <= 3; ++f) {
+                hits.push_back({Rectangle{fieldX, y, w * 0.34f, 44.f}, kIdFieldBase + f});
+                y += 92.f;
+            }
         }
         // Right column: a [<] label [>] row per category, then palette,
         // then the action buttons. The preview renders in-world between
@@ -265,7 +271,13 @@ MenuResult Menu::update(float dt) {
                 editingAddress_ = false;
             } else if (hit.id == kIdCreator) {
                 page_ = Page::Creator;
+                avatarMode_ = false;
                 editingField_ = 0;
+            } else if (hit.id == kIdAvatar) {
+                page_ = Page::Creator;
+                avatarMode_ = true;
+                editingField_ = 0;
+                if (avatar_.current) draftLook_ = avatar_.current();
             } else if (hit.id == kIdJournal) {
                 page_ = Page::Journal;
                 journalPage_ = 0;
@@ -303,7 +315,13 @@ MenuResult Menu::update(float dt) {
                 draftLook_ = randomizeLook(creatorSeed_);
             } else if (hit.id == kIdCreate) {
                 editingField_ = 0;
-                attemptCreate();
+                if (avatarMode_) {
+                    const std::string error =
+                        avatar_.onSave ? avatar_.onSave(draftLook_) : "no avatar hook";
+                    showToast(error.empty() ? "Avatar saved" : error);
+                } else {
+                    attemptCreate();
+                }
             } else if (hit.id == kIdHost) {
                 if (multiplayer_.onHost) {
                     const std::string error = multiplayer_.onHost(kDefaultHostPort);
@@ -509,6 +527,7 @@ void Menu::render() const {
         else if (hit.id == kIdControls) label = "Controls";
         else if (hit.id == kIdMultiplayer) label = "Multiplayer";
         else if (hit.id == kIdCreator) label = "Create Character";
+        else if (hit.id == kIdAvatar) label = "Edit My Avatar";
         else if (hit.id == kIdJournal) label = "Journal";
         else if (hit.id == kIdJournalPrev) label = "< Prev";
         else if (hit.id == kIdJournalNext) label = "Next >";
@@ -542,7 +561,7 @@ void Menu::render() const {
         } else if (hit.id == kIdPalette) {
             label = "Palette: " + draftLook_.paletteId;
         } else if (hit.id == kIdRandomize) label = "Randomize";
-        else if (hit.id == kIdCreate) label = "Save & Spawn";
+        else if (hit.id == kIdCreate) label = avatarMode_ ? "Save Avatar" : "Save & Spawn";
         else if (hit.id == kIdHost) label = "Host on port " + std::to_string(kDefaultHostPort);
         else if (hit.id == kIdJoin) label = "Join";
         else if (hit.id == kIdLeave) label = "Leave session";

@@ -127,18 +127,26 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                 result.value.persona.armed = (val == "true" || val == "yes" || val == "1");
             } else if (key == "look") {
                 // Appearance from the shared parts library. Structural
-                // parse only (exactly five items); whether the ids exist in
-                // the catalog is checked at spawn by lookForPersona.
+                // parse only; whether the ids exist in the catalog is
+                // checked at spawn by lookForPersona. Six items since the
+                // Mouth category (issue #104): body, head, eyes, hair,
+                // mouth, palette. The pre-Mouth five-item form still
+                // parses — the mouth defaults to the canonical smile so
+                // old files keep their authored identity.
                 const auto items = splitCsv(val);
-                if (items.size() != 5) {
-                    result.error = id + ": bad look '" + val +
-                                   "' (want: body, head, eyes, hair, palette)";
+                if (items.size() != 5 && items.size() != 6) {
+                    result.error =
+                        id + ": bad look '" + val +
+                        "' (want: body, head, eyes, hair, mouth, palette)";
                     return result;
                 }
-                for (int c = 0; c < kPartCategoryCount; ++c) {
-                    result.value.look.partIds[c] = items[static_cast<std::size_t>(c)];
-                }
-                result.value.look.paletteId = items[4];
+                result.value.look.part(PartCategory::Body) = items[0];
+                result.value.look.part(PartCategory::Head) = items[1];
+                result.value.look.part(PartCategory::Eyes) = items[2];
+                result.value.look.part(PartCategory::Hair) = items[3];
+                result.value.look.part(PartCategory::Mouth) =
+                    items.size() == 6 ? items[4] : "mouth_smile";
+                result.value.look.paletteId = items.back();
                 result.value.hasLook = true;
             } else if (key == "schedule") {
                 // Repeated key: one daily-routine block per line, driven by
@@ -200,6 +208,8 @@ std::string renderPersonaText(const LoadedPersona& loaded) {
     out << "position = " << loaded.position.x << ", " << loaded.position.z << '\n';
     out << "facing = " << loaded.facingDeg << '\n';
     if (loaded.hasLook) {
+        // Always the six-item form — parse accepts five for old files, but
+        // everything written back is current-format.
         out << "look = ";
         for (int c = 0; c < kPartCategoryCount; ++c) {
             out << loaded.look.partIds[c] << ", ";

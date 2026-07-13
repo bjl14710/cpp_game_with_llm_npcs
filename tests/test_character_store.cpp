@@ -31,6 +31,7 @@ CharacterLook sampleLook() {
     look.part(PartCategory::Head) = "head_block";
     look.part(PartCategory::Eyes) = "eyes_dot";
     look.part(PartCategory::Hair) = "hair_spikes";
+    look.part(PartCategory::Mouth) = "mouth_open";
     look.paletteId = "cool";
     return look;
 }
@@ -77,6 +78,7 @@ TEST_CASE("loadAll returns only characters with both records intact") {
     CHECK(all[0].characterId == "c_full");
     CHECK(all[0].personaText.find("Whole") != std::string::npos);
     CHECK(all[0].look.part(PartCategory::Hair) == "hair_spikes");
+    CHECK(all[0].look.part(PartCategory::Mouth) == "mouth_open");
 
     // The stored persona text parses through the ONE persona parser.
     const PersonaParseResult parsed =
@@ -127,4 +129,33 @@ TEST_CASE("unopenable database degrades to ok() == false, not a crash") {
     CHECK_FALSE(store.loadPersona("x", text));
     CHECK(store.loadAll().empty());
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("player avatar look round-trips under its reserved id (issue #106)") {
+    TempDb db("avatar");
+    CharacterStore store(db.path);
+    REQUIRE(store.ok());
+
+    const CharacterLook look = sampleLook();
+    CHECK(store.saveLook("player_avatar", look));
+
+    CharacterLook out;
+    REQUIRE(store.loadLook("player_avatar", out));
+    for (int c = 0; c < kPartCategoryCount; ++c) {
+        CHECK(out.partIds[c] == look.partIds[c]);
+    }
+    CHECK(out.paletteId == look.paletteId);
+
+    // A look-only row must never join the spawn pass — the avatar is not
+    // an NPC (loadAll requires BOTH records by design).
+    for (const StoredCharacter& stored : store.loadAll()) {
+        CHECK(stored.characterId != "player_avatar");
+    }
+
+    // Editing overwrites in place: the avatar is one row, not a history.
+    CharacterLook edited = look;
+    edited.paletteId = "berry";
+    CHECK(store.saveLook("player_avatar", edited));
+    REQUIRE(store.loadLook("player_avatar", out));
+    CHECK(out.paletteId == "berry");
 }

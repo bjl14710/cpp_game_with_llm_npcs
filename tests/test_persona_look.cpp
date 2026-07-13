@@ -15,7 +15,7 @@ TEST_CASE("a look header line parses into the five look fields") {
     const auto parsed = parsePersonaText(
         "name = Piper\n"
         "position = 1, 2\n"
-        "look = body_round, head_round, eyes_happy, hair_bowl, warm\n",
+        "look = body_round, head_round, eyes_happy, hair_bowl, mouth_o, warm\n",
         "piper");
     REQUIRE_MESSAGE(parsed.ok, parsed.error);
     REQUIRE(parsed.value.hasLook);
@@ -23,6 +23,7 @@ TEST_CASE("a look header line parses into the five look fields") {
     CHECK(parsed.value.look.part(PartCategory::Head) == "head_round");
     CHECK(parsed.value.look.part(PartCategory::Eyes) == "eyes_happy");
     CHECK(parsed.value.look.part(PartCategory::Hair) == "hair_bowl");
+    CHECK(parsed.value.look.part(PartCategory::Mouth) == "mouth_o");
     CHECK(parsed.value.look.paletteId == "warm");
 }
 
@@ -46,7 +47,7 @@ TEST_CASE("renderPersonaText round-trips the look line") {
     auto parsed = parsePersonaText(
         "name = Piper\n"
         "position = 1, 2\n"
-        "look = body_block, head_block, eyes_visor, hair_spikes, cool\n",
+        "look = body_block, head_block, eyes_visor, hair_spikes, mouth_neutral, cool\n",
         "piper");
     REQUIRE_MESSAGE(parsed.ok, parsed.error);
     const auto again = parsePersonaText(renderPersonaText(parsed.value), "piper");
@@ -70,6 +71,7 @@ TEST_CASE("lookForPersona prefers a valid authored look") {
     authored.part(PartCategory::Head) = "head_round";
     authored.part(PartCategory::Eyes) = "eyes_wide";
     authored.part(PartCategory::Hair) = "hair_tuft";
+    authored.part(PartCategory::Mouth) = "mouth_smile";
     authored.paletteId = "warm";
     REQUIRE(lookIsValid(authored));
 
@@ -88,6 +90,7 @@ TEST_CASE("an invalid authored look falls back deterministically, with a reason"
     stale.part(PartCategory::Head) = "head_round";
     stale.part(PartCategory::Eyes) = "eyes_wide";
     stale.part(PartCategory::Hair) = "hair_dreadlocks";  // not in the catalog
+    stale.part(PartCategory::Mouth) = "mouth_smile";
     stale.paletteId = "warm";
 
     std::string why;

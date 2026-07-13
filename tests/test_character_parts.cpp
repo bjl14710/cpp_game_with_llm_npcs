@@ -17,6 +17,7 @@ CharacterLook roundLook() {
     look.part(PartCategory::Head) = "head_round";
     look.part(PartCategory::Eyes) = "eyes_wide";
     look.part(PartCategory::Hair) = "hair_tuft";
+    look.part(PartCategory::Mouth) = "mouth_smile";
     look.paletteId = "warm";
     return look;
 }
@@ -42,31 +43,37 @@ TEST_CASE("catalog covers every category and category specs are orderable") {
 }
 
 TEST_CASE("every style-consistent combination assembles completely") {
-    // Exhaustive: bodies x heads x eyes x hair, filtered by pairwise
-    // compatibility — each valid combo must place all categories with
-    // positive height. This is the "any combination renders correctly"
-    // acceptance criterion at the data level.
+    // Exhaustive: bodies x heads x eyes x hair x mouths, filtered by
+    // pairwise compatibility — each valid combo must place all categories
+    // with positive height. This is the "any combination renders
+    // correctly" acceptance criterion at the data level.
     int validCombos = 0;
     for (const PartDef* body : partsForCategory(PartCategory::Body, "any")) {
         for (const PartDef* head : partsForCategory(PartCategory::Head, "any")) {
             for (const PartDef* eyes : partsForCategory(PartCategory::Eyes, "any")) {
                 for (const PartDef* hair : partsForCategory(PartCategory::Hair, "any")) {
+                for (const PartDef* mouth : partsForCategory(PartCategory::Mouth, "any")) {
                     CharacterLook look;
                     look.part(PartCategory::Body) = body->id;
                     look.part(PartCategory::Head) = head->id;
                     look.part(PartCategory::Eyes) = eyes->id;
                     look.part(PartCategory::Hair) = hair->id;
+                    look.part(PartCategory::Mouth) = mouth->id;
                     look.paletteId = "warm";
                     const bool compatible =
                         styleCompatible(*body, *head) &&
                         styleCompatible(*body, *eyes) &&
                         styleCompatible(*body, *hair) &&
+                        styleCompatible(*body, *mouth) &&
                         styleCompatible(*head, *eyes) &&
                         styleCompatible(*head, *hair) &&
-                        styleCompatible(*eyes, *hair);
+                        styleCompatible(*head, *mouth) &&
+                        styleCompatible(*eyes, *hair) &&
+                        styleCompatible(*eyes, *mouth) &&
+                        styleCompatible(*hair, *mouth);
                     const AssembledLook assembled = assembleLook(look);
                     CAPTURE(body->id + "+" + head->id + "+" + eyes->id +
-                            "+" + hair->id);
+                            "+" + hair->id + "+" + mouth->id);
                     CHECK(assembled.ok == compatible);
                     if (!compatible) continue;
                     ++validCombos;
@@ -76,6 +83,7 @@ TEST_CASE("every style-consistent combination assembles completely") {
                     // sanity check that sockets actually stacked parts.
                     CHECK(assembled.parts[1].position.y >
                           assembled.parts[0].part->localSize.y * 0.5f);
+                }
                 }
             }
         }
@@ -95,6 +103,7 @@ TEST_CASE("style gate rejects cross-family looks with a reason") {
 TEST_CASE("unknown part and unknown palette are rejected") {
     CharacterLook look = roundLook();
     look.part(PartCategory::Hair) = "hair_dreadlocks";  // not in the catalog
+    look.part(PartCategory::Mouth) = "mouth_smile";
     CHECK_FALSE(lookIsValid(look));
     CHECK(findPart("hair_dreadlocks") == nullptr);
 
@@ -136,6 +145,7 @@ TEST_CASE("look serialization round-trips and rejects garbage") {
 TEST_CASE("bald option exists and assembles flush with the head") {
     CharacterLook look = roundLook();
     look.part(PartCategory::Hair) = "hair_none";
+    look.part(PartCategory::Mouth) = "mouth_neutral";
     const AssembledLook assembled = assembleLook(look);
     REQUIRE(assembled.ok);
     // Zero-size hair must not add height beyond the head.

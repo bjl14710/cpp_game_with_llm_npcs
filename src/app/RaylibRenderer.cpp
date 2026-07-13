@@ -304,6 +304,208 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
     }
 }
 
+namespace {
+
+// Palette colors resolved once per character and handed to every recipe.
+struct RecipeColors {
+    Color skin;
+    Color hair;
+    Color outfit;
+    Color dark;
+};
+
+// Rim color for the inverted-hull outline pass (issue #103) — near-black
+// with a hint of blue so lines feel inked, not void.
+constexpr Color kOutlineColor{32, 30, 38, 255};
+
+// The ONE place part ids map to shapes — the graphics-pack seam (issue
+// #101). A content pack is exactly: catalog rows (PartDef/PartPalette
+// with their `pack` tag) + recipe branches HERE. Nothing else — not the
+// assembly, not the picker, not the render loop — changes when a pack is
+// added. `at` is the part's anchor (bottom-center) and `dim` its declared
+// size, both already in world units (contract scale applied); a part
+// without a bespoke branch falls through to the generic declared-box
+// recipe at the bottom, so new catalog rows always render.
+void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
+                    const RecipeColors& c) {
+    const float cy = at.y + dim.y * 0.5f;  // box center height
+
+    if (part.id == "body_round") {
+        // Tapered trunk: narrow shoulders over a wider base.
+        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.34f, dim.x * 0.5f,
+                     dim.y, 16, c.outfit);
+    } else if (part.id == "head_round") {
+        DrawSphere({at.x, cy, at.z}, dim.y * 0.5f, c.skin);
+    } else if (part.id == "hair_tuft") {
+        DrawSphere({at.x, at.y + dim.y * 0.3f, at.z}, dim.x * 0.5f, c.hair);
+    } else if (part.id == "hair_bowl") {
+        // Oversized cap sunk into the head reads as a bowl cut.
+        DrawSphere({at.x, at.y - dim.y * 0.55f, at.z}, dim.x * 0.5f, c.hair);
+    } else if (part.id == "hair_spikes") {
+        for (int i = -1; i <= 1; ++i) {
+            DrawCylinder({at.x + static_cast<float>(i) * dim.x * 0.30f,
+                          at.y - dim.y * 0.25f, at.z},
+                         0.f, dim.x * 0.16f, dim.y, 8, c.hair);
+        }
+    } else if (part.id == "body_slim") {
+        // Slimmer tapered trunk than body_round (issue #92).
+        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.30f, dim.x * 0.42f,
+                     dim.y, 16, c.outfit);
+    } else if (part.id == "head_oval") {
+        // Vertically stretched sphere reads as a longer, oval face.
+        rlPushMatrix();
+        rlTranslatef(at.x, cy, at.z);
+        rlScalef(1.f, dim.y / dim.x, 1.f);
+        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, c.skin);
+        rlPopMatrix();
+    } else if (part.id == "hair_pony") {
+        // A rounded cap plus a small tail behind the head.
+        DrawSphere({at.x, at.y + dim.y * 0.30f, at.z}, dim.x * 0.5f, c.hair);
+        DrawSphere({at.x, at.y - dim.y * 0.10f, at.z - dim.z * 0.5f},
+                   dim.x * 0.34f, c.hair);
+    } else if (part.id == "hair_mohawk") {
+        // A single tall narrow crest running front-to-back.
+        DrawCube({at.x, cy, at.z}, dim.x * 0.5f, dim.y, dim.z, c.hair);
+    } else if (part.id == "hair_cap") {
+        // A flat crown sunk onto the head plus a forward brim (+z is
+        // the character's front, same as the eye sockets).
+        DrawCylinder({at.x, at.y - dim.y * 0.40f, at.z}, dim.x * 0.50f,
+                     dim.x * 0.55f, dim.y, 12, c.hair);
+        DrawCube({at.x, at.y + dim.y * 0.10f, at.z + dim.z * 0.34f},
+                 dim.x * 0.90f, dim.y * 0.18f, dim.z * 0.50f, c.hair);
+    } else if (part.id == "hair_buzz") {
+        // A tight crop: one thin disc hugging the scalp.
+        DrawCylinder({at.x, at.y - dim.y * 0.30f, at.z}, dim.x * 0.48f,
+                     dim.x * 0.50f, dim.y, 12, c.hair);
+    } else if (part.id == "hair_bob") {
+        // A sunken crown with side spheres reaching down over the ears.
+        DrawSphere({at.x, at.y - dim.y * 0.35f, at.z}, dim.x * 0.50f, c.hair);
+        DrawSphere({at.x - dim.x * 0.42f, at.y - dim.y * 1.10f, at.z},
+                   dim.x * 0.22f, c.hair);
+        DrawSphere({at.x + dim.x * 0.42f, at.y - dim.y * 1.10f, at.z},
+                   dim.x * 0.22f, c.hair);
+    } else if (part.id == "hair_curls") {
+        // A cluster of small spheres: a lower row of three, two on top.
+        for (int i = -1; i <= 1; ++i) {
+            DrawSphere({at.x + static_cast<float>(i) * dim.x * 0.30f,
+                        at.y + dim.y * 0.05f, at.z},
+                       dim.x * 0.24f, c.hair);
+        }
+        DrawSphere({at.x - dim.x * 0.15f, at.y + dim.y * 0.45f, at.z},
+                   dim.x * 0.22f, c.hair);
+        DrawSphere({at.x + dim.x * 0.15f, at.y + dim.y * 0.45f, at.z},
+                   dim.x * 0.22f, c.hair);
+    } else if (part.id == "hair_bun") {
+        // A rounded cap with a bun perched top-back.
+        DrawSphere({at.x, at.y - dim.y * 0.25f, at.z}, dim.x * 0.52f, c.hair);
+        DrawSphere({at.x, at.y + dim.y * 0.55f, at.z - dim.z * 0.35f},
+                   dim.x * 0.30f, c.hair);
+    } else if (part.id == "hair_side") {
+        // A slab swept to one side, with a longer fall down that side.
+        DrawCube({at.x - dim.x * 0.12f, cy, at.z}, dim.x * 0.76f, dim.y,
+                 dim.z, c.hair);
+        DrawCube({at.x - dim.x * 0.45f, at.y - dim.y * 0.60f, at.z},
+                 dim.x * 0.20f, dim.y * 1.60f, dim.z * 0.80f, c.hair);
+    } else if (part.id == "body_pear") {
+        // Bottom-heavy rounded trunk — motherly Tomodachi silhouette.
+        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.28f, dim.x * 0.52f,
+                     dim.y, 16, c.outfit);
+    } else if (part.id == "hair_long") {
+        // Crown plus a long fall down the back.
+        DrawSphere({at.x, at.y - dim.y * 0.55f, at.z}, dim.x * 0.50f, c.hair);
+        DrawCube({at.x, at.y - dim.y * 1.05f, at.z - dim.z * 0.42f},
+                 dim.x * 0.82f, dim.y * 1.9f, dim.z * 0.22f, c.hair);
+    } else if (part.id == "hair_afro") {
+        // One big proud sphere.
+        DrawSphere({at.x, at.y + dim.y * 0.20f, at.z}, dim.x * 0.52f, c.hair);
+    } else if (part.id == "hair_braids") {
+        // Crown with a stacked braid hanging at each side.
+        DrawSphere({at.x, at.y - dim.y * 0.30f, at.z}, dim.x * 0.48f, c.hair);
+        for (const float side : {-1.f, 1.f}) {
+            DrawSphere({at.x + side * dim.x * 0.46f, at.y - dim.y * 0.95f, at.z},
+                       dim.x * 0.15f, c.hair);
+            DrawSphere({at.x + side * dim.x * 0.46f, at.y - dim.y * 1.35f, at.z},
+                       dim.x * 0.12f, c.hair);
+        }
+    } else if (part.id == "hair_flat_top") {
+        DrawCube({at.x, cy, at.z}, dim.x * 0.92f, dim.y, dim.z * 0.92f, c.hair);
+    } else if (part.id == "hair_helmet") {
+        // A shell sunk over the skull, open at the face.
+        DrawCube({at.x, at.y - dim.y * 0.30f, at.z - dim.z * 0.06f},
+                 dim.x, dim.y * 1.5f, dim.z * 0.88f, c.hair);
+    } else if (part.id == "hair_wave") {
+        // A slab with a lip swept up over the forehead.
+        DrawCube({at.x, at.y - dim.y * 0.15f, at.z}, dim.x * 0.94f,
+                 dim.y * 0.7f, dim.z * 0.94f, c.hair);
+        DrawCube({at.x, at.y + dim.y * 0.45f, at.z + dim.z * 0.38f},
+                 dim.x * 0.55f, dim.y * 0.8f, dim.z * 0.24f, c.hair);
+    } else if (part.id == "eyes_sleepy") {
+        // Two low flat lids.
+        const float dx = dim.x * 0.5f - dim.y * 0.5f;
+        DrawCube({at.x - dx, cy, at.z}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.dark);
+        DrawCube({at.x + dx, cy, at.z}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.dark);
+    } else if (part.id == "eyes_wink") {
+        // One open pupil, one closed lid.
+        const float dx = dim.x * 0.5f - dim.y * 0.5f;
+        DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
+        DrawCube({at.x + dx, cy, at.z}, dim.y * 1.5f, dim.y * 0.4f, dim.z, c.dark);
+    } else if (part.id == "eyes_glasses") {
+        // Two framed lenses joined by a bridge, pupils inside.
+        const float dx = dim.x * 0.5f - dim.y * 0.55f;
+        for (const float side : {-1.f, 1.f}) {
+            DrawCube({at.x + side * dx, cy, at.z}, dim.y * 1.15f,
+                     dim.y * 1.15f, dim.z * 0.6f, c.dark);
+            DrawSphere({at.x + side * dx, cy, at.z + dim.z * 0.15f},
+                       dim.y * 0.32f, c.skin);
+        }
+        DrawCube({at.x, cy + dim.y * 0.12f, at.z}, dx * 0.9f, dim.y * 0.18f,
+                 dim.z * 0.5f, c.dark);
+    } else if (part.id == "eyes_angry") {
+        // Pupils under a heavy single brow bar.
+        const float dx = dim.x * 0.5f - dim.y * 0.5f;
+        DrawSphere({at.x - dx, cy - dim.y * 0.15f, at.z}, dim.y * 0.45f, c.dark);
+        DrawSphere({at.x + dx, cy - dim.y * 0.15f, at.z}, dim.y * 0.45f, c.dark);
+        DrawCube({at.x, cy + dim.y * 0.42f, at.z}, dim.x * 0.94f,
+                 dim.y * 0.30f, dim.z, c.dark);
+    } else if (part.id == "mouth_smile") {
+        // A wide low bar with raised end dots reads as an upturned smile.
+        DrawCube({at.x, cy - dim.y * 0.20f, at.z}, dim.x * 0.68f,
+                 dim.y * 0.38f, dim.z, c.dark);
+        DrawSphere({at.x - dim.x * 0.42f, cy + dim.y * 0.15f, at.z},
+                   dim.y * 0.30f, c.dark);
+        DrawSphere({at.x + dim.x * 0.42f, cy + dim.y * 0.15f, at.z},
+                   dim.y * 0.30f, c.dark);
+    } else if (part.id == "mouth_open" || part.id == "mouth_o") {
+        // A flattened dark sphere: tall ellipse (open) or small ring (o).
+        rlPushMatrix();
+        rlTranslatef(at.x, cy, at.z);
+        rlScalef(1.f, dim.y / dim.x, 0.35f);
+        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, c.dark);
+        rlPopMatrix();
+    } else if (part.id == "mouth_neutral") {
+        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
+    } else if (part.category == PartCategory::Eyes) {
+        if (part.id == "eyes_visor") {
+            DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
+        } else {
+            // Two pupils split across the part's declared width.
+            const float dx = dim.x * 0.5f - dim.y * 0.5f;
+            DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
+            DrawSphere({at.x + dx, cy, at.z}, dim.y * 0.5f, c.dark);
+        }
+    } else if (part.localSize.y > 0.f) {
+        // Generic recipe: any part without a bespoke shape renders as
+        // its declared box (skin for heads, hair on top, outfit below)
+        // so NEW catalog parts appear immediately, just plainly.
+        const Color color = part.category == PartCategory::Head ? c.skin
+                            : part.category == PartCategory::Hair ? c.hair
+                                                                  : c.outfit;
+        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, color);
+    }
+}
+
+}  // namespace
+
 void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
                                             bool walking, float phase, NpcFace face,
@@ -324,10 +526,11 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     for (const PartPalette& candidate : paletteCatalog()) {
         if (candidate.id == look.paletteId) palette = &candidate;
     }
-    const Color skin{palette->skin[0], palette->skin[1], palette->skin[2], 255};
-    const Color hair{palette->hair[0], palette->hair[1], palette->hair[2], 255};
-    const Color outfit{palette->outfit[0], palette->outfit[1], palette->outfit[2], 255};
-    const Color dark{38, 38, 44, 255};
+    const RecipeColors colors{
+        Color{palette->skin[0], palette->skin[1], palette->skin[2], 255},
+        Color{palette->hair[0], palette->hair[1], palette->hair[2], 255},
+        Color{palette->outfit[0], palette->outfit[1], palette->outfit[2], 255},
+        Color{38, 38, 44, 255}};
 
     // Whole-figure transform: facing + procedural walk bob. Parts then draw
     // at their assembly-local positions and rotate correctly for free.
@@ -340,106 +543,36 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
     if (dead) rlRotatef(-90.f, 1.f, 0.f, 0.f);
 
+    // Cartoon outline, classic inverted hull (issue #103): every recipe is
+    // issued TWICE — first inflated about its part's center, near-black,
+    // with FRONT faces culled (so only a rim of the enlarged copy survives
+    // around the real geometry), then normally. The passes are grouped —
+    // not interleaved per part — because the cull-face switch must drain
+    // the rlgl batch; two drains per character instead of two per part.
+    constexpr float kHullScale = 1.06f;
+    const RecipeColors outlineColors{kOutlineColor, kOutlineColor,
+                                     kOutlineColor, kOutlineColor};
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_FRONT);
     for (const PlacedPart& placed : assembled.parts) {
-        const PartDef& part = *placed.part;
-        const Vec3 at = placed.position * s;          // anchor, bottom-center
-        const Vec3 dim = part.localSize * s;
-        const float cy = at.y + dim.y * 0.5f;         // box center height
+        const Vec3 at = placed.position * s;
+        const Vec3 dim = placed.part->localSize * s;
+        const float cy = at.y + dim.y * 0.5f;
+        rlPushMatrix();  // inflate about the part's center, not the feet
+        rlTranslatef(at.x, cy, at.z);
+        rlScalef(kHullScale, kHullScale, kHullScale);
+        rlTranslatef(-at.x, -cy, -at.z);
+        drawPartRecipe(*placed.part, at, dim, outlineColors);
+        rlPopMatrix();
+    }
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_BACK);
 
-        if (part.id == "body_round") {
-            // Tapered trunk: narrow shoulders over a wider base.
-            DrawCylinder({at.x, at.y, at.z}, dim.x * 0.34f, dim.x * 0.5f,
-                         dim.y, 16, outfit);
-        } else if (part.id == "head_round") {
-            DrawSphere({at.x, cy, at.z}, dim.y * 0.5f, skin);
-        } else if (part.id == "hair_tuft") {
-            DrawSphere({at.x, at.y + dim.y * 0.3f, at.z}, dim.x * 0.5f, hair);
-        } else if (part.id == "hair_bowl") {
-            // Oversized cap sunk into the head reads as a bowl cut.
-            DrawSphere({at.x, at.y - dim.y * 0.55f, at.z}, dim.x * 0.5f, hair);
-        } else if (part.id == "hair_spikes") {
-            for (int i = -1; i <= 1; ++i) {
-                DrawCylinder({at.x + static_cast<float>(i) * dim.x * 0.30f,
-                              at.y - dim.y * 0.25f, at.z},
-                             0.f, dim.x * 0.16f, dim.y, 8, hair);
-            }
-        } else if (part.id == "body_slim") {
-            // Slimmer tapered trunk than body_round (issue #92).
-            DrawCylinder({at.x, at.y, at.z}, dim.x * 0.30f, dim.x * 0.42f,
-                         dim.y, 16, outfit);
-        } else if (part.id == "head_oval") {
-            // Vertically stretched sphere reads as a longer, oval face.
-            rlPushMatrix();
-            rlTranslatef(at.x, cy, at.z);
-            rlScalef(1.f, dim.y / dim.x, 1.f);
-            DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, skin);
-            rlPopMatrix();
-        } else if (part.id == "hair_pony") {
-            // A rounded cap plus a small tail behind the head.
-            DrawSphere({at.x, at.y + dim.y * 0.30f, at.z}, dim.x * 0.5f, hair);
-            DrawSphere({at.x, at.y - dim.y * 0.10f, at.z - dim.z * 0.5f},
-                       dim.x * 0.34f, hair);
-        } else if (part.id == "hair_mohawk") {
-            // A single tall narrow crest running front-to-back.
-            DrawCube({at.x, cy, at.z}, dim.x * 0.5f, dim.y, dim.z, hair);
-        } else if (part.id == "hair_cap") {
-            // A flat crown sunk onto the head plus a forward brim (+z is
-            // the character's front, same as the eye sockets).
-            DrawCylinder({at.x, at.y - dim.y * 0.40f, at.z}, dim.x * 0.50f,
-                         dim.x * 0.55f, dim.y, 12, hair);
-            DrawCube({at.x, at.y + dim.y * 0.10f, at.z + dim.z * 0.34f},
-                     dim.x * 0.90f, dim.y * 0.18f, dim.z * 0.50f, hair);
-        } else if (part.id == "hair_buzz") {
-            // A tight crop: one thin disc hugging the scalp.
-            DrawCylinder({at.x, at.y - dim.y * 0.30f, at.z}, dim.x * 0.48f,
-                         dim.x * 0.50f, dim.y, 12, hair);
-        } else if (part.id == "hair_bob") {
-            // A sunken crown with side spheres reaching down over the ears.
-            DrawSphere({at.x, at.y - dim.y * 0.35f, at.z}, dim.x * 0.50f, hair);
-            DrawSphere({at.x - dim.x * 0.42f, at.y - dim.y * 1.10f, at.z},
-                       dim.x * 0.22f, hair);
-            DrawSphere({at.x + dim.x * 0.42f, at.y - dim.y * 1.10f, at.z},
-                       dim.x * 0.22f, hair);
-        } else if (part.id == "hair_curls") {
-            // A cluster of small spheres: a lower row of three, two on top.
-            for (int i = -1; i <= 1; ++i) {
-                DrawSphere({at.x + static_cast<float>(i) * dim.x * 0.30f,
-                            at.y + dim.y * 0.05f, at.z},
-                           dim.x * 0.24f, hair);
-            }
-            DrawSphere({at.x - dim.x * 0.15f, at.y + dim.y * 0.45f, at.z},
-                       dim.x * 0.22f, hair);
-            DrawSphere({at.x + dim.x * 0.15f, at.y + dim.y * 0.45f, at.z},
-                       dim.x * 0.22f, hair);
-        } else if (part.id == "hair_bun") {
-            // A rounded cap with a bun perched top-back.
-            DrawSphere({at.x, at.y - dim.y * 0.25f, at.z}, dim.x * 0.52f, hair);
-            DrawSphere({at.x, at.y + dim.y * 0.55f, at.z - dim.z * 0.35f},
-                       dim.x * 0.30f, hair);
-        } else if (part.id == "hair_side") {
-            // A slab swept to one side, with a longer fall down that side.
-            DrawCube({at.x - dim.x * 0.12f, cy, at.z}, dim.x * 0.76f, dim.y,
-                     dim.z, hair);
-            DrawCube({at.x - dim.x * 0.45f, at.y - dim.y * 0.60f, at.z},
-                     dim.x * 0.20f, dim.y * 1.60f, dim.z * 0.80f, hair);
-        } else if (part.category == PartCategory::Eyes) {
-            if (part.id == "eyes_visor") {
-                DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, dark);
-            } else {
-                // Two pupils split across the part's declared width.
-                const float dx = dim.x * 0.5f - dim.y * 0.5f;
-                DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, dark);
-                DrawSphere({at.x + dx, cy, at.z}, dim.y * 0.5f, dark);
-            }
-        } else if (part.localSize.y > 0.f) {
-            // Generic recipe: any part without a bespoke shape renders as
-            // its declared box (skin for heads, hair on top, outfit below)
-            // so NEW catalog parts appear immediately, just plainly.
-            const Color color = part.category == PartCategory::Head ? skin
-                                : part.category == PartCategory::Hair ? hair
-                                                                      : outfit;
-            DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, color);
-        }
+    for (const PlacedPart& placed : assembled.parts) {
+        // Anchor and size in world units — the contract scale is applied
+        // HERE so recipes never see it.
+        drawPartRecipe(*placed.part, placed.position * s,
+                       placed.part->localSize * s, colors);
     }
     rlPopMatrix();
 
@@ -449,6 +582,16 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     if (!dead && face != NpcFace::Neutral) {
         DrawBillboard(camera_, assets_.faceTexture(face),
                       Vector3{position.x, 2.45f, position.z}, 0.55f, WHITE);
+    }
+}
+
+void RaylibRenderer::setAvatarPalette(const std::string& paletteId) {
+    for (const PartPalette& palette : paletteCatalog()) {
+        if (palette.id != paletteId) continue;
+        avatarSkin_ = Color{palette.skin[0], palette.skin[1], palette.skin[2], 255};
+        avatarOutfit_ =
+            Color{palette.outfit[0], palette.outfit[1], palette.outfit[2], 255};
+        return;
     }
 }
 
@@ -474,8 +617,10 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     const float yawDeg = std::atan2(f.x, f.z) * RAD2DEG;
     const float pitchDeg = std::asin(std::max(-1.f, std::min(1.f, f.y))) * RAD2DEG;
 
-    const Color skin{224, 172, 138, 255};
-    const Color sleeve{60, 64, 74, 255};
+    // The avatar's palette colors the arm and hand — the one first-person
+    // surface where the player sees their own look (issue #106).
+    const Color skin = avatarSkin_;
+    const Color sleeve = avatarOutfit_;
     const Color gunmetal{55, 58, 66, 255};
     const Color gripTone{38, 40, 46, 255};
 
