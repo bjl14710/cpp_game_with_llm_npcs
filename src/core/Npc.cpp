@@ -71,6 +71,16 @@ void Npc::applyAction(NpcAction action) {
     // anyway, treat it as calling for the police instead.
     if (action == NpcAction::Arrest && !persona_.police) action = NpcAction::CallPolice;
 
+    // Mood/combat gate on following (issue #120): an NPC who is hostile,
+    // fleeing, or plain angry at the player does not fall into step with
+    // them, whatever the model emitted — the VALIDATE step of
+    // propose-validate-commit, same as the civilian-arrest rule above.
+    if (action == NpcAction::Follow &&
+        (state_ == NpcState::Hostile || state_ == NpcState::Fleeing ||
+         mood_ == NpcMood::Angry)) {
+        action = NpcAction::None;
+    }
+
     lastAction_ = action;  // remembered for one turn so the UI can narrate it
     switch (action) {
         case NpcAction::None:
