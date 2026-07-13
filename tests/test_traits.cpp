@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Persona.hpp"
+#include "RatingLog.hpp"
 #include "PersonaLoader.hpp"
 #include "Trait.hpp"
 #include "doctest.h"
@@ -128,10 +129,36 @@ TEST_CASE("persona trait keys round-trip through renderPersonaText") {
     CHECK(again.value.persona.traitIds[1] == "poetic");
 }
 
-TEST_CASE("rating capture appends JSONL and never touches live prompts" *
-          doctest::skip()) {
-    // Step 4. TODO(traits): good -> saves/ratings/candidates.jsonl row
-    // {trait ids, persona id, player line, npc reply, ts}; bad ->
-    // rejected.jsonl; the rendered system prompt is byte-identical before
-    // and after rating (no auto-promotion, by design).
+TEST_CASE("rating capture appends JSONL and never touches live prompts") {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "llm_npc_ratings_test";
+    fs::remove_all(dir);
+
+    Persona persona;
+    persona.name = "Marge";
+    persona.traitIds = {"grumpy"};
+    TraitDef grumpy;
+    grumpy.id = "grumpy";
+    grumpy.name = "Grumpy";
+    grumpy.behaviorRules = {"Complain briefly before helping."};
+    const std::string before = persona.renderSystemPrompt("memory", "", {&grumpy});
+
+    RatingLog log(dir);
+    CHECK(log.appendCandidate("Marge", persona.traitIds, "Hi!", "It's a day."));
+    CHECK(log.appendRejected("Marge", persona.traitIds, "Hi!", "As an AI..."));
+
+    // Well-formed rows in the right files.
+    std::ifstream cand(dir / "candidates.jsonl");
+    std::string row;
+    REQUIRE(std::getline(cand, row));
+    CHECK(row.find("\"persona\":\"Marge\"") != std::string::npos);
+    CHECK(row.find("\"traits\":[\"grumpy\"]") != std::string::npos);
+    CHECK(row.find("\"npc\":\"It's a day.\"") != std::string::npos);
+    std::ifstream rej(dir / "rejected.jsonl");
+    REQUIRE(std::getline(rej, row));
+    CHECK(row.find("As an AI...") != std::string::npos);
+
+    // The design guarantee: rating changed NOTHING in the live prompt.
+    CHECK(persona.renderSystemPrompt("memory", "", {&grumpy}) == before);
+    fs::remove_all(dir);
 }

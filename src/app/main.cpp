@@ -43,6 +43,7 @@
 #include "NetServer.hpp"
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
+#include "RatingLog.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
 #include "Trait.hpp"
@@ -612,6 +613,12 @@ int main(int argc, char** argv) {
     };
     menu.setAvatar(avatarHooks);
 
+    // Trait rating loop (issue #118): review files only, human-curated —
+    // rating a reply provably never changes a live prompt.
+    RatingLog ratingLog(projectRoot / "saves" / "ratings");
+    int ratedNpc = -1;                 // one rating per (npc, reply)
+    std::size_t ratedHistorySize = 0;
+
     // ---- Sandbox editor state (issue #112) ----------------------------
     SandboxMap sandboxDoc;
     std::string sandboxSlug;
@@ -879,6 +886,41 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
         } else if (mode == AppMode::Dialogue) {
+            // Rating capture (issue #118): F1 keeps the last completed reply
+            // as a trait-example candidate, F2 logs it for review. F-keys on
+            // purpose — +/- would collide with the text input. One rating
+            // per reply; nothing changes in live prompts.
+            if (!joined && session.npcIndex() >= 0 &&
+                session.npcIndex() < static_cast<int>(world.npcs().size())) {
+                Npc& ratedTarget =
+                    world.npcs()[static_cast<std::size_t>(session.npcIndex())];
+                const auto& history = ratedTarget.history();
+                const bool ratable =
+                    !client.busy() && history.size() >= 2 &&
+                    history.back().role == "assistant" &&
+                    !(ratedNpc == session.npcIndex() &&
+                      ratedHistorySize == history.size());
+                if (ratable &&
+                    (IsKeyPressed(KEY_F1) || IsKeyPressed(KEY_F2))) {
+                    const std::string playerLine =
+                        history[history.size() - 2].content;
+                    const std::string npcLine = history.back().content;
+                    const bool good = IsKeyPressed(KEY_F1);
+                    const bool wrote =
+                        good ? ratingLog.appendCandidate(
+                                   ratedTarget.persona().name,
+                                   ratedTarget.persona().traitIds, playerLine,
+                                   npcLine)
+                             : ratingLog.appendRejected(
+                                   ratedTarget.persona().name,
+                                   ratedTarget.persona().traitIds, playerLine,
+                                   npcLine);
+                    if (wrote) {
+                        ratedNpc = session.npcIndex();
+                        ratedHistorySize = history.size();
+                    }
+                }
+            }
             if (IsKeyPressed(KEY_ESCAPE)) {
                 // Leaving a conversation kicks off the NPC's memory update
                 // and fact extraction (solo/host only — a guest's
@@ -1581,6 +1623,17 @@ int main(int argc, char** argv) {
         renderer.endFrame();
 
         // ---- 2D overlay ----
+        if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
+            session.npcIndex() < static_cast<int>(world.npcs().size())) {
+            const auto& ratedHistory =
+                world.npcs()[static_cast<std::size_t>(session.npcIndex())].history();
+            if (!client.busy() && ratedHistory.size() >= 2 &&
+                ratedHistory.back().role == "assistant" &&
+                !(ratedNpc == session.npcIndex() &&
+                  ratedHistorySize == ratedHistory.size())) {
+                drawCenteredHudText("[F1] like reply    [F2] flag reply", 16, 12.f);
+            }
+        }
         if (sandboxEditing) {
             const std::string current =
                 sandboxPlacingNpc && !sandboxNpcSources.empty()
