@@ -502,28 +502,7 @@ int main(int argc, char** argv) {
         for (Npc& npc : world.npcs()) refreshGossip(npc);
     };
 
-    if (mapFile) {
-        // Fixture boot (--map): compile and load the sandbox map instead
-        // of the town. NPC placements spawn once #113 lands; validation
-        // problems are logged, and buildCity skips anything invalid.
-        std::ifstream mapIn(mapFile);
-        std::ostringstream mapBuf;
-        mapBuf << mapIn.rdbuf();
-        SandboxMap bootMap;
-        if (!mapIn || !SandboxMap::fromJson(mapBuf.str(), bootMap)) {
-            std::cerr << "[llm_npc] --map: cannot read/parse " << mapFile
-                      << " — starting the town instead\n";
-            spawnTownRoster();
-        } else {
-            for (const MapError& e : validateMap(bootMap)) {
-                std::cerr << "[llm_npc] --map " << e.where << ": " << e.reason
-                          << "\n";
-            }
-            world.loadCity(buildCity(bootMap));
-            std::cerr << "[llm_npc] --map: loaded '" << bootMap.name << "' ("
-                      << world.city().buildings().size() << " solid pieces)\n";
-        }
-    } else {
+    if (!mapFile) {
         spawnTownRoster();
     }
     resetNpcSideArrays();
@@ -701,6 +680,40 @@ int main(int argc, char** argv) {
         sandboxOpenStem = stem;
     };
     menu.setSandbox(sandboxHooks);
+
+    if (mapFile) {
+        // Fixture boot (--map): compile and load the sandbox map instead
+        // of the town, with its placed NPCs spawned — headless smoke shots
+        // and instant play-testing of a saved map.
+        std::ifstream mapIn(mapFile);
+        std::ostringstream mapBuf;
+        mapBuf << mapIn.rdbuf();
+        SandboxMap bootMap;
+        if (!mapIn || !SandboxMap::fromJson(mapBuf.str(), bootMap)) {
+            std::cerr << "[llm_npc] --map: cannot read/parse " << mapFile
+                      << " — starting the town instead\n";
+            spawnTownRoster();
+            resetNpcSideArrays();
+        } else {
+            for (const MapError& e : validateMap(bootMap)) {
+                std::cerr << "[llm_npc] --map " << e.where << ": " << e.reason
+                          << "\n";
+            }
+            sandboxDoc = bootMap;
+            sandboxSlug = fs::path(mapFile).stem().string();
+            sandboxActive = true;
+            sandboxNpcSources.clear();
+            for (const auto& loaded : roster) {
+                sandboxNpcSources.push_back("persona:" + loaded.id);
+            }
+            world.loadCity(buildCity(sandboxDoc));
+            spawnMapNpcs(sandboxDoc);
+            resetNpcSideArrays();
+            std::cerr << "[llm_npc] --map: loaded '" << bootMap.name << "' ("
+                      << world.city().buildings().size() << " solid pieces, "
+                      << world.npcs().size() << " NPCs)\n";
+        }
+    }
 
     // Journal: a pure read of the shared fact store — what the player was
     // personally told, grouped by subject, conflicts pre-flagged by core.
