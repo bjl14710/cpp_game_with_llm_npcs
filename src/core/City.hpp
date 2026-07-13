@@ -29,6 +29,15 @@ class City {
     // an open plaza in the middle, and a park in the north-east corner.
     static City makeDowntown();
 
+    // A city from an explicit building list (sandbox maps compile through
+    // this — see SandboxMap::buildCity). Such cities have no downtown
+    // street grid: hasStreets() tells the renderer to skip the hardcoded
+    // road/slab pass.
+    static City fromBuildings(std::vector<Building> buildings, float halfSize);
+
+    // False for sandbox-built cities (no authored street grid).
+    bool hasStreets() const { return hasStreets_; }
+
     // Half the side length of the square world; walkable X/Z are within
     // [-halfSize, halfSize].
     float halfSize() const { return halfSize_; }
@@ -62,6 +71,7 @@ class City {
    private:
     float halfSize_ = 110.f;
     std::vector<Building> buildings_;
+    bool hasStreets_ = true;
 };
 
 }  // namespace llm_npc

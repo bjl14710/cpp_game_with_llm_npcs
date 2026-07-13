@@ -75,6 +75,14 @@ City City::makeDowntown() {
     return city;
 }
 
+City City::fromBuildings(std::vector<Building> buildings, float halfSize) {
+    City city;
+    city.buildings_ = std::move(buildings);
+    city.halfSize_ = halfSize;
+    city.hasStreets_ = false;
+    return city;
+}
+
 const Building* City::findBuilding(const std::string& id) const {
     for (const auto& b : buildings_) {
         if (b.id == id) return &b;
