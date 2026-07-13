@@ -29,12 +29,13 @@ struct TempFile {
 
 }  // namespace
 
-TEST_CASE("defaults are WASD + T + Escape") {
+TEST_CASE("defaults are WASD + Space + T + Escape") {
     KeyBindings kb = KeyBindings::defaults();
     CHECK(kb.key(Action::MoveForward) == "W");
     CHECK(kb.key(Action::MoveBackward) == "S");
     CHECK(kb.key(Action::StrafeLeft) == "A");
     CHECK(kb.key(Action::StrafeRight) == "D");
+    CHECK(kb.key(Action::Jump) == "Space");
     CHECK(kb.key(Action::Talk) == "T");
     CHECK(kb.key(Action::OpenMenu) == "Escape");
 }

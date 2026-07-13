@@ -14,6 +14,7 @@ enum class Action {
     MoveBackward,
     StrafeLeft,
     StrafeRight,
+    Jump,
     Talk,
     OpenMenu,
     Count,
