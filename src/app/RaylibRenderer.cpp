@@ -135,11 +135,10 @@ void RaylibRenderer::setTimeOfDay(float hours) {
 }
 
 void RaylibRenderer::beginFrame(const CameraPose& pose) {
-    camera_.position = {pose.position.x, pose.position.y + 1.7f, pose.position.z};
-    const float pitchRad = degToRad(pose.pitchDeg);
-    const float yawRad = degToRad(pose.yawDeg);
-    const Vector3 dir{std::sin(yawRad) * std::cos(pitchRad), std::sin(pitchRad),
-                      std::cos(yawRad) * std::cos(pitchRad)};
+    camera_.position = {pose.position.x, pose.position.y + kEyeHeight, pose.position.z};
+    // Same authoritative look vector the weapon aims along (issue #91), so the
+    // crosshair and the shot can never disagree.
+    const Vec3 dir = lookDirection(pose.yawDeg, pose.pitchDeg);
     camera_.target = {camera_.position.x + dir.x, camera_.position.y + dir.y,
                       camera_.position.z + dir.z};
     camera_.up = {0.f, 1.f, 0.f};
@@ -359,6 +358,25 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                               at.y - dim.y * 0.25f, at.z},
                              0.f, dim.x * 0.16f, dim.y, 8, hair);
             }
+        } else if (part.id == "body_slim") {
+            // Slimmer tapered trunk than body_round (issue #92).
+            DrawCylinder({at.x, at.y, at.z}, dim.x * 0.30f, dim.x * 0.42f,
+                         dim.y, 16, outfit);
+        } else if (part.id == "head_oval") {
+            // Vertically stretched sphere reads as a longer, oval face.
+            rlPushMatrix();
+            rlTranslatef(at.x, cy, at.z);
+            rlScalef(1.f, dim.y / dim.x, 1.f);
+            DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, skin);
+            rlPopMatrix();
+        } else if (part.id == "hair_pony") {
+            // A rounded cap plus a small tail behind the head.
+            DrawSphere({at.x, at.y + dim.y * 0.30f, at.z}, dim.x * 0.5f, hair);
+            DrawSphere({at.x, at.y - dim.y * 0.10f, at.z - dim.z * 0.5f},
+                       dim.x * 0.34f, hair);
+        } else if (part.id == "hair_mohawk") {
+            // A single tall narrow crest running front-to-back.
+            DrawCube({at.x, cy, at.z}, dim.x * 0.5f, dim.y, dim.z, hair);
         } else if (part.category == PartCategory::Eyes) {
             if (part.id == "eyes_visor") {
                 DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, dark);

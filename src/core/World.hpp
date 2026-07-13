@@ -16,7 +16,7 @@ namespace llm_npc {
 // at constant speed on the XZ plane and expires after maxLifetime seconds.
 struct Projectile {
     Vec3  position{};
-    Vec3  direction{};   // normalised, XZ only
+    Vec3  direction{};   // normalised, full 3D (aim follows pitch — issue #91)
     float speed     = 0.f;
     float lifetime  = 0.f;
     float maxLifetime = 2.f;
@@ -53,6 +53,10 @@ class World {
 
     Player&       player()       { return player_; }
     const Player& player() const { return player_; }
+
+    // Read-only view of in-flight projectiles. Lets tests inspect a shot's
+    // origin and direction directly (the renderer does not draw them yet).
+    const std::vector<Projectile>& projectiles() const { return projectiles_; }
 
     // --- Combat API ------------------------------------------------------
 

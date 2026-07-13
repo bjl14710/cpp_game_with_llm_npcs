@@ -56,6 +56,12 @@ constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
 constexpr float kNameplateRange = 28.f;  // how far name tags stay visible
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
+// Creator preview rotation (issue #93). Player-driven only; after this idle
+// spell with no input the figure eases back to facing the camera. All tunable.
+constexpr float kPreviewIdleTimeout   = 2.5f;   // seconds of no input before return
+constexpr float kPreviewEaseRate      = 6.0f;   // exponential ease toward front
+constexpr float kPreviewDragDegPerPx  = 0.4f;   // mouse-drag sensitivity
+constexpr float kPreviewKeyDegPerSec  = 90.f;   // Left/Right key rotation speed
 // How long an arrest holds the player at the police station. Short, because
 // the worst on-the-books offense here is disturbing the peace.
 constexpr float kJailSeconds = 10.f;
@@ -507,8 +513,12 @@ int main(int argc, char** argv) {
         return rows;
     };
     menu.setJournal(journalHooks);
-    // Slow turntable for the creator preview figure.
-    float previewSpinDeg = 0.f;
+    // Creator preview rotation (issue #93): player-driven, with an idle return
+    // to facing the camera. No autonomous spin.
+    float previewYaw = 0.f;
+    float previewIdleSeconds = 0.f;
+    bool previewWasOpen = false;  // detects the frame the Creator page opens
+    bool previewDragging = false;  // latched at press: is this a preview drag or a control click?
 
     // Gossip propagation cadence (real seconds between ticks) and its rng
     // (seeded for reproducible town behavior in a session).
@@ -550,7 +560,11 @@ int main(int argc, char** argv) {
             // and not replicated to guests yet).
             if (!joined && jailSecondsLeft <= 0.f) {
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    world.playerAttack(flatForward(player.yawDeg));
+                    // Fire along the authoritative look vector (yaw AND pitch),
+                    // the same one the camera aims — so the shot goes exactly
+                    // where the crosshair points (issue #91). flatForward is
+                    // kept above for WASD, which is intentionally horizontal.
+                    world.playerAttack(lookDirection(player.yawDeg, player.pitchDeg));
                 }
                 if (IsKeyPressed(KEY_ONE)) world.playerSwitchWeapon(WeaponKind::Fist);
                 if (IsKeyPressed(KEY_TWO)) world.playerSwitchWeapon(WeaponKind::Pistol);
@@ -987,15 +1001,64 @@ int main(int argc, char** argv) {
             visual.variantSeed = 1000 + remote.playerId;
             renderer.drawCharacter(visual);
         }
-        // Creator preview: the draft look turns slowly a few steps in front
-        // of the camera while the Creator page is open (the page's lighter
-        // overlay keeps it readable).
-        if (mode == AppMode::Menu && menu.creatorPreview()) {
-            previewSpinDeg += dt * 35.f;
+        // Creator preview: the draft look stands a few steps in front of the
+        // camera while the Creator page is open (the page's lighter overlay
+        // keeps it readable); the player rotates it (see below).
+        const bool previewOpen = (mode == AppMode::Menu && menu.creatorPreview());
+        if (previewOpen) {
+            // On the frame the page opens, start facing the camera rather than
+            // an arbitrary angle (still no autonomous spin afterward).
+            if (!previewWasOpen) {
+                previewYaw = player.yawDeg + 180.f;
+                previewIdleSeconds = 0.f;
+                previewDragging = false;
+            }
+            // Two states, no autonomous spin (issue #93):
+            //   (1) INPUT — a left-drag over the preview (not over a menu
+            //       control) or Left/Right keys rotate the figure and reset
+            //       the idle timer.
+            //   (2) IDLE RETURN — with no input, only after kPreviewIdleTimeout
+            //       does it ease back toward facing the camera. Before that it
+            //       simply holds still.
+            // (A future opt-in auto-rotate would be a third branch here.)
+            //
+            // Whether a left-press is a preview drag or a control click is
+            // decided ONCE, at the press, and latched until release: a click
+            // that starts on a control never rotates even if the cursor slides
+            // off, and a drag that starts on empty space keeps rotating even if
+            // the cursor crosses a control. Sampling the cursor per-frame
+            // instead would let a control-click flicked off its rect spin the
+            // figure, and stall a legitimate drag that grazes a hit-rect.
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                previewDragging = !menu.pointOverInteractive(GetMousePosition());
+            }
+            if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                previewDragging = false;
+            }
+
+            float rotateInput = 0.f;
+            if (IsKeyDown(KEY_LEFT))  rotateInput -= kPreviewKeyDegPerSec * dt;
+            if (IsKeyDown(KEY_RIGHT)) rotateInput += kPreviewKeyDegPerSec * dt;
+            if (previewDragging) rotateInput += GetMouseDelta().x * kPreviewDragDegPerPx;
+
+            // A held drag counts as active even while momentarily still, so the
+            // figure never eases away from under a grabbing cursor.
+            if (rotateInput != 0.f || previewDragging) {
+                previewYaw += rotateInput;
+                previewIdleSeconds = 0.f;
+            } else {
+                previewIdleSeconds += dt;
+                if (previewIdleSeconds >= kPreviewIdleTimeout) {
+                    const float defaultYaw = player.yawDeg + 180.f;  // front to camera
+                    previewYaw += shortestAngleDelta(previewYaw, defaultYaw) *
+                                  (1.f - std::exp(-kPreviewEaseRate * dt));
+                }
+            }
             const Vec3 previewAt = player.position + flatForward(player.yawDeg) * 3.4f;
             renderer.drawCompositeCharacter(*menu.creatorPreview(), previewAt,
-                                            previewSpinDeg, false, 0.f);
+                                            previewYaw, false, 0.f);
         }
+        previewWasOpen = previewOpen;
         if (!joined && mode != AppMode::Dead) {
             renderer.drawViewmodel(static_cast<int>(world.player().weapon),
                                    world.player().attackAnimFraction);
