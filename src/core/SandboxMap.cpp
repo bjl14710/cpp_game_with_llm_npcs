@@ -167,6 +167,46 @@ std::vector<MapError> validateMap(const SandboxMap& map) {
     return errors;
 }
 
+bool resolvePlacedNpc(const PlacedNpc& placed,
+                      const std::vector<LoadedPersona>& roster,
+                      const CharacterStore& store, LoadedPersona& out) {
+    const auto colon = placed.source.find(':');
+    if (colon == std::string::npos || colon + 1 >= placed.source.size()) {
+        return false;
+    }
+    const std::string kind = placed.source.substr(0, colon);
+    const std::string key = placed.source.substr(colon + 1);
+
+    if (kind == "persona") {
+        for (const LoadedPersona& loaded : roster) {
+            if (loaded.id != key) continue;
+            out = loaded;
+            out.position = Vec3{placed.x, 0.f, placed.z};
+            out.facingDeg = placed.facingDeg;
+            out.schedule.clear();  // town coordinates mean nothing here
+            return true;
+        }
+        return false;
+    }
+    if (kind == "character") {
+        std::string personaText;
+        if (!store.loadPersona(key, personaText)) return false;
+        const PersonaParseResult parsed = parsePersonaText(personaText, key);
+        if (!parsed.ok) return false;
+        out = parsed.value;
+        out.position = Vec3{placed.x, 0.f, placed.z};
+        out.facingDeg = placed.facingDeg;
+        out.schedule.clear();
+        CharacterLook look;
+        if (store.loadLook(key, look)) {
+            out.look = look;
+            out.hasLook = true;
+        }
+        return true;
+    }
+    return false;
+}
+
 City buildCity(const SandboxMap& map) {
     // Solid pieces compile to normal Building rows — collision (City) and
     // rendering (Assets, via the '#'-stripped id) follow with zero new

@@ -1,5 +1,6 @@
 // Sandbox map editor core (plan: sandbox-map-editor). The two remaining
 // skipped stubs land with their steps (#110 seam, #113 NPC spawning).
+#include <filesystem>
 #include <string>
 
 #include "LlmClient.hpp"
@@ -163,8 +164,59 @@ TEST_CASE("town <-> sandbox <-> town round-trip via loadCity") {
     CHECK(world.city().findBuilding("bakery") != nullptr);
 }
 
-TEST_CASE("placed NPCs spawn with stored persona and look, schedules off" *
-          doctest::skip()) {
-    // Step 5 (#113). TODO(sandbox): persona:/character: resolution,
-    // placement override, schedule suppression, deleted-id skip.
+TEST_CASE("placed NPCs resolve with stored persona and look, schedules off") {
+    // Step 5 (#113). resolvePlacedNpc is the one door placements spawn
+    // through: identity from the roster or the character store, position/
+    // facing from the placement, schedules CLEARED (town coordinates mean
+    // nothing in a custom map).
+    std::vector<LoadedPersona> roster;
+    {
+        const auto parsed = parsePersonaText(
+            "name = Marge Holloway\n"
+            "position = -70, -36\n"
+            "facing = 0\n"
+            "look = body_pear, head_round, eyes_happy, hair_bun, mouth_smile, warm\n"
+            "schedule = 5-12, -70, -36, baking bread\n",
+            "baker");
+        REQUIRE_MESSAGE(parsed.ok, parsed.error);
+        roster.push_back(parsed.value);
+    }
+    const std::filesystem::path db =
+        std::filesystem::temp_directory_path() / "llm_npc_sandbox_npc.sqlite3";
+    std::filesystem::remove(db);
+    CharacterStore store(db);
+    REQUIRE(store.ok());
+    REQUIRE(store.savePersona("custom_7", "name = Doctor Steve\nposition = 0, 0\n"));
+    CharacterLook storedLook;
+    storedLook.part(PartCategory::Body) = "body_slim";
+    storedLook.part(PartCategory::Head) = "head_oval";
+    storedLook.part(PartCategory::Eyes) = "eyes_round";
+    storedLook.part(PartCategory::Hair) = "hair_bob";
+    storedLook.part(PartCategory::Mouth) = "mouth_smile";
+    storedLook.paletteId = "mint";
+    REQUIRE(store.saveLook("custom_7", storedLook));
+
+    LoadedPersona out;
+    // persona: source — roster identity, placement override, schedule gone.
+    REQUIRE(resolvePlacedNpc({"persona:baker", 12.f, -4.f, 90.f}, roster, store, out));
+    CHECK(out.persona.name == "Marge Holloway");
+    CHECK(out.position.x == doctest::Approx(12.f));
+    CHECK(out.position.z == doctest::Approx(-4.f));
+    CHECK(out.facingDeg == doctest::Approx(90.f));
+    CHECK(out.schedule.empty());
+    CHECK(out.hasLook);  // her authored look travels with her
+
+    // character: source — store identity + stored look.
+    REQUIRE(resolvePlacedNpc({"character:custom_7", 3.f, 5.f, 0.f}, roster, store, out));
+    CHECK(out.persona.name == "Doctor Steve");
+    REQUIRE(out.hasLook);
+    CHECK(out.look.part(PartCategory::Hair) == "hair_bob");
+    CHECK(out.schedule.empty());
+
+    // Unknown sources fail cleanly — the caller skips them and the map
+    // still loads.
+    CHECK_FALSE(resolvePlacedNpc({"persona:nobody", 0.f, 0.f, 0.f}, roster, store, out));
+    CHECK_FALSE(resolvePlacedNpc({"character:gone", 0.f, 0.f, 0.f}, roster, store, out));
+    CHECK_FALSE(resolvePlacedNpc({"garbage", 0.f, 0.f, 0.f}, roster, store, out));
+    std::filesystem::remove(db);
 }

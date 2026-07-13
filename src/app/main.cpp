@@ -613,7 +613,12 @@ int main(int argc, char** argv) {
     bool sandboxOpenRequested = false;  // set by the menu hook, handled below
     std::string sandboxOpenStem;
     int sandboxPieceIndex = 0;
+    bool sandboxPlacingNpc = false;     // Tab toggles piece vs NPC placement
+    int sandboxNpcIndex = 0;
+    std::vector<std::string> sandboxNpcSources;  // built on map open
+    std::unordered_map<std::string, CharacterLook> sandboxLookCache;
     PlacedPiece sandboxGhost;           // cursor preview, shared input->render
+    PlacedNpc sandboxGhostNpc;          // ditto when placing NPCs
     bool sandboxGhostValid = false;
     bool sandboxGhostLive = false;
     Vec3 sandboxCam{};                  // pan target on the ground plane
@@ -635,6 +640,50 @@ int main(int argc, char** argv) {
         player.position = Vec3{0.f, 0.f, 24.f};
         playerVerticalSpeed = 0.f;
     };
+    // The look a placed-NPC source renders with in the EDITOR (play mode
+    // spawns real NPCs; this is just the preview), memoized per map open.
+    const auto lookForSource = [&](const std::string& source) -> const CharacterLook& {
+        auto it = sandboxLookCache.find(source);
+        if (it != sandboxLookCache.end()) return it->second;
+        LoadedPersona loaded;
+        CharacterLook look;
+        if (resolvePlacedNpc(PlacedNpc{source, 0.f, 0.f, 0.f}, roster,
+                             characterStore, loaded)) {
+            std::string why;
+            look = lookForPersona(loaded.persona.name,
+                                  loaded.hasLook ? &loaded.look : nullptr, &why);
+        } else {
+            look = lookForPersona(source);  // deterministic placeholder
+        }
+        return sandboxLookCache.emplace(source, std::move(look)).first->second;
+    };
+
+    // Spawns the map's placed NPCs into the CURRENT world (play mode) —
+    // real personas/looks through the standard pipeline, schedules
+    // suppressed by resolvePlacedNpc. Unknown sources skip with a log.
+    const auto spawnMapNpcs = [&](const SandboxMap& map) {
+        npcLooks.clear();
+        for (const PlacedNpc& placed : map.npcs) {
+            LoadedPersona loaded;
+            if (!resolvePlacedNpc(placed, roster, characterStore, loaded)) {
+                std::cerr << "[llm_npc] sandbox: skipping npc '" << placed.source
+                          << "' (unknown or records missing)\n";
+                continue;
+            }
+            Npc npc(loaded.persona, client);
+            npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
+            std::string lookWhy;
+            npcLooks.push_back(lookForPersona(
+                loaded.persona.name, loaded.hasLook ? &loaded.look : nullptr,
+                &lookWhy));
+            const NpcMemory memory = memoryStore.load(loaded.persona.name);
+            if (!memory.summary.empty()) npc.setMemory(memory.summary);
+            world.addNpc(std::move(npc));
+        }
+        std::cerr << "[llm_npc] sandbox: spawned " << world.npcs().size()
+                  << " placed NPCs\n";
+    };
+
     Menu::SandboxHooks sandboxHooks;
     sandboxHooks.listMaps = [&]() {
         std::vector<std::string> stems;
@@ -702,7 +751,10 @@ int main(int argc, char** argv) {
         if (mode == AppMode::Playing) {
             if (IsWindowFocused() && !smokeRun) applyMouseLook(player);
             if (sandboxActive && IsKeyPressed(KEY_P)) {
-                // Back from play-testing to the editor.
+                // Back from play-testing to the editor: clear the live
+                // NPCs (the document is the truth in edit mode).
+                world.loadCity(buildCity(sandboxDoc));
+                resetNpcSideArrays();
                 mode = AppMode::SandboxEdit;
                 EnableCursor();
             }
@@ -843,18 +895,63 @@ int main(int argc, char** argv) {
 
             const auto& catalog = pieceCatalog();
             const int pieceCount = static_cast<int>(catalog.size());
-            if (IsKeyPressed(KEY_LEFT_BRACKET)) {
-                sandboxPieceIndex = (sandboxPieceIndex + pieceCount - 1) % pieceCount;
+            const int npcCount = static_cast<int>(sandboxNpcSources.size());
+            if (IsKeyPressed(KEY_TAB) && npcCount > 0) {
+                sandboxPlacingNpc = !sandboxPlacingNpc;  // pieces <-> NPCs
             }
-            if (IsKeyPressed(KEY_RIGHT_BRACKET)) {
-                sandboxPieceIndex = (sandboxPieceIndex + 1) % pieceCount;
+            const int cycle = IsKeyPressed(KEY_RIGHT_BRACKET) ? 1
+                              : IsKeyPressed(KEY_LEFT_BRACKET) ? -1
+                                                               : 0;
+            if (cycle != 0) {
+                if (sandboxPlacingNpc && npcCount > 0) {
+                    sandboxNpcIndex = (sandboxNpcIndex + npcCount + cycle) % npcCount;
+                } else {
+                    sandboxPieceIndex =
+                        (sandboxPieceIndex + pieceCount + cycle) % pieceCount;
+                }
             }
 
             // Cursor tile from the previous frame's camera (one frame of
             // lag is invisible at editor pan speeds).
             Vec3 ground;
             sandboxGhostLive = renderer.screenToGround(GetMousePosition(), ground);
-            if (sandboxGhostLive) {
+            if (sandboxGhostLive && sandboxPlacingNpc) {
+                // NPC placement: free position (not grid-bound), validity =
+                // the candidate document still validating for this entry.
+                sandboxGhostNpc = PlacedNpc{sandboxNpcSources[static_cast<std::size_t>(
+                                                sandboxNpcIndex)],
+                                            ground.x, ground.z, 180.f};
+                SandboxMap candidate = sandboxDoc;
+                candidate.npcs.push_back(sandboxGhostNpc);
+                sandboxGhostValid = true;
+                const std::string newWhere =
+                    "npcs[" + std::to_string(sandboxDoc.npcs.size()) + "]";
+                for (const MapError& e : validateMap(candidate)) {
+                    if (e.where == newWhere) {
+                        sandboxGhostValid = false;
+                        break;
+                    }
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sandboxGhostValid) {
+                    sandboxDoc.npcs.push_back(sandboxGhostNpc);
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+                    // Delete the nearest placed NPC within arm's reach.
+                    int best = -1;
+                    float bestD = 2.25f;  // 1.5u squared
+                    for (int i = 0; i < static_cast<int>(sandboxDoc.npcs.size()); ++i) {
+                        const float dx = sandboxDoc.npcs[static_cast<std::size_t>(i)].x - ground.x;
+                        const float dz = sandboxDoc.npcs[static_cast<std::size_t>(i)].z - ground.z;
+                        if (dx * dx + dz * dz < bestD) {
+                            bestD = dx * dx + dz * dz;
+                            best = i;
+                        }
+                    }
+                    if (best >= 0) {
+                        sandboxDoc.npcs.erase(sandboxDoc.npcs.begin() + best);
+                    }
+                }
+            } else if (sandboxGhostLive) {
                 const PieceDef& piece =
                     catalog[static_cast<std::size_t>(sandboxPieceIndex)];
                 sandboxGhost.pieceId = piece.id;
@@ -902,9 +999,11 @@ int main(int argc, char** argv) {
             }
 
             if (IsKeyPressed(KEY_P)) {
-                // Play the map: save, then stand at the first clear spot
-                // spiraling out from the center.
+                // Play the map: save, spawn the placed NPCs, then stand at
+                // the first clear spot spiraling out from the center.
                 saveSandboxDoc();
+                spawnMapNpcs(sandboxDoc);
+                resetNpcSideArrays();
                 Vec3 spawn{0.f, 0.f, 0.f};
                 for (float r = 4.f;
                      r <= 60.f &&
@@ -963,6 +1062,16 @@ int main(int argc, char** argv) {
                     resetNpcSideArrays();
                     sandboxCam = Vec3{};
                     sandboxGhostLive = false;
+                    sandboxPlacingNpc = false;
+                    sandboxNpcIndex = 0;
+                    sandboxLookCache.clear();
+                    sandboxNpcSources.clear();
+                    for (const auto& loaded : roster) {
+                        sandboxNpcSources.push_back("persona:" + loaded.id);
+                    }
+                    for (const StoredCharacter& stored : characterStore.loadAll()) {
+                        sandboxNpcSources.push_back("character:" + stored.characterId);
+                    }
                     mode = AppMode::SandboxEdit;
                     EnableCursor();
                 }
@@ -1274,7 +1383,29 @@ int main(int argc, char** argv) {
                 CameraPose{player.position, player.yawDeg, player.pitchDeg});
         }
         renderer.drawCity(world.city());
-        if (sandboxEditing && sandboxGhostLive) {
+        if (sandboxEditing) {
+            // Placed NPCs render as their real composite looks so the
+            // editor shows the cast, not markers.
+            for (const PlacedNpc& placed : sandboxDoc.npcs) {
+                renderer.drawCompositeCharacter(lookForSource(placed.source),
+                                                Vec3{placed.x, 0.f, placed.z},
+                                                placed.facingDeg, false, 0.f);
+            }
+        }
+        if (sandboxEditing && sandboxGhostLive && sandboxPlacingNpc) {
+            // NPC ghost: the actual look at the cursor plus a validity box.
+            renderer.drawCompositeCharacter(
+                lookForSource(sandboxGhostNpc.source),
+                Vec3{sandboxGhostNpc.x, 0.f, sandboxGhostNpc.z},
+                sandboxGhostNpc.facingDeg, false, 0.f);
+            Building box;
+            box.minX = sandboxGhostNpc.x - 0.6f;
+            box.maxX = sandboxGhostNpc.x + 0.6f;
+            box.minZ = sandboxGhostNpc.z - 0.6f;
+            box.maxZ = sandboxGhostNpc.z + 0.6f;
+            box.height = 1.9f;
+            renderer.drawPlacementGhost(box, sandboxGhostValid);
+        } else if (sandboxEditing && sandboxGhostLive) {
             if (const PieceDef* pd = findPiece(sandboxGhost.pieceId)) {
                 Building ghost;
                 ghost.id = pd->assetId;  // base id: preview with the real model
@@ -1406,11 +1537,15 @@ int main(int argc, char** argv) {
 
         // ---- 2D overlay ----
         if (sandboxEditing) {
-            const PieceDef& current =
-                pieceCatalog()[static_cast<std::size_t>(sandboxPieceIndex)];
+            const std::string current =
+                sandboxPlacingNpc && !sandboxNpcSources.empty()
+                    ? "NPC " + sandboxNpcSources[static_cast<std::size_t>(sandboxNpcIndex)]
+                    : "piece " +
+                          pieceCatalog()[static_cast<std::size_t>(sandboxPieceIndex)].label;
             drawCenteredHudText(
-                "Sandbox '" + sandboxDoc.name + "'   piece: " + current.label +
-                "   [ / ] cycle | click place | right-click delete | P play | Esc save+exit",
+                "Sandbox '" + sandboxDoc.name + "'   " + current +
+                "   Tab pieces/NPCs | [ / ] cycle | click place | right-click delete | "
+                "P play | Esc save+exit",
                 18, 14.f);
         }
         // Nameplates from whichever pose source is authoritative right now.

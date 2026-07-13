@@ -3,7 +3,9 @@
 #include <string>
 #include <vector>
 
+#include "CharacterStore.hpp"
 #include "City.hpp"
+#include "PersonaLoader.hpp"
 #include "PieceCatalog.hpp"
 
 namespace llm_npc {
@@ -39,8 +41,8 @@ struct SandboxMap {
     std::vector<PlacedPiece> pieces;
     std::vector<PlacedNpc> npcs;
 
-    // TODO(sandbox step 1): compact JSON per the contract above; fromJson
-    // returns false on malformed input or a newer version.
+    // Compact JSON per the contract above; fromJson returns false on
+    // malformed input or a newer version.
     std::string toJson() const;
     static bool fromJson(const std::string& json, SandboxMap& out);
 };
@@ -53,17 +55,26 @@ struct MapError {
     std::string reason;  // "unknown piece id 'shp_bakery'" ...
 };
 
-// TODO(sandbox step 1): full validation — piece ids exist, placements
-// in bounds and on-grid, no SOLID footprint overlaps, npc positions not
-// inside solids, npc sources well-formed. Returns every problem, not
-// just the first.
+// Full validation — piece ids exist, placements in bounds, no SOLID
+// footprint overlaps, npc positions not inside solids, npc sources
+// well-formed. Returns EVERY problem, not just the first.
 std::vector<MapError> validateMap(const SandboxMap& map);
 
-// TODO(sandbox step 1): compile the document to a normal City — each
-// solid piece becomes a Building row (id = assetId + "#" + n, AABB from
-// tile footprint, height from the piece) so collision AND rendering come
-// from the existing systems with zero new runtime. Visual pieces render
-// but emit no Building.
+// Resolves a placed NPC to a spawnable LoadedPersona: identity from the
+// shipped roster ("persona:<stem>") or the character store
+// ("character:<id>"), position/facing from the placement, schedule
+// CLEARED — town schedules reference town coordinates, which are
+// nonsense in a custom map (logged decision). Returns false when the
+// source is unknown or its records are gone; the map still loads and the
+// caller logs the skip.
+bool resolvePlacedNpc(const PlacedNpc& placed,
+                      const std::vector<LoadedPersona>& roster,
+                      const CharacterStore& store, LoadedPersona& out);
+
+// Compiles the document to a normal City — each solid piece becomes a
+// Building row (id = assetId + "#" + n, AABB from tile footprint, height
+// from the piece) so collision AND rendering come from the existing
+// systems with zero new runtime. Visual pieces emit no Building.
 City buildCity(const SandboxMap& map);
 
 }  // namespace llm_npc
