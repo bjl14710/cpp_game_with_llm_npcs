@@ -67,12 +67,18 @@ class RaylibRenderer {
     // TODO(implement): steps 4-5.
     void drawCharacter(const CharacterVisual& visual);
 
-    // Draws one player-created character: parts snapped by the core's
-    // socket assembly, scaled ONCE so the whole figure meets the same
-    // 1.8-unit height contract as pack characters, colored by the look's
-    // palette. `phase` drives the procedural walk bob (no skeleton in v1).
+    // Draws one composite character — the ONE shared parts library both the
+    // creator and every roaming NPC render from (plan:
+    // shared-character-library): parts snapped by the core's socket
+    // assembly, scaled ONCE so the whole figure meets the same 1.8-unit
+    // height contract as pack characters, colored by the look's palette.
+    // `phase` drives the procedural walk bob (no skeleton in v1). Non-neutral
+    // `face` billboards the same emote pack characters use; `dead` lays the
+    // figure flat instead (the dead don't emote). Defaults keep the creator
+    // preview call sites unchanged.
     void drawCompositeCharacter(const CharacterLook& look, const Vec3& position,
-                                float facingDeg, bool walking, float phase);
+                                float facingDeg, bool walking, float phase,
+                                NpcFace face = NpcFace::Neutral, bool dead = false);
 
     // First-person weapon prop anchored lower-right of the camera, driven
     // solely by the authoritative equipped state: the WeaponKind index and

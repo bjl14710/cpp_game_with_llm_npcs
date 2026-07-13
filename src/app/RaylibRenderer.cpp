@@ -306,7 +306,8 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
 
 void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
-                                            bool walking, float phase) {
+                                            bool walking, float phase, NpcFace face,
+                                            bool dead) {
     const AssembledLook assembled = assembleLook(look);
     if (!assembled.ok) {
         // Invalid/stale look: the same marker cylinder the pack path uses.
@@ -330,10 +331,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
 
     // Whole-figure transform: facing + procedural walk bob. Parts then draw
     // at their assembly-local positions and rotate correctly for free.
-    const float bob = walking ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
+    // Death pose: the figure tips onto its back (a rigid tip-over, the
+    // composite counterpart of the pack models' death clip), lifted a
+    // little so the torso doesn't sink through the ground slab.
+    const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
     rlPushMatrix();
-    rlTranslatef(position.x, position.y + bob, position.z);
+    rlTranslatef(position.x, position.y + bob + (dead ? 0.30f : 0.f), position.z);
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
+    if (dead) rlRotatef(-90.f, 1.f, 0.f, 0.f);
 
     for (const PlacedPart& placed : assembled.parts) {
         const PartDef& part = *placed.part;
@@ -377,6 +382,46 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         } else if (part.id == "hair_mohawk") {
             // A single tall narrow crest running front-to-back.
             DrawCube({at.x, cy, at.z}, dim.x * 0.5f, dim.y, dim.z, hair);
+        } else if (part.id == "hair_cap") {
+            // A flat crown sunk onto the head plus a forward brim (+z is
+            // the character's front, same as the eye sockets).
+            DrawCylinder({at.x, at.y - dim.y * 0.40f, at.z}, dim.x * 0.50f,
+                         dim.x * 0.55f, dim.y, 12, hair);
+            DrawCube({at.x, at.y + dim.y * 0.10f, at.z + dim.z * 0.34f},
+                     dim.x * 0.90f, dim.y * 0.18f, dim.z * 0.50f, hair);
+        } else if (part.id == "hair_buzz") {
+            // A tight crop: one thin disc hugging the scalp.
+            DrawCylinder({at.x, at.y - dim.y * 0.30f, at.z}, dim.x * 0.48f,
+                         dim.x * 0.50f, dim.y, 12, hair);
+        } else if (part.id == "hair_bob") {
+            // A sunken crown with side spheres reaching down over the ears.
+            DrawSphere({at.x, at.y - dim.y * 0.35f, at.z}, dim.x * 0.50f, hair);
+            DrawSphere({at.x - dim.x * 0.42f, at.y - dim.y * 1.10f, at.z},
+                       dim.x * 0.22f, hair);
+            DrawSphere({at.x + dim.x * 0.42f, at.y - dim.y * 1.10f, at.z},
+                       dim.x * 0.22f, hair);
+        } else if (part.id == "hair_curls") {
+            // A cluster of small spheres: a lower row of three, two on top.
+            for (int i = -1; i <= 1; ++i) {
+                DrawSphere({at.x + static_cast<float>(i) * dim.x * 0.30f,
+                            at.y + dim.y * 0.05f, at.z},
+                           dim.x * 0.24f, hair);
+            }
+            DrawSphere({at.x - dim.x * 0.15f, at.y + dim.y * 0.45f, at.z},
+                       dim.x * 0.22f, hair);
+            DrawSphere({at.x + dim.x * 0.15f, at.y + dim.y * 0.45f, at.z},
+                       dim.x * 0.22f, hair);
+        } else if (part.id == "hair_bun") {
+            // A rounded cap with a bun perched top-back.
+            DrawSphere({at.x, at.y - dim.y * 0.25f, at.z}, dim.x * 0.52f, hair);
+            DrawSphere({at.x, at.y + dim.y * 0.55f, at.z - dim.z * 0.35f},
+                       dim.x * 0.30f, hair);
+        } else if (part.id == "hair_side") {
+            // A slab swept to one side, with a longer fall down that side.
+            DrawCube({at.x - dim.x * 0.12f, cy, at.z}, dim.x * 0.76f, dim.y,
+                     dim.z, hair);
+            DrawCube({at.x - dim.x * 0.45f, at.y - dim.y * 0.60f, at.z},
+                     dim.x * 0.20f, dim.y * 1.60f, dim.z * 0.80f, hair);
         } else if (part.category == PartCategory::Eyes) {
             if (part.id == "eyes_visor") {
                 DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, dark);
@@ -397,6 +442,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         }
     }
     rlPopMatrix();
+
+    // Same emote billboard the pack path draws, at the same height — the
+    // two render paths must stay indistinguishable to the player. The dead
+    // don't emote.
+    if (!dead && face != NpcFace::Neutral) {
+        DrawBillboard(camera_, assets_.faceTexture(face),
+                      Vector3{position.x, 2.45f, position.z}, 0.55f, WHITE);
+    }
 }
 
 void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {

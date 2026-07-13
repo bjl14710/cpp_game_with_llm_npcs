@@ -125,6 +125,21 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                 // Carries a weapon: retaliates (turns Hostile) when attacked
                 // instead of fleeing. Same true/yes/1 convention.
                 result.value.persona.armed = (val == "true" || val == "yes" || val == "1");
+            } else if (key == "look") {
+                // Appearance from the shared parts library. Structural
+                // parse only (exactly five items); whether the ids exist in
+                // the catalog is checked at spawn by lookForPersona.
+                const auto items = splitCsv(val);
+                if (items.size() != 5) {
+                    result.error = id + ": bad look '" + val +
+                                   "' (want: body, head, eyes, hair, palette)";
+                    return result;
+                }
+                for (int c = 0; c < kPartCategoryCount; ++c) {
+                    result.value.look.partIds[c] = items[static_cast<std::size_t>(c)];
+                }
+                result.value.look.paletteId = items[4];
+                result.value.hasLook = true;
             } else if (key == "schedule") {
                 // Repeated key: one daily-routine block per line, driven by
                 // the shared world clock (never a private timer).
@@ -184,6 +199,13 @@ std::string renderPersonaText(const LoadedPersona& loaded) {
     if (!loaded.spotId.empty()) out << "spot = " << loaded.spotId << '\n';
     out << "position = " << loaded.position.x << ", " << loaded.position.z << '\n';
     out << "facing = " << loaded.facingDeg << '\n';
+    if (loaded.hasLook) {
+        out << "look = ";
+        for (int c = 0; c < kPartCategoryCount; ++c) {
+            out << loaded.look.partIds[c] << ", ";
+        }
+        out << loaded.look.paletteId << '\n';
+    }
     for (const ScheduleEntry& entry : loaded.schedule) {
         out << "schedule = " << entry.startHour << '-' << entry.endHour << ", "
             << entry.position.x << ", " << entry.position.z << ", "

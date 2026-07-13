@@ -214,19 +214,33 @@ int main(int argc, char** argv) {
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
     for (const auto& err : personaErrors) std::cerr << "[llm_npc] persona error: " << err << "\n";
+    // ONE look per NPC, index-aligned with world.npcs(). Every NPC —
+    // designer persona or player-created — draws from the same shared
+    // composite parts pool the creator picks from (plan:
+    // shared-character-library); the rigged pack models are no longer an
+    // NPC source. Looks come from the persona's authored `look =` line,
+    // or the deterministic per-name fallback when absent/stale.
+    std::vector<CharacterLook> npcLooks;
     for (const auto& loaded : roster) {
         Npc npc(loaded.persona, client);
         npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
         npc.setSchedule(loaded.schedule);
+        std::string lookWhy;
+        npcLooks.push_back(lookForPersona(loaded.persona.name,
+                                          loaded.hasLook ? &loaded.look : nullptr,
+                                          &lookWhy));
+        if (!lookWhy.empty()) {
+            std::cerr << "[llm_npc] " << loaded.id << ": authored look rejected ("
+                      << lookWhy << ") — using the deterministic fallback\n";
+        }
         world.addNpc(std::move(npc));
     }
 
     // Player-created characters (plan: character-creator): the persona
     // record goes through the SAME parser as designer .persona files; the
-    // look record is registered so the render loop draws the composite
-    // instead of a pack model. Bad rows were already skipped by loadAll.
+    // stored look joins npcLooks like everyone else's. Bad rows were
+    // already skipped by loadAll.
     CharacterStore characterStore(projectRoot / "saves" / "characters.sqlite3");
-    std::unordered_map<std::size_t, CharacterLook> customLooks;
     for (const StoredCharacter& stored : characterStore.loadAll()) {
         const PersonaParseResult parsed =
             parsePersonaText(stored.personaText, stored.characterId);
@@ -238,11 +252,11 @@ int main(int argc, char** argv) {
         npc.setPlacement(parsed.value.position, parsed.value.facingDeg,
                          parsed.value.spotId);
         npc.setSchedule(parsed.value.schedule);
-        customLooks[world.npcs().size()] = stored.look;
+        npcLooks.push_back(stored.look);
         world.addNpc(std::move(npc));
     }
     std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs ("
-              << customLooks.size() << " player-created)\n";
+              << world.npcs().size() - roster.size() << " player-created)\n";
 
     // Cross-session NPC memory: summaries persist in saves/ and are injected
     // into each NPC's system prompt (plan: npc-memory-and-model).
@@ -482,7 +496,7 @@ int main(int argc, char** argv) {
 
         Npc npc(loaded.persona, client);
         npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
-        customLooks[world.npcs().size()] = look;
+        npcLooks.push_back(look);
         world.addNpc(std::move(npc));
         wasCaught.push_back(false);
         npcLastPos.push_back(loaded.position);
@@ -951,45 +965,47 @@ int main(int argc, char** argv) {
         renderer.drawCity(world.city());
         if (joined) {
             for (const auto& netNpc : netNpcs) {
-                CharacterVisual visual;
-                visual.position = netNpc.position;
-                visual.facingDeg = netNpc.facingDeg;
-                visual.variantSeed = netNpc.npcIndex;
                 const int mood = netNpc.npcIndex < static_cast<int>(netMoods.size())
                                      ? netMoods[static_cast<std::size_t>(netNpc.npcIndex)]
                                      : netNpc.mood;
-                visual.face = faceForMood(static_cast<NpcMood>(mood));
+                const NpcFace face = faceForMood(static_cast<NpcMood>(mood));
+                // Clients load the same persona files as the host, so the
+                // shared-library look resolves identically by index. An
+                // out-of-range index (host has created characters this
+                // client's save lacks) falls back to the rigged mesh rather
+                // than guessing a look.
                 if (netNpc.npcIndex >= 0 &&
-                    netNpc.npcIndex < static_cast<int>(world.npcs().size())) {
-                    visual.police =
-                        world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().police;
+                    netNpc.npcIndex < static_cast<int>(npcLooks.size())) {
+                    renderer.drawCompositeCharacter(
+                        npcLooks[static_cast<std::size_t>(netNpc.npcIndex)],
+                        netNpc.position, netNpc.facingDeg, false,
+                        static_cast<float>(GetTime()), face);
+                } else {
+                    CharacterVisual visual;
+                    visual.position = netNpc.position;
+                    visual.facingDeg = netNpc.facingDeg;
+                    visual.variantSeed = netNpc.npcIndex;
+                    visual.face = face;
+                    renderer.drawCharacter(visual);
                 }
-                renderer.drawCharacter(visual);
             }
         } else {
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 const Npc& npc = world.npcs()[i];
-                CharacterVisual visual;
-                visual.position = npc.position();
-                visual.facingDeg = npc.facingDeg();
-                visual.variantSeed = static_cast<int>(i);
-                visual.police = npc.persona().police;
-                visual.walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
+                const bool walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
                 npcLastPos[i] = npc.position();
-                if (npc.pose() != NpcAction::None) visual.gesturePhase = npc.gesturePhase();
-                visual.face = faceForMood(npc.mood());
-                visual.dead = npc.combatState() == NpcState::Dead;
-                if (smokeRun) visual.face = static_cast<NpcFace>(i % 6);
-                // Player-created characters draw as their socketed part
-                // composite; everyone else uses a pack model.
-                if (const auto customLook = customLooks.find(i);
-                    customLook != customLooks.end()) {
-                    renderer.drawCompositeCharacter(
-                        customLook->second, npc.position(), npc.facingDeg(),
-                        visual.walking, static_cast<float>(GetTime()));
-                } else {
-                    renderer.drawCharacter(visual);
-                }
+                NpcFace face = faceForMood(npc.mood());
+                if (smokeRun) face = static_cast<NpcFace>(i % 6);
+                // ONE shared library: every NPC — designer persona or
+                // player-created — draws from the same composite parts pool
+                // the creator picks from (plan: shared-character-library).
+                // A gesture drives the bob so a talking NPC still reads as
+                // animated (composites have no gesture clip).
+                renderer.drawCompositeCharacter(
+                    npcLooks[i], npc.position(), npc.facingDeg(),
+                    walking || npc.pose() != NpcAction::None,
+                    static_cast<float>(GetTime()), face,
+                    npc.combatState() == NpcState::Dead);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a

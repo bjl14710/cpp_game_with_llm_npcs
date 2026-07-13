@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "CharacterParts.hpp"
 #include "Math.hpp"
 #include "Persona.hpp"
 #include "Schedule.hpp"
@@ -17,6 +18,13 @@ struct LoadedPersona {
     Vec3 position;          // world position on the ground plane (y = 0)
     float facingDeg = 0.f;  // initial facing, degrees around +y (0 = +z)
     std::string spotId;     // landmark tag, e.g. "bakery" or "park"
+    // Optional authored appearance from the shared parts library: a
+    // "look = body, head, eyes, hair, palette" header line. Parsed
+    // structurally only — catalog validation happens at the spawn site via
+    // lookForPersona, so a stale part id demotes to the deterministic
+    // fallback instead of killing the whole persona file.
+    CharacterLook look;
+    bool hasLook = false;
     // Optional daily routine, driven by the shared world clock: repeated
     // "schedule = HH-HH, x, z, activity" header lines, in file order.
     std::vector<ScheduleEntry> schedule;
@@ -40,6 +48,7 @@ struct PersonaParseResult {
 //   spot = bakery
 //   position = -40, 28           (x, z world coordinates)
 //   facing = 180                 (degrees)
+//   look = body_round, head_round, eyes_happy, hair_bun, warm   (optional)
 //   ---
 //   Everything after the --- line is passed to the model verbatim.
 //
