@@ -74,7 +74,7 @@ constexpr float kPreviewKeyDegPerSec  = 90.f;   // Left/Right key rotation speed
 constexpr float kJailSeconds = 10.f;
 
 // What the main loop is currently showing.
-enum class AppMode { Playing, Dialogue, Menu, Dead };
+enum class AppMode { Playing, Dialogue, Menu, Dead, SandboxEdit };
 
 // First-person pose; position is the FEET on the ground plane (y = 0).
 struct LocalPlayer {
@@ -606,6 +606,53 @@ int main(int argc, char** argv) {
     };
     menu.setAvatar(avatarHooks);
 
+    // ---- Sandbox editor state (issue #112) ----------------------------
+    SandboxMap sandboxDoc;
+    std::string sandboxSlug;
+    bool sandboxActive = false;         // a sandbox map is loaded (edit OR play)
+    bool sandboxOpenRequested = false;  // set by the menu hook, handled below
+    std::string sandboxOpenStem;
+    int sandboxPieceIndex = 0;
+    PlacedPiece sandboxGhost;           // cursor preview, shared input->render
+    bool sandboxGhostValid = false;
+    bool sandboxGhostLive = false;
+    Vec3 sandboxCam{};                  // pan target on the ground plane
+    float sandboxZoom = 45.f;
+    const fs::path mapsDir = projectRoot / "saves" / "maps";
+    const auto saveSandboxDoc = [&]() {
+        if (!sandboxActive) return;
+        std::error_code ec;
+        fs::create_directories(mapsDir, ec);
+        std::ofstream out(mapsDir / (sandboxSlug + ".json"));
+        out << sandboxDoc.toJson();
+    };
+    const auto exitSandboxToTown = [&]() {
+        saveSandboxDoc();
+        sandboxActive = false;
+        world.loadCity(City::makeDowntown());
+        spawnTownRoster();
+        resetNpcSideArrays();
+        player.position = Vec3{0.f, 0.f, 24.f};
+        playerVerticalSpeed = 0.f;
+    };
+    Menu::SandboxHooks sandboxHooks;
+    sandboxHooks.listMaps = [&]() {
+        std::vector<std::string> stems;
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(mapsDir, ec)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                stems.push_back(entry.path().stem().string());
+            }
+        }
+        std::sort(stems.begin(), stems.end());
+        return stems;
+    };
+    sandboxHooks.onOpen = [&](const std::string& stem) {
+        sandboxOpenRequested = true;
+        sandboxOpenStem = stem;
+    };
+    menu.setSandbox(sandboxHooks);
+
     // Journal: a pure read of the shared fact store — what the player was
     // personally told, grouped by subject, conflicts pre-flagged by core.
     Menu::JournalHooks journalHooks;
@@ -654,6 +701,11 @@ int main(int argc, char** argv) {
         // ---- input ----
         if (mode == AppMode::Playing) {
             if (IsWindowFocused() && !smokeRun) applyMouseLook(player);
+            if (sandboxActive && IsKeyPressed(KEY_P)) {
+                // Back from play-testing to the editor.
+                mode = AppMode::SandboxEdit;
+                EnableCursor();
+            }
 
             if (jailSecondsLeft <= 0.f) {  // no walking out of a sentence
                 Vec3 wish{};
@@ -775,6 +827,101 @@ int main(int argc, char** argv) {
                 mode = AppMode::Playing;
                 DisableCursor();
             }
+        } else if (mode == AppMode::SandboxEdit) {
+            // ---- Sandbox editor (issue #112): pan/zoom, ghost cursor,
+            // place/delete, cycle pieces; P plays the map, Escape saves
+            // and returns to town.
+            const float pan = sandboxZoom * 0.9f * dt;
+            if (isActionPressed(bindings, Action::MoveForward)) sandboxCam.z -= pan;
+            if (isActionPressed(bindings, Action::MoveBackward)) sandboxCam.z += pan;
+            if (isActionPressed(bindings, Action::StrafeLeft)) sandboxCam.x -= pan;
+            if (isActionPressed(bindings, Action::StrafeRight)) sandboxCam.x += pan;
+            sandboxZoom = clampf(sandboxZoom - GetMouseWheelMove() * 4.f, 16.f, 90.f);
+            const float edge = world.city().halfSize();
+            sandboxCam.x = clampf(sandboxCam.x, -edge, edge);
+            sandboxCam.z = clampf(sandboxCam.z, -edge, edge);
+
+            const auto& catalog = pieceCatalog();
+            const int pieceCount = static_cast<int>(catalog.size());
+            if (IsKeyPressed(KEY_LEFT_BRACKET)) {
+                sandboxPieceIndex = (sandboxPieceIndex + pieceCount - 1) % pieceCount;
+            }
+            if (IsKeyPressed(KEY_RIGHT_BRACKET)) {
+                sandboxPieceIndex = (sandboxPieceIndex + 1) % pieceCount;
+            }
+
+            // Cursor tile from the previous frame's camera (one frame of
+            // lag is invisible at editor pan speeds).
+            Vec3 ground;
+            sandboxGhostLive = renderer.screenToGround(GetMousePosition(), ground);
+            if (sandboxGhostLive) {
+                const PieceDef& piece =
+                    catalog[static_cast<std::size_t>(sandboxPieceIndex)];
+                sandboxGhost.pieceId = piece.id;
+                sandboxGhost.tileX =
+                    static_cast<int>(std::floor(ground.x / kMapTileUnits)) -
+                    piece.tilesW / 2;
+                sandboxGhost.tileZ =
+                    static_cast<int>(std::floor(ground.z / kMapTileUnits)) -
+                    piece.tilesD / 2;
+                // Validity: would the candidate document still validate,
+                // with every error citing OTHER entries ignored?
+                SandboxMap candidate = sandboxDoc;
+                candidate.pieces.push_back(sandboxGhost);
+                sandboxGhostValid = true;
+                const std::string newWhere =
+                    "pieces[" + std::to_string(sandboxDoc.pieces.size()) + "]";
+                for (const MapError& e : validateMap(candidate)) {
+                    if (e.where == newWhere) {
+                        sandboxGhostValid = false;
+                        break;
+                    }
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sandboxGhostValid) {
+                    sandboxDoc.pieces.push_back(sandboxGhost);
+                    world.loadCity(buildCity(sandboxDoc));
+                }
+                if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
+                    // Delete the topmost (most recent) piece under the cursor.
+                    for (int i = static_cast<int>(sandboxDoc.pieces.size()) - 1;
+                         i >= 0; --i) {
+                        const PieceDef* pd = findPiece(sandboxDoc.pieces[i].pieceId);
+                        if (!pd) continue;
+                        const float minX = static_cast<float>(sandboxDoc.pieces[i].tileX) * kMapTileUnits;
+                        const float minZ = static_cast<float>(sandboxDoc.pieces[i].tileZ) * kMapTileUnits;
+                        if (ground.x >= minX &&
+                            ground.x <= minX + static_cast<float>(pd->tilesW) * kMapTileUnits &&
+                            ground.z >= minZ &&
+                            ground.z <= minZ + static_cast<float>(pd->tilesD) * kMapTileUnits) {
+                            sandboxDoc.pieces.erase(sandboxDoc.pieces.begin() + i);
+                            world.loadCity(buildCity(sandboxDoc));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (IsKeyPressed(KEY_P)) {
+                // Play the map: save, then stand at the first clear spot
+                // spiraling out from the center.
+                saveSandboxDoc();
+                Vec3 spawn{0.f, 0.f, 0.f};
+                for (float r = 4.f;
+                     r <= 60.f &&
+                     world.city().circleIntersectsAny(spawn.x, spawn.z, kPlayerRadius);
+                     r += 4.f) {
+                    spawn = Vec3{r, 0.f, r * 0.5f};
+                }
+                player.position = spawn;
+                playerVerticalSpeed = 0.f;
+                mode = AppMode::Playing;
+                DisableCursor();
+            }
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                exitSandboxToTown();
+                mode = AppMode::Playing;
+                DisableCursor();
+            }
         } else {  // Menu
             switch (menu.update(dt)) {
                 case MenuResult::Resume:
@@ -785,6 +932,40 @@ int main(int argc, char** argv) {
                     goto shutdown;  // single exit point below the loop
                 case MenuResult::None:
                     break;
+            }
+            if (sandboxOpenRequested) {
+                sandboxOpenRequested = false;
+                SandboxMap doc;
+                std::string slug = sandboxOpenStem;
+                bool ok = true;
+                if (slug.empty()) {
+                    int n = 1;
+                    while (fs::exists(mapsDir / ("map-" + std::to_string(n) + ".json"))) {
+                        ++n;
+                    }
+                    slug = "map-" + std::to_string(n);
+                    doc.name = slug;
+                } else {
+                    std::ifstream in(mapsDir / (slug + ".json"));
+                    std::ostringstream buf;
+                    buf << in.rdbuf();
+                    ok = static_cast<bool>(in) && SandboxMap::fromJson(buf.str(), doc);
+                    if (!ok) {
+                        std::cerr << "[llm_npc] sandbox: cannot open '" << slug
+                                  << "'\n";
+                    }
+                }
+                if (ok) {
+                    sandboxDoc = std::move(doc);
+                    sandboxSlug = slug;
+                    sandboxActive = true;
+                    world.loadCity(buildCity(sandboxDoc));
+                    resetNpcSideArrays();
+                    sandboxCam = Vec3{};
+                    sandboxGhostLive = false;
+                    mode = AppMode::SandboxEdit;
+                    EnableCursor();
+                }
             }
         }
         if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
@@ -1080,8 +1261,31 @@ int main(int argc, char** argv) {
         BeginDrawing();
         renderer.setTimeOfDay(worldHour);  // sky, fog, light: one clock
         ClearBackground(renderer.skyColor());
-        renderer.beginFrame(CameraPose{player.position, player.yawDeg, player.pitchDeg});
+        const bool sandboxEditing = (mode == AppMode::SandboxEdit);
+        if (sandboxEditing) {
+            // High tilted vantage over the pan target; beginFrame adds eye
+            // height, so hand it the zoom height minus that.
+            renderer.beginFrame(CameraPose{
+                Vec3{sandboxCam.x, sandboxZoom - kEyeHeight,
+                     sandboxCam.z + sandboxZoom * 0.7f},
+                180.f, -55.f});
+        } else {
+            renderer.beginFrame(
+                CameraPose{player.position, player.yawDeg, player.pitchDeg});
+        }
         renderer.drawCity(world.city());
+        if (sandboxEditing && sandboxGhostLive) {
+            if (const PieceDef* pd = findPiece(sandboxGhost.pieceId)) {
+                Building ghost;
+                ghost.id = pd->assetId;  // base id: preview with the real model
+                ghost.minX = static_cast<float>(sandboxGhost.tileX) * kMapTileUnits;
+                ghost.minZ = static_cast<float>(sandboxGhost.tileZ) * kMapTileUnits;
+                ghost.maxX = ghost.minX + static_cast<float>(pd->tilesW) * kMapTileUnits;
+                ghost.maxZ = ghost.minZ + static_cast<float>(pd->tilesD) * kMapTileUnits;
+                ghost.height = pd->height;
+                renderer.drawPlacementGhost(ghost, sandboxGhostValid);
+            }
+        }
         if (joined) {
             for (const auto& netNpc : netNpcs) {
                 const int mood = netNpc.npcIndex < static_cast<int>(netMoods.size())
@@ -1194,13 +1398,21 @@ int main(int argc, char** argv) {
                                             previewYaw, false, 0.f);
         }
         previewWasOpen = previewOpen;
-        if (!joined && mode != AppMode::Dead) {
+        if (!joined && mode != AppMode::Dead && !sandboxEditing) {
             renderer.drawViewmodel(static_cast<int>(world.player().weapon),
                                    world.player().attackAnimFraction);
         }
         renderer.endFrame();
 
         // ---- 2D overlay ----
+        if (sandboxEditing) {
+            const PieceDef& current =
+                pieceCatalog()[static_cast<std::size_t>(sandboxPieceIndex)];
+            drawCenteredHudText(
+                "Sandbox '" + sandboxDoc.name + "'   piece: " + current.label +
+                "   [ / ] cycle | click place | right-click delete | P play | Esc save+exit",
+                18, 14.f);
+        }
         // Nameplates from whichever pose source is authoritative right now.
         const auto plateFor = [&](const Vec3& feet, const std::string& name, Color color) {
             if (distanceXZ(player.position, feet) > kNameplateRange) return;

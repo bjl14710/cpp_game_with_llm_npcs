@@ -1,5 +1,7 @@
 #include "Menu.hpp"
 
+#include <algorithm>
+
 #include <utility>
 
 #include "Config.hpp"  // trim
@@ -27,6 +29,11 @@ constexpr int kIdLeave = 303;
 constexpr int kIdCreator = 4;
 constexpr int kIdJournal = 5;
 constexpr int kIdAvatar = 6;
+constexpr int kIdSandbox = 7;
+// Sandbox page: New button + one row per saved map (capped by layout).
+constexpr int kIdMapNew = 600;
+constexpr int kIdMapBase = 610;
+constexpr int kMaxMapRows = 7;
 // Journal-page widgets.
 constexpr int kIdJournalPrev = 500;
 constexpr int kIdJournalNext = 501;
@@ -101,6 +108,8 @@ void Menu::setCreator(CreatorHooks hooks) { creator_ = std::move(hooks); }
 
 void Menu::setAvatar(AvatarHooks hooks) { avatar_ = std::move(hooks); }
 
+void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
+
 void Menu::setJournal(JournalHooks hooks) { journal_ = std::move(hooks); }
 
 void Menu::open() {
@@ -119,9 +128,9 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 254.f;
+        float y = h * 0.5f - 290.f;
         for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator,
-                       kIdAvatar, kIdJournal, kIdQuit}) {
+                       kIdAvatar, kIdJournal, kIdSandbox, kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
@@ -158,6 +167,17 @@ std::vector<Menu::Hit> Menu::layout() const {
         hits.push_back(
             {Rectangle{rowX + rowW * 0.53f, y, rowW * 0.47f, 48.f}, kIdCreate});
         hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 48.f}, kIdBack});
+    } else if (page_ == Page::Sandbox) {
+        const float x = (w - 420.f) * 0.5f;
+        float y = h * 0.24f;
+        hits.push_back({Rectangle{x, y, 420.f, 48.f}, kIdMapNew});
+        y += 68.f;
+        const int rows = std::min<int>(kMaxMapRows, static_cast<int>(sandboxMaps_.size()));
+        for (int i = 0; i < rows; ++i) {
+            hits.push_back({Rectangle{x, y, 420.f, 44.f}, kIdMapBase + i});
+            y += 56.f;
+        }
+        hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 44.f}, kIdBack});
     } else if (page_ == Page::Multiplayer) {
         const float x = (w - 420.f) * 0.5f;
         float y = h * 0.30f;
@@ -281,6 +301,18 @@ MenuResult Menu::update(float dt) {
             } else if (hit.id == kIdJournal) {
                 page_ = Page::Journal;
                 journalPage_ = 0;
+            } else if (hit.id == kIdSandbox) {
+                page_ = Page::Sandbox;
+                sandboxMaps_ = sandbox_.listMaps ? sandbox_.listMaps()
+                                                 : std::vector<std::string>{};
+            } else if (hit.id == kIdMapNew) {
+                if (sandbox_.onOpen) sandbox_.onOpen("");
+            } else if (hit.id >= kIdMapBase && hit.id < kIdMapBase + kMaxMapRows) {
+                const std::size_t index =
+                    static_cast<std::size_t>(hit.id - kIdMapBase);
+                if (sandbox_.onOpen && index < sandboxMaps_.size()) {
+                    sandbox_.onOpen(sandboxMaps_[index]);
+                }
             } else if (hit.id == kIdJournalPrev) {
                 if (journalPage_ > 0) --journalPage_;
             } else if (hit.id == kIdJournalNext) {
@@ -528,6 +560,12 @@ void Menu::render() const {
         else if (hit.id == kIdMultiplayer) label = "Multiplayer";
         else if (hit.id == kIdCreator) label = "Create Character";
         else if (hit.id == kIdAvatar) label = "Edit My Avatar";
+        else if (hit.id == kIdSandbox) label = "Sandbox Maps";
+        else if (hit.id == kIdMapNew) label = "+ New Map";
+        else if (hit.id >= kIdMapBase && hit.id < kIdMapBase + kMaxMapRows) {
+            const std::size_t index = static_cast<std::size_t>(hit.id - kIdMapBase);
+            label = index < sandboxMaps_.size() ? sandboxMaps_[index] : "?";
+        }
         else if (hit.id == kIdJournal) label = "Journal";
         else if (hit.id == kIdJournalPrev) label = "< Prev";
         else if (hit.id == kIdJournalNext) label = "Next >";

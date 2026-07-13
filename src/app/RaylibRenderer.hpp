@@ -96,6 +96,16 @@ class RaylibRenderer {
     // TODO(implement): step 3.
     void endFrame();
 
+    // Editor support (issue #112): unprojects a screen point onto the
+    // ground plane (y = 0) with the CURRENT camera; false when the ray
+    // points at the sky. Call between beginFrame and endFrame.
+    bool screenToGround(Vector2 screen, Vec3& out) const;
+
+    // Editor ghost: the piece's would-be Building drawn translucent —
+    // green when the placement is valid, red when refused. Reuses the
+    // normal building draw paths so the preview IS the eventual look.
+    void drawPlacementGhost(const Building& building, bool valid);
+
     // Projects a world point for nameplates; false when behind the camera.
     // raylib's GetWorldToScreen does the math — this wraps the behind-camera
     // check the legacy worldToScreen had.

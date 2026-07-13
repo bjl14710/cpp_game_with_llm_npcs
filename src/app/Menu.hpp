@@ -81,6 +81,15 @@ class Menu {
     };
     void setAvatar(AvatarHooks hooks);
 
+    // Sandbox page (issue #112): lists saved maps; clicking one (or New)
+    // hands the map's file stem ("" = create new) to main, which switches
+    // into the editor. The menu never touches map files itself.
+    struct SandboxHooks {
+        std::function<std::vector<std::string>()> listMaps;
+        std::function<void(const std::string& stemOrEmpty)> onOpen;
+    };
+    void setSandbox(SandboxHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -114,7 +123,7 @@ class Menu {
     void render() const;
 
    private:
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -136,6 +145,8 @@ class Menu {
     // ---- Creator page state ----
     CreatorHooks creator_;
     AvatarHooks avatar_;
+    SandboxHooks sandbox_;
+    std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
     std::string creatorName_;
     std::string creatorBackstory_;

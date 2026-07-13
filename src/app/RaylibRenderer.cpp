@@ -600,6 +600,38 @@ void RaylibRenderer::setAvatarPalette(const std::string& paletteId) {
     }
 }
 
+bool RaylibRenderer::screenToGround(Vector2 screen, Vec3& out) const {
+    const Ray ray = GetMouseRay(screen, camera_);
+    if (ray.direction.y >= -1e-4f) return false;  // parallel or skyward
+    const float t = -ray.position.y / ray.direction.y;
+    out = Vec3{ray.position.x + ray.direction.x * t, 0.f,
+               ray.position.z + ray.direction.z * t};
+    return true;
+}
+
+void RaylibRenderer::drawPlacementGhost(const Building& building, bool valid) {
+    const Color tint = valid ? Color{120, 230, 140, 140} : Color{235, 90, 90, 140};
+    if (const Model* model = assets_.modelForBuilding(building)) {
+        const Assets::SizeSpec& spec = assets_.sizeSpecFor(building);
+        if (spec.mode == Assets::SizeSpec::Mode::Uniform) {
+            drawModelUniform(*model, (building.minX + building.maxX) * 0.5f,
+                             (building.minZ + building.maxZ) * 0.5f,
+                             spec.worldHeight, tint);
+        } else {
+            drawModelFittedToAABB(*model, building.minX, building.minZ,
+                                  building.maxX, building.maxZ, building.height,
+                                  tint);
+        }
+    }
+    // The footprint outline always draws, even model-less, so the grid
+    // cell the piece will claim is unmistakable.
+    const Vector3 center{(building.minX + building.maxX) * 0.5f,
+                         building.height * 0.5f,
+                         (building.minZ + building.maxZ) * 0.5f};
+    DrawCubeWires(center, building.maxX - building.minX, building.height,
+                  building.maxZ - building.minZ, tint);
+}
+
 void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     if (weaponKind < 0 || weaponKind > 1) return;
     // The fist is invisible at rest — nothing floats in front of the
