@@ -538,7 +538,8 @@ int main(int argc, char** argv) {
     Menu::CreatorHooks creatorHooks;
     creatorHooks.onCreate = [&](const std::string& name, const std::string& backstory,
                                 const std::string& traits,
-                                const CharacterLook& look) -> std::string {
+                                const CharacterLook& look,
+                                const std::string& traitId) -> std::string {
         std::string why;
         if (!lookIsValid(look, &why)) return why;
 
@@ -551,6 +552,7 @@ int main(int argc, char** argv) {
             trait = trim(trait);
             if (!trait.empty()) loaded.persona.traits.push_back(trait);
         }
+        if (!traitId.empty()) loaded.persona.traitIds.push_back(traitId);
         loaded.spotId = "plaza";
         loaded.facingDeg = 180.f;
         // First clear standing spot on rings around the plaza center.
@@ -705,6 +707,11 @@ int main(int argc, char** argv) {
         sandboxOpenStem = stem;
     };
     menu.setSandbox(sandboxHooks);
+    {
+        std::vector<std::string> traitIds;
+        for (const TraitDef& trait : traitLibrary) traitIds.push_back(trait.id);
+        menu.setTraitChoices(std::move(traitIds));
+    }
 
     if (mapFile) {
         // Fixture boot (--map): compile and load the sandbox map instead

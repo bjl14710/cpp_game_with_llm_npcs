@@ -44,9 +44,15 @@ class Menu {
     // saved and spawned) or a human-readable error shown as a toast.
     struct CreatorHooks {
         std::function<std::string(const std::string& name, const std::string& backstory,
-                                  const std::string& traits, const CharacterLook& look)>
-            onCreate;
+                                  const std::string& traits, const CharacterLook& look,
+                                  const std::string& traitId)>
+            onCreate;  // traitId "" = no structured trait picked
     };
+
+    // The structured-trait choices the creator's trait row cycles (issue
+    // #117); installed once by main from the loaded library. One trait per
+    // created character in the v1 UI — the file format supports three.
+    void setTraitChoices(std::vector<std::string> ids);
 
     // One display row of the player's journal, pre-rendered by main.cpp
     // from the shared fact store so the menu never touches WorldState.
@@ -149,6 +155,8 @@ class Menu {
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
     std::string creatorName_;
+    std::vector<std::string> traitChoices_;  // cycled by the trait row
+    int creatorTraitIndex_ = 0;              // 0 = none; else 1-based into choices
     std::string creatorBackstory_;
     std::string creatorTraits_;
     int editingField_ = 0;  // 0 none, 1 name, 2 backstory, 3 traits

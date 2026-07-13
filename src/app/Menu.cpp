@@ -44,6 +44,7 @@ constexpr int kIdPartNext = 420;       // +category
 constexpr int kIdPalette = 430;
 constexpr int kIdRandomize = 431;
 constexpr int kIdCreate = 432;
+constexpr int kIdTrait = 433;
 
 // Display name for a catalog part id: the text after the category prefix
 // ("hair_bowl" → "bowl"), title-ish enough for a picker chip.
@@ -110,6 +111,11 @@ void Menu::setAvatar(AvatarHooks hooks) { avatar_ = std::move(hooks); }
 
 void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
 
+void Menu::setTraitChoices(std::vector<std::string> ids) {
+    traitChoices_ = std::move(ids);
+    creatorTraitIndex_ = 0;
+}
+
 void Menu::setJournal(JournalHooks hooks) { journal_ = std::move(hooks); }
 
 void Menu::open() {
@@ -159,10 +165,15 @@ std::vector<Menu::Hit> Menu::layout() const {
         for (int c = 0; c < kPartCategoryCount; ++c) {
             hits.push_back({Rectangle{rowX, y, 44.f, 40.f}, kIdPartPrev + c});
             hits.push_back({Rectangle{rowX + rowW - 44.f, y, 44.f, 40.f}, kIdPartNext + c});
-            y += 56.f;
+            y += 52.f;
         }
         hits.push_back({Rectangle{rowX, y, rowW, 40.f}, kIdPalette});
-        y += 64.f;
+        y += 52.f;
+        if (!avatarMode_ && !traitChoices_.empty()) {
+            // Structured personality (issue #117) — avatars have none.
+            hits.push_back({Rectangle{rowX, y, rowW, 40.f}, kIdTrait});
+        }
+        y += 56.f;
         hits.push_back({Rectangle{rowX, y, rowW * 0.47f, 48.f}, kIdRandomize});
         hits.push_back(
             {Rectangle{rowX + rowW * 0.53f, y, rowW * 0.47f, 48.f}, kIdCreate});
@@ -341,6 +352,10 @@ MenuResult Menu::update(float dt) {
                     if (palettes[i].id == draftLook_.paletteId) index = i;
                 }
                 draftLook_.paletteId = palettes[(index + 1) % palettes.size()].id;
+            } else if (hit.id == kIdTrait) {
+                editingField_ = 0;
+                creatorTraitIndex_ = (creatorTraitIndex_ + 1) %
+                                     (static_cast<int>(traitChoices_.size()) + 1);
             } else if (hit.id == kIdRandomize) {
                 editingField_ = 0;
                 creatorSeed_ = creatorSeed_ * 7919u + 13u;
@@ -451,9 +466,13 @@ void Menu::attemptCreate() {
         showToast("Name required");
         return;
     }
+    const std::string traitId =
+        creatorTraitIndex_ == 0
+            ? std::string()
+            : traitChoices_[static_cast<std::size_t>(creatorTraitIndex_ - 1)];
     const std::string error =
         creator_.onCreate(trim(creatorName_), trim(creatorBackstory_),
-                          trim(creatorTraits_), draftLook_);
+                          trim(creatorTraits_), draftLook_, traitId);
     if (!error.empty()) {
         showToast(error);
         return;
@@ -462,6 +481,7 @@ void Menu::attemptCreate() {
     creatorName_.clear();
     creatorBackstory_.clear();
     creatorTraits_.clear();
+    creatorTraitIndex_ = 0;
     creatorSeed_ = creatorSeed_ * 7919u + 13u;
     draftLook_ = randomizeLook(creatorSeed_);
 }
@@ -598,6 +618,11 @@ void Menu::render() const {
             label = ">";
         } else if (hit.id == kIdPalette) {
             label = "Palette: " + draftLook_.paletteId;
+        } else if (hit.id == kIdTrait) {
+            label = "Trait: " + (creatorTraitIndex_ == 0
+                                     ? std::string("none")
+                                     : traitChoices_[static_cast<std::size_t>(
+                                           creatorTraitIndex_ - 1)]);
         } else if (hit.id == kIdRandomize) label = "Randomize";
         else if (hit.id == kIdCreate) label = avatarMode_ ? "Save Avatar" : "Save & Spawn";
         else if (hit.id == kIdHost) label = "Host on port " + std::to_string(kDefaultHostPort);
