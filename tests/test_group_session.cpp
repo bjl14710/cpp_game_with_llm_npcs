@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "Gossip.hpp"
 #include "GroupSession.hpp"
+#include "WorldState.hpp"
 #include "LlmClient.hpp"
 #include "Npc.hpp"
 #include "Persona.hpp"
@@ -97,8 +99,46 @@ TEST_CASE("mood-gated follow: hostile or angry NPCs refuse" ) {
     CHECK(angry.behavior() != NpcAction::Follow);  // gate held
 }
 
-TEST_CASE("per-participant memories and attributed facts" * doctest::skip()) {
-    // Step 4 (#123). TODO(groups): on close, each participant's summary
-    // request routes with their own perspective prompt; a fact stated by
-    // NPC X lands on the world bus with source == X's persona name.
+TEST_CASE("per-participant memories and attributed facts") {
+    // #123: every group turn goes through the speaker's OWN npc.ask with
+    // the labeled transcript — so each participant's private history (the
+    // input to their close-time memory summary) contains the conversation
+    // from their own seat, and fact extraction runs per participant with
+    // facts committed under THEIR name.
+    LlmClient client(LlmConfig{/*host=*/"127.0.0.1", /*port=*/1});
+    Persona pm;
+    pm.name = "Marge";
+    Persona pd;
+    pd.name = "Dana";
+    Npc marge(pm, client);
+    Npc dana(pd, client);
+
+    GroupSession group;
+    group.open({0, 1}, {"Marge", "Dana"});
+    group.addLine("Player", "Morning, both.");
+
+    // Marge's turn: her history records the labeled transcript + HER reply.
+    const std::string context1 = group.renderTranscript();
+    marge.ask(context1);
+    marge.onReplyArrived(ChatReply{1, true, "Fresh rye is out. [[MOOD: happy]]", ""});
+    group.addLine("Marge", "Fresh rye is out.");
+    REQUIRE(marge.history().size() == 2);
+    CHECK(marge.history()[0].content.find("Player: Morning, both.") != std::string::npos);
+    CHECK(marge.history()[1].content.find("Fresh rye") != std::string::npos);
+
+    // Dana's turn sees Marge's line inside HER OWN history.
+    dana.ask(group.renderTranscript());
+    dana.onReplyArrived(ChatReply{2, true, "Noted. [[MOOD: neutral]]", ""});
+    CHECK(dana.history()[0].content.find("Marge: Fresh rye is out.") != std::string::npos);
+    CHECK(dana.history()[0].content.find("Player: Morning, both.") != std::string::npos);
+
+    // Facts committed during Dana's extraction carry DANA as the source.
+    WorldState state;
+    ProposedFact proposal;
+    proposal.subject = "bakery_bread";
+    proposal.content = "The bakery has fresh rye today.";
+    proposal.playerLearned = true;
+    const KnownFact record = commitFact(state, proposal, dana.persona().name);
+    CHECK(record.source == "Dana");
+    REQUIRE_FALSE(state.factsKnownBy("Dana").empty());
 }
