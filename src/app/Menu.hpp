@@ -93,6 +93,9 @@ class Menu {
     struct SandboxHooks {
         std::function<std::vector<std::string>()> listMaps;
         std::function<void(const std::string& stemOrEmpty)> onOpen;
+        // LLM generation (issue #129): the typed description; main runs
+        // the async generate-validate-retry chain and opens the result.
+        std::function<std::string(const std::string& description)> onGenerate;
     };
     void setSandbox(SandboxHooks hooks);
 
@@ -147,6 +150,8 @@ class Menu {
     MultiplayerHooks multiplayer_;
     std::string joinAddress_ = "127.0.0.1:40605";
     bool editingAddress_ = false;  // typed characters go into joinAddress_
+    std::string genDescription_;   // sandbox "Generate..." field (issue #129)
+    bool editingGen_ = false;
 
     // ---- Creator page state ----
     CreatorHooks creator_;

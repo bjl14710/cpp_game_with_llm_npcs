@@ -32,6 +32,8 @@ constexpr int kIdAvatar = 6;
 constexpr int kIdSandbox = 7;
 // Sandbox page: New button + one row per saved map (capped by layout).
 constexpr int kIdMapNew = 600;
+constexpr int kIdGenField = 601;
+constexpr int kIdGenGo = 602;
 constexpr int kIdMapBase = 610;
 constexpr int kMaxMapRows = 7;
 // Journal-page widgets.
@@ -180,9 +182,13 @@ std::vector<Menu::Hit> Menu::layout() const {
         hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 48.f}, kIdBack});
     } else if (page_ == Page::Sandbox) {
         const float x = (w - 420.f) * 0.5f;
-        float y = h * 0.24f;
+        float y = h * 0.18f;
         hits.push_back({Rectangle{x, y, 420.f, 48.f}, kIdMapNew});
-        y += 68.f;
+        y += 60.f;
+        // Describe-a-map row (issue #129): text field + Generate button.
+        hits.push_back({Rectangle{x, y, 300.f, 44.f}, kIdGenField});
+        hits.push_back({Rectangle{x + 310.f, y, 110.f, 44.f}, kIdGenGo});
+        y += 64.f;
         const int rows = std::min<int>(kMaxMapRows, static_cast<int>(sandboxMaps_.size()));
         for (int i = 0; i < rows; ++i) {
             hits.push_back({Rectangle{x, y, 420.f, 44.f}, kIdMapBase + i});
@@ -279,7 +285,28 @@ MenuResult Menu::update(float dt) {
         // Clicking empty space also drops focus (fall through to clicks).
     }
 
-    if (!editingAddress_ && IsKeyPressed(KEY_ESCAPE)) {
+    if (editingGen_) {
+        int ch = GetCharPressed();
+        while (ch != 0) {
+            if (ch >= 32 && ch < 127 && genDescription_.size() < 200) {
+                genDescription_.push_back(static_cast<char>(ch));
+            }
+            ch = GetCharPressed();
+        }
+        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) &&
+            !genDescription_.empty()) {
+            genDescription_.pop_back();
+        }
+        if (IsKeyPressed(KEY_ESCAPE)) editingGen_ = false;
+        if (IsKeyPressed(KEY_ENTER)) {
+            editingGen_ = false;
+            if (sandbox_.onGenerate && !trim(genDescription_).empty()) {
+                showToast(sandbox_.onGenerate(trim(genDescription_)));
+            }
+        }
+    }
+
+    if (!editingAddress_ && !editingGen_ && IsKeyPressed(KEY_ESCAPE)) {
         if (page_ != Page::Main) {
             page_ = Page::Main;
             return MenuResult::None;
@@ -318,6 +345,13 @@ MenuResult Menu::update(float dt) {
                                                  : std::vector<std::string>{};
             } else if (hit.id == kIdMapNew) {
                 if (sandbox_.onOpen) sandbox_.onOpen("");
+            } else if (hit.id == kIdGenField) {
+                editingGen_ = true;
+            } else if (hit.id == kIdGenGo) {
+                editingGen_ = false;
+                if (sandbox_.onGenerate && !trim(genDescription_).empty()) {
+                    showToast(sandbox_.onGenerate(trim(genDescription_)));
+                }
             } else if (hit.id >= kIdMapBase && hit.id < kIdMapBase + kMaxMapRows) {
                 const std::size_t index =
                     static_cast<std::size_t>(hit.id - kIdMapBase);
@@ -582,6 +616,10 @@ void Menu::render() const {
         else if (hit.id == kIdAvatar) label = "Edit My Avatar";
         else if (hit.id == kIdSandbox) label = "Sandbox Maps";
         else if (hit.id == kIdMapNew) label = "+ New Map";
+        else if (hit.id == kIdGenField) {
+            label = genDescription_ + (editingGen_ ? "_" : "");
+            if (label.empty()) label = "(describe a map to generate)";
+        } else if (hit.id == kIdGenGo) label = "Generate";
         else if (hit.id >= kIdMapBase && hit.id < kIdMapBase + kMaxMapRows) {
             const std::size_t index = static_cast<std::size_t>(hit.id - kIdMapBase);
             label = index < sandboxMaps_.size() ? sandboxMaps_[index] : "?";
