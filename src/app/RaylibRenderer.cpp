@@ -176,7 +176,7 @@ void RaylibRenderer::drawCity(const City& city) {
     const Model* straight = assets_.prop("road_straight");
     const Model* crossing = assets_.prop("road_straight_crossing");
     const Model* junction = assets_.prop("road_junction");
-    if (straight && crossing && junction) {
+    if (city.hasStreets() && straight && crossing && junction) {
         constexpr float kTile = 16.f;
         for (const float sc : {-kStreetCenter, kStreetCenter}) {
             for (float t = -96.f; t <= 96.f; t += kTile) {
@@ -196,20 +196,23 @@ void RaylibRenderer::drawCity(const City& city) {
                 drawRoadTile(*straight, e, sc, 6.f, kStreetWidth, true);
             }
         }
-    } else {
+    } else if (city.hasStreets()) {
         for (const float c : {-kStreetCenter, kStreetCenter}) {
             DrawCube({c, 0.02f, 0.f}, kStreetWidth, 0.04f, half * 2.f, kAsphalt);
             DrawCube({0.f, 0.02f, c}, half * 2.f, 0.04f, kStreetWidth, kAsphalt);
         }
     }
     // Block slabs: plaza (center) is pale stone, park (north-east) stays
-    // grass, every other block gets a sidewalk-toned slab.
-    for (const float bx : {-64.f, 0.f, 64.f}) {
-        for (const float bz : {-64.f, 0.f, 64.f}) {
-            const bool plaza = bx == 0.f && bz == 0.f;
-            const bool park = bx == 64.f && bz == 64.f;
-            if (park) continue;
-            DrawCube({bx, 0.04f, bz}, 48.f, 0.08f, 48.f, plaza ? kPlaza : kSidewalk);
+    // grass, every other block gets a sidewalk-toned slab. Sandbox cities
+    // (no authored street grid) stay plain grass.
+    if (city.hasStreets()) {
+        for (const float bx : {-64.f, 0.f, 64.f}) {
+            for (const float bz : {-64.f, 0.f, 64.f}) {
+                const bool plaza = bx == 0.f && bz == 0.f;
+                const bool park = bx == 64.f && bz == 64.f;
+                if (park) continue;
+                DrawCube({bx, 0.04f, bz}, 48.f, 0.08f, 48.f, plaza ? kPlaza : kSidewalk);
+            }
         }
     }
 
@@ -223,7 +226,9 @@ void RaylibRenderer::drawCity(const City& city) {
         // The fountain is composed from primitives (no pack model). Must be
         // dispatched by id BEFORE the model lookup: modelForBuilding falls
         // back to a hashed generic building for uncurated ids.
-        if (b.id == "fountain") {
+        // Compare the BASE id: sandbox instances carry a '#' suffix
+        // ("fountain#4") and must hit the same composite recipe.
+        if (b.id.substr(0, b.id.find('#')) == "fountain") {
             drawFountain(b, assets_.sizeSpecFor(b).worldHeight);
             continue;
         }

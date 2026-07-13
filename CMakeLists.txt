@@ -34,6 +34,8 @@ add_library(llm_npc_core STATIC
     src/core/Gossip.cpp
     src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
+    src/core/PieceCatalog.cpp
+    src/core/SandboxMap.cpp
     src/core/LlmClient.cpp
     src/core/NetClient.cpp
     src/core/NetFraming.cpp

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <sstream>
 #include <iostream>
@@ -42,6 +43,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "RaylibRenderer.hpp"
+#include "SandboxMap.hpp"
 #include "Weapon.hpp"
 #include "World.hpp"
 
@@ -171,7 +173,8 @@ void drawNameplate(const std::string& name, Vector2 screen, Color color) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    // --frames N [shot.png] [--camera x z yaw] [--hour H]: render N frames
+    // --frames N [shot.png] [--camera x z yaw] [--hour H] [--map file]:
+    // render N frames
     // then exit 0, optionally saving a screenshot of the last frame
     // (scripted smoke runs + visual checks). --camera overrides the default
     // plaza vantage; --hour pins the world clock so day/night-dependent
@@ -181,6 +184,7 @@ int main(int argc, char** argv) {
     bool cameraOverride = false;
     float cameraX = 0.f, cameraZ = 0.f, cameraYaw = 180.f;
     float hourOverride = -1.f;
+    const char* mapFile = nullptr;  // --map: boot into a sandbox fixture
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
         int arg = 3;
@@ -196,6 +200,11 @@ int main(int argc, char** argv) {
                 arg += 4;
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--hour") == 0) {
                 hourOverride = std::strtof(argv[arg + 1], nullptr);
+                arg += 2;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--map") == 0) {
+                // Boot straight into a sandbox map fixture (headless smoke
+                // shots for placed pieces; the in-game entry is the menu).
+                mapFile = argv[arg + 1];
                 arg += 2;
             } else {
                 ++arg;
@@ -493,7 +502,30 @@ int main(int argc, char** argv) {
         for (Npc& npc : world.npcs()) refreshGossip(npc);
     };
 
-    spawnTownRoster();
+    if (mapFile) {
+        // Fixture boot (--map): compile and load the sandbox map instead
+        // of the town. NPC placements spawn once #113 lands; validation
+        // problems are logged, and buildCity skips anything invalid.
+        std::ifstream mapIn(mapFile);
+        std::ostringstream mapBuf;
+        mapBuf << mapIn.rdbuf();
+        SandboxMap bootMap;
+        if (!mapIn || !SandboxMap::fromJson(mapBuf.str(), bootMap)) {
+            std::cerr << "[llm_npc] --map: cannot read/parse " << mapFile
+                      << " — starting the town instead\n";
+            spawnTownRoster();
+        } else {
+            for (const MapError& e : validateMap(bootMap)) {
+                std::cerr << "[llm_npc] --map " << e.where << ": " << e.reason
+                          << "\n";
+            }
+            world.loadCity(buildCity(bootMap));
+            std::cerr << "[llm_npc] --map: loaded '" << bootMap.name << "' ("
+                      << world.city().buildings().size() << " solid pieces)\n";
+        }
+    } else {
+        spawnTownRoster();
+    }
     resetNpcSideArrays();
 
     // Character creator: persists BOTH records (independently) and spawns
