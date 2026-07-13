@@ -31,7 +31,7 @@ std::string castVocabulary(const std::vector<TraitDef>& traitLibrary) {
         for (const PartDef* part :
              partsForCategory(static_cast<PartCategory>(c), "any")) {
             if (!first) v += ", ";
-            v += part->id;
+            v += part->id + "(" + part->styleTag + ")";
             first = false;
         }
         v += "\n";
@@ -46,8 +46,8 @@ std::string castVocabulary(const std::vector<TraitDef>& traitLibrary) {
         if (i) v += ", ";
         v += traitLibrary[i].id;
     }
-    v += "\nStyle rule: 'round' and 'blocky' family parts never mix; 'any' "
-         "parts fit both.\n";
+    v += "\nStyle rule: within one look, never mix a (round) part with a "
+         "(blocky) part; (any) parts fit both families.\n";
     return v;
 }
 
@@ -65,18 +65,22 @@ std::string mapVocabulary() {
 
 std::string buildCastPrompt(const std::vector<TraitDef>& traitLibrary) {
     return "You create characters for a small-town life game by emitting "
-           "STRICT JSON, no prose, no code fences:\n"
-           "{\"characters\": [\"<persona file text>\", ...]}\n"
-           "Each persona file text uses key = value lines separated by \\n:\n"
-           "name = <unique full name> (required)\n"
-           "role = <one-line occupation>\n"
-           "traits = <2-4 comma-separated adjectives>\n"
-           "style = <how they speak, one line>\n"
-           "knowledge = <what they know and don't, one line>\n"
-           "position = <x>, <z>\n"
-           "trait = <ONE trait id from the vocabulary> (0-2 such lines)\n"
-           "look = <body>, <head>, <eyes>, <hair>, <mouth>, <palette> "
-           "(required, ids from the vocabulary, style-consistent)\n" +
+           "STRICT JSON, no prose, no code fences. Shape:\n"
+           "{\"characters\": [{\"name\": \"<unique full name>\", "
+           "\"role\": \"<occupation>\", \"traits\": \"<2-4 adjectives>\", "
+           "\"style\": \"<how they speak>\", \"knowledge\": \"<what they "
+           "know and don't>\", \"position\": \"<x>, <z>\", "
+           "\"trait\": [<0-2 ids>], \"look\": \"<body>, <head>, <eyes>, "
+           "<hair>, <mouth>, <palette>\"}]}\n"
+           "\"trait\" ids must be copied VERBATIM from the traits list, or use "
+           "[] — adjectives from the request (like 'curious') are NOT trait "
+           "ids; they belong in \"traits\".\n"
+           "Example look value (bare ids, six of them, style-consistent):\n"
+           "\"body_round, head_round, eyes_happy, hair_bun, mouth_smile, warm\"\n"
+           "The palette is the bare id ('warm', NOT 'palette_warm'). trait "
+           "lines are OPTIONAL — use ONLY ids from the traits list below or "
+           "omit the line entirely. Keep every look inside ONE style family "
+           "('round' or 'blocky'; 'any' parts fit both).\n" +
            castVocabulary(traitLibrary) +
            "At most " + std::to_string(kWorldGenMaxCharacters) +
            " characters. Reply with ONLY the JSON object.";
@@ -98,14 +102,15 @@ std::string buildVillagePrompt(const std::vector<TraitDef>& traitLibrary) {
            "\"pieces\": [{\"piece\": \"<piece id>\", \"x\": <tileX>, \"z\": "
            "<tileZ>}], \"npcs\": [{\"source\": \"character:gen_<name_slug>\", "
            "\"x\": <world x>, \"z\": <world z>, \"facing\": <deg>}]}, "
-           "\"characters\": [\"<persona file text>\", ...]}\n"
-           "name_slug = the character's name lowercased with spaces as '_'.\n"
-           "Every npc source must match one generated character.\n"
-           "Persona file text format:\n"
-           "name = <unique full name> (required)\nrole = <occupation>\n"
-           "traits = <adjectives>\nstyle = <speech>\nknowledge = <bounds>\n"
-           "position = <x>, <z>\ntrait = <trait id> (0-2 lines)\n"
-           "look = <body>, <head>, <eyes>, <hair>, <mouth>, <palette> (required)\n" +
+           "\"characters\": [{\"name\": \"...\", \"role\": \"...\", "
+           "\"traits\": \"...\", \"style\": \"...\", \"knowledge\": "
+           "\"...\", \"position\": \"<x>, <z>\", \"trait\": [], "
+           "\"look\": \"<body>, <head>, <eyes>, <hair>, <mouth>, "
+           "<palette>\"}]}\n"
+           "name_slug = the character's name lowercased with spaces as '_'. "
+           "Every npc source must match one generated character. \"trait\" "
+           "ids come VERBATIM from the traits list or use []. The look is "
+           "six bare ids, style-consistent.\n" +
            castVocabulary(traitLibrary) + mapVocabulary() +
            "At most " + std::to_string(kWorldGenMaxCharacters) +
            " characters. Reply with ONLY the JSON object.";
@@ -131,8 +136,55 @@ bool parseGeneratedCast(const std::string& json,
     }
     std::vector<GeneratedCharacter> cast;
     for (const auto& e : j["characters"]) {
-        if (!e.is_string()) return false;
-        cast.push_back({e.get<std::string>()});
+        if (e.is_string()) {  // raw persona text also accepted
+            cast.push_back({e.get<std::string>()});
+            continue;
+        }
+        // The preferred contract: one JSON OBJECT per character (models
+        // handle nested objects far better than newline-embedded strings —
+        // measured during #126's live smoke, where all three local models
+        // failed the string form identically). Converted here to the
+        // persona text the EXISTING parser validates, so the one-loader
+        // rule holds.
+        if (!e.is_object()) return false;
+        std::string text;
+        for (const char* key : {"name", "role", "traits", "style", "knowledge"}) {
+            if (e.contains(key) && e[key].is_string()) {
+                text += std::string(key) + " = " + e[key].get<std::string>() + "\n";
+            }
+        }
+        if (e.contains("position") && e["position"].is_string()) {
+            text += "position = " + e["position"].get<std::string>() + "\n";
+        }
+        if (e.contains("trait")) {
+            // Wrapper normalization only (never content repair): models
+            // sometimes emit the array AS a string — "[grumpy]".
+            const auto stripWrap = [](std::string s) {
+                while (!s.empty() && (s.front() == '[' || s.front() == '"' ||
+                                      s.front() == ' ')) {
+                    s.erase(s.begin());
+                }
+                while (!s.empty() && (s.back() == ']' || s.back() == '"' ||
+                                      s.back() == ' ')) {
+                    s.pop_back();
+                }
+                return s;
+            };
+            if (e["trait"].is_string()) {
+                const std::string id = stripWrap(e["trait"].get<std::string>());
+                if (!id.empty()) text += "trait = " + id + "\n";
+            } else if (e["trait"].is_array()) {
+                for (const auto& id : e["trait"]) {
+                    if (id.is_string()) {
+                        text += "trait = " + id.get<std::string>() + "\n";
+                    }
+                }
+            }
+        }
+        if (e.contains("look") && e["look"].is_string()) {
+            text += "look = " + e["look"].get<std::string>() + "\n";
+        }
+        cast.push_back({std::move(text)});
     }
     if (cast.empty() || cast.size() > kWorldGenMaxCharacters) return false;
     out = std::move(cast);
