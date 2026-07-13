@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "WorldGen.hpp"
 #include "WorldGenValidate.hpp"
 #include "doctest.h"
 
@@ -105,4 +106,40 @@ TEST_CASE("retry feedback renders every error verbatim") {
     CHECK(feedback.find("characters[0]: duplicate character name 'Kid'") !=
           std::string::npos);
     CHECK(feedback.find("ONLY the corrected JSON") != std::string::npos);
+}
+
+TEST_CASE("generation parsers: cast, village, ids, links (offline)") {
+    // Cast contract.
+    std::vector<GeneratedCharacter> cast;
+    REQUIRE(parseGeneratedCast(
+        R"({"characters": ["name = A\nlook = x\n", "name = B\n"]})", cast));
+    REQUIRE(cast.size() == 2);
+    CHECK(cast[0].personaText.find("name = A") != std::string::npos);
+    CHECK_FALSE(parseGeneratedCast(R"({"characters": []})", cast));   // empty
+    CHECK_FALSE(parseGeneratedCast(R"({"people": ["x"]})", cast));    // wrong key
+    CHECK_FALSE(parseGeneratedCast(R"({"characters": [7]})", cast));  // non-string
+
+    // Stable generated ids.
+    CHECK(generatedCharacterId("Old Salt Harbard") == "gen_old_salt_harbard");
+    CHECK(generatedCharacterId("Mo'ana O-Kai") == "gen_mo_ana_o_kai");
+
+    // Village contract + link cross-check.
+    SandboxMap map;
+    std::vector<GeneratedCharacter> villagers;
+    const char* village = R"({
+      "map": {"version": 1, "name": "cove", "tile": 8,
+              "pieces": [{"piece": "bench", "x": 0, "z": 0}],
+              "npcs": [{"source": "character:gen_old_salt_harbard",
+                        "x": 12.0, "z": 4.0, "facing": 180.0},
+                       {"source": "character:gen_nobody",
+                        "x": 14.0, "z": 4.0, "facing": 0.0}]},
+      "characters": ["name = Old Salt Harbard\n"]})";
+    REQUIRE(parseGeneratedVillage(village, map, villagers));
+    CHECK(map.name == "cove");
+    REQUIRE(villagers.size() == 1);
+    const auto links = validateVillageLinks(map, villagers);
+    REQUIRE(links.size() == 1);  // gen_nobody flagged, harbard linked
+    CHECK(links[0].where == "npcs[1]");
+    CHECK(links[0].reason.find("gen_nobody") != std::string::npos);
+    CHECK(links[0].reason.find("valid: gen_old_salt_harbard") != std::string::npos);
 }
