@@ -5,6 +5,7 @@
 // snapshots and routes chat through NetClient.
 #include "raylib.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -44,6 +45,7 @@
 #include "PersonaLoader.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
+#include "Trait.hpp"
 #include "Weapon.hpp"
 #include "World.hpp"
 
@@ -228,6 +230,16 @@ int main(int argc, char** argv) {
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
     for (const auto& err : personaErrors) std::cerr << "[llm_npc] persona error: " << err << "\n";
+
+    // Structured personality traits (issue #116): one shared library every
+    // NPC's prompt resolves against. Malformed files are named and skipped.
+    std::vector<std::string> traitErrors;
+    const std::vector<TraitDef> traitLibrary =
+        loadAllTraits(projectRoot / "traits", &traitErrors);
+    for (const auto& err : traitErrors) {
+        std::cerr << "[llm_npc] trait error: " << err << "\n";
+    }
+    std::cerr << "[llm_npc] loaded " << traitLibrary.size() << " traits\n";
     // ONE look per NPC, index-aligned with world.npcs(). Every NPC —
     // designer persona or player-created — draws from the same shared
     // composite parts pool the creator picks from (plan:
@@ -499,7 +511,20 @@ int main(int argc, char** argv) {
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             npcLastPos[i] = world.npcs()[i].position();
         }
-        for (Npc& npc : world.npcs()) refreshGossip(npc);
+        for (Npc& npc : world.npcs()) {
+            refreshGossip(npc);
+            npc.setTraitRegistry(&traitLibrary);
+            for (const std::string& id : npc.persona().traitIds) {
+                const bool known =
+                    std::any_of(traitLibrary.begin(), traitLibrary.end(),
+                                [&](const TraitDef& d) { return d.id == id; });
+                if (!known) {
+                    std::cerr << "[llm_npc] " << npc.persona().name
+                              << ": unknown trait '" << id
+                              << "' — ignored (stale-id demotion)\n";
+                }
+            }
+        }
     };
 
     if (!mapFile) {

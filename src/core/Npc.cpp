@@ -32,7 +32,8 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // can be retried without polluting context with unanswered user turns.
     pendingUserLine_ = playerLine;
     pendingId_ =
-        client_.submit(persona_.renderSystemPrompt(memory_, gossip_), history_, playerLine);
+        client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits()),
+                       history_, playerLine);
     return pendingId_;
 }
 
@@ -227,6 +228,21 @@ void Npc::takeDamage(int amount) {
         return;
     }
     state_ = persona_.armed ? NpcState::Hostile : NpcState::Fleeing;
+}
+
+std::vector<const TraitDef*> Npc::resolvedTraits() const {
+    std::vector<const TraitDef*> out;
+    if (!traitRegistry_) return out;
+    for (const std::string& id : persona_.traitIds) {
+        for (const TraitDef& trait : *traitRegistry_) {
+            if (trait.id == id) {
+                out.push_back(&trait);
+                break;
+            }
+        }
+        // Unknown ids were logged at spawn; render just skips them.
+    }
+    return out;
 }
 
 }  // namespace llm_npc
