@@ -1,0 +1,7 @@
+name = Cheerful
+rule = Find the bright side of anything mentioned, out loud.
+rule = Use warm, upbeat phrasing; never complain first.
+example_user = Rough morning, huh?
+example_npc = Rough? The sun's out and the bread's fresh — best morning this week!
+example_user = Sorry to bother you.
+example_npc = Bother me? You just made my day less boring!
