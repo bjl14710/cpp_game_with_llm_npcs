@@ -225,54 +225,16 @@ int main(int argc, char** argv) {
     // shared-character-library); the rigged pack models are no longer an
     // NPC source. Looks come from the persona's authored `look =` line,
     // or the deterministic per-name fallback when absent/stale.
+    // Per-NPC look registry, index-aligned with world.npcs(). POPULATION
+    // happens in spawnTownRoster below (extracted so sandbox play can
+    // repopulate the world through the same path — issue #110).
     std::vector<CharacterLook> npcLooks;
-    for (const auto& loaded : roster) {
-        Npc npc(loaded.persona, client);
-        npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
-        npc.setSchedule(loaded.schedule);
-        std::string lookWhy;
-        npcLooks.push_back(lookForPersona(loaded.persona.name,
-                                          loaded.hasLook ? &loaded.look : nullptr,
-                                          &lookWhy));
-        if (!lookWhy.empty()) {
-            std::cerr << "[llm_npc] " << loaded.id << ": authored look rejected ("
-                      << lookWhy << ") — using the deterministic fallback\n";
-        }
-        world.addNpc(std::move(npc));
-    }
-
-    // Player-created characters (plan: character-creator): the persona
-    // record goes through the SAME parser as designer .persona files; the
-    // stored look joins npcLooks like everyone else's. Bad rows were
-    // already skipped by loadAll.
     CharacterStore characterStore(projectRoot / "saves" / "characters.sqlite3");
-    for (const StoredCharacter& stored : characterStore.loadAll()) {
-        const PersonaParseResult parsed =
-            parsePersonaText(stored.personaText, stored.characterId);
-        if (!parsed.ok) {
-            std::cerr << "[llm_npc] stored persona error: " << parsed.error << "\n";
-            continue;
-        }
-        Npc npc(parsed.value.persona, client);
-        npc.setPlacement(parsed.value.position, parsed.value.facingDeg,
-                         parsed.value.spotId);
-        npc.setSchedule(parsed.value.schedule);
-        npcLooks.push_back(stored.look);
-        world.addNpc(std::move(npc));
-    }
-    std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs ("
-              << world.npcs().size() - roster.size() << " player-created)\n";
-
-    // Cross-session NPC memory: summaries persist in saves/ and are injected
-    // into each NPC's system prompt (plan: npc-memory-and-model).
+    // Cross-session NPC memory store (summaries injected during spawning).
     ConversationStore memoryStore(projectRoot / "saves" / "conversations.sqlite3");
-    for (Npc& npc : world.npcs()) {
-        const NpcMemory memory = memoryStore.load(npc.persona().name);
-        if (!memory.summary.empty()) npc.setMemory(memory.summary);
-    }
-    // History length at the last save, per NPC — new turns above this mark
-    // trigger a summarization request when the conversation closes.
-    std::vector<std::size_t> savedTurns(world.npcs().size(), 0);
+    // History length at the last save, per NPC — sized by
+    // resetNpcSideArrays below.
+    std::vector<std::size_t> savedTurns;
     // In-flight summary request id → NPC index it belongs to.
     std::unordered_map<std::uint64_t, int> summaryRoutes;
 
@@ -293,7 +255,6 @@ int main(int argc, char** argv) {
         }
         npc.setGossip(std::move(gossip));
     };
-    for (Npc& npc : world.npcs()) refreshGossip(npc);
 
     // PROPOSE step of propose->validate->commit: after a conversation, ask
     // the NPC's own model for at most two structured facts as strict JSON.
@@ -468,12 +429,72 @@ int main(int argc, char** argv) {
 
     // Arrest bookkeeping: catch fires once per latch (see hasCaughtPlayer).
     float jailSecondsLeft = 0.f;
-    std::vector<bool> wasCaught(world.npcs().size(), false);
+    std::vector<bool> wasCaught;
     // Previous frame's NPC positions, for walk-animation detection.
-    std::vector<Vec3> npcLastPos(world.npcs().size());
-    for (std::size_t i = 0; i < world.npcs().size(); ++i) {
-        npcLastPos[i] = world.npcs()[i].position();
-    }
+    std::vector<Vec3> npcLastPos;
+
+    // ---- World population (issue #110) -------------------------------
+    // The town roster and the per-NPC bookkeeping are (re)built through
+    // these two, so sandbox play can swap maps via world.loadCity and
+    // come back without leaving stale state anywhere.
+
+    // Spawns the shipped personas + every stored created character into
+    // the CURRENT world, with looks and persisted memories.
+    const auto spawnTownRoster = [&]() {
+        npcLooks.clear();
+        for (const auto& loaded : roster) {
+            Npc npc(loaded.persona, client);
+            npc.setPlacement(loaded.position, loaded.facingDeg, loaded.spotId);
+            npc.setSchedule(loaded.schedule);
+            std::string lookWhy;
+            npcLooks.push_back(lookForPersona(loaded.persona.name,
+                                              loaded.hasLook ? &loaded.look : nullptr,
+                                              &lookWhy));
+            if (!lookWhy.empty()) {
+                std::cerr << "[llm_npc] " << loaded.id << ": authored look rejected ("
+                          << lookWhy << ") — using the deterministic fallback\n";
+            }
+            world.addNpc(std::move(npc));
+        }
+        // Player-created characters (plan: character-creator): the persona
+        // record goes through the SAME parser as designer .persona files;
+        // the stored look joins npcLooks like everyone else's.
+        for (const StoredCharacter& stored : characterStore.loadAll()) {
+            const PersonaParseResult parsed =
+                parsePersonaText(stored.personaText, stored.characterId);
+            if (!parsed.ok) {
+                std::cerr << "[llm_npc] stored persona error: " << parsed.error << "\n";
+                continue;
+            }
+            Npc npc(parsed.value.persona, client);
+            npc.setPlacement(parsed.value.position, parsed.value.facingDeg,
+                             parsed.value.spotId);
+            npc.setSchedule(parsed.value.schedule);
+            npcLooks.push_back(stored.look);
+            world.addNpc(std::move(npc));
+        }
+        for (Npc& npc : world.npcs()) {
+            const NpcMemory memory = memoryStore.load(npc.persona().name);
+            if (!memory.summary.empty()) npc.setMemory(memory.summary);
+        }
+        std::cerr << "[llm_npc] loaded " << world.npcs().size() << " NPCs ("
+                  << world.npcs().size() - roster.size() << " player-created)\n";
+    };
+
+    // Rebuilds every per-NPC side array + gossip block for the CURRENT
+    // world contents. Call after ANY repopulation.
+    const auto resetNpcSideArrays = [&]() {
+        savedTurns.assign(world.npcs().size(), 0);
+        wasCaught.assign(world.npcs().size(), false);
+        npcLastPos.resize(world.npcs().size());
+        for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+            npcLastPos[i] = world.npcs()[i].position();
+        }
+        for (Npc& npc : world.npcs()) refreshGossip(npc);
+    };
+
+    spawnTownRoster();
+    resetNpcSideArrays();
 
     // Character creator: persists BOTH records (independently) and spawns
     // the new citizen immediately. Declared after the per-NPC bookkeeping

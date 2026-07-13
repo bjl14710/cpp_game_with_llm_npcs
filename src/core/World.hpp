@@ -33,6 +33,14 @@ class World {
 
     const City& city() const { return city_; }
 
+    // Swaps in a different city and clears every inhabitant — the seam
+    // that makes town <-> sandbox-map switching possible. World cannot be
+    // reassigned (Npc holds an LlmClient&), so contents swap IN PLACE.
+    // The world bus (state_) deliberately survives: facts, knowledge and
+    // the clock are session state, not map state. Callers must respawn
+    // NPCs and rebuild their per-NPC bookkeeping afterwards.
+    void loadCity(City city);
+
     // The world bus: shared facts every system reads instead of keeping a
     // private copy — the clock lives here (see WorldState).
     WorldState&       state()       { return state_; }

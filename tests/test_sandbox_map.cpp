@@ -2,8 +2,10 @@
 // skipped stubs land with their steps (#110 seam, #113 NPC spawning).
 #include <string>
 
+#include "LlmClient.hpp"
 #include "Math.hpp"
 #include "SandboxMap.hpp"
+#include "World.hpp"
 #include "doctest.h"
 
 using namespace llm_npc;
@@ -126,10 +128,39 @@ TEST_CASE("buildCity compiles pieces to native collision") {
     CHECK(open.z == doctest::Approx(42.f));
 }
 
-TEST_CASE("town <-> sandbox <-> town round-trip" * doctest::skip()) {
-    // Step 2 (#110). TODO(sandbox): World::loadCity swaps city + clears
-    // npcs/projectiles; reloading makeDowntown restores collision; side
-    // arrays rebuilt by the extracted spawn lambdas.
+TEST_CASE("town <-> sandbox <-> town round-trip via loadCity") {
+    // Step 2 (#110). World swaps contents in place (it cannot be
+    // reassigned — NPCs hold the client reference); the world bus
+    // deliberately survives the swap. Main-side array rebuilding is
+    // covered by the extracted resetNpcSideArrays (smoke-verified).
+    LlmClient client(LlmConfig{/*host=*/"127.0.0.1", /*port=*/1});
+    World world(City::makeDowntown());
+    Persona p;
+    p.name = "Roundtrip Rita";
+    Npc npc(p, client);
+    npc.setPlacement(Vec3{0.f, 0.f, 20.f}, 0.f, "plaza");
+    world.addNpc(std::move(npc));
+    REQUIRE(world.npcs().size() == 1);
+    CHECK(world.city().hasStreets());
+    const std::size_t townBuildings = world.city().buildings().size();
+    world.state().setTimeOfDayHours(15.0);  // bus state must survive swaps
+
+    // Into the sandbox map: buildings swap, inhabitants clear.
+    world.loadCity(buildCity(sampleMap()));
+    CHECK_FALSE(world.city().hasStreets());
+    CHECK(world.city().buildings().size() == 2);
+    CHECK(world.npcs().empty());
+    CHECK(world.state().timeOfDayHours() == doctest::Approx(15.0));
+    // Collision is live on the new city (into the placed bakery).
+    const Vec3 blocked = world.city().resolveMovement(
+        Vec3{-16.f, 0.f, -7.f}, Vec3{-16.f, 0.f, -9.f}, 0.45f);
+    CHECK(blocked.z == doctest::Approx(-7.f));
+
+    // And back to town: geometry, streets, and collision all restore.
+    world.loadCity(City::makeDowntown());
+    CHECK(world.city().hasStreets());
+    CHECK(world.city().buildings().size() == townBuildings);
+    CHECK(world.city().findBuilding("bakery") != nullptr);
 }
 
 TEST_CASE("placed NPCs spawn with stored persona and look, schedules off" *
