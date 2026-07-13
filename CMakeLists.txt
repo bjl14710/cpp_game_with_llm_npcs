@@ -32,6 +32,7 @@ add_library(llm_npc_core STATIC
     src/core/DialogueSession.cpp
     src/core/FactStore.cpp
     src/core/Gossip.cpp
+    src/core/GroupSession.cpp
     src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
     src/core/PieceCatalog.cpp
