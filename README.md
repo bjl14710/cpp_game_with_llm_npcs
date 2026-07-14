@@ -6,7 +6,11 @@ press `T` and talk to them about anything. Each NPC has their own personality,
 their own knowledge of the city (and pointed ignorance of everything else),
 and remembers your conversation.
 
-Powered locally by [Ollama](https://ollama.com) — no cloud, no API key.
+Runs locally on [Ollama](https://ollama.com) out of the box — no cloud, no API
+key. It can *optionally* use cloud models (Claude, GPT, Gemini) through a single
+[OpenRouter](https://openrouter.ai) key; see [Configuration](#configuration).
+Where this is all heading — a build-your-own-characters product — is sketched in
+[docs/VISION.md](docs/VISION.md).
 
 ## Quick start (Windows)
 
@@ -25,7 +29,8 @@ Powered locally by [Ollama](https://ollama.com) — no cloud, no API key.
 3. **Fetch the art packs** (once): `bash tools/fetch_assets.sh` — two CC0
    low-poly packs, pinned and checksummed (see `assets/LICENSES.md`).
 
-4. **Double-click `run.bat`** (or run `./run.ps1`). It checks Ollama is up,
+4. **Double-click `run.bat`** (or run `./run.ps1`; on macOS, `run.command` or
+   `./run.sh`). It starts Ollama if needed, pulls the model on first run,
    builds (CMake fetches raylib automatically), and launches the game.
 
 ## Playing
@@ -88,8 +93,16 @@ the hardware store may have opinions.
 
 ## Configuration
 
-- `config/llm.cfg` — model, host/port, temperature, `keep_alive` (latency).
-  Any model you have pulled in Ollama works; smaller = snappier.
+- `config/llm.cfg` — provider, model, host/port, temperature, `keep_alive`
+  (latency). Any model you have pulled in Ollama works; smaller = snappier. Pick
+  a model in-game from the pause menu (Esc → Model) too.
+- **Cloud models (optional).** Set `provider = openrouter` and a `model` like
+  `anthropic/claude-haiku-4.5` in `config/llm.cfg`, then provide an OpenRouter
+  key via the `OPENROUTER_API_KEY` environment variable or a `config/secrets.cfg`
+  (copy `config/secrets.cfg.example`; it's gitignored). Cloud needs an
+  OpenSSL-enabled build (CMake auto-detects OpenSSL; on macOS `brew install
+  openssl@3`). The same code path also works against Ollama's OpenAI shim
+  (`base_url = http://localhost:11434/v1`) with no key and no TLS.
 - `config/keybindings.cfg` — key bindings (also editable in-game).
 - `personas/*.persona` — the characters themselves. Edit freely; the file
   format is documented in [docs/DEVELOPER.md](docs/DEVELOPER.md).
