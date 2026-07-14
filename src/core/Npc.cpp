@@ -32,7 +32,8 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // can be retried without polluting context with unanswered user turns.
     pendingUserLine_ = playerLine;
     pendingId_ =
-        client_.submit(persona_.renderSystemPrompt(memory_, gossip_), history_, playerLine);
+        client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits()),
+                       history_, playerLine);
     return pendingId_;
 }
 
@@ -69,6 +70,16 @@ void Npc::applyAction(NpcAction action) {
     // Only police can actually arrest; when the model has a civilian try
     // anyway, treat it as calling for the police instead.
     if (action == NpcAction::Arrest && !persona_.police) action = NpcAction::CallPolice;
+
+    // Mood/combat gate on following (issue #120): an NPC who is hostile,
+    // fleeing, or plain angry at the player does not fall into step with
+    // them, whatever the model emitted — the VALIDATE step of
+    // propose-validate-commit, same as the civilian-arrest rule above.
+    if (action == NpcAction::Follow &&
+        (state_ == NpcState::Hostile || state_ == NpcState::Fleeing ||
+         mood_ == NpcMood::Angry)) {
+        action = NpcAction::None;
+    }
 
     lastAction_ = action;  // remembered for one turn so the UI can narrate it
     switch (action) {
@@ -227,6 +238,21 @@ void Npc::takeDamage(int amount) {
         return;
     }
     state_ = persona_.armed ? NpcState::Hostile : NpcState::Fleeing;
+}
+
+std::vector<const TraitDef*> Npc::resolvedTraits() const {
+    std::vector<const TraitDef*> out;
+    if (!traitRegistry_) return out;
+    for (const std::string& id : persona_.traitIds) {
+        for (const TraitDef& trait : *traitRegistry_) {
+            if (trait.id == id) {
+                out.push_back(&trait);
+                break;
+            }
+        }
+        // Unknown ids were logged at spawn; render just skips them.
+    }
+    return out;
 }
 
 }  // namespace llm_npc

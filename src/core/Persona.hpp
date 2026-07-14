@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "Trait.hpp"
+
 namespace llm_npc {
 
 // A Persona is the static identity of an NPC. It is rendered into a single
@@ -12,6 +14,12 @@ struct Persona {
     std::string name;                 // "Companion", "Jim", "Jane #47"
     std::string role;                 // "traveling companion", "pharmacist"
     std::vector<std::string> traits;  // "curious", "soft-spoken", ...
+    // STRUCTURED traits (issue #116): ids into the traits/*.trait library,
+    // from repeated `trait =` persona keys. Additive — the free-text
+    // `traits` adjectives above stay as flavor. Composition order is a
+    // TESTED contract: identity < trait rules+examples < memory < trait
+    // reinforcement < action protocol.
+    std::vector<std::string> traitIds;
     std::string speakingStyle;        // "short sentences, 1-3 per reply"
     std::string knowledgeBoundary;    // what they do / do not know
     std::string extraDirectives;      // free-form constraints
@@ -32,8 +40,19 @@ struct Persona {
     // identically to the plain prompt.
     std::string renderSystemPrompt(const std::string& memory,
                                    const std::string& gossip) const {
+        return renderSystemPrompt(memory, gossip, {});
+    }
+
+    // Full assembly with resolved trait definitions (unknown traitIds were
+    // demoted with a log at spawn; render simply composes what it is
+    // handed). Rules and examples land BEFORE the memory summary, and a
+    // short reinforcement AFTER it, so a long remembered history cannot
+    // dilute the personality (the anti-drift contract, pinned by test).
+    std::string renderSystemPrompt(const std::string& memory,
+                                   const std::string& gossip,
+                                   const std::vector<const TraitDef*>& traitDefs) const {
         std::string prompt = renderSystemPrompt();
-        std::string section;
+        std::string section = renderTraitBlock(traitDefs);
         if (!memory.empty()) {
             section += "What you remember from earlier meetings with this player: " +
                        memory + "\n";
@@ -42,6 +61,7 @@ struct Persona {
             section += "Things you have heard around town (bring them up when "
                        "relevant): " + gossip + "\n";
         }
+        section += renderTraitReinforcement(traitDefs);
         if (section.empty()) return prompt;
         const auto at = prompt.find("ACTIONS: ");
         if (at == std::string::npos) return prompt + section;

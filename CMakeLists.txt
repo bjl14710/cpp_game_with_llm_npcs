@@ -32,10 +32,15 @@ add_library(llm_npc_core STATIC
     src/core/DialogueSession.cpp
     src/core/FactStore.cpp
     src/core/Gossip.cpp
+    src/core/GroupSession.cpp
     src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
     src/core/PieceCatalog.cpp
+    src/core/RatingLog.cpp
     src/core/SandboxMap.cpp
+    src/core/Trait.cpp
+    src/core/WorldGen.cpp
+    src/core/WorldGenValidate.cpp
     src/core/LlmClient.cpp
     src/core/NetClient.cpp
     src/core/NetFraming.cpp
@@ -81,3 +86,6 @@ target_link_libraries(cpp_game_with_llm_npcs
 # (tools/bench_npc_models.py) from the same code path the game uses.
 add_executable(persona_prompt tools/persona_prompt.cpp)
 target_link_libraries(persona_prompt PRIVATE llm_npc_core)
+
+add_executable(worldgen_cli tools/worldgen_cli.cpp)
+target_link_libraries(worldgen_cli PRIVATE llm_npc_core)
