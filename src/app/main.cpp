@@ -45,6 +45,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "RatingLog.hpp"
+#include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
 #include "Trait.hpp"
@@ -484,6 +485,9 @@ int main(int argc, char** argv) {
         // record goes through the SAME parser as designer .persona files;
         // the stored look joins npcLooks like everyone else's.
         for (const StoredCharacter& stored : characterStore.loadAll()) {
+            // Generated village characters (gen_*) belong to their maps,
+            // not the town roster (issue #129).
+            if (stored.characterId.rfind("gen_", 0) == 0) continue;
             const PersonaParseResult parsed =
                 parsePersonaText(stored.personaText, stored.characterId);
             if (!parsed.ok) {
@@ -742,6 +746,30 @@ int main(int argc, char** argv) {
     sandboxHooks.onOpen = [&](const std::string& stem) {
         sandboxOpenRequested = true;
         sandboxOpenStem = stem;
+    };
+    // LLM map generation (issue #129): an async generate-validate-retry
+    // chain over internal requests; results save as a normal map file and
+    // open in EDIT mode — always a draft the player owns, never locked.
+    std::uint64_t worldgenRequestId = 0;
+    int worldgenAttempt = 0;
+    std::string worldgenDescription;
+    std::string worldgenStatus;         // HUD line
+    float worldgenStatusTtl = 0.f;
+    const auto worldgenSay = [&](const std::string& s) {
+        worldgenStatus = s;
+        worldgenStatusTtl = 6.f;
+        std::cerr << "[llm_npc] worldgen: " << s << "\n";
+    };
+    const auto submitWorldgen = [&](const std::string& user) {
+        worldgenRequestId = client.submit(buildVillagePrompt(traitLibrary), {}, user);
+    };
+    sandboxHooks.onGenerate = [&](const std::string& description) -> std::string {
+        if (worldgenRequestId != 0) return "Already generating...";
+        worldgenDescription = description;
+        worldgenAttempt = 1;
+        submitWorldgen(description);
+        worldgenSay("Generating '" + description.substr(0, 40) + "'...");
+        return "Generating... (watch the status line)";
     };
     menu.setSandbox(sandboxHooks);
     {
@@ -1220,6 +1248,7 @@ int main(int argc, char** argv) {
                 case MenuResult::None:
                     break;
             }
+        }
             if (sandboxOpenRequested) {
                 sandboxOpenRequested = false;
                 SandboxMap doc;
@@ -1264,7 +1293,6 @@ int main(int argc, char** argv) {
                     EnableCursor();
                 }
             }
-        }
         if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
 
         // The ONE world clock advances here; every time-aware system below
@@ -1477,6 +1505,82 @@ int main(int argc, char** argv) {
         }
         for (const auto& reply : client.drainReplies()) {
             if (chatRouter && chatRouter->routeReply(reply)) continue;
+            // World generation chain (issue #129): validate, retry with
+            // the errors, and on success persist + open in the editor.
+            if (worldgenRequestId != 0 && reply.id == worldgenRequestId) {
+                worldgenRequestId = 0;
+                std::string json;
+                SandboxMap genMap;
+                std::vector<GeneratedCharacter> genCast;
+                std::vector<MapError> mapErrors;
+                std::vector<CastError> castErrors;
+                if (!reply.ok) {
+                    worldgenSay("Generation failed: " + reply.errorMessage);
+                    worldgenAttempt = 0;
+                    continue;
+                }
+                if (!extractJsonObject(reply.content, json)) {
+                    mapErrors.push_back({"output", "no JSON object found"});
+                } else if (!parseGeneratedVillage(json, genMap, genCast)) {
+                    mapErrors.push_back({"output",
+                                         "JSON shape is not {\"map\": {...}, "
+                                         "\"characters\": [...]}"});
+                } else {
+                    mapErrors = validateMap(genMap);
+                    castErrors = validateCast(genCast, traitLibrary);
+                    const auto links = validateVillageLinks(genMap, genCast);
+                    mapErrors.insert(mapErrors.end(), links.begin(), links.end());
+                }
+                if (!mapErrors.empty() || !castErrors.empty()) {
+                    if (worldgenAttempt < kWorldGenMaxAttempts) {
+                        ++worldgenAttempt;
+                        submitWorldgen(worldgenDescription + "\n\n" +
+                                       renderRetryFeedback(mapErrors, castErrors));
+                        worldgenSay("Attempt " + std::to_string(worldgenAttempt) +
+                                    "/" + std::to_string(kWorldGenMaxAttempts) +
+                                    "...");
+                    } else {
+                        std::string first = mapErrors.empty()
+                                                ? castErrors.front().reason
+                                                : mapErrors.front().reason;
+                        worldgenSay("Generation failed after " +
+                                    std::to_string(kWorldGenMaxAttempts) +
+                                    " attempts: " + first);
+                        worldgenAttempt = 0;
+                    }
+                    continue;
+                }
+                // Valid: persist the cast (gen_ ids never spawn in town —
+                // spawnTownRoster filters them) and the map, then open it
+                // in EDIT mode via the normal path.
+                for (const GeneratedCharacter& character : genCast) {
+                    const PersonaParseResult parsed =
+                        parsePersonaText(character.personaText, "generated");
+                    if (!parsed.ok) continue;  // validateCast already passed
+                    const std::string genId =
+                        generatedCharacterId(parsed.value.persona.name);
+                    characterStore.savePersona(genId, character.personaText);
+                    if (parsed.value.hasLook) {
+                        characterStore.saveLook(genId, parsed.value.look);
+                    }
+                }
+                std::string slug = "gen-1";
+                for (int n = 1; fs::exists(mapsDir / (slug + ".json")); ++n) {
+                    slug = "gen-" + std::to_string(n);
+                }
+                std::error_code ec;
+                fs::create_directories(mapsDir, ec);
+                {
+                    std::ofstream out(mapsDir / (slug + ".json"));
+                    out << genMap.toJson();
+                }
+                worldgenSay("Generated '" + genMap.name + "' -> " + slug +
+                            " (opening editor)");
+                worldgenAttempt = 0;
+                sandboxOpenRequested = true;
+                sandboxOpenStem = slug;
+                continue;
+            }
             // Summary notes: remember + persist, never shown in a dialog.
             if (const auto summary = summaryRoutes.find(reply.id);
                 summary != summaryRoutes.end()) {
@@ -1767,6 +1871,10 @@ int main(int argc, char** argv) {
         renderer.endFrame();
 
         // ---- 2D overlay ----
+        if (worldgenStatusTtl > 0.f) {
+            worldgenStatusTtl -= dt;
+            drawCenteredHudText(worldgenStatus, 16, 40.f);
+        }
         if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
             session.npcIndex() < static_cast<int>(world.npcs().size())) {
             const auto& ratedHistory =
