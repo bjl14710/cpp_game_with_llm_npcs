@@ -706,14 +706,36 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // Death pose: the figure tips onto its back (a rigid tip-over, the
     // composite counterpart of the pack models' death clip), lifted a
     // little so the torso doesn't sink through the ground slab.
-    const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
-
     // Mesh heads wear a flat face DECAL (issue #140) instead of primitive
     // eye/mouth marks, and their mood lives ON that face — no emote
     // billboard for this family.
     const PartDef* headPart = findPart(look.part(PartCategory::Head));
     const bool meshFace = headPart && !headPart->meshName.empty() &&
                           assets_.partMeshes(headPart->meshName) != nullptr;
+
+    // Tier-B locomotion (issue #142): CPU-skin each modular file this
+    // figure draws from (body and head may come from different files) to
+    // Idle or Walk at this figure's clock. Files share one animation
+    // library, so a mixed head keeps riding its neck. The dead freeze at
+    // Idle frame 0 under the rigid tip-over; rigged clips replace the
+    // procedural bob for mesh figures (bob stays for core primitives).
+    std::string stems[2];
+    int stemCount = 0;
+    for (const PlacedPart& placed : assembled.parts) {
+        if (placed.part->meshName.empty()) continue;
+        const std::string stem =
+            placed.part->meshName.substr(0, placed.part->meshName.find(':'));
+        const bool seen = stemCount > 0 && (stems[0] == stem ||
+                                            (stemCount > 1 && stems[1] == stem));
+        if (!seen && stemCount < 2) stems[stemCount++] = stem;
+    }
+    for (int i = 0; i < stemCount; ++i) {
+        assets_.poseModular(stems[i], walking && !dead, dead ? 0.f : phase);
+    }
+    const bool meshFigure = stemCount > 0;
+    const float bob = (walking && !dead && !meshFigure)
+                          ? std::fabs(std::sin(phase * 7.f)) * 0.05f
+                          : 0.f;
 
     // Character surfaces band through the cel shader (issue #138); the
     // frame's fog shader is restored before the emote billboard below.

@@ -4,6 +4,8 @@
 #include <fstream>
 #include <iostream>
 
+#include "raymath.h"
+
 #include "CharacterParts.hpp"
 #include "FaceTexture.hpp"
 #include "json.hpp"
@@ -341,6 +343,9 @@ Assets::~Assets() {
     }
     for (auto& [stem, model] : models_) UnloadModel(model);
     for (auto& [stem, model] : modularModels_) UnloadModel(model);
+    for (auto& [stem, entry] : modularClips_) {
+        if (entry.clips) UnloadModelAnimations(entry.clips, entry.count);
+    }
     for (auto& character : characters_) {
         if (character.clips) UnloadModelAnimations(character.clips, character.clipCount);
         UnloadModel(character.model);
@@ -405,6 +410,113 @@ void Assets::loadCharacter(const std::string& stem) {
     characters_.push_back(character);
 }
 
+namespace {
+
+// raylib's glTF path assumes skinned vertices are stored in the NODE-REST
+// pose (that is what it puts in model.bindPose) and never reads the skin's
+// inverse_bind_matrices — but the Quaternius pack stores vertices in the
+// TRUE bind pose (T-pose arms) with an arms-down rest skeleton. The result
+// is the #139-noted "shoulders never move" freeze: rest-relative deltas
+// are computed against the wrong base. Re-baking every skinned vertex and
+// normal into rest space once at load (v' = sum of w * restGlobal *
+// inverseBind * v) fixes both tiers at the root: the static Tier-A stance
+// becomes the natural arms-down rest, and UpdateModelAnimation's deltas
+// become correct so clips play as authored (issue #142).
+void rebakeVerticesToRestPose(Model& model, const nlohmann::json& gltf) {
+    if (model.boneCount <= 0 || model.bindPose == nullptr) return;
+    if (!gltf.contains("skins") || gltf["skins"].empty() ||
+        !gltf["skins"][0].contains("inverseBindMatrices") ||
+        !gltf.contains("buffers") || gltf["buffers"].empty()) {
+        return;
+    }
+    const std::string uri = gltf["buffers"][0].value("uri", "");
+    const auto comma = uri.find(',');
+    if (uri.rfind("data:", 0) != 0 || comma == std::string::npos) return;
+    int rawSize = 0;
+    unsigned char* raw = DecodeDataBase64(
+        reinterpret_cast<const unsigned char*>(uri.c_str() + comma + 1), &rawSize);
+    if (raw == nullptr) return;
+
+    const auto& accessor =
+        gltf["accessors"][gltf["skins"][0]["inverseBindMatrices"].get<int>()];
+    const auto& view = gltf["bufferViews"][accessor["bufferView"].get<int>()];
+    const std::size_t offset = static_cast<std::size_t>(
+        view.value("byteOffset", 0) + accessor.value("byteOffset", 0));
+    const int count = accessor.value("count", 0);
+    if (count < model.boneCount ||
+        offset + static_cast<std::size_t>(count) * 16 * sizeof(float) >
+            static_cast<std::size_t>(rawSize)) {
+        MemFree(raw);
+        return;
+    }
+
+    // skinMat = restGlobal * inverseBind, per joint. glTF matrices are
+    // column-major; the element shuffle below is the same one raylib's own
+    // loader applies.
+    std::vector<Matrix> skin(static_cast<std::size_t>(model.boneCount));
+    for (int i = 0; i < model.boneCount; ++i) {
+        float m[16];
+        std::memcpy(m, raw + offset + static_cast<std::size_t>(i) * 16 * sizeof(float),
+                    sizeof(m));
+        const Matrix ibm = {m[0], m[4], m[8],  m[12], m[1], m[5], m[9],  m[13],
+                            m[2], m[6], m[10], m[14], m[3], m[7], m[11], m[15]};
+        const Transform& rest = model.bindPose[i];
+        const Matrix restGlobal = MatrixMultiply(
+            MatrixMultiply(MatrixScale(rest.scale.x, rest.scale.y, rest.scale.z),
+                           QuaternionToMatrix(rest.rotation)),
+            MatrixTranslate(rest.translation.x, rest.translation.y,
+                            rest.translation.z));
+        skin[static_cast<std::size_t>(i)] = MatrixMultiply(ibm, restGlobal);
+    }
+    MemFree(raw);
+
+    for (int m = 0; m < model.meshCount; ++m) {
+        Mesh& mesh = model.meshes[m];
+        if (mesh.boneWeights == nullptr || mesh.boneIds == nullptr) continue;
+        for (int v = 0; v < mesh.vertexCount; ++v) {
+            const Vector3 p = {mesh.vertices[v * 3], mesh.vertices[v * 3 + 1],
+                               mesh.vertices[v * 3 + 2]};
+            Vector3 outP{};
+            Vector3 outN{};
+            float total = 0.f;
+            for (int j = 0; j < 4; ++j) {
+                const float w = mesh.boneWeights[v * 4 + j];
+                if (w == 0.f) continue;
+                const Matrix& sm = skin[mesh.boneIds[v * 4 + j]];
+                outP = Vector3Add(outP, Vector3Scale(Vector3Transform(p, sm), w));
+                if (mesh.normals != nullptr) {
+                    Matrix rot = sm;  // rotation-only for normals
+                    rot.m12 = rot.m13 = rot.m14 = 0.f;
+                    const Vector3 n = {mesh.normals[v * 3], mesh.normals[v * 3 + 1],
+                                       mesh.normals[v * 3 + 2]};
+                    outN = Vector3Add(outN, Vector3Scale(Vector3Transform(n, rot), w));
+                }
+                total += w;
+            }
+            if (total <= 0.f) continue;
+            mesh.vertices[v * 3] = outP.x / total;
+            mesh.vertices[v * 3 + 1] = outP.y / total;
+            mesh.vertices[v * 3 + 2] = outP.z / total;
+            if (mesh.normals != nullptr) {
+                const Vector3 n = Vector3Normalize(outN);
+                mesh.normals[v * 3] = n.x;
+                mesh.normals[v * 3 + 1] = n.y;
+                mesh.normals[v * 3 + 2] = n.z;
+            }
+        }
+        // Push the re-baked data to the GPU buffers LoadModel uploaded.
+        UpdateMeshBuffer(mesh, 0, mesh.vertices,
+                         mesh.vertexCount * 3 * static_cast<int>(sizeof(float)), 0);
+        if (mesh.normals != nullptr) {
+            UpdateMeshBuffer(mesh, 2, mesh.normals,
+                             mesh.vertexCount * 3 * static_cast<int>(sizeof(float)),
+                             0);
+        }
+    }
+}
+
+}  // namespace
+
 void Assets::loadModularParts() {
     // glTF node names -> raylib mesh index ranges, per file stem. raylib
     // flattens glTF meshes PER PRIMITIVE in file order, so glTF mesh i's
@@ -466,22 +578,21 @@ void Assets::loadModularParts() {
                     model.materials[i].shader = celLoaded_ ? celShader_ : fogShader_;
                 }
             }
-            // Tier A stance (plan: static assembly, no per-frame animation):
-            // pose the model ONCE at load to frame 0 of its Idle clip, so
-            // static part meshes stand naturally instead of in the glTF
-            // bind pose (T-pose arms). All four files share one skeleton
-            // and animation library, so mixed heads/bodies pose in
-            // agreement. Anchoring keeps using the bind-pose bounds — feet
-            // stay at y=0 and the neck line doesn't move at frame 0.
+            // Animation library for Tier-B locomotion (issue #142), kept
+            // for the life of the Assets; playback happens per figure via
+            // poseModular. All four files share one library, so mixed
+            // heads/bodies pose in agreement.
             int clipCount = 0;
             ModelAnimation* clips = LoadModelAnimations(path.c_str(), &clipCount);
+            ModularClips entry;
+            entry.clips = clips;
+            entry.count = clipCount;
             for (int i = 0; i < clipCount; ++i) {
-                if (std::string(clips[i].name) == "Idle") {
-                    UpdateModelAnimation(model, clips[i], 0);
-                    break;
-                }
+                const std::string clipName = clips[i].name;
+                if (clipName == "Idle") entry.idle = i;
+                else if (clipName == "Walk") entry.walk = i;
             }
-            if (clips) UnloadModelAnimations(clips, clipCount);
+            modularClips_.emplace(stem, entry);
             modelIt = modularModels_.emplace(stem, model).first;
             meshRemaps_.emplace(stem, std::move(remap));
 
@@ -508,6 +619,7 @@ void Assets::loadModularParts() {
                                                     nlohmann::json::array())
                                              .size())};
                 }
+                rebakeVerticesToRestPose(modelIt->second, j);
             }
         }
 
@@ -557,6 +669,20 @@ void Assets::loadModularParts() {
 const Assets::PartMeshes* Assets::partMeshes(const std::string& meshName) const {
     const auto it = partMeshes_.find(meshName);
     return it != partMeshes_.end() ? &it->second : nullptr;
+}
+
+void Assets::poseModular(const std::string& stem, bool walking, float timeSec) {
+    const auto modelIt = modularModels_.find(stem);
+    const auto clipIt = modularClips_.find(stem);
+    if (modelIt == modularModels_.end() || clipIt == modularClips_.end()) return;
+    const int clip = walking ? clipIt->second.walk : clipIt->second.idle;
+    if (clip < 0 || clip >= clipIt->second.count) return;
+    const ModelAnimation& animation = clipIt->second.clips[clip];
+    // Same ~60 samples/second convention the rigged path uses.
+    const int frame = animation.frameCount > 0
+                          ? static_cast<int>(timeSec * 60.f) % animation.frameCount
+                          : 0;
+    UpdateModelAnimation(modelIt->second, animation, frame);
 }
 
 const Assets::CharacterAsset* Assets::characterFor(int variantSeed, bool police) const {

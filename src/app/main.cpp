@@ -1805,11 +1805,13 @@ int main(int argc, char** argv) {
                 // the creator picks from (plan: shared-character-library).
                 // A gesture drives the bob so a talking NPC still reads as
                 // animated (composites have no gesture clip).
+                // Per-NPC clock offset so mesh-family idle/walk cycles
+                // don't play in eerie unison across the plaza (#142).
                 renderer.drawCompositeCharacter(
                     npcLooks[i], npc.position(), npc.facingDeg(),
                     walking || npc.pose() != NpcAction::None,
-                    static_cast<float>(GetTime()), face,
-                    npc.combatState() == NpcState::Dead);
+                    static_cast<float>(GetTime()) + static_cast<float>(i) * 1.618f,
+                    face, npc.combatState() == NpcState::Dead);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a

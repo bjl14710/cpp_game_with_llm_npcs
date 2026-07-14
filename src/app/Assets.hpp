@@ -148,6 +148,13 @@ class Assets {
     };
     const PartMeshes* partMeshes(const std::string& meshName) const;
 
+    // Tier-B locomotion (issue #142): CPU-skins one modular pack model to
+    // its Idle or Walk clip at `timeSec` (60 samples/second, looped). The
+    // renderer calls this per figure for each file its parts draw from —
+    // every file shares one animation library, so a mixed head/body pose
+    // in agreement. Unknown stem or missing clip is a safe no-op.
+    void poseModular(const std::string& stem, bool walking, float timeSec);
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -192,6 +199,15 @@ class Assets {
     std::unordered_map<std::string, Model> modularModels_;
     std::unordered_map<std::string, std::vector<int>> meshRemaps_;
     std::unordered_map<std::string, PartMeshes> partMeshes_;
+
+    // Per-file animation library for the modular pack (issue #142).
+    struct ModularClips {
+        ModelAnimation* clips = nullptr;
+        int count = 0;
+        int idle = -1;  // "Idle"
+        int walk = -1;  // "Walk"
+    };
+    std::unordered_map<std::string, ModularClips> modularClips_;
 
     // One baked emote per NpcFace value, indexed by the enum.
     Texture2D faces_[6] = {};
