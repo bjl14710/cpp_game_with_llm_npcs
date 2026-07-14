@@ -13,3 +13,6 @@ bench/out/
 
 # Visual-QA screenshot sets (generated per run by the visual-qa agent)
 docs/qa/screenshots/
+
+# Local cloud API key (never commit secrets); see config/secrets.cfg.example
+config/secrets.cfg

@@ -1,5 +1,8 @@
 # Developer Guide
 
+> Long-term product direction — cloud models, the in-game character creator,
+> cost model, and monetization — lives in [VISION.md](VISION.md).
+
 ## Architecture: core / app split
 
 The codebase is split so that all game logic builds and tests on a headless
@@ -12,7 +15,7 @@ external/   Vendored single-header deps: httplib, nlohmann/json, doctest.
 tests/      doctest suites + a plain-make runner for cmake-less containers.
 personas/   One .persona file per NPC (identity + world placement).
 assets/     CC0 model packs, fetched by tools/fetch_assets.sh (gitignored).
-config/     llm.cfg (model/host/latency) and keybindings.cfg.
+config/     llm.cfg (provider/model/host/latency), keybindings.cfg, secrets.cfg.example.
 ```
 
 CMake fetches a pinned raylib via FetchContent at configure time — a clean
@@ -23,8 +26,9 @@ clone builds with no graphics packages installed. Keep the split absolute:
 
 | Module            | Responsibility |
 |-------------------|----------------|
-| `LlmClient`       | One worker thread for all NPCs. Streams Ollama `/api/chat` (NDJSON); main thread polls `drainDeltas()` / `drainReplies()` per frame. `warmUp()` preloads the model; `keep_alive` keeps it resident. |
-| `StreamAssembler` | Reassembles NDJSON lines from arbitrary TCP chunk boundaries; `parseOllamaChunk` maps one line to delta/done/error. |
+| `LlmClient`       | One worker thread for all NPCs; owns the request/reply queues. Delegates the HTTP + wire format to a swappable `LlmBackend`. Main thread polls `drainDeltas()` / `drainReplies()` per frame; `warmUp()` preloads the model; `model()`/`setModel()`/`availableModels()` drive the in-game picker. |
+| `LlmBackend`      | Provider interface (`chat()` + model accessors). `makeBackend()` picks by `provider`: `OllamaBackend` (local `/api/chat` NDJSON + `/api/tags`) or `OpenAiBackend` (OpenAI-compatible `/v1/chat/completions` SSE — OpenRouter/OpenAI/Gemini or a local `/v1`; HTTPS needs an OpenSSL build). |
+| `StreamAssembler` | Reassembles newline-delimited lines from arbitrary TCP chunk boundaries; `parseOllamaChunk` / `parseOpenAiChunk` map one line to delta/done/error for the two wire formats. |
 | `Persona`         | Static NPC identity, rendered into the system prompt. |
 | `PersonaLoader`   | Parses `personas/*.persona` (key=value header, `---`, free-form directives) including world placement. |
 | `Npc`             | Per-NPC chat history (bounded), pending-request tracking, world placement. History only grows on successful replies. |
@@ -32,7 +36,7 @@ clone builds with no graphics packages installed. Keep the split absolute:
 | `World`           | City + NPC roster; `nearestNpcWithin` drives the talk prompt. |
 | `DialogueSession` | Roaming → Talking → WaitingReply → Streaming state machine; routes streamed deltas by request id. |
 | `KeyBindings`     | Action → key-name map with swap-on-conflict rebinding and file persistence. Names are translated to SFML codes only in `src/app/InputMap`. |
-| `Config`          | Tiny key=value reader + `llm.cfg` loader. |
+| `Config`          | Tiny key=value reader/writer: `loadLlmConfig` (incl. provider/base_url and env-or-`secrets.cfg` API-key resolution) and `setKvValue` (in-place single-key edit, used to persist the picked model). |
 | `NetMessage`      | Multiplayer wire protocol: type-tagged JSON envelope (`encodeMessage`/`decodeMessage`, nullopt on garbage), `kNetProtocolVersion` handshake constant, pose serialization helpers. |
 | `NetFraming`      | `FrameAssembler`: 4-byte big-endian length prefix + payload over TCP; rejects prefixes over 1 MiB (drop the connection — the stream can't resync). The TCP sibling of `StreamAssembler`. |
 | `NetSocket`       | Header-only winsock/POSIX shims: `sendAll`, recv timeouts, `SO_NOSIGPIPE` on macOS. |

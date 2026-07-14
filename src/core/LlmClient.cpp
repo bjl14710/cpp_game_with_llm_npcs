@@ -1,17 +1,13 @@
 #include "LlmClient.hpp"
 
-#include <string_view>
 #include <utility>
 
-#include "StreamAssembler.hpp"
-#include "httplib.h"
-#include "json.hpp"
+#include "LlmBackend.hpp"
 
 namespace llm_npc {
 
-using nlohmann::json;
-
-LlmClient::LlmClient(LlmConfig config) : config_(std::move(config)) {
+LlmClient::LlmClient(LlmConfig config)
+    : config_(std::move(config)), backend_(makeBackend(config_)) {
     worker_ = std::thread(&LlmClient::workerLoop, this);
 }
 
@@ -71,6 +67,12 @@ std::vector<ChatReply> LlmClient::drainReplies() {
     return out;
 }
 
+std::vector<std::string> LlmClient::availableModels() { return backend_->listModels(); }
+
+std::string LlmClient::model() const { return backend_->model(); }
+
+void LlmClient::setModel(std::string model) { backend_->setModel(model); }
+
 void LlmClient::workerLoop() {
     while (true) {
         ChatRequest req;
@@ -98,110 +100,23 @@ ChatReply LlmClient::processOne(const ChatRequest& req) {
     ChatReply reply;
     reply.id = req.id;
 
-    // Build Ollama /api/chat body. Streaming NDJSON keeps perceived latency
-    // low (first words appear immediately); keep_alive holds the model in
-    // memory between conversations. Warm-up requests send no messages, which
-    // makes Ollama load the model and return at once.
-    json messages = json::array();
-    if (!req.internal) {
-        if (!req.systemPrompt.empty()) {
-            messages.push_back({{"role", "system"}, {"content", req.systemPrompt}});
-        }
-        for (const auto& turn : req.history) {
-            messages.push_back({{"role", turn.role}, {"content", turn.content}});
-        }
-        messages.push_back({{"role", "user"}, {"content", req.userMessage}});
-    }
+    BackendRequest backendReq;
+    backendReq.systemPrompt = req.systemPrompt;
+    backendReq.history = req.history;
+    backendReq.userMessage = req.userMessage;
+    backendReq.internal = req.internal;
 
-    json body = {
-        {"model", config_.model},
-        {"messages", messages},
-        {"stream", true},
-        {"keep_alive", config_.keepAlive},
-        {"options", {{"temperature", config_.temperature}}},
+    // Each text fragment becomes a ChatDelta tagged with this request's id, so
+    // the UI can stream it. Warm-up requests stay silent.
+    const auto onDelta = [&](const std::string& delta) {
+        if (req.internal) return;
+        std::lock_guard<std::mutex> lock(replyMutex_);
+        deltas_.push_back(ChatDelta{req.id, delta});
     };
-    // Only reasoning models understand `think`; omit unless configured so
-    // ordinary models never receive an unknown field.
-    if (!config_.think.empty()) body["think"] = (config_.think == "true");
-
-    httplib::Client cli(config_.host, config_.port);
-    cli.set_read_timeout(config_.requestTimeoutSeconds, 0);
-    cli.set_write_timeout(config_.requestTimeoutSeconds, 0);
-    cli.set_connection_timeout(5, 0);
-
-    int status = 0;
-    std::string errorBody;   // body bytes of a non-200 response
-    std::string content;     // accumulated assistant text
-    std::string streamError; // first error found inside the stream
-    bool sawDone = false;
-    StreamAssembler assembler;
-
-    // Parses one NDJSON line: append text, surface deltas, note completion.
-    const auto handleLine = [&](const std::string& line) {
-        const OllamaChunk chunk = parseOllamaChunk(line);
-        if (!chunk.error.empty()) {
-            if (streamError.empty()) streamError = chunk.error;
-            return;
-        }
-        if (!chunk.delta.empty()) {
-            content += chunk.delta;
-            if (!req.internal) {
-                std::lock_guard<std::mutex> lock(replyMutex_);
-                deltas_.push_back(ChatDelta{req.id, chunk.delta});
-            }
-        }
-        if (chunk.done) sawDone = true;
-    };
-
-    // httplib v0.15 has no streaming Post() overload, so drive a raw Request
-    // through Client::send with a content receiver.
-    httplib::Request hreq;
-    hreq.method = "POST";
-    hreq.path = "/api/chat";
-    hreq.set_header("Content-Type", "application/json");
-    hreq.body = body.dump();
-    hreq.response_handler = [&](const httplib::Response& response) {
-        status = response.status;
-        return true;
-    };
-    hreq.content_receiver = [&](const char* data, size_t length, uint64_t, uint64_t) {
-        if (status != 200) {
-            errorBody.append(data, length);
-        } else {
-            assembler.feed(std::string_view(data, length), handleLine);
-        }
-        return true;
-    };
-
-    const httplib::Result result = cli.send(hreq);
-    if (!result) {
-        const std::string detail = result.error() == httplib::Error::Success
-                                       ? "request aborted"
-                                       : to_string(result.error());
-        reply.errorMessage = "could not reach Ollama at " + config_.host + ":" +
-                             std::to_string(config_.port) + " (" + detail + ")";
-        return reply;
-    }
-
-    // A final line without a trailing newline still counts.
-    const std::string tail = assembler.takeRemainder();
-    if (!tail.empty()) handleLine(tail);
-
-    if (status != 200) {
-        reply.errorMessage = "Ollama returned HTTP " + std::to_string(status) +
-                             (errorBody.empty() ? "" : ": " + errorBody);
-        return reply;
-    }
-    if (!streamError.empty()) {
-        reply.errorMessage = streamError;
-        return reply;
-    }
-    if (!sawDone) {
-        reply.errorMessage = "Ollama stream ended before completion";
-        return reply;
-    }
-    reply.ok = true;
-    reply.content = std::move(content);
+    const BackendResult result = backend_->chat(backendReq, onDelta);
+    reply.ok = result.ok;
+    reply.content = result.content;
+    reply.errorMessage = result.error;
     return reply;
 }
 
