@@ -1,5 +1,6 @@
 // Tests for the key=value config reader and LLM config loading.
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -70,10 +71,49 @@ TEST_CASE("loadLlmConfig overrides defaults from llm.cfg") {
 
 TEST_CASE("loadLlmConfig keeps defaults when llm.cfg is absent") {
     TempDir tmp;  // empty dir
+    unsetenv("OPENROUTER_API_KEY");  // don't let the ambient env leak in
     auto cfg = llm_npc::loadLlmConfig(tmp.path);
     CHECK(cfg.host == "localhost");
     CHECK(cfg.port == 11434);
     CHECK_FALSE(cfg.model.empty());
+    CHECK(cfg.provider == "ollama");
+    CHECK(cfg.baseUrl.empty());
+    CHECK(cfg.apiKeyEnv == "OPENROUTER_API_KEY");
+    CHECK(cfg.apiKey.empty());
+}
+
+TEST_CASE("loadLlmConfig reads provider/base_url/api_key_env") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "provider = openrouter\n"
+              "base_url = https://openrouter.ai/api/v1\n"
+              "api_key_env = LLM_NPC_TEST_KEY\n"
+              "model = anthropic/claude-haiku-4.5\n");
+    unsetenv("LLM_NPC_TEST_KEY");
+    auto cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.provider == "openrouter");
+    CHECK(cfg.baseUrl == "https://openrouter.ai/api/v1");
+    CHECK(cfg.apiKeyEnv == "LLM_NPC_TEST_KEY");
+    CHECK(cfg.model == "anthropic/claude-haiku-4.5");
+}
+
+TEST_CASE("loadLlmConfig resolves the API key from the env var, which wins") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "api_key_env = LLM_NPC_TEST_KEY\n");
+    tmp.write("secrets.cfg", "api_key = from-secrets\n");
+    setenv("LLM_NPC_TEST_KEY", "from-env", /*overwrite=*/1);
+    auto cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.apiKey == "from-env");
+    unsetenv("LLM_NPC_TEST_KEY");
+}
+
+TEST_CASE("loadLlmConfig falls back to secrets.cfg when the env var is unset") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "api_key_env = LLM_NPC_TEST_KEY\n");
+    tmp.write("secrets.cfg", "api_key = from-secrets\n");
+    unsetenv("LLM_NPC_TEST_KEY");
+    auto cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.apiKey == "from-secrets");
 }
 
 TEST_CASE("loadLlmConfig reads the think toggle and defaults to omitted") {
@@ -84,4 +124,42 @@ TEST_CASE("loadLlmConfig reads the think toggle and defaults to omitted") {
 
     TempDir empty;
     CHECK(llm_npc::loadLlmConfig(empty.path).think.empty());
+}
+
+TEST_CASE("setKvValue rewrites the matching line and preserves the rest") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "# heading comment\n"
+              "host = localhost\n"
+              "model = old:tag\n"
+              "keep_alive = 10m\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "new:tag"));
+    auto kv = llm_npc::readKv(tmp.path / "llm.cfg");
+    CHECK(kv["model"] == "new:tag");
+    CHECK(kv["host"] == "localhost");  // other keys untouched
+    CHECK(kv["keep_alive"] == "10m");
+    // The comment survives (readKv strips comments, so check the raw text).
+    CHECK(llm_npc::slurp(tmp.path / "llm.cfg").find("# heading comment") != std::string::npos);
+}
+
+TEST_CASE("setKvValue appends a key that isn't present yet") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "host = localhost\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "tiny:1b"));
+    auto kv = llm_npc::readKv(tmp.path / "llm.cfg");
+    CHECK(kv["host"] == "localhost");
+    CHECK(kv["model"] == "tiny:1b");
+}
+
+TEST_CASE("setKvValue ignores commented and longer-prefixed keys") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "# model = commented\n"
+              "model_extra = leaveme\n"
+              "model = real\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "changed"));
+    auto kv = llm_npc::readKv(tmp.path / "llm.cfg");
+    CHECK(kv["model"] == "changed");
+    CHECK(kv["model_extra"] == "leaveme");  // prefix collision not touched
+    CHECK(llm_npc::slurp(tmp.path / "llm.cfg").find("# model = commented") != std::string::npos);
 }
