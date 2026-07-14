@@ -30,6 +30,9 @@ constexpr int kIdCreator = 4;
 constexpr int kIdJournal = 5;
 constexpr int kIdAvatar = 6;
 constexpr int kIdSandbox = 7;
+constexpr int kIdModels = 8;
+constexpr int kIdModelBase = 700;
+constexpr int kMaxModelRows = 8;
 // Sandbox page: New button + one row per saved map (capped by layout).
 constexpr int kIdMapNew = 600;
 constexpr int kIdGenField = 601;
@@ -113,6 +116,8 @@ void Menu::setAvatar(AvatarHooks hooks) { avatar_ = std::move(hooks); }
 
 void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
 
+void Menu::setModels(ModelHooks hooks) { models_ = std::move(hooks); }
+
 void Menu::setTraitChoices(std::vector<std::string> ids) {
     traitChoices_ = std::move(ids);
     creatorTraitIndex_ = 0;
@@ -136,9 +141,9 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 290.f;
+        float y = h * 0.5f - 326.f;
         for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator,
-                       kIdAvatar, kIdJournal, kIdSandbox, kIdQuit}) {
+                       kIdAvatar, kIdJournal, kIdSandbox, kIdModels, kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
@@ -193,6 +198,15 @@ std::vector<Menu::Hit> Menu::layout() const {
         for (int i = 0; i < rows; ++i) {
             hits.push_back({Rectangle{x, y, 420.f, 44.f}, kIdMapBase + i});
             y += 56.f;
+        }
+        hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 44.f}, kIdBack});
+    } else if (page_ == Page::Model) {
+        const float x = (w - 420.f) * 0.5f;
+        float y = h * 0.22f;
+        const int rows = std::min<int>(kMaxModelRows, static_cast<int>(modelList_.size()));
+        for (int i = 0; i < rows; ++i) {
+            hits.push_back({Rectangle{x, y, 420.f, 44.f}, kIdModelBase + i});
+            y += 54.f;
         }
         hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 44.f}, kIdBack});
     } else if (page_ == Page::Multiplayer) {
@@ -343,6 +357,23 @@ MenuResult Menu::update(float dt) {
                 page_ = Page::Sandbox;
                 sandboxMaps_ = sandbox_.listMaps ? sandbox_.listMaps()
                                                  : std::vector<std::string>{};
+            } else if (hit.id == kIdModels) {
+                page_ = Page::Model;
+                modelList_ = models_.listModels ? models_.listModels()
+                                                : std::vector<std::string>{};
+                if (modelList_.empty()) {
+                    showToast("No models found (is Ollama running?)");
+                }
+            } else if (hit.id >= kIdModelBase && hit.id < kIdModelBase + kMaxModelRows) {
+                const std::size_t index =
+                    static_cast<std::size_t>(hit.id - kIdModelBase);
+                if (models_.onSelect && index < modelList_.size()) {
+                    const std::string error = models_.onSelect(modelList_[index]);
+                    showToast(error.empty()
+                                  ? "Model switched to " + modelList_[index] +
+                                        " (next replies use it)"
+                                  : error);
+                }
             } else if (hit.id == kIdMapNew) {
                 if (sandbox_.onOpen) sandbox_.onOpen("");
             } else if (hit.id == kIdGenField) {
@@ -615,6 +646,14 @@ void Menu::render() const {
         else if (hit.id == kIdCreator) label = "Create Character";
         else if (hit.id == kIdAvatar) label = "Edit My Avatar";
         else if (hit.id == kIdSandbox) label = "Sandbox Maps";
+        else if (hit.id == kIdModels) label = "LLM Model";
+        else if (hit.id >= kIdModelBase && hit.id < kIdModelBase + kMaxModelRows) {
+            const std::size_t index = static_cast<std::size_t>(hit.id - kIdModelBase);
+            label = index < modelList_.size() ? modelList_[index] : "?";
+            if (models_.currentModel && label == models_.currentModel()) {
+                label = "> " + label + " (current)";
+            }
+        }
         else if (hit.id == kIdMapNew) label = "+ New Map";
         else if (hit.id == kIdGenField) {
             label = genDescription_ + (editingGen_ ? "_" : "");

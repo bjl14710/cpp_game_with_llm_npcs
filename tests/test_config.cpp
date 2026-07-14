@@ -125,3 +125,41 @@ TEST_CASE("loadLlmConfig reads the think toggle and defaults to omitted") {
     TempDir empty;
     CHECK(llm_npc::loadLlmConfig(empty.path).think.empty());
 }
+
+TEST_CASE("setKvValue rewrites the matching line and preserves the rest") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "# heading comment\n"
+              "host = localhost\n"
+              "model = old:tag\n"
+              "keep_alive = 10m\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "new:tag"));
+    auto kv = llm_npc::readKv(tmp.path / "llm.cfg");
+    CHECK(kv["model"] == "new:tag");
+    CHECK(kv["host"] == "localhost");  // other keys untouched
+    CHECK(kv["keep_alive"] == "10m");
+    // The comment survives (readKv strips comments, so check the raw text).
+    CHECK(llm_npc::slurp(tmp.path / "llm.cfg").find("# heading comment") != std::string::npos);
+}
+
+TEST_CASE("setKvValue appends a key that isn't present yet") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "host = localhost\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "tiny:1b"));
+    auto kv = llm_npc::readKv(tmp.path / "llm.cfg");
+    CHECK(kv["host"] == "localhost");
+    CHECK(kv["model"] == "tiny:1b");
+}
+
+TEST_CASE("setKvValue ignores commented and longer-prefixed keys") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "# model = commented\n"
+              "model_extra = leaveme\n"
+              "model = real\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "changed"));
+    auto kv = llm_npc::readKv(tmp.path / "llm.cfg");
+    CHECK(kv["model"] == "changed");
+    CHECK(kv["model_extra"] == "leaveme");  // prefix collision not touched
+    CHECK(llm_npc::slurp(tmp.path / "llm.cfg").find("# model = commented") != std::string::npos);
+}

@@ -771,6 +771,21 @@ int main(int argc, char** argv) {
         worldgenSay("Generating '" + description.substr(0, 40) + "'...");
         return "Generating... (watch the status line)";
     };
+    // Model picker (ported from the pluggable-llm branch): switch the live
+    // client and persist the choice to config/llm.cfg; in-flight requests
+    // finish on the old model, new ones use the new pick.
+    Menu::ModelHooks modelHooks;
+    modelHooks.listModels = [&]() { return client.availableModels(); };
+    modelHooks.currentModel = [&]() { return client.model(); };
+    modelHooks.onSelect = [&](const std::string& model) -> std::string {
+        client.setModel(model);
+        if (!setKvValue(configDir / "llm.cfg", "model", model)) {
+            return "Switched for this session (could not write llm.cfg)";
+        }
+        return "";
+    };
+    menu.setModels(modelHooks);
+
     menu.setSandbox(sandboxHooks);
     {
         std::vector<std::string> traitIds;

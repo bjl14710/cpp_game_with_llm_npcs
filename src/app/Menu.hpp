@@ -99,6 +99,17 @@ class Menu {
     };
     void setSandbox(SandboxHooks hooks);
 
+    // Model page (ported from the pluggable-llm branch onto the raylib
+    // menu): lists the backend's installed models; clicking one switches
+    // the live client and persists the choice. Hooks keep the menu free of
+    // LlmClient types.
+    struct ModelHooks {
+        std::function<std::vector<std::string>()> listModels;
+        std::function<std::string()> currentModel;
+        std::function<std::string(const std::string& model)> onSelect;
+    };
+    void setModels(ModelHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -132,7 +143,7 @@ class Menu {
     void render() const;
 
    private:
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -157,6 +168,8 @@ class Menu {
     CreatorHooks creator_;
     AvatarHooks avatar_;
     SandboxHooks sandbox_;
+    ModelHooks models_;
+    std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
     std::string creatorName_;

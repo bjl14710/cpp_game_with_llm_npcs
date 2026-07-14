@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 namespace llm_npc {
 
@@ -36,6 +37,39 @@ std::string slurp(const std::filesystem::path& path) {
     std::ostringstream o;
     o << in.rdbuf();
     return o.str();
+}
+
+bool setKvValue(const std::filesystem::path& path, const std::string& key,
+                const std::string& value) {
+    std::vector<std::string> lines;
+    bool replaced = false;
+    {
+        std::ifstream in(path);
+        std::string line;
+        while (std::getline(in, line)) {
+            // Match a non-comment line whose first token is exactly `key`,
+            // followed by optional spaces and '='. The '=' check keeps a key
+            // from matching a longer one (e.g. "keep" vs "keep_alive").
+            const auto begin = line.find_first_not_of(" \t");
+            if (begin != std::string::npos && line[begin] != '#') {
+                const std::string rest = line.substr(begin);
+                if (rest.rfind(key, 0) == 0) {
+                    const std::string after = trim(rest.substr(key.size()));
+                    if (!after.empty() && after.front() == '=') {
+                        line = key + " = " + value;
+                        replaced = true;
+                    }
+                }
+            }
+            lines.push_back(line);
+        }
+    }
+    if (!replaced) lines.push_back(key + " = " + value);
+
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) return false;
+    for (const std::string& l : lines) out << l << "\n";
+    return true;
 }
 
 LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
