@@ -910,29 +910,75 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     rlRotatef(yawDeg, 0.f, 1.f, 0.f);
     rlRotatef(-pitchDeg, 1.f, 0.f, 0.f);
 
-    if (fist) {
-        // attackFraction runs 1 → 0 across the swing; sin turns that into
-        // extend-then-retract, so the arm shoots out from the lower right
-        // and pulls back — a punch, not a hovering prop.
-        const float ext = std::sin(attackFraction * PI);
-        const float reach = 0.34f + 0.55f * ext;
-        // Sleeve forearm rising slightly toward screen center, fist at the
-        // end. Local vectors — the matrix above carries them to the world.
-        DrawCylinderEx(Vector3{-0.26f, -0.40f, 0.16f},
-                       Vector3{-0.22f, -0.30f + 0.08f * ext, reach},
-                       0.055f, 0.045f, 10, sleeve);
-        DrawSphere(Vector3{-0.22f, -0.30f + 0.08f * ext, reach}, 0.075f, skin);
-    } else {
-        // Pistol: held silhouette (slide + barrel + grip + hand) with a
-        // recoil kick — back and muzzle-up — driven by attackFraction.
+    // attackFraction runs 1 → 0 across the swing; sin turns that into
+    // extend-then-retract for the fist. Pistol recoil (back and muzzle-up)
+    // is a pose transform, so it applies to rim and color passes alike.
+    const float ext = std::sin(attackFraction * PI);
+    const float reach = 0.34f + 0.55f * ext;
+    if (!fist) {
         rlTranslatef(0.f, 0.f, -0.07f * attackFraction);
         rlRotatef(-7.f * attackFraction, 1.f, 0.f, 0.f);
-        DrawCube(Vector3{-0.26f, -0.26f, 0.50f}, 0.045f, 0.075f, 0.26f, gunmetal);
-        DrawCylinderEx(Vector3{-0.26f, -0.25f, 0.60f}, Vector3{-0.26f, -0.25f, 0.75f},
-                       0.018f, 0.018f, 10, gunmetal);
-        DrawCube(Vector3{-0.26f, -0.345f, 0.44f}, 0.04f, 0.11f, 0.055f, gripTone);
-        DrawSphere(Vector3{-0.26f, -0.31f, 0.43f}, 0.042f, skin);  // hand
     }
+
+    // One prop, two palettes: the rim pass re-issues every shape through
+    // this inflated about ITS OWN center (the same per-part pivots the
+    // body hull uses — a single whole-prop pivot leaves the near side of
+    // each shape rimless).
+    const auto drawProp = [&](Color sleeveC, Color skinC, Color metalC,
+                              Color gripC, float inflate) {
+        const auto shape = [&](Vector3 center, auto&& draw) {
+            if (inflate > 1.f) {
+                rlPushMatrix();
+                rlTranslatef(center.x, center.y, center.z);
+                rlScalef(inflate, inflate, inflate);
+                rlTranslatef(-center.x, -center.y, -center.z);
+            }
+            draw();
+            if (inflate > 1.f) rlPopMatrix();
+        };
+        if (fist) {
+            // Sleeve forearm rising slightly toward screen center, fist at
+            // the end. Local vectors — the matrix above carries them to
+            // the world.
+            const Vector3 fistAt{-0.22f, -0.30f + 0.08f * ext, reach};
+            shape(Vector3{-0.24f, -0.35f + 0.04f * ext, (0.16f + reach) * 0.5f},
+                  [&] {
+                      DrawCylinderEx(Vector3{-0.26f, -0.40f, 0.16f}, fistAt,
+                                     0.055f, 0.045f, 10, sleeveC);
+                  });
+            shape(fistAt, [&] { DrawSphere(fistAt, 0.075f, skinC); });
+        } else {
+            // Pistol: held silhouette (slide + barrel + grip + hand).
+            shape(Vector3{-0.26f, -0.26f, 0.50f}, [&] {
+                DrawCube(Vector3{-0.26f, -0.26f, 0.50f}, 0.045f, 0.075f, 0.26f,
+                         metalC);
+            });
+            shape(Vector3{-0.26f, -0.25f, 0.675f}, [&] {
+                DrawCylinderEx(Vector3{-0.26f, -0.25f, 0.60f},
+                               Vector3{-0.26f, -0.25f, 0.75f}, 0.018f, 0.018f, 10,
+                               metalC);
+            });
+            shape(Vector3{-0.26f, -0.345f, 0.44f}, [&] {
+                DrawCube(Vector3{-0.26f, -0.345f, 0.44f}, 0.04f, 0.11f, 0.055f,
+                         gripC);
+            });
+            shape(Vector3{-0.26f, -0.31f, 0.43f}, [&] {
+                DrawSphere(Vector3{-0.26f, -0.31f, 0.43f}, 0.042f, skinC);  // hand
+            });
+        }
+    };
+
+    // Cartoon rim (issue #143 gate): the same #103 inverted hull every
+    // third-person figure gets — grouped passes, batch drained around the
+    // cull switches. The rim is proportionally larger than the body's
+    // (1.14 vs 1.06) because the prop sits half a meter from the eye.
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_FRONT);
+    drawProp(kOutlineColor, kOutlineColor, kOutlineColor, kOutlineColor, 1.14f);
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_BACK);
+
+    drawProp(sleeve, skin, gunmetal, gripTone, 1.f);
     rlPopMatrix();
     endCharacterShader();
 }
