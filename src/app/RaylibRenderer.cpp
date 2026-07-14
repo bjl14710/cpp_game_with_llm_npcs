@@ -576,6 +576,80 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     }
 }
 
+// Face-pick ids -> FaceTexture style indexes (issue #140). Unknown ids
+// (a stored look from a newer catalog) fall back to style 0 rather than
+// failing — same demote-gracefully rule looks follow everywhere.
+int stylizedEyeStyle(const std::string& id) {
+    const char* ids[FaceTexture::kEyeStyleCount] = {
+        "eyes_q_dot",    "eyes_q_wide", "eyes_q_round", "eyes_q_happy",
+        "eyes_q_sleepy", "eyes_q_star", "eyes_q_wink",  "eyes_q_glasses"};
+    for (int i = 0; i < FaceTexture::kEyeStyleCount; ++i) {
+        if (id == ids[i]) return i;
+    }
+    return 0;
+}
+
+int stylizedMouthStyle(const std::string& id) {
+    const char* ids[FaceTexture::kMouthStyleCount] = {
+        "mouth_q_smile", "mouth_q_line", "mouth_q_open", "mouth_q_o"};
+    for (int i = 0; i < FaceTexture::kMouthStyleCount; ++i) {
+        if (id == ids[i]) return i;
+    }
+    return 0;
+}
+
+// The flat face decal (issue #140): a HEAD-oriented textured quad spanning
+// the face sockets — drawn inside the figure's matrix, so it turns with
+// facingDeg and tips with the death pose instead of billboarding at the
+// camera. Alpha-blended over the mesh face, a hair proud of the surface so
+// depth keeps it in front.
+void drawStylizedFace(const Texture2D& texture, const PartDef& head,
+                      const Vec3& headAt, float s) {
+    const auto eyes = head.sockets.find("eyes");
+    const auto mouth = head.sockets.find("mouth");
+    if (eyes == head.sockets.end() || mouth == head.sockets.end()) return;
+
+    const float size = head.localSize.x * 0.72f * s;  // square decal
+    // Anchor the CANVAS eye line (46/128 from the top = 18/128 above quad
+    // center) to the head's eyes socket — the eye line is what reads, so
+    // it must land exactly; the mouth follows the canvas's fixed anatomy.
+    const float cy = headAt.y + eyes->second.y * s - size * (18.f / 128.f);
+    // Proud of the face by a bit MORE than the wrap sweeps back, so the
+    // outer strips end flush with the cheeks instead of buried in them.
+    const float zFront = headAt.z +
+                         std::max(eyes->second.z, mouth->second.z) * s +
+                         size * 0.075f;
+
+    // A flat plane "clings" to the near cheek at steep viewing angles
+    // (parallax against the curved face), so the decal is a shallow
+    // 3-strip wrap: full-front center third, outer thirds swept back.
+    const float half = size * 0.5f;
+    const float third = size / 3.f;
+    const float sweep = size * 0.06f;
+    const float xs[4] = {headAt.x - half, headAt.x - half + third,
+                         headAt.x + half - third, headAt.x + half};
+    const float zs[4] = {zFront - sweep, zFront, zFront, zFront - sweep};
+
+    rlSetTexture(texture.id);
+    rlBegin(RL_QUADS);
+    rlColor4ub(255, 255, 255, 255);
+    for (int strip = 0; strip < 3; ++strip) {
+        const float u0 = static_cast<float>(strip) / 3.f;
+        const float u1 = static_cast<float>(strip + 1) / 3.f;
+        rlNormal3f(0.f, 0.f, 1.f);  // near-frontal; banding follows the face
+        rlTexCoord2f(u0, 1.f);
+        rlVertex3f(xs[strip], cy - half, zs[strip]);
+        rlTexCoord2f(u1, 1.f);
+        rlVertex3f(xs[strip + 1], cy - half, zs[strip + 1]);
+        rlTexCoord2f(u1, 0.f);
+        rlVertex3f(xs[strip + 1], cy + half, zs[strip + 1]);
+        rlTexCoord2f(u0, 0.f);
+        rlVertex3f(xs[strip], cy + half, zs[strip]);
+    }
+    rlEnd();
+    rlSetTexture(0);
+}
+
 // Mesh-backed part (issue #139): draws the part's resolved meshes with
 // their bounds bottom-center on the assembly anchor — the same convention
 // primitive recipes use — under the one contract scale. DrawMesh composes
@@ -633,6 +707,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // composite counterpart of the pack models' death clip), lifted a
     // little so the torso doesn't sink through the ground slab.
     const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
+
+    // Mesh heads wear a flat face DECAL (issue #140) instead of primitive
+    // eye/mouth marks, and their mood lives ON that face — no emote
+    // billboard for this family.
+    const PartDef* headPart = findPart(look.part(PartCategory::Head));
+    const bool meshFace = headPart && !headPart->meshName.empty() &&
+                          assets_.partMeshes(headPart->meshName) != nullptr;
+
     // Character surfaces band through the cel shader (issue #138); the
     // frame's fog shader is restored before the emote billboard below.
     beginCharacterShader();
@@ -653,6 +735,11 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     rlDrawRenderBatchActive();
     rlSetCullFace(RL_CULL_FACE_FRONT);
     for (const PlacedPart& placed : assembled.parts) {
+        // Face-decal families draw no eye/mouth geometry — nothing to hull.
+        if (meshFace && (placed.part->category == PartCategory::Eyes ||
+                         placed.part->category == PartCategory::Mouth)) {
+            continue;
+        }
         const Vec3 at = placed.position * s;
         // Mesh-backed parts rim through the normal-inflate outline shader
         // (issue #138's mesh technique) — the scale hull is for primitive
@@ -685,6 +772,10 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         // their resolved meshes (issue #139); a part whose mesh didn't
         // resolve draws its declared box so the figure never has holes.
         const Vec3 at = placed.position * s;
+        if (meshFace && (placed.part->category == PartCategory::Eyes ||
+                         placed.part->category == PartCategory::Mouth)) {
+            continue;  // the face decal below carries eyes, mouth, AND mood
+        }
         if (!placed.part->meshName.empty()) {
             if (const Assets::PartMeshes* pm =
                     assets_.partMeshes(placed.part->meshName)) {
@@ -694,13 +785,25 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         }
         drawPartRecipe(*placed.part, at, placed.part->localSize * s, colors);
     }
+    if (meshFace) {
+        for (const PlacedPart& placed : assembled.parts) {
+            if (placed.part->category != PartCategory::Head) continue;
+            drawStylizedFace(
+                assets_.stylizedFace(
+                    stylizedEyeStyle(look.part(PartCategory::Eyes)),
+                    stylizedMouthStyle(look.part(PartCategory::Mouth)),
+                    dead ? NpcFace::Neutral : face),
+                *placed.part, placed.position * s, s);
+        }
+    }
     rlPopMatrix();
     endCharacterShader();
 
-    // Same emote billboard the pack path draws, at the same height — the
-    // two render paths must stay indistinguishable to the player. The dead
-    // don't emote.
-    if (!dead && face != NpcFace::Neutral) {
+    // Emote billboard for CORE-family looks only, same height as the pack
+    // path draws it. Mesh-face families retired it (issue #140): their
+    // mood is already on the face, so a floating copy would double-report.
+    // The dead don't emote.
+    if (!dead && !meshFace && face != NpcFace::Neutral) {
         DrawBillboard(camera_, assets_.faceTexture(face),
                       Vector3{position.x, 2.45f, position.z}, 0.55f, WHITE);
     }

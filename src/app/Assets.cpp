@@ -157,6 +157,16 @@ Assets::Assets(const std::string& assetsDir) {
     for (int i = 0; i < 6; ++i) {
         faces_[i] = FaceTexture::bake(static_cast<NpcFace>(i));
     }
+    // The stylized decal set too (issue #140): every creator face pick x
+    // every mood, a few rect draws each — negligible at boot.
+    for (int e = 0; e < FaceTexture::kEyeStyleCount; ++e) {
+        for (int m = 0; m < FaceTexture::kMouthStyleCount; ++m) {
+            for (int f = 0; f < 6; ++f) {
+                stylizedFaces_[e][m][f] =
+                    FaceTexture::bakeStylized(e, m, static_cast<NpcFace>(f));
+            }
+        }
+    }
 
     // Atmosphere shader first, so every model loaded below can adopt it.
     // Failure (no GL context, GLSL mismatch) degrades to the plain look.
@@ -324,6 +334,11 @@ Assets::~Assets() {
         UnloadShader(outlineShader_);
     }
     for (Texture2D& face : faces_) UnloadTexture(face);
+    for (auto& perEye : stylizedFaces_) {
+        for (auto& perMouth : perEye) {
+            for (Texture2D& face : perMouth) UnloadTexture(face);
+        }
+    }
     for (auto& [stem, model] : models_) UnloadModel(model);
     for (auto& [stem, model] : modularModels_) UnloadModel(model);
     for (auto& character : characters_) {

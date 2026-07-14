@@ -136,10 +136,25 @@ TEST_CASE("proportion window holds for the mesh family (or new values logged)") 
     }
 }
 
-TEST_CASE("stylized face set: creator-pickable textures per face id" *
-          doctest::skip()) {
-    // Step 4. TODO(stylized): FaceTexture's stylized set exposes >=8 face
-    // ids, each generating a texture; mood variants exist per face
-    // (happy/angry/sad/embarrassed/surprised) so the new family shows
-    // moods ON the face, not as a floating billboard.
+TEST_CASE("stylized face set: creator-pickable picks per face id") {
+    // Issue #140. Texture GENERATION is app-side GL
+    // (FaceTexture::bakeStylized, 8 eye styles x 4 mouth styles x 6 moods)
+    // and is screenshot-verified; what core owns — and this pins — is the
+    // creator-pickable face-pick set: >=8 eye picks and >=4 mouth picks in
+    // the family, each a valid quaternius part, in the renderer's
+    // eyes_q_*/mouth_q_* naming so the id -> texture-style mapping resolves.
+    const auto eyes = partsForCategory(PartCategory::Eyes, "quaternius");
+    const auto mouths = partsForCategory(PartCategory::Mouth, "quaternius");
+    CHECK(eyes.size() >= 8);
+    CHECK(mouths.size() >= 4);
+    for (const PartDef* pick : eyes) {
+        CAPTURE(pick->id);
+        CHECK(pick->id.rfind("eyes_q_", 0) == 0);
+        CHECK(pick->styleTag == "quaternius");
+    }
+    for (const PartDef* pick : mouths) {
+        CAPTURE(pick->id);
+        CHECK(pick->id.rfind("mouth_q_", 0) == 0);
+        CHECK(pick->styleTag == "quaternius");
+    }
 }

@@ -83,6 +83,16 @@ class Assets {
         return faces_[static_cast<std::size_t>(face)];
     }
 
+    // Stylized face decal for the quaternius mesh family (issue #140),
+    // by creator pick (eye/mouth style) and current mood. Out-of-range
+    // styles clamp to 0 so stored looks never index past the set.
+    const Texture2D& stylizedFace(int eyeStyle, int mouthStyle, NpcFace mood) const {
+        if (eyeStyle < 0 || eyeStyle >= FaceTexture::kEyeStyleCount) eyeStyle = 0;
+        if (mouthStyle < 0 || mouthStyle >= FaceTexture::kMouthStyleCount)
+            mouthStyle = 0;
+        return stylizedFaces_[eyeStyle][mouthStyle][static_cast<std::size_t>(mood)];
+    }
+
     // The atmosphere shader (distance fog + warm tint), assigned to every
     // model material at load. The renderer also wraps the primitive batch
     // in it (BeginShaderMode) so ground/props haze consistently with
@@ -185,6 +195,10 @@ class Assets {
 
     // One baked emote per NpcFace value, indexed by the enum.
     Texture2D faces_[6] = {};
+
+    // Stylized face decals (issue #140): eye style x mouth style x mood.
+    Texture2D stylizedFaces_[FaceTexture::kEyeStyleCount]
+                            [FaceTexture::kMouthStyleCount][6] = {};
 
     // Distance-fog + warm-tint shader shared by every material.
     Shader fogShader_{};

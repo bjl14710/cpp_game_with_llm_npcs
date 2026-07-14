@@ -188,18 +188,40 @@ const std::vector<PartDef>& partCatalog() {
           {"hair", {0.f, 0.566f, 0.f}},
           {"mouth", {0.f, 0.106f, 0.152f}}},
          "quaternius", "Witch:Head"},
-        // Family-scale face marks (same ~43%-of-head-width ratio the core
-        // eyes use) and the baked-hair placeholder.
+        // Face picks (issue #140): for this family the Eyes/Mouth rows
+        // select a flat face DECAL style (FaceTexture::bakeStylized draws
+        // the actual pixels; the renderer maps these ids to its style
+        // indexes) rendered as one head-oriented quad at the face sockets.
+        // localSize is nominal — validity/assembly bookkeeping only. Row
+        // order here mirrors the texture style order. The baked-hair
+        // placeholder keeps the Hair category filled: mesh heads ship with
+        // their hair.
         {"eyes_q_dot", PartCategory::Eyes, "quaternius",
          {0.095f, 0.030f, 0.024f}, {}, "quaternius", ""},
         {"eyes_q_wide", PartCategory::Eyes, "quaternius",
          {0.120f, 0.044f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_round", PartCategory::Eyes, "quaternius",
+         {0.110f, 0.040f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_happy", PartCategory::Eyes, "quaternius",
+         {0.105f, 0.032f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_sleepy", PartCategory::Eyes, "quaternius",
+         {0.100f, 0.026f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_star", PartCategory::Eyes, "quaternius",
+         {0.110f, 0.040f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_wink", PartCategory::Eyes, "quaternius",
+         {0.105f, 0.030f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_glasses", PartCategory::Eyes, "quaternius",
+         {0.130f, 0.048f, 0.024f}, {}, "quaternius", ""},
         {"hair_q_baked", PartCategory::Hair, "quaternius", {0.f, 0.f, 0.f},
          {}, "quaternius", ""},
         {"mouth_q_smile", PartCategory::Mouth, "quaternius",
          {0.075f, 0.024f, 0.020f}, {}, "quaternius", ""},
         {"mouth_q_line", PartCategory::Mouth, "quaternius",
          {0.070f, 0.014f, 0.020f}, {}, "quaternius", ""},
+        {"mouth_q_open", PartCategory::Mouth, "quaternius",
+         {0.065f, 0.045f, 0.020f}, {}, "quaternius", ""},
+        {"mouth_q_o", PartCategory::Mouth, "quaternius",
+         {0.045f, 0.045f, 0.020f}, {}, "quaternius", ""},
     };
     return parts;
 }
