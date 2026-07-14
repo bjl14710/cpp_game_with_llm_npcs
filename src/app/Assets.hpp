@@ -96,6 +96,33 @@ class Assets {
     int fogColorLoc() const { return fogColorLoc_; }
     int fogLightLoc() const { return fogLightLoc_; }
 
+    // The character shader (issue #138): banded cel diffuse composed with
+    // the SAME fog stage in one program. Assigned to every character
+    // material at load; the renderer wraps composite-part and viewmodel
+    // primitive draws in it so no character surface renders on the default
+    // lit material. nullptr when compilation failed — characters then keep
+    // the fog shader (never the default material).
+    const Shader* celShader() const { return celLoaded_ ? &celShader_ : nullptr; }
+    int celCameraLoc() const { return celCameraLoc_; }
+    int celColorLoc() const { return celColorLoc_; }
+    int celLightLoc() const { return celLightLoc_; }
+
+    // Inverted-hull outline shader for MESH characters (the model-space
+    // counterpart of the #103 primitive hull): inflates along vertex
+    // normals, shades solid rim color, fades into fog with distance.
+    const Shader* outlineShader() const {
+        return outlineLoaded_ ? &outlineShader_ : nullptr;
+    }
+    int outlineCameraLoc() const { return outlineCameraLoc_; }
+    int outlineColorLoc() const { return outlineColorLoc_; }
+
+    // Ready-to-use material carrying the outline shader, so the renderer's
+    // rim pass can DrawMesh directly without mutating a model's own
+    // materials mid-frame. nullptr when the shader didn't compile.
+    const Material* outlineMaterial() const {
+        return outlineLoaded_ ? &outlineMaterial_ : nullptr;
+    }
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -137,6 +164,20 @@ class Assets {
     int fogCameraLoc_ = -1;
     int fogColorLoc_ = -1;
     int fogLightLoc_ = -1;
+
+    // Character cel shader + mesh outline shader (issue #138). Same
+    // per-frame uniforms as fog (cameraPos / fogColor / lightLevel), so
+    // the renderer drives all programs from one place.
+    Shader celShader_{};
+    bool celLoaded_ = false;
+    int celCameraLoc_ = -1;
+    int celColorLoc_ = -1;
+    int celLightLoc_ = -1;
+    Shader outlineShader_{};
+    bool outlineLoaded_ = false;
+    int outlineCameraLoc_ = -1;
+    int outlineColorLoc_ = -1;
+    Material outlineMaterial_{};  // default maps + outlineShader_
 };
 
 }  // namespace llm_npc

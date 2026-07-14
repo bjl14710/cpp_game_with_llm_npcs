@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "raymath.h"
 #include "rlgl.h"
 
 #include "DayNight.hpp"
@@ -126,11 +127,22 @@ void RaylibRenderer::setTimeOfDay(float hours) {
                       static_cast<unsigned char>(sky.g * 255.f),
                       static_cast<unsigned char>(sky.b * 255.f), 255};
     lightLevel_ = lightLevelAt(hours);
+    const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
     if (const Shader* fog = assets_.fogShader()) {
-        const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
         SetShaderValue(*fog, assets_.fogColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(*fog, assets_.fogLightLoc(), &lightLevel_,
                        SHADER_UNIFORM_FLOAT);
+    }
+    // The character cel and outline programs fog with the same curves —
+    // characters and their rims haze into the same horizon as the city.
+    if (const Shader* cel = assets_.celShader()) {
+        SetShaderValue(*cel, assets_.celColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(*cel, assets_.celLightLoc(), &lightLevel_,
+                       SHADER_UNIFORM_FLOAT);
+    }
+    if (const Shader* outline = assets_.outlineShader()) {
+        SetShaderValue(*outline, assets_.outlineColorLoc(), fogColor,
+                       SHADER_UNIFORM_VEC4);
     }
 }
 
@@ -150,15 +162,35 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
     // (ground plane, slabs, fountain, viewmodel) through the same shader so
     // everything hazes consistently. Fog distance needs the camera each
     // frame.
+    const float eye[3] = {camera_.position.x, camera_.position.y,
+                          camera_.position.z};
+    if (const Shader* cel = assets_.celShader()) {
+        SetShaderValue(*cel, assets_.celCameraLoc(), eye, SHADER_UNIFORM_VEC3);
+    }
+    if (const Shader* outline = assets_.outlineShader()) {
+        SetShaderValue(*outline, assets_.outlineCameraLoc(), eye,
+                       SHADER_UNIFORM_VEC3);
+    }
     if (const Shader* fog = assets_.fogShader()) {
-        const float eye[3] = {camera_.position.x, camera_.position.y,
-                              camera_.position.z};
         SetShaderValue(*fog, assets_.fogCameraLoc(), eye, SHADER_UNIFORM_VEC3);
         BeginMode3D(camera_);
         BeginShaderMode(*fog);
         return;
     }
     BeginMode3D(camera_);
+}
+
+void RaylibRenderer::beginCharacterShader() {
+    if (const Shader* cel = assets_.celShader()) BeginShaderMode(*cel);
+}
+
+void RaylibRenderer::endCharacterShader() {
+    if (!assets_.celShader()) return;  // nothing was begun
+    if (const Shader* fog = assets_.fogShader()) {
+        BeginShaderMode(*fog);  // hand the batch back to the frame's shader
+    } else {
+        EndShaderMode();
+    }
 }
 
 void RaylibRenderer::drawCity(const City& city) {
@@ -299,6 +331,28 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
     DrawModelEx(character->model, position, Vector3{0.f, 1.f, 0.f}, visual.facingDeg,
                 Vector3{s, s, s}, WHITE);
 
+    // Cartoon rim (issue #138) — the mesh version of the #103 inverted
+    // hull: redraw every mesh through the outline shader (vertices pushed
+    // out along their world-space normals, solid rim color) with FRONT
+    // faces culled so only the silhouette band survives. The batch drains
+    // before each cull switch, exactly like the primitive hull; the CPU-
+    // skinned vertices are already posed from the draw above.
+    if (const Material* rim = assets_.outlineMaterial()) {
+        const Matrix local = MatrixMultiply(
+            MatrixScale(s, s, s),
+            MatrixRotate(Vector3{0.f, 1.f, 0.f}, visual.facingDeg * DEG2RAD));
+        const Matrix transform = MatrixMultiply(
+            MatrixMultiply(character->model.transform, local),
+            MatrixTranslate(position.x, position.y, position.z));
+        rlDrawRenderBatchActive();
+        rlSetCullFace(RL_CULL_FACE_FRONT);
+        for (int i = 0; i < character->model.meshCount; ++i) {
+            DrawMesh(character->model.meshes[i], *rim, transform);
+        }
+        rlDrawRenderBatchActive();
+        rlSetCullFace(RL_CULL_FACE_BACK);
+    }
+
     // Non-neutral moods float as an emote above the head — the same six
     // procedural faces the legacy renderer painted on, now billboarded.
     // The dead don't emote.
@@ -323,6 +377,14 @@ struct RecipeColors {
 // with a hint of blue so lines feel inked, not void.
 constexpr Color kOutlineColor{32, 30, 38, 255};
 
+// TODO(stylized step 3): add the MESH branch at the top of this dispatch:
+// if (!part.meshName.empty()) draw the loaded mesh at `at`, scaled so its
+// measured bounds fill `dim` (the contract already resolved the numbers) —
+// then return. The quaternius family flows through here with zero changes
+// to assembly/picker code. TODO(stylized step 4): quaternius heads draw a
+// FLAT FACE QUAD (head-oriented, not camera-billboard) at the face socket,
+// textured from FaceTexture's stylized set; mood = face-texture variant,
+// replacing the emote billboard for that family.
 // The ONE place part ids map to shapes — the graphics-pack seam (issue
 // #101). A content pack is exactly: catalog rows (PartDef/PartPalette
 // with their `pack` tag) + recipe branches HERE. Nothing else — not the
@@ -543,6 +605,9 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // composite counterpart of the pack models' death clip), lifted a
     // little so the torso doesn't sink through the ground slab.
     const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
+    // Character surfaces band through the cel shader (issue #138); the
+    // frame's fog shader is restored before the emote billboard below.
+    beginCharacterShader();
     rlPushMatrix();
     rlTranslatef(position.x, position.y + bob + (dead ? 0.30f : 0.f), position.z);
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
@@ -580,6 +645,7 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                        placed.part->localSize * s, colors);
     }
     rlPopMatrix();
+    endCharacterShader();
 
     // Same emote billboard the pack path draws, at the same height — the
     // two render paths must stay indistinguishable to the player. The dead
@@ -661,6 +727,9 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     const Color gunmetal{55, 58, 66, 255};
     const Color gripTone{38, 40, 46, 255};
 
+    // The first-person arm is a character surface too — same cel banding
+    // as the third-person figures (issue #138 routing rule).
+    beginCharacterShader();
     rlPushMatrix();
     rlTranslatef(camera_.position.x, camera_.position.y, camera_.position.z);
     rlRotatef(yawDeg, 0.f, 1.f, 0.f);
@@ -690,6 +759,7 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
         DrawSphere(Vector3{-0.26f, -0.31f, 0.43f}, 0.042f, skin);  // hand
     }
     rlPopMatrix();
+    endCharacterShader();
 }
 
 void RaylibRenderer::endFrame() {

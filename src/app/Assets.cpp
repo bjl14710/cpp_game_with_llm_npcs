@@ -65,6 +65,86 @@ void main() {
 }
 )";
 
+// Character cel shader (issue #138): 3-band toon diffuse composed with the
+// SAME warm-tint + distance-fog stage as kFogFragmentShader, in one program.
+// The face normal comes from screen-space derivatives of the world position
+// (flat-faceted banding) rather than vertex normals, because the rlgl batch
+// only fills normals for cubes — spheres/cylinders (most composite parts)
+// push none. Derivative normals band EVERY character surface identically:
+// batch primitives, skinned meshes, and the #139 part meshes. Same vertex
+// stage as fog; only the fragment differs.
+constexpr const char* kCelFragmentShader = R"(
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragPosition;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+uniform vec3 cameraPos;
+uniform vec4 fogColor;
+uniform float fogDensity;
+uniform float lightLevel;
+out vec4 finalColor;
+void main() {
+    vec4 texel = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
+    // Flat face normal; fixed sun direction. No normalize(cross) on
+    // degenerate fragments: guard keeps billboards/decals fully lit.
+    vec3 dx = dFdx(fragPosition);
+    vec3 dy = dFdy(fragPosition);
+    vec3 n = cross(dx, dy);
+    float ndl = 1.0;
+    if (dot(n, n) > 1e-12) {
+        ndl = max(dot(normalize(n), normalize(vec3(0.4, 0.8, 0.45))), 0.0);
+    }
+    // Quantize into 3 bands: shadow floor, mid tone, full light.
+    float band = ndl < 0.25 ? 0.62 : (ndl < 0.65 ? 0.84 : 1.0);
+    vec3 warm = texel.rgb * band * vec3(1.06, 1.0, 0.92) * lightLevel;
+    float d = length(cameraPos - fragPosition) * fogDensity;
+    float fog = 1.0 - exp(-d * d);
+    finalColor = vec4(mix(warm, fogColor.rgb, fog), texel.a);
+}
+)";
+
+// Inverted-hull outline for MESH characters (the model counterpart of the
+// #103 primitive hull): the vertex stage pushes each vertex out along its
+// world-space normal by a fixed world width; drawn with front faces culled
+// so only the rim survives. Meshes have real normals (unlike the batch),
+// which is exactly why this pass is mesh-only.
+constexpr const char* kOutlineVertexShader = R"(
+#version 330
+in vec3 vertexPosition;
+in vec3 vertexNormal;
+uniform mat4 matModel;
+uniform mat4 matNormal;
+uniform mat4 matView;
+uniform mat4 matProjection;
+uniform float outlineWidth;
+out vec3 fragPosition;
+void main() {
+    vec3 wp = vec3(matModel * vec4(vertexPosition, 1.0));
+    vec3 wn = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));
+    fragPosition = wp + wn * outlineWidth;
+    gl_Position = matProjection * matView * vec4(fragPosition, 1.0);
+}
+)";
+
+// Solid rim color, fading into fog with distance so far-off outlines melt
+// into the horizon along with the geometry they wrap.
+constexpr const char* kOutlineFragmentShader = R"(
+#version 330
+in vec3 fragPosition;
+uniform vec3 cameraPos;
+uniform vec4 fogColor;
+uniform float fogDensity;
+uniform vec4 outlineColor;
+out vec4 finalColor;
+void main() {
+    float d = length(cameraPos - fragPosition) * fogDensity;
+    float fog = 1.0 - exp(-d * d);
+    finalColor = vec4(mix(outlineColor.rgb, fogColor.rgb, fog), 1.0);
+}
+)";
+
 }  // namespace
 
 Assets::Assets(const std::string& assetsDir) {
@@ -94,6 +174,54 @@ Assets::Assets(const std::string& assetsDir) {
         SetShaderValue(fogShader_, fogLightLoc_, &light, SHADER_UNIFORM_FLOAT);
     } else {
         std::cerr << "[llm_npc] fog shader failed to compile — plain look\n";
+    }
+
+    // Character cel shader (issue #138): shares the fog vertex stage and
+    // uniform names, so the renderer drives fog + cel identically. Failure
+    // degrades characters to the fog shader — never the default material.
+    celShader_ = LoadShaderFromMemory(kFogVertexShader, kCelFragmentShader);
+    celLoaded_ = IsShaderValid(celShader_);
+    if (celLoaded_) {
+        celCameraLoc_ = GetShaderLocation(celShader_, "cameraPos");
+        celColorLoc_ = GetShaderLocation(celShader_, "fogColor");
+        celLightLoc_ = GetShaderLocation(celShader_, "lightLevel");
+        const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
+        const float density = 0.006f;
+        const float light = 1.f;
+        SetShaderValue(celShader_, celColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(celShader_, GetShaderLocation(celShader_, "fogDensity"),
+                       &density, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(celShader_, celLightLoc_, &light, SHADER_UNIFORM_FLOAT);
+    } else {
+        std::cerr << "[llm_npc] cel shader failed to compile — characters keep "
+                     "the fog look\n";
+    }
+
+    // Mesh outline shader: fixed world-space rim width (relative to the
+    // 1.8u character contract) and the #103 rim color, set once — only
+    // cameraPos and fogColor change per frame.
+    outlineShader_ =
+        LoadShaderFromMemory(kOutlineVertexShader, kOutlineFragmentShader);
+    outlineLoaded_ = IsShaderValid(outlineShader_);
+    if (outlineLoaded_) {
+        outlineCameraLoc_ = GetShaderLocation(outlineShader_, "cameraPos");
+        outlineColorLoc_ = GetShaderLocation(outlineShader_, "fogColor");
+        const float width = 0.022f;
+        const float rim[4] = {32.f / 255.f, 30.f / 255.f, 38.f / 255.f, 1.f};
+        const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
+        const float density = 0.006f;
+        SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "outlineWidth"),
+                       &width, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "outlineColor"),
+                       rim, SHADER_UNIFORM_VEC4);
+        SetShaderValue(outlineShader_, outlineColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "fogDensity"),
+                       &density, SHADER_UNIFORM_FLOAT);
+        outlineMaterial_ = LoadMaterialDefault();
+        outlineMaterial_.shader = outlineShader_;
+    } else {
+        std::cerr << "[llm_npc] outline shader failed to compile — mesh "
+                     "characters render rimless\n";
     }
 
     cityDir_ = assetsDir + "/models/city";
@@ -178,6 +306,13 @@ Assets::Assets(const std::string& assetsDir) {
 
 Assets::~Assets() {
     if (fogLoaded_) UnloadShader(fogShader_);
+    if (celLoaded_) UnloadShader(celShader_);
+    if (outlineLoaded_) {
+        // Not UnloadMaterial: that would also unload outlineShader_ (freed
+        // on the next line) — only the default maps array is ours to free.
+        MemFree(outlineMaterial_.maps);
+        UnloadShader(outlineShader_);
+    }
     for (Texture2D& face : faces_) UnloadTexture(face);
     for (auto& [stem, model] : models_) UnloadModel(model);
     for (auto& character : characters_) {
@@ -220,12 +355,15 @@ void Assets::loadCharacter(const std::string& stem) {
         return;
     }
 
-    // Characters fog too. CPU skinning is unaffected: it writes animated
-    // vertices into the mesh before drawing, and the fog shader consumes
-    // only the standard position/texcoord/color attributes.
-    if (fogLoaded_) {
+    // Characters render through the cel shader (#138) — banded toon light
+    // composed with the same fog stage. CPU skinning is unaffected: it
+    // writes animated vertices into the mesh before drawing, and the shader
+    // consumes only the standard position/texcoord/color attributes. Cel
+    // compile failure falls back to fog; a character NEVER keeps the
+    // default lit material (the routing rule this block enforces).
+    if (celLoaded_ || fogLoaded_) {
         for (int i = 0; i < character.model.materialCount; ++i) {
-            character.model.materials[i].shader = fogShader_;
+            character.model.materials[i].shader = celLoaded_ ? celShader_ : fogShader_;
         }
     }
 
