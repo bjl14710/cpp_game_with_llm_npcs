@@ -1,5 +1,6 @@
 #include "Config.hpp"
 
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -49,6 +50,19 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
     }
     if (auto it = kv.find("keep_alive"); it != kv.end()) cfg.keepAlive = it->second;
     if (auto it = kv.find("think"); it != kv.end()) cfg.think = it->second;
+    if (auto it = kv.find("provider"); it != kv.end()) cfg.provider = it->second;
+    if (auto it = kv.find("base_url"); it != kv.end()) cfg.baseUrl = it->second;
+    if (auto it = kv.find("api_key_env"); it != kv.end()) cfg.apiKeyEnv = it->second;
+
+    // Resolve the cloud API key without ever storing it in version control:
+    // prefer the named environment variable, then fall back to the gitignored
+    // config/secrets.cfg. Left empty (cloud disabled) when neither is set.
+    if (const char* env = std::getenv(cfg.apiKeyEnv.c_str()); env && *env) {
+        cfg.apiKey = env;
+    } else {
+        auto secrets = readKv(configDir / "secrets.cfg");
+        if (auto it = secrets.find("api_key"); it != secrets.end()) cfg.apiKey = it->second;
+    }
     return cfg;
 }
 

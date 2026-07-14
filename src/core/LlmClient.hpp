@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -10,6 +11,8 @@
 #include <vector>
 
 namespace llm_npc {
+
+class LlmBackend;  // the swappable provider; see LlmBackend.hpp
 
 // A single turn in a chat history. Role is "user" or "assistant".
 struct ChatTurn {
@@ -31,6 +34,19 @@ struct LlmConfig {
     // `think`. qwen3-class models need "false" for chat-speed replies —
     // measured 24s -> 2.7s time-to-first-token (bench/REPORT.md).
     std::string think = "";
+
+    // Which backend serves requests: "ollama" (default, local, no TLS) or any
+    // OpenAI-compatible cloud provider ("openrouter", "openai", ...).
+    std::string provider = "ollama";
+    // OpenAI-compatible base URL; empty lets the backend pick its default
+    // (OpenRouter). Point it at http://localhost:11434/v1 to exercise the cloud
+    // code path against local Ollama with no TLS.
+    std::string baseUrl = "";
+    // Name of the environment variable that holds the cloud API key.
+    std::string apiKeyEnv = "OPENROUTER_API_KEY";
+    // The resolved API key (from the env var or config/secrets.cfg). Filled in
+    // at load time and never written back to disk.
+    std::string apiKey = "";
 };
 
 // One request submitted to the LLM.
@@ -93,12 +109,20 @@ class LlmClient {
 
     const LlmConfig& config() const { return config_; }
 
+    // Live model controls, delegated to the backend so the in-game picker can
+    // switch models without restarting. availableModels() may hit the network
+    // (e.g. Ollama's /api/tags), so call it off the hot path (menu open).
+    std::vector<std::string> availableModels();
+    std::string model() const;
+    void setModel(std::string model);
+
    private:
     void workerLoop();
     ChatReply processOne(const ChatRequest& req);
     void enqueue(ChatRequest req);
 
     LlmConfig config_;
+    std::unique_ptr<LlmBackend> backend_;  // the active provider
 
     std::thread worker_;
     std::atomic<bool> stop_{false};

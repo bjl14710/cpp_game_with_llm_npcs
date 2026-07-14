@@ -41,7 +41,10 @@ add_library(llm_npc_core STATIC
     src/core/Trait.cpp
     src/core/WorldGen.cpp
     src/core/WorldGenValidate.cpp
+    src/core/LlmBackend.cpp
     src/core/LlmClient.cpp
+    src/core/OllamaBackend.cpp
+    src/core/OpenAiBackend.cpp
     src/core/NetClient.cpp
     src/core/NetFraming.cpp
     src/core/NetMessage.cpp

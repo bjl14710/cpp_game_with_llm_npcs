@@ -1,13 +1,17 @@
-// Tests for StreamAssembler and parseOllamaChunk — the NDJSON plumbing that
-// turns Ollama's streamed /api/chat bytes into per-token text deltas.
+// Tests for StreamAssembler, parseOllamaChunk (Ollama NDJSON), and
+// parseOpenAiChunk (OpenAI-compatible SSE) — the plumbing that turns streamed
+// chat bytes into per-token text deltas.
 #include <string>
 #include <vector>
 
+#include "OpenAiChunk.hpp"
 #include "StreamAssembler.hpp"
 #include "doctest.h"
 
 using llm_npc::OllamaChunk;
+using llm_npc::OpenAiChunk;
 using llm_npc::parseOllamaChunk;
+using llm_npc::parseOpenAiChunk;
 using llm_npc::StreamAssembler;
 
 namespace {
@@ -85,4 +89,58 @@ TEST_CASE("parseOllamaChunk ignores blank and CRLF-framed lines") {
         "{\"message\":{\"content\":\"hi\"},\"done\":false}\r");
     CHECK(crlf.delta == "hi");
     CHECK(crlf.error.empty());
+}
+
+TEST_CASE("parseOpenAiChunk extracts a text delta from a data line") {
+    OpenAiChunk c = parseOpenAiChunk(
+        R"(data: {"choices":[{"delta":{"content":"Hel"}}]})");
+    CHECK(c.delta == "Hel");
+    CHECK_FALSE(c.done);
+    CHECK(c.error.empty());
+}
+
+TEST_CASE("parseOpenAiChunk treats [DONE] as completion") {
+    OpenAiChunk c = parseOpenAiChunk("data: [DONE]");
+    CHECK(c.delta.empty());
+    CHECK(c.done);
+    CHECK(c.error.empty());
+}
+
+TEST_CASE("parseOpenAiChunk marks done on a non-null finish_reason") {
+    OpenAiChunk c = parseOpenAiChunk(
+        R"(data: {"choices":[{"delta":{},"finish_reason":"stop"}]})");
+    CHECK(c.delta.empty());
+    CHECK(c.done);
+    CHECK(c.error.empty());
+}
+
+TEST_CASE("parseOpenAiChunk surfaces an error object's message") {
+    OpenAiChunk c = parseOpenAiChunk(
+        R"(data: {"error":{"message":"invalid api key","type":"auth"}})");
+    CHECK(c.error == "invalid api key");
+    CHECK_FALSE(c.done);
+}
+
+TEST_CASE("parseOpenAiChunk ignores blank lines and SSE comments") {
+    OpenAiChunk blank = parseOpenAiChunk("");
+    CHECK(blank.delta.empty());
+    CHECK(blank.error.empty());
+    CHECK_FALSE(blank.done);
+
+    OpenAiChunk comment = parseOpenAiChunk(": OPENROUTER PROCESSING");
+    CHECK(comment.delta.empty());
+    CHECK(comment.error.empty());
+    CHECK_FALSE(comment.done);
+
+    // A bare keep-alive "data:" with nothing after it is a no-op too.
+    OpenAiChunk emptyData = parseOpenAiChunk("data:");
+    CHECK(emptyData.delta.empty());
+    CHECK_FALSE(emptyData.done);
+}
+
+TEST_CASE("parseOpenAiChunk tolerates CRLF framing") {
+    OpenAiChunk c = parseOpenAiChunk(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r");
+    CHECK(c.delta == "hi");
+    CHECK(c.error.empty());
 }
