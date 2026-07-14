@@ -31,6 +31,7 @@
 #include "DialogUI.hpp"
 #include "FactStore.hpp"
 #include "Gossip.hpp"
+#include "GroupSession.hpp"
 #include "Journal.hpp"
 #include "DialogueSession.hpp"
 #include "HostChatRouter.hpp"
@@ -44,6 +45,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "RatingLog.hpp"
+#include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
 #include "Trait.hpp"
@@ -330,6 +332,7 @@ int main(int argc, char** argv) {
         summaryRoutes[id] = npcIndex;
     };
 
+
     SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_MSAA_4X_HINT);
     InitWindow(1280, 720, "LLM NPC City");
     SetTargetFPS(60);
@@ -482,6 +485,9 @@ int main(int argc, char** argv) {
         // record goes through the SAME parser as designer .persona files;
         // the stored look joins npcLooks like everyone else's.
         for (const StoredCharacter& stored : characterStore.loadAll()) {
+            // Generated village characters (gen_*) belong to their maps,
+            // not the town roster (issue #129).
+            if (stored.characterId.rfind("gen_", 0) == 0) continue;
             const PersonaParseResult parsed =
                 parsePersonaText(stored.personaText, stored.characterId);
             if (!parsed.ok) {
@@ -613,6 +619,34 @@ int main(int argc, char** argv) {
     };
     menu.setAvatar(avatarHooks);
 
+    // Group conversations (issues #122-#124): additive alongside the solo
+    // DialogueSession; active() discriminates. One streamed turn at a time.
+    GroupSession group;
+    std::uint64_t groupPendingId = 0;  // request id of the streaming turn
+    double groupTurnStart = 0.0;       // for the latency log (issue #124)
+    // One group turn (issue #122): the speaker gets THEIR OWN persona
+    // prompt plus the labeled transcript, through the same ask/route/
+    // stream pipeline solo talk uses — so directives, moods, history and
+    // memory summaries all keep working per participant.
+    const auto submitGroupTurn = [&](int npcIndex) {
+        if (npcIndex < 0 || npcIndex >= static_cast<int>(world.npcs().size())) return;
+        Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
+        std::string context = "You are in a group conversation. Present: Player";
+        for (const int i : group.participants()) {
+            context += ", " + world.npcs()[static_cast<std::size_t>(i)].persona().name;
+        }
+        context += ".\nThe conversation so far, speakers labeled:\n" +
+                   group.renderTranscript() +
+                   "Reply with only your own next line, in character, to whoever "
+                   "spoke last.";
+        const std::uint64_t id = npc.ask(context);
+        pendingRoutes[id] = npcIndex;
+        groupPendingId = id;
+        groupTurnStart = GetTime();
+        dialog.beginStreaming(npc.persona().name);
+        dialog.setInputEnabled(false);
+    };
+
     // Trait rating loop (issue #118): review files only, human-curated —
     // rating a reply provably never changes a live prompt.
     RatingLog ratingLog(projectRoot / "saves" / "ratings");
@@ -712,6 +746,30 @@ int main(int argc, char** argv) {
     sandboxHooks.onOpen = [&](const std::string& stem) {
         sandboxOpenRequested = true;
         sandboxOpenStem = stem;
+    };
+    // LLM map generation (issue #129): an async generate-validate-retry
+    // chain over internal requests; results save as a normal map file and
+    // open in EDIT mode — always a draft the player owns, never locked.
+    std::uint64_t worldgenRequestId = 0;
+    int worldgenAttempt = 0;
+    std::string worldgenDescription;
+    std::string worldgenStatus;         // HUD line
+    float worldgenStatusTtl = 0.f;
+    const auto worldgenSay = [&](const std::string& s) {
+        worldgenStatus = s;
+        worldgenStatusTtl = 6.f;
+        std::cerr << "[llm_npc] worldgen: " << s << "\n";
+    };
+    const auto submitWorldgen = [&](const std::string& user) {
+        worldgenRequestId = client.submit(buildVillagePrompt(traitLibrary), {}, user);
+    };
+    sandboxHooks.onGenerate = [&](const std::string& description) -> std::string {
+        if (worldgenRequestId != 0) return "Already generating...";
+        worldgenDescription = description;
+        worldgenAttempt = 1;
+        submitWorldgen(description);
+        worldgenSay("Generating '" + description.substr(0, 40) + "'...");
+        return "Generating... (watch the status line)";
     };
     menu.setSandbox(sandboxHooks);
     {
@@ -869,6 +927,40 @@ int main(int argc, char** argv) {
                        nearbyNpc < static_cast<int>(world.npcs().size()) &&
                        world.npcs()[static_cast<std::size_t>(nearbyNpc)].combatState() ==
                            NpcState::Idle) {
+                // Followers join the conversation (issue #122): player + up
+                // to 3 NPCs, the brief's latency cap.
+                std::vector<int> members{nearbyNpc};
+                std::vector<std::string> memberNames{
+                    world.npcs()[static_cast<std::size_t>(nearbyNpc)].persona().name};
+                if (!joined) {
+                    for (int i = 0; i < static_cast<int>(world.npcs().size()) &&
+                                    members.size() < 3;
+                         ++i) {
+                        if (i == nearbyNpc) continue;
+                        Npc& candidate = world.npcs()[static_cast<std::size_t>(i)];
+                        if (candidate.behavior() == NpcAction::Follow &&
+                            candidate.combatState() == NpcState::Idle) {
+                            members.push_back(i);
+                            memberNames.push_back(candidate.persona().name);
+                        }
+                    }
+                }
+                if (members.size() >= 2) {
+                    group.open(members, memberNames);
+                    groupPendingId = 0;
+                    for (const int i : members) {
+                        world.npcs()[static_cast<std::size_t>(i)].lookAt(player.position);
+                    }
+                    std::string party = "Talking with";
+                    for (const std::string& n : memberNames) party += " " + n + ",";
+                    party.back() = '.';
+                    dialog.reset();
+                    dialog.appendLine({TranscriptLine::Kind::System, "", party});
+                    dialog.setInputEnabled(true);
+                    mode = AppMode::Dialogue;
+                    EnableCursor();
+                    continue;  // group path complete; skip the solo open
+                }
                 session.open(nearbyNpc);
                 Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
                 if (joined) {
@@ -886,6 +978,25 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
         } else if (mode == AppMode::Dialogue) {
+            if (group.active()) {
+                // Combat doesn't pause for talk: drop dead/arrested
+                // participants with a note; close when nobody is left.
+                for (const int i : std::vector<int>(group.participants())) {
+                    if (world.npcs()[static_cast<std::size_t>(i)].combatState() ==
+                        NpcState::Dead) {
+                        dialog.appendLine(
+                            {TranscriptLine::Kind::System, "",
+                             group.nameOf(i) + " is no longer with us."});
+                        group.removeParticipant(i);
+                    }
+                }
+                if (group.participants().empty()) {
+                    group.close();
+                    groupPendingId = 0;
+                    mode = AppMode::Playing;
+                    DisableCursor();
+                }
+            }
             // Rating capture (issue #118): F1 keeps the last completed reply
             // as a trait-example candidate, F2 logs it for review. F-keys on
             // purpose — +/- would collide with the text input. One rating
@@ -922,10 +1033,20 @@ int main(int argc, char** argv) {
                 }
             }
             if (IsKeyPressed(KEY_ESCAPE)) {
-                // Leaving a conversation kicks off the NPC's memory update
-                // and fact extraction (solo/host only — a guest's
-                // conversations live host-side).
-                if (!joined) {
+                // Leaving a conversation kicks off memory updates and fact
+                // extraction (solo/host only — a guest's conversations live
+                // host-side). Groups: EVERY participant summarizes from
+                // their own history (which holds the labeled transcript),
+                // and facts extract per participant, attributed to them
+                // (issue #123).
+                if (group.active()) {
+                    for (const int i : group.participants()) {
+                        requestSummary(i);
+                        requestFacts(i);
+                    }
+                    group.close();
+                    groupPendingId = 0;
+                } else if (!joined) {
                     requestSummary(session.npcIndex());
                     requestFacts(session.npcIndex());
                 }
@@ -935,7 +1056,15 @@ int main(int argc, char** argv) {
                 DisableCursor();
             } else {
                 const std::string submitted = dialog.pollInput();
-                if (!submitted.empty() && session.isOpen()) {
+                if (!submitted.empty() && group.active()) {
+                    if (groupPendingId == 0) {  // one streamed turn at a time
+                        dialog.appendLine(
+                            {TranscriptLine::Kind::Player, "You", submitted});
+                        group.notePlayerTurn();
+                        group.addLine("Player", submitted);
+                        submitGroupTurn(group.resolveNextSpeaker(submitted));
+                    }
+                } else if (!submitted.empty() && session.isOpen()) {
                     Npc& npc = world.npcs()[static_cast<std::size_t>(session.npcIndex())];
                     if (joined) {
                         // Joined: the host owns the NPC — send the line up.
@@ -1119,6 +1248,7 @@ int main(int argc, char** argv) {
                 case MenuResult::None:
                     break;
             }
+        }
             if (sandboxOpenRequested) {
                 sandboxOpenRequested = false;
                 SandboxMap doc;
@@ -1163,7 +1293,6 @@ int main(int argc, char** argv) {
                     EnableCursor();
                 }
             }
-        }
         if (mode != AppMode::Menu && jailSecondsLeft > 0.f) jailSecondsLeft -= dt;
 
         // The ONE world clock advances here; every time-aware system below
@@ -1370,10 +1499,88 @@ int main(int argc, char** argv) {
             if (chatRouter && chatRouter->routeDelta(delta)) continue;
             if (session.deltaArrived(delta.id, delta.text)) {
                 dialog.appendStreamingDelta(delta.text);
+            } else if (group.active() && delta.id == groupPendingId) {
+                dialog.appendStreamingDelta(delta.text);
             }
         }
         for (const auto& reply : client.drainReplies()) {
             if (chatRouter && chatRouter->routeReply(reply)) continue;
+            // World generation chain (issue #129): validate, retry with
+            // the errors, and on success persist + open in the editor.
+            if (worldgenRequestId != 0 && reply.id == worldgenRequestId) {
+                worldgenRequestId = 0;
+                std::string json;
+                SandboxMap genMap;
+                std::vector<GeneratedCharacter> genCast;
+                std::vector<MapError> mapErrors;
+                std::vector<CastError> castErrors;
+                if (!reply.ok) {
+                    worldgenSay("Generation failed: " + reply.errorMessage);
+                    worldgenAttempt = 0;
+                    continue;
+                }
+                if (!extractJsonObject(reply.content, json)) {
+                    mapErrors.push_back({"output", "no JSON object found"});
+                } else if (!parseGeneratedVillage(json, genMap, genCast)) {
+                    mapErrors.push_back({"output",
+                                         "JSON shape is not {\"map\": {...}, "
+                                         "\"characters\": [...]}"});
+                } else {
+                    mapErrors = validateMap(genMap);
+                    castErrors = validateCast(genCast, traitLibrary);
+                    const auto links = validateVillageLinks(genMap, genCast);
+                    mapErrors.insert(mapErrors.end(), links.begin(), links.end());
+                }
+                if (!mapErrors.empty() || !castErrors.empty()) {
+                    if (worldgenAttempt < kWorldGenMaxAttempts) {
+                        ++worldgenAttempt;
+                        submitWorldgen(worldgenDescription + "\n\n" +
+                                       renderRetryFeedback(mapErrors, castErrors));
+                        worldgenSay("Attempt " + std::to_string(worldgenAttempt) +
+                                    "/" + std::to_string(kWorldGenMaxAttempts) +
+                                    "...");
+                    } else {
+                        std::string first = mapErrors.empty()
+                                                ? castErrors.front().reason
+                                                : mapErrors.front().reason;
+                        worldgenSay("Generation failed after " +
+                                    std::to_string(kWorldGenMaxAttempts) +
+                                    " attempts: " + first);
+                        worldgenAttempt = 0;
+                    }
+                    continue;
+                }
+                // Valid: persist the cast (gen_ ids never spawn in town —
+                // spawnTownRoster filters them) and the map, then open it
+                // in EDIT mode via the normal path.
+                for (const GeneratedCharacter& character : genCast) {
+                    const PersonaParseResult parsed =
+                        parsePersonaText(character.personaText, "generated");
+                    if (!parsed.ok) continue;  // validateCast already passed
+                    const std::string genId =
+                        generatedCharacterId(parsed.value.persona.name);
+                    characterStore.savePersona(genId, character.personaText);
+                    if (parsed.value.hasLook) {
+                        characterStore.saveLook(genId, parsed.value.look);
+                    }
+                }
+                std::string slug = "gen-1";
+                for (int n = 1; fs::exists(mapsDir / (slug + ".json")); ++n) {
+                    slug = "gen-" + std::to_string(n);
+                }
+                std::error_code ec;
+                fs::create_directories(mapsDir, ec);
+                {
+                    std::ofstream out(mapsDir / (slug + ".json"));
+                    out << genMap.toJson();
+                }
+                worldgenSay("Generated '" + genMap.name + "' -> " + slug +
+                            " (opening editor)");
+                worldgenAttempt = 0;
+                sandboxOpenRequested = true;
+                sandboxOpenStem = slug;
+                continue;
+            }
             // Summary notes: remember + persist, never shown in a dialog.
             if (const auto summary = summaryRoutes.find(reply.id);
                 summary != summaryRoutes.end()) {
@@ -1424,6 +1631,47 @@ int main(int argc, char** argv) {
                 chatRouter->announceNpcMood(npcIndex);
             }
 
+            if (group.active() && reply.id == groupPendingId) {
+                groupPendingId = 0;
+                // Latency log (issue #124): one model call per turn.
+                std::cerr << "[llm_npc] group turn: "
+                          << (GetTime() - groupTurnStart) << "s ("
+                          << npc.persona().name << ")\n";
+                dialog.endStreaming();
+                if (text && !text->empty()) {
+                    dialog.appendLine(
+                        {TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                    group.addLine(npc.persona().name, *text);
+                } else {
+                    dialog.appendLine({TranscriptLine::Kind::System, "",
+                                       "(" + npc.persona().name + " says nothing.)"});
+                    group.addLine(npc.persona().name, "...");
+                }
+                const std::string groupSd = stageDirection(npc.lastAction());
+                if (!groupSd.empty()) {
+                    dialog.appendLine({TranscriptLine::Kind::System, "",
+                                       npc.persona().name + " " + groupSd});
+                }
+                if (npc.lastAction() == NpcAction::CallPolice) {
+                    for (Npc& officer : world.npcs()) {
+                        if (officer.persona().police) officer.commandArrest();
+                    }
+                }
+                // NPC-to-NPC floor (capped): the next participant answers
+                // the line just spoken; otherwise back to the player.
+                if (group.npcMayTakeFloor() && group.participants().size() >= 2) {
+                    const int next = group.resolveNextSpeaker("");
+                    if (next >= 0 && next != npcIndex) {
+                        group.noteNpcTurn();
+                        submitGroupTurn(next);
+                    } else {
+                        dialog.setInputEnabled(true);
+                    }
+                } else {
+                    dialog.setInputEnabled(true);
+                }
+                continue;
+            }
             if (session.replyArrived(reply.id, reply.ok)) {
                 dialog.endStreaming();
                 if (text) {
@@ -1623,6 +1871,10 @@ int main(int argc, char** argv) {
         renderer.endFrame();
 
         // ---- 2D overlay ----
+        if (worldgenStatusTtl > 0.f) {
+            worldgenStatusTtl -= dt;
+            drawCenteredHudText(worldgenStatus, 16, 40.f);
+        }
         if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
             session.npcIndex() < static_cast<int>(world.npcs().size())) {
             const auto& ratedHistory =
