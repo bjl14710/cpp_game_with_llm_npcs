@@ -261,3 +261,69 @@ TEST_CASE("deriveFacingFromMotion ignores sub-threshold drift and the dead") {
     npc.deriveFacingFromMotion(prev2, 1.f / 60.f);
     CHECK(npc.facingDeg() == doctest::Approx(held));
 }
+
+TEST_CASE("schedules: the injected clock decides the destination") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    const City city = City::makeDowntown();
+    Npc npc(civilianPersona(), client);
+    npc.setPlacement(Vec3{-70.f, 0.f, -36.f}, 0.f, "bakery");
+    npc.setSchedule({{5.f, 12.f, Vec3{-70.f, 0.f, -36.f}, "baking bread"},
+                     {12.f, 14.f, Vec3{-8.f, 0.f, -6.f}, "lunch at the plaza"}});
+    const Vec3 farPlayer{90.f, 0.f, 90.f};
+
+    // Morning: already at the bakery spot -> stays put, activity reported.
+    npc.update(0.1f, farPlayer, city, 7.f);
+    CHECK(npc.activity() == "baking bread");
+    CHECK(distanceXZ(npc.position(), Vec3{-70.f, 0.f, -36.f}) < 0.5f);
+
+    // Same NPC, different injected hour -> walks toward the plaza. The NPC
+    // has no clock of its own; only the parameter changed.
+    const float before = distanceXZ(npc.position(), Vec3{-8.f, 0.f, -6.f});
+    for (int i = 0; i < 60; ++i) npc.update(0.1f, farPlayer, city, 12.5f);
+    CHECK(npc.activity() == "lunch at the plaza");
+    CHECK(distanceXZ(npc.position(), Vec3{-8.f, 0.f, -6.f}) < before);
+
+    // No clock (negative hour) -> schedule dormant, no movement.
+    const Vec3 held = npc.position();
+    npc.update(0.5f, farPlayer, city);
+    CHECK(distanceXZ(npc.position(), held) < 0.001f);
+}
+
+TEST_CASE("schedules: a nearby player pauses the walk; no schedule idles") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    const City city = City::makeDowntown();
+    Npc npc(civilianPersona(), client);
+    npc.setPlacement(Vec3{10.f, 0.f, 10.f}, 0.f, "plaza");
+    npc.setSchedule({{0.f, 24.f, Vec3{10.f, 0.f, -40.f}, "errands"}});
+
+    // Player right next to the NPC: the routine politely waits.
+    const Vec3 nearPlayer{11.f, 0.f, 10.f};
+    npc.update(0.5f, nearPlayer, city, 10.f);
+    CHECK(distanceXZ(npc.position(), Vec3{10.f, 0.f, 10.f}) < 0.001f);
+    CHECK(npc.activity() == "errands");  // the label still reports
+
+    // Player far away: the walk resumes.
+    npc.update(0.5f, Vec3{90.f, 0.f, 90.f}, city, 10.f);
+    CHECK(distanceXZ(npc.position(), Vec3{10.f, 0.f, 10.f}) > 0.5f);
+
+    // An NPC with no schedule never moves on its own.
+    Npc idler(civilianPersona(), client);
+    idler.setPlacement(Vec3{0.f, 0.f, 10.f}, 0.f, "plaza");
+    idler.update(0.5f, Vec3{90.f, 0.f, 90.f}, city, 10.f);
+    CHECK(distanceXZ(idler.position(), Vec3{0.f, 0.f, 10.f}) < 0.001f);
+    CHECK(idler.activity().empty());
+}
+
+TEST_CASE("schedules: midnight-wrapping ranges and edge hours") {
+    const std::vector<ScheduleEntry> schedule = {
+        {22.f, 6.f, Vec3{}, "night shift"},
+        {6.f, 10.f, Vec3{}, "morning"},
+    };
+    CHECK(activeScheduleIndex(schedule, 23.f) == 0);
+    CHECK(activeScheduleIndex(schedule, 2.f) == 0);
+    CHECK(activeScheduleIndex(schedule, 6.f) == 1);   // start-inclusive
+    CHECK(activeScheduleIndex(schedule, 5.99f) == 0); // end-exclusive
+    CHECK(activeScheduleIndex(schedule, 15.f) == -1); // gap: nothing active
+}

@@ -6,6 +6,10 @@ knowledge = Taught three decades of the city's children, including half the shop
 spot = bench
 position = 68, 73
 facing = 180
+look = body_round, head_oval, eyes_sleepy, hair_tuft, mouth_smile, cool
+schedule = 8-13, -36, 8, reading at the library
+schedule = 13-19, 68, 73, grading essays
+schedule = 19-8, 68, 73, stargazing
 ---
 Your bench is in the park, northeast corner of downtown, near the fountain
 square where Benny plays guitar. The library overdue notices keep coming;

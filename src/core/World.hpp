@@ -8,6 +8,7 @@
 #include "Math.hpp"
 #include "Npc.hpp"
 #include "Player.hpp"
+#include "WorldState.hpp"
 
 namespace llm_npc {
 
@@ -15,7 +16,7 @@ namespace llm_npc {
 // at constant speed on the XZ plane and expires after maxLifetime seconds.
 struct Projectile {
     Vec3  position{};
-    Vec3  direction{};   // normalised, XZ only
+    Vec3  direction{};   // normalised, full 3D (aim follows pitch — issue #91)
     float speed     = 0.f;
     float lifetime  = 0.f;
     float maxLifetime = 2.f;
@@ -32,6 +33,19 @@ class World {
 
     const City& city() const { return city_; }
 
+    // Swaps in a different city and clears every inhabitant — the seam
+    // that makes town <-> sandbox-map switching possible. World cannot be
+    // reassigned (Npc holds an LlmClient&), so contents swap IN PLACE.
+    // The world bus (state_) deliberately survives: facts, knowledge and
+    // the clock are session state, not map state. Callers must respawn
+    // NPCs and rebuild their per-NPC bookkeeping afterwards.
+    void loadCity(City city);
+
+    // The world bus: shared facts every system reads instead of keeping a
+    // private copy — the clock lives here (see WorldState).
+    WorldState&       state()       { return state_; }
+    const WorldState& state() const { return state_; }
+
     // Adds an NPC (already placed via setPlacement).
     void addNpc(Npc npc) { npcs_.push_back(std::move(npc)); }
 
@@ -47,6 +61,10 @@ class World {
 
     Player&       player()       { return player_; }
     const Player& player() const { return player_; }
+
+    // Read-only view of in-flight projectiles. Lets tests inspect a shot's
+    // origin and direction directly (the renderer does not draw them yet).
+    const std::vector<Projectile>& projectiles() const { return projectiles_; }
 
     // --- Combat API ------------------------------------------------------
 
@@ -66,6 +84,7 @@ class World {
 
    private:
     City   city_;
+    WorldState state_;
     Player player_;
     std::vector<Npc>        npcs_;
     std::vector<Projectile> projectiles_;

@@ -4,8 +4,10 @@
 #include <string>
 #include <vector>
 
+#include "CharacterParts.hpp"
 #include "Math.hpp"
 #include "Persona.hpp"
+#include "Schedule.hpp"
 
 namespace llm_npc {
 
@@ -16,6 +18,16 @@ struct LoadedPersona {
     Vec3 position;          // world position on the ground plane (y = 0)
     float facingDeg = 0.f;  // initial facing, degrees around +y (0 = +z)
     std::string spotId;     // landmark tag, e.g. "bakery" or "park"
+    // Optional authored appearance from the shared parts library: a
+    // "look = body, head, eyes, hair, palette" header line. Parsed
+    // structurally only — catalog validation happens at the spawn site via
+    // lookForPersona, so a stale part id demotes to the deterministic
+    // fallback instead of killing the whole persona file.
+    CharacterLook look;
+    bool hasLook = false;
+    // Optional daily routine, driven by the shared world clock: repeated
+    // "schedule = HH-HH, x, z, activity" header lines, in file order.
+    std::vector<ScheduleEntry> schedule;
 };
 
 // Result of parsing one persona definition.
@@ -36,6 +48,7 @@ struct PersonaParseResult {
 //   spot = bakery
 //   position = -40, 28           (x, z world coordinates)
 //   facing = 180                 (degrees)
+//   look = body_round, head_round, eyes_happy, hair_bun, warm   (optional)
 //   ---
 //   Everything after the --- line is passed to the model verbatim.
 //
@@ -51,5 +64,12 @@ PersonaParseResult parsePersonaFile(const std::filesystem::path& path);
 // are appended to `errors` when it is non-null.
 std::vector<LoadedPersona> loadAllPersonas(const std::filesystem::path& dir,
                                            std::vector<std::string>* errors = nullptr);
+
+// Inverse of parsePersonaText: renders a LoadedPersona back to the .persona
+// key=value text format. Player-created characters serialize through this
+// so stored personas and designer-authored files share ONE format and ONE
+// parser. Round-trip guarantee: parsePersonaText(renderPersonaText(p)) == p
+// for values expressible in the format (header values must be single-line).
+std::string renderPersonaText(const LoadedPersona& loaded);
 
 }  // namespace llm_npc

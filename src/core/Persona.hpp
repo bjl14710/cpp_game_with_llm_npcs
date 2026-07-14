@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "Trait.hpp"
+
 namespace llm_npc {
 
 // A Persona is the static identity of an NPC. It is rendered into a single
@@ -12,6 +14,12 @@ struct Persona {
     std::string name;                 // "Companion", "Jim", "Jane #47"
     std::string role;                 // "traveling companion", "pharmacist"
     std::vector<std::string> traits;  // "curious", "soft-spoken", ...
+    // STRUCTURED traits (issue #116): ids into the traits/*.trait library,
+    // from repeated `trait =` persona keys. Additive — the free-text
+    // `traits` adjectives above stay as flavor. Composition order is a
+    // TESTED contract: identity < trait rules+examples < memory < trait
+    // reinforcement < action protocol.
+    std::vector<std::string> traitIds;
     std::string speakingStyle;        // "short sentences, 1-3 per reply"
     std::string knowledgeBoundary;    // what they do / do not know
     std::string extraDirectives;      // free-form constraints
@@ -22,12 +30,39 @@ struct Persona {
     // earlier sessions woven in, so the NPC picks up where things left off.
     // An empty memory renders identically to renderSystemPrompt().
     std::string renderSystemPrompt(const std::string& memory) const {
+        return renderSystemPrompt(memory, "");
+    }
+
+    // Memory plus town gossip: the facts THIS character has heard (from the
+    // shared world bus), so knowledge stays per-NPC. Both sections insert
+    // before the action protocol — directive instructions stay last (small
+    // models weight trailing instructions most). Empty strings render
+    // identically to the plain prompt.
+    std::string renderSystemPrompt(const std::string& memory,
+                                   const std::string& gossip) const {
+        return renderSystemPrompt(memory, gossip, {});
+    }
+
+    // Full assembly with resolved trait definitions (unknown traitIds were
+    // demoted with a log at spawn; render simply composes what it is
+    // handed). Rules and examples land BEFORE the memory summary, and a
+    // short reinforcement AFTER it, so a long remembered history cannot
+    // dilute the personality (the anti-drift contract, pinned by test).
+    std::string renderSystemPrompt(const std::string& memory,
+                                   const std::string& gossip,
+                                   const std::vector<const TraitDef*>& traitDefs) const {
         std::string prompt = renderSystemPrompt();
-        if (memory.empty()) return prompt;
-        // Insert before the action protocol so the directive instructions
-        // stay last (small models weight trailing instructions most).
-        const std::string section =
-            "What you remember from earlier meetings with this player: " + memory + "\n";
+        std::string section = renderTraitBlock(traitDefs);
+        if (!memory.empty()) {
+            section += "What you remember from earlier meetings with this player: " +
+                       memory + "\n";
+        }
+        if (!gossip.empty()) {
+            section += "Things you have heard around town (bring them up when "
+                       "relevant): " + gossip + "\n";
+        }
+        section += renderTraitReinforcement(traitDefs);
+        if (section.empty()) return prompt;
         const auto at = prompt.find("ACTIONS: ");
         if (at == std::string::npos) return prompt + section;
         prompt.insert(at, section);

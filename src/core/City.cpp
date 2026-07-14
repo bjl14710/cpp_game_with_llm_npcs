@@ -48,6 +48,23 @@ City City::makeDowntown() {
         {"bush_c", "", 50.8f, 78.8f, 53.2f, 81.2f, 1.1f, 12},
         {"bush_d", "", 74.8f, 74.8f, 77.2f, 77.2f, 1.1f, 12},
 
+        // Parked cars, curbside on the two Z-running streets (KayKit cars
+        // face along Z at identity and the Uniform draw path doesn't
+        // rotate). Spots avoid the zebra crossings (x/z +-16 and +-48), the
+        // junctions, shop doors, and every persona's home position. The
+        // police car parks beside its station block.
+        {"police_car", "", -27.4f, -62.8f, -23.6f, -58.8f, 1.5f, 13},
+        {"hatchback_b", "", 23.8f, -68.8f, 27.4f, -64.8f, 1.35f, 13},
+        {"sedan_a", "", 36.7f, -8.f, 40.4f, -4.f, 1.35f, 13},
+        {"sedan_b", "", 36.7f, 61.5f, 40.4f, 65.5f, 1.35f, 13},
+        {"hatchback_a", "", -40.4f, 59.5f, -36.7f, 63.5f, 1.35f, 13},
+
+        // Alley props: dumpster + trash between the SW apartments, a bin in
+        // the coffee/office alley.
+        {"dumpster_a", "", -67.2f, -86.f, -63.2f, -83.5f, 1.4f, 14},
+        {"trash_a", "", -62.5f, -87.4f, -61.1f, -86.f, 0.9f, 14},
+        {"trash_b", "", 45.f, -65.4f, 46.2f, -64.2f, 0.7f, 14},
+
         // Unnamed filler so every block reads as a dense city.
         {"apt_a", "", -88.f, -88.f, -68.f, -70.f, 22.f, 9},
         {"apt_b", "", -60.f, -88.f, -40.f, -72.f, 18.f, 9},
@@ -58,6 +75,14 @@ City City::makeDowntown() {
     return city;
 }
 
+City City::fromBuildings(std::vector<Building> buildings, float halfSize) {
+    City city;
+    city.buildings_ = std::move(buildings);
+    city.halfSize_ = halfSize;
+    city.hasStreets_ = false;
+    return city;
+}
+
 const Building* City::findBuilding(const std::string& id) const {
     for (const auto& b : buildings_) {
         if (b.id == id) return &b;
@@ -65,12 +90,28 @@ const Building* City::findBuilding(const std::string& id) const {
     return nullptr;
 }
 
-bool City::circleIntersectsAny(float x, float z, float radius) const {
+bool City::circleIntersectsAny(float x, float z, float radius, float feetY) const {
     const float r2 = radius * radius;
+    // A building stops being solid once the mover's feet reach its top
+    // (small tolerance so standing exactly on a roof doesn't wedge).
+    const float clearance = feetY + 0.01f;
     for (const auto& b : buildings_) {
+        if (b.height <= clearance) continue;
         if (distSqToBuilding(b, x, z) < r2) return true;
     }
     return false;
+}
+
+float City::supportHeightAt(float x, float z, float radius, float feetY) const {
+    const float r2 = radius * radius;
+    float support = 0.f;  // the ground plane
+    for (const auto& b : buildings_) {
+        // Only tops at or below the feet can hold them up; anything higher
+        // is a wall beside the mover, not a floor beneath them.
+        if (b.height > feetY + 0.01f || b.height <= support) continue;
+        if (distSqToBuilding(b, x, z) < r2) support = b.height;
+    }
+    return support;
 }
 
 Vec3 City::resolveMovement(const Vec3& from, const Vec3& to, float radius) const {
@@ -79,9 +120,9 @@ Vec3 City::resolveMovement(const Vec3& from, const Vec3& to, float radius) const
 
     Vec3 pos = from;
     const float nx = clampf(to.x, lo, hi);
-    if (!circleIntersectsAny(nx, pos.z, radius)) pos.x = nx;
+    if (!circleIntersectsAny(nx, pos.z, radius, from.y)) pos.x = nx;
     const float nz = clampf(to.z, lo, hi);
-    if (!circleIntersectsAny(pos.x, nz, radius)) pos.z = nz;
+    if (!circleIntersectsAny(pos.x, nz, radius, from.y)) pos.z = nz;
     pos.y = to.y;
     return pos;
 }

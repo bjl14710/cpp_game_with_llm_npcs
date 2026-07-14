@@ -24,12 +24,23 @@ FetchContent_MakeAvailable(raylib)
 # Core: rendering-free game logic shared with the unit tests.
 add_library(llm_npc_core STATIC
     external/sqlite3.c
+    src/core/CharacterParts.cpp
+    src/core/CharacterStore.cpp
     src/core/City.cpp
     src/core/Config.cpp
     src/core/ConversationStore.cpp
     src/core/DialogueSession.cpp
+    src/core/FactStore.cpp
+    src/core/Gossip.cpp
+    src/core/GroupSession.cpp
     src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
+    src/core/PieceCatalog.cpp
+    src/core/RatingLog.cpp
+    src/core/SandboxMap.cpp
+    src/core/Trait.cpp
+    src/core/WorldGen.cpp
+    src/core/WorldGenValidate.cpp
     src/core/LlmClient.cpp
     src/core/NetClient.cpp
     src/core/NetFraming.cpp
@@ -38,6 +49,7 @@ add_library(llm_npc_core STATIC
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp
     src/core/World.cpp
+    src/core/WorldState.cpp
 )
 target_include_directories(llm_npc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
@@ -74,3 +86,6 @@ target_link_libraries(cpp_game_with_llm_npcs
 # (tools/bench_npc_models.py) from the same code path the game uses.
 add_executable(persona_prompt tools/persona_prompt.cpp)
 target_link_libraries(persona_prompt PRIVATE llm_npc_core)
+
+add_executable(worldgen_cli tools/worldgen_cli.cpp)
+target_link_libraries(worldgen_cli PRIVATE llm_npc_core)

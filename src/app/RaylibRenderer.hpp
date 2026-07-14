@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "Assets.hpp"
+#include "CharacterParts.hpp"
 #include "City.hpp"
 #include "FaceTexture.hpp"
 #include "Math.hpp"
@@ -47,6 +48,15 @@ class RaylibRenderer {
     // TODO(implement): step 3 of the plan.
     void beginFrame(const CameraPose& pose);
 
+    // Feeds the day/night pass from the SHARED world clock (call once per
+    // frame, before beginFrame): sky/fog color and scene light level all
+    // derive from this one hour value — no renderer-private timers.
+    void setTimeOfDay(float hours);
+
+    // The sky clear color for the current time of day (main passes it to
+    // ClearBackground so sky and fog always agree).
+    Color skyColor() const { return skyColor_; }
+
     // Draws ground, roads, and one asset-pack model per City building
     // (facadeKind/spotId → model via Assets), plus street props.
     // TODO(implement): step 3.
@@ -56,6 +66,24 @@ class RaylibRenderer {
     // `walking`, gesture clip while gesturePhase > 0, face texture by `face`.
     // TODO(implement): steps 4-5.
     void drawCharacter(const CharacterVisual& visual);
+
+    // Draws one composite character — the ONE shared parts library both the
+    // creator and every roaming NPC render from (plan:
+    // shared-character-library): parts snapped by the core's socket
+    // assembly, scaled ONCE so the whole figure meets the same 1.8-unit
+    // height contract as pack characters, colored by the look's palette.
+    // `phase` drives the procedural walk bob (no skeleton in v1). Non-neutral
+    // `face` billboards the same emote pack characters use; `dead` lays the
+    // figure flat instead (the dead don't emote). Defaults keep the creator
+    // preview call sites unchanged.
+    void drawCompositeCharacter(const CharacterLook& look, const Vec3& position,
+                                float facingDeg, bool walking, float phase,
+                                NpcFace face = NpcFace::Neutral, bool dead = false);
+
+    // The player avatar's palette (issue #106): the punch arm/fist and the
+    // pistol hand tint from it, so the avatar choice is visible in first
+    // person. Unknown/empty ids keep the previous colors.
+    void setAvatarPalette(const std::string& paletteId);
 
     // First-person weapon prop anchored lower-right of the camera, driven
     // solely by the authoritative equipped state: the WeaponKind index and
@@ -68,6 +96,16 @@ class RaylibRenderer {
     // TODO(implement): step 3.
     void endFrame();
 
+    // Editor support (issue #112): unprojects a screen point onto the
+    // ground plane (y = 0) with the CURRENT camera; false when the ray
+    // points at the sky. Call between beginFrame and endFrame.
+    bool screenToGround(Vector2 screen, Vec3& out) const;
+
+    // Editor ghost: the piece's would-be Building drawn translucent —
+    // green when the placement is valid, red when refused. Reuses the
+    // normal building draw paths so the preview IS the eventual look.
+    void drawPlacementGhost(const Building& building, bool valid);
+
     // Projects a world point for nameplates; false when behind the camera.
     // raylib's GetWorldToScreen does the math — this wraps the behind-camera
     // check the legacy worldToScreen had.
@@ -76,7 +114,12 @@ class RaylibRenderer {
 
    private:
     Assets& assets_;
+    // Avatar-driven viewmodel colors (defaults match the pre-avatar look).
+    Color avatarSkin_{224, 172, 138, 255};
+    Color avatarOutfit_{60, 64, 74, 255};
     Camera3D camera_{};  // rebuilt each beginFrame; kept for worldToScreen
+    Color skyColor_{135, 190, 235, 255};  // daylight until the clock speaks
+    float lightLevel_ = 1.f;              // scene brightness multiplier
 
     // Per-entity animation playback (keyed by variantSeed, which is unique
     // per entity): which clip is playing and the running frame clock. The

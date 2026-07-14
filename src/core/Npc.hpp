@@ -10,6 +10,7 @@
 #include "Math.hpp"
 #include "NpcAction.hpp"
 #include "Persona.hpp"
+#include "Schedule.hpp"
 
 namespace llm_npc {
 
@@ -68,7 +69,23 @@ class Npc {
     // turns to face them per the current behavior, sliding around buildings
     // via `city`, and counts down any active gesture pose. Pure game logic
     // (no LLM, no graphics) so it stays unit-testable.
-    void update(float dt, const Vec3& playerPos, const City& city);
+    //
+    // `timeOfDayHours` is the SHARED world clock (World::state()) injected
+    // per tick — the NPC keeps no clock of its own. Pass a negative value
+    // (the default) to disable schedule behavior (tests, callers without a
+    // clock); everything else behaves as before.
+    void update(float dt, const Vec3& playerPos, const City& city,
+                float timeOfDayHours = -1.f);
+
+    // Daily routine (from the persona file). Empty = stand at home.
+    void setSchedule(std::vector<ScheduleEntry> schedule) {
+        schedule_ = std::move(schedule);
+    }
+
+    // The active schedule entry's activity label at the last update
+    // ("baking bread"); empty when nothing is scheduled. Shown in the
+    // nameplate.
+    const std::string& activity() const { return activity_; }
 
     // The persistent movement behavior set by the last obeyed instruction.
     NpcAction behavior() const { return behavior_; }
@@ -117,6 +134,22 @@ class Npc {
     void setMemory(std::string summary) { memory_ = std::move(summary); }
     const std::string& memory() const { return memory_; }
 
+    // Town gossip THIS character has heard, rendered by main from the
+    // shared fact bus whenever this NPC's knowledge set changes; injected
+    // into every system prompt alongside the memory.
+    void setGossip(std::string gossip) { gossip_ = std::move(gossip); }
+
+    // Installs the shared trait library (issue #116); persona().traitIds
+    // resolve against it at prompt time.
+    void setTraitRegistry(const std::vector<TraitDef>* registry) {
+        traitRegistry_ = registry;
+    }
+
+    // persona().traitIds resolved against the registry (unknown ids skip;
+    // they were logged at spawn).
+    std::vector<const TraitDef*> resolvedTraits() const;
+    const std::string& gossip() const { return gossip_; }
+
     // --- Combat interface --------------------------------------------------
 
     // Reduces hp by `amount` (clamped at 0). Transitions state: armed NPCs
@@ -160,6 +193,11 @@ class Npc {
     std::uint64_t pendingId_ = 0;
     std::string pendingUserLine_;
     std::string memory_;  // persisted cross-session summary (may be empty)
+    // The loaded trait library (owned by main, outlives every NPC); null
+    // when no traits are in play. Resolution happens per prompt so the
+    // registry can be shared by every NPC without copies.
+    const std::vector<TraitDef>* traitRegistry_ = nullptr;
+    std::string gossip_;  // facts heard around town (may be empty)
 
     Vec3 position_{};
     float facingDeg_ = 0.f;
@@ -175,6 +213,8 @@ class Npc {
     bool caughtPlayer_ = false;               // arrest reached the player
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
+    std::vector<ScheduleEntry> schedule_;     // daily routine (may be empty)
+    std::string activity_;                    // active entry's label
 
     // Combat state — all zero/Idle until something hurts this NPC.
     int hp_ = 100;

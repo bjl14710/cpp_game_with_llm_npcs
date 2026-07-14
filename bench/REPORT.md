@@ -53,3 +53,30 @@ Both slot straight into the existing harness once pulled:
 - The brief described the current setup as "Gemma with format:json"; the
   repo actually ran qwen2.5:3b with directive tags, so that is what was
   benchmarked (decision log: .claude/plans/npc-memory-and-model.md).
+
+---
+
+## Schema-validity bench — world generation (2026-07-14, issue #127)
+
+Fixed corpus (2× gen-cast, 1× gen-map, 1× gen-village) through
+`worldgen_cli` — the SAME C++ validator the game loads through, retry
+cap 3. Numbers are validity within retries / on the first attempt /
+mean seconds per run:
+
+| model | valid | first-try | mean s |
+|-------|-------|-----------|--------|
+| qwen3:8b | 50% | 0% | 54.6 |
+| qwen2.5:3b-instruct | 25% | 25% | 19.3 |
+| gemma3:4b | 0% | 0% | 42.9 |
+
+**Measured winner: qwen3:8b** — which is already the configured dialogue
+model, so world generation shares the one client (no separate
+worldgen_model client until the winners diverge; documented in llm.cfg).
+The user-suggested coding model ("Ornith") was not pulled locally and is
+untested — pull it and re-run this bench to include it.
+
+Observations: gen-village (map + cast + link constraints in one output)
+is the hard mode — 0/3 models passed it; gen-cast passes for qwen3:8b
+now that the vocabulary carries style families; gen-map is easy
+(qwen2.5 one-shot it in 2s). The retry loop demonstrably reduces error
+counts between attempts even when it doesn't fully converge.

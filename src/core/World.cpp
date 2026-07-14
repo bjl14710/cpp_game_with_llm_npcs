@@ -31,9 +31,13 @@ bool World::playerAttack(const Vec3& aimDirection) {
     player_.attackCooldown    = def.fireCooldown;
     player_.attackAnimFraction = 1.0f;
 
-    const Vec3 dir = normalize(Vec3{aimDirection.x, 0.f, aimDirection.z});
+    // Fire along the full 3D aim (issue #91): keep the y component instead of
+    // flattening it, and spawn from eye height so the shot leaves from the
+    // point the player is looking through. tickProjectiles integrates the
+    // direction in 3D and the [0,kNpcHeight] band test still catches hits.
+    const Vec3 dir = normalize(aimDirection);
     Projectile p;
-    p.position   = player_.position;
+    p.position   = player_.position + Vec3{0.f, kEyeHeight, 0.f};
     p.direction  = dir;
     p.speed      = 40.f;
     p.damage     = def.damage;
@@ -69,7 +73,11 @@ void World::tickProjectiles(float dt, CombatFrameResult& out) {
 
     auto it = projectiles_.begin();
     while (it != projectiles_.end()) {
-        if (it->lifetime >= it->maxLifetime) {
+        // Retire on age, or once a downward shot has passed below the ground —
+        // now that aim follows pitch (#91), a missed downward shot would
+        // otherwise keep travelling underground until its lifetime expired.
+        if (it->lifetime >= it->maxLifetime ||
+            (it->position.y < 0.f && it->direction.y < 0.f)) {
             it = projectiles_.erase(it);
             continue;
         }
@@ -146,6 +154,12 @@ void World::tickCooldowns(float dt) {
     for (auto& npc : npcs_) {
         npc.fireCooldown = std::max(0.f, npc.fireCooldown - dt);
     }
+}
+
+void World::loadCity(City city) {
+    city_ = std::move(city);
+    npcs_.clear();
+    projectiles_.clear();
 }
 
 int World::nearestNpcWithin(const Vec3& pos, float radius) const {

@@ -20,6 +20,7 @@ constexpr float kCatchRadius = 1.6f;   // arrest succeeds within this range
 constexpr float kGestureSeconds = 15.f; // how long raise_hand / wave holds
 constexpr float kMoodSeconds = 25.f;    // how long an expression lingers
 constexpr float kHomeSnapRadius = 0.6f; // close enough to be "back at post"
+constexpr float kSchedulePause = 4.f;   // player this close pauses routine walking
 }  // namespace
 
 Npc::Npc(Persona persona, LlmClient& client, int maxHistoryTurns)
@@ -30,7 +31,9 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // history only once a successful reply arrives. That way a failed request
     // can be retried without polluting context with unanswered user turns.
     pendingUserLine_ = playerLine;
-    pendingId_ = client_.submit(persona_.renderSystemPrompt(memory_), history_, playerLine);
+    pendingId_ =
+        client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits()),
+                       history_, playerLine);
     return pendingId_;
 }
 
@@ -67,6 +70,16 @@ void Npc::applyAction(NpcAction action) {
     // Only police can actually arrest; when the model has a civilian try
     // anyway, treat it as calling for the police instead.
     if (action == NpcAction::Arrest && !persona_.police) action = NpcAction::CallPolice;
+
+    // Mood/combat gate on following (issue #120): an NPC who is hostile,
+    // fleeing, or plain angry at the player does not fall into step with
+    // them, whatever the model emitted — the VALIDATE step of
+    // propose-validate-commit, same as the civilian-arrest rule above.
+    if (action == NpcAction::Follow &&
+        (state_ == NpcState::Hostile || state_ == NpcState::Fleeing ||
+         mood_ == NpcMood::Angry)) {
+        action = NpcAction::None;
+    }
 
     lastAction_ = action;  // remembered for one turn so the UI can narrate it
     switch (action) {
@@ -106,7 +119,8 @@ void Npc::faceToward(const Vec3& target) {
     facingDeg_ = std::atan2(dx, dz) * 180.f / 3.14159265358979323846f;
 }
 
-void Npc::update(float dt, const Vec3& playerPos, const City& city) {
+void Npc::update(float dt, const Vec3& playerPos, const City& city,
+                 float timeOfDayHours) {
     // Tick down any gesture overlay independently of movement.
     if (poseTimer_ > 0.f) {
         gesturePhase_ += dt;
@@ -164,7 +178,28 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city) {
         case NpcAction::Face:
             faceToward(playerPos);
             break;
-        case NpcAction::None:
+        case NpcAction::None: {
+            // Daily routine: walk to the active schedule entry, read from
+            // the SHARED clock injected by the caller (negative = no clock,
+            // schedule dormant). Combat states own movement instead, and a
+            // player within conversation range politely pauses the walk.
+            if (timeOfDayHours < 0.f || schedule_.empty() ||
+                state_ != NpcState::Idle) {
+                break;
+            }
+            const int active = activeScheduleIndex(schedule_, timeOfDayHours);
+            activity_ = active >= 0 ? schedule_[static_cast<std::size_t>(active)].activity
+                                    : std::string();
+            if (active < 0 || dist < kSchedulePause) break;
+            const Vec3& target =
+                schedule_[static_cast<std::size_t>(active)].position;
+            if (distanceXZ(position_, target) > kHomeSnapRadius) {
+                faceToward(target);
+                const Vec3 step = normalize(target - position_) * (kNpcWalk * dt);
+                position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
+            }
+            break;
+        }
         case NpcAction::RaiseHand:  // gesture-only kinds never reach behavior_
         case NpcAction::Wave:
         case NpcAction::CallPolice:
@@ -203,6 +238,21 @@ void Npc::takeDamage(int amount) {
         return;
     }
     state_ = persona_.armed ? NpcState::Hostile : NpcState::Fleeing;
+}
+
+std::vector<const TraitDef*> Npc::resolvedTraits() const {
+    std::vector<const TraitDef*> out;
+    if (!traitRegistry_) return out;
+    for (const std::string& id : persona_.traitIds) {
+        for (const TraitDef& trait : *traitRegistry_) {
+            if (trait.id == id) {
+                out.push_back(&trait);
+                break;
+            }
+        }
+        // Unknown ids were logged at spawn; render just skips them.
+    }
+    return out;
 }
 
 }  // namespace llm_npc

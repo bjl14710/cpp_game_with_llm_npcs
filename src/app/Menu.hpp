@@ -8,6 +8,7 @@
 
 #include "raylib.h"
 
+#include "CharacterParts.hpp"
 #include "KeyBindings.hpp"
 
 namespace llm_npc {
@@ -38,6 +39,33 @@ class Menu {
         std::function<bool()> active;         // hosting or joined right now
     };
 
+    // Callback the Creator page drives; injected by main.cpp so the menu
+    // stays free of world/storage types. Returns "" on success (character
+    // saved and spawned) or a human-readable error shown as a toast.
+    struct CreatorHooks {
+        std::function<std::string(const std::string& name, const std::string& backstory,
+                                  const std::string& traits, const CharacterLook& look,
+                                  const std::string& traitId)>
+            onCreate;  // traitId "" = no structured trait picked
+    };
+
+    // The structured-trait choices the creator's trait row cycles (issue
+    // #117); installed once by main from the loaded library. One trait per
+    // created character in the v1 UI — the file format supports three.
+    void setTraitChoices(std::vector<std::string> ids);
+
+    // One display row of the player's journal, pre-rendered by main.cpp
+    // from the shared fact store so the menu never touches WorldState.
+    struct JournalRow {
+        std::string subject;      // normalized topic key ("bakery_fire")
+        std::string content;      // what was said
+        std::string attribution;  // "heard from Marge at 09:30"
+        bool conflicting = false; // clashes with another row on the subject
+    };
+    struct JournalHooks {
+        std::function<std::vector<JournalRow>()> entries;
+    };
+
     // `bindings` is shared with the main loop; `savePath` is where every
     // accepted rebind is persisted.
     Menu(KeyBindings& bindings, std::filesystem::path savePath);
@@ -45,6 +73,49 @@ class Menu {
     // Installs the Multiplayer page's callbacks; without them the page
     // shows nothing actionable (solo-only build of the menu still works).
     void setMultiplayer(MultiplayerHooks hooks);
+
+    // Installs the Creator page's save callback.
+    void setCreator(CreatorHooks hooks);
+
+    // The player's own avatar (issue #106): the SAME creator page opens in
+    // avatar mode from "Edit My Avatar" — same picker, same Randomize, same
+    // preview — but Save writes the avatar instead of spawning an NPC.
+    // `current` seeds the draft; `onSave` returns "" or a toast-able error.
+    struct AvatarHooks {
+        std::function<CharacterLook()> current;
+        std::function<std::string(const CharacterLook&)> onSave;
+    };
+    void setAvatar(AvatarHooks hooks);
+
+    // Sandbox page (issue #112): lists saved maps; clicking one (or New)
+    // hands the map's file stem ("" = create new) to main, which switches
+    // into the editor. The menu never touches map files itself.
+    struct SandboxHooks {
+        std::function<std::vector<std::string>()> listMaps;
+        std::function<void(const std::string& stemOrEmpty)> onOpen;
+        // LLM generation (issue #129): the typed description; main runs
+        // the async generate-validate-retry chain and opens the result.
+        std::function<std::string(const std::string& description)> onGenerate;
+    };
+    void setSandbox(SandboxHooks hooks);
+
+    // Installs the Journal page's read hook (pure read path — the journal
+    // owns no data and never writes).
+    void setJournal(JournalHooks hooks);
+
+    // The draft look while the Creator page is open, nullptr otherwise.
+    // main.cpp renders it as an in-world preview in front of the camera that
+    // the player rotates by dragging/arrow keys and that eases back to facing
+    // the camera when idle (the overlay dims less on that page so it reads).
+    const CharacterLook* creatorPreview() const {
+        return page_ == Page::Creator ? &draftLook_ : nullptr;
+    }
+
+    // True when `p` lies over any interactive control on the current page (a
+    // layout() hit-rect). main.cpp uses this so a left-drag that starts over
+    // the creator preview rotates the figure, while a press over a control
+    // stays a click — clicking a cycler/button never spins the preview.
+    bool pointOverInteractive(Vector2 p) const;
 
     // Resets to the main page (called when the menu is opened).
     void open();
@@ -61,7 +132,7 @@ class Menu {
     void render() const;
 
    private:
-    enum class Page { Main, Controls, Multiplayer };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -79,6 +150,36 @@ class Menu {
     MultiplayerHooks multiplayer_;
     std::string joinAddress_ = "127.0.0.1:40605";
     bool editingAddress_ = false;  // typed characters go into joinAddress_
+    std::string genDescription_;   // sandbox "Generate..." field (issue #129)
+    bool editingGen_ = false;
+
+    // ---- Creator page state ----
+    CreatorHooks creator_;
+    AvatarHooks avatar_;
+    SandboxHooks sandbox_;
+    std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
+    bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
+    std::string creatorName_;
+    std::vector<std::string> traitChoices_;  // cycled by the trait row
+    int creatorTraitIndex_ = 0;              // 0 = none; else 1-based into choices
+    std::string creatorBackstory_;
+    std::string creatorTraits_;
+    int editingField_ = 0;  // 0 none, 1 name, 2 backstory, 3 traits
+    CharacterLook draftLook_ = randomizeLook(7);
+    unsigned creatorSeed_ = 7;
+
+    // Steps the draft's part for `category` by ±1 within the options
+    // compatible with the current body style; cycling the body re-validates
+    // the other categories.
+    void cycleCreatorPart(PartCategory category, int direction);
+
+    // Validates and fires onCreate; toasts the outcome and clears the form
+    // on success.
+    void attemptCreate();
+
+    // ---- Journal page state ----
+    JournalHooks journal_;
+    int journalPage_ = 0;  // paging offset, kJournalRowsPerPage rows each
 
     // Clickable areas for the current page, derived from the window size so
     // render() and update() always agree.

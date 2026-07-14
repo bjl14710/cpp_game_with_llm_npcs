@@ -62,4 +62,34 @@ inline float clampf(float v, float lo, float hi) { return std::max(lo, std::min(
 // Degrees -> radians.
 inline float degToRad(float deg) { return deg * 3.14159265358979323846f / 180.f; }
 
+// Signed shortest angular difference (toDeg - fromDeg) wrapped to [-180, 180].
+// Used to ease a rotation toward a target along the short way round.
+inline float shortestAngleDelta(float fromDeg, float toDeg) {
+    float d = std::fmod(toDeg - fromDeg + 180.f, 360.f);
+    if (d < 0.f) d += 360.f;
+    return d - 180.f;
+}
+
+// Player eye height above the ground position. The renderer camera and the
+// weapon spawn origin BOTH read this so a shot always leaves from the same
+// point the player is looking through (the camera literal at
+// RaylibRenderer::beginFrame derives from this too).
+constexpr float kEyeHeight = 1.7f;
+
+// The single authoritative "where the player is looking" vector, derived from
+// yaw AND pitch. The camera (RaylibRenderer::beginFrame) and every weapon
+// (World::playerAttack) both derive their aim from THIS one function, so a shot
+// can never drift out of sync with the crosshair the way it did when combat
+// reconstructed a separate yaw-only, horizontal aim (the moonwalk class of
+// bug — see issue #91). Convention (matches the camera basis):
+//   yaw 0 -> +Z,  yaw +90 -> +X,  pitch >0 -> +Y (looking up).
+// Returns a normalized vector; at zero pitch it equals the horizontal forward
+// (sin yaw, 0, cos yaw) that WASD movement uses.
+inline Vec3 lookDirection(float yawDeg, float pitchDeg) {
+    const float yr = degToRad(yawDeg);
+    const float pr = degToRad(pitchDeg);
+    const float cp = std::cos(pr);
+    return normalize(Vec3{std::sin(yr) * cp, std::sin(pr), std::cos(yr) * cp});
+}
+
 }  // namespace llm_npc
