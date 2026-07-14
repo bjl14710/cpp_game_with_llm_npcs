@@ -123,6 +123,21 @@ class Assets {
         return outlineLoaded_ ? &outlineMaterial_ : nullptr;
     }
 
+    // Mesh-backed character part (issue #139): the raylib meshes one
+    // catalog PartDef draws, the model whose materials draw them, and the
+    // measured bind-pose bounds the renderer anchors by (bottom-center on
+    // the assembly anchor — the same convention primitive recipes use).
+    // Resolved once at load from PartDef::meshName ("File:NodeA+NodeB",
+    // where glTF node names are File_NodeA, ...). nullptr when the file or
+    // node is missing — the part falls back to its primitive box.
+    struct PartMeshes {
+        const Model* model = nullptr;
+        std::vector<int> meshes;  // raylib mesh indices (one per primitive)
+        Vector3 boundsMin{};
+        Vector3 boundsMax{};
+    };
+    const PartMeshes* partMeshes(const std::string& meshName) const;
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -130,6 +145,10 @@ class Assets {
 
     // Loads one character glb + animations; resolves the named clips.
     void loadCharacter(const std::string& stem);
+
+    // Loads the modular part models the catalog references and resolves
+    // every mesh-backed PartDef to its raylib mesh indices (issue #139).
+    void loadModularParts();
 
     bool loaded_ = false;
     std::string cityDir_;
@@ -154,6 +173,15 @@ class Assets {
     // Loaded characters in file order; Knight's index for the police pick.
     std::vector<CharacterAsset> characters_;
     int knightIndex_ = -1;
+
+    // Modular part pack (issue #139): one model per file stem, plus the
+    // per-PartDef mesh resolution keyed by the exact meshName string.
+    // meshRemaps_ carries each file's pre- -> post-compaction mesh index
+    // mapping (unskinned prop meshes are dropped at load).
+    std::string modularDir_;
+    std::unordered_map<std::string, Model> modularModels_;
+    std::unordered_map<std::string, std::vector<int>> meshRemaps_;
+    std::unordered_map<std::string, PartMeshes> partMeshes_;
 
     // One baked emote per NpcFace value, indexed by the enum.
     Texture2D faces_[6] = {};

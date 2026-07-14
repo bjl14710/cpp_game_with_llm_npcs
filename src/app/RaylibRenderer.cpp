@@ -560,6 +560,11 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
             DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
             DrawSphere({at.x + dx, cy, at.z}, dim.y * 0.5f, c.dark);
         }
+    } else if (part.category == PartCategory::Mouth) {
+        // Generic mouth: a thin dark bar, so family-specific mouth ids
+        // (e.g. the quaternius-scale marks) render without a bespoke
+        // recipe branch each.
+        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
     } else if (part.localSize.y > 0.f) {
         // Generic recipe: any part without a bespoke shape renders as
         // its declared box (skin for heads, hair on top, outfit below)
@@ -568,6 +573,29 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                             : part.category == PartCategory::Hair ? c.hair
                                                                   : c.outfit;
         DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, color);
+    }
+}
+
+// Mesh-backed part (issue #139): draws the part's resolved meshes with
+// their bounds bottom-center on the assembly anchor — the same convention
+// primitive recipes use — under the one contract scale. DrawMesh composes
+// its transform with the surrounding rlgl matrix stack, so the figure's
+// facing/death-tip matrix applies exactly as it does to primitives.
+// `override` swaps in the outline material for the rim pass; nullptr draws
+// the model's own (cel-routed) materials.
+void drawPartMeshes(const Assets::PartMeshes& pm, const Vec3& at, float s,
+                    const Material* override) {
+    const float cx = (pm.boundsMin.x + pm.boundsMax.x) * 0.5f;
+    const float cz = (pm.boundsMin.z + pm.boundsMax.z) * 0.5f;
+    const Matrix m = MatrixMultiply(
+        MatrixMultiply(MatrixTranslate(-cx, -pm.boundsMin.y, -cz),
+                       MatrixScale(s, s, s)),
+        MatrixTranslate(at.x, at.y, at.z));
+    for (const int idx : pm.meshes) {
+        const Material& material =
+            override ? *override
+                     : pm.model->materials[pm.model->meshMaterial[idx]];
+        DrawMesh(pm.model->meshes[idx], material, m);
     }
 }
 
@@ -626,6 +654,19 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     rlSetCullFace(RL_CULL_FACE_FRONT);
     for (const PlacedPart& placed : assembled.parts) {
         const Vec3 at = placed.position * s;
+        // Mesh-backed parts rim through the normal-inflate outline shader
+        // (issue #138's mesh technique) — the scale hull is for primitive
+        // recipes, whose shapes have no per-vertex normals to inflate by.
+        if (!placed.part->meshName.empty()) {
+            if (const Assets::PartMeshes* pm =
+                    assets_.partMeshes(placed.part->meshName)) {
+                if (const Material* rim = assets_.outlineMaterial()) {
+                    drawPartMeshes(*pm, at, s, rim);
+                }
+                continue;
+            }
+            // Unresolved mesh: its fallback box outlines like any recipe.
+        }
         const Vec3 dim = placed.part->localSize * s;
         const float cy = at.y + dim.y * 0.5f;
         rlPushMatrix();  // inflate about the part's center, not the feet
@@ -640,9 +681,18 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
 
     for (const PlacedPart& placed : assembled.parts) {
         // Anchor and size in world units — the contract scale is applied
-        // HERE so recipes never see it.
-        drawPartRecipe(*placed.part, placed.position * s,
-                       placed.part->localSize * s, colors);
+        // HERE so recipes never see it. Mesh-backed parts dispatch to
+        // their resolved meshes (issue #139); a part whose mesh didn't
+        // resolve draws its declared box so the figure never has holes.
+        const Vec3 at = placed.position * s;
+        if (!placed.part->meshName.empty()) {
+            if (const Assets::PartMeshes* pm =
+                    assets_.partMeshes(placed.part->meshName)) {
+                drawPartMeshes(*pm, at, s, nullptr);
+                continue;
+            }
+        }
+        drawPartRecipe(*placed.part, at, placed.part->localSize * s, colors);
     }
     rlPopMatrix();
     endCharacterShader();

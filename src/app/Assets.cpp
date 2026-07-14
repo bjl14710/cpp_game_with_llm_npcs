@@ -1,9 +1,12 @@
 #include "Assets.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
+#include "CharacterParts.hpp"
 #include "FaceTexture.hpp"
+#include "json.hpp"
 
 namespace llm_npc {
 
@@ -96,8 +99,10 @@ void main() {
     if (dot(n, n) > 1e-12) {
         ndl = max(dot(normalize(n), normalize(vec3(0.4, 0.8, 0.45))), 0.0);
     }
-    // Quantize into 3 bands: shadow floor, mid tone, full light.
-    float band = ndl < 0.25 ? 0.62 : (ndl < 0.65 ? 0.84 : 1.0);
+    // Quantize into 3 bands: shadow floor, mid tone, full light. The floor
+    // stays readable (0.70) — the pack's baked outfit colors are already
+    // dark, and a character facing away from the sun must not go murky.
+    float band = ndl < 0.25 ? 0.70 : (ndl < 0.65 ? 0.87 : 1.0);
     vec3 warm = texel.rgb * band * vec3(1.06, 1.0, 0.92) * lightLevel;
     float d = length(cameraPos - fragPosition) * fogDensity;
     float fog = 1.0 - exp(-d * d);
@@ -301,6 +306,11 @@ Assets::Assets(const std::string& assetsDir) {
         loadCharacter(stem);
     }
 
+    // Quaternius modular part meshes (issue #139), resolved from whatever
+    // the part catalog references.
+    modularDir_ = assetsDir + "/models/characters_modular";
+    loadModularParts();
+
     loaded_ = any;
 }
 
@@ -315,6 +325,7 @@ Assets::~Assets() {
     }
     for (Texture2D& face : faces_) UnloadTexture(face);
     for (auto& [stem, model] : models_) UnloadModel(model);
+    for (auto& [stem, model] : modularModels_) UnloadModel(model);
     for (auto& character : characters_) {
         if (character.clips) UnloadModelAnimations(character.clips, character.clipCount);
         UnloadModel(character.model);
@@ -377,6 +388,160 @@ void Assets::loadCharacter(const std::string& stem) {
     }
     if (stem == "Knight") knightIndex_ = static_cast<int>(characters_.size());
     characters_.push_back(character);
+}
+
+void Assets::loadModularParts() {
+    // glTF node names -> raylib mesh index ranges, per file stem. raylib
+    // flattens glTF meshes PER PRIMITIVE in file order, so glTF mesh i's
+    // primitives occupy a contiguous raylib range starting at the sum of
+    // the primitive counts before it — read straight from the glTF JSON
+    // (it's the same file LoadModel parses).
+    struct NodeRange {
+        int first = 0;
+        int count = 0;
+    };
+    std::unordered_map<std::string, std::unordered_map<std::string, NodeRange>>
+        nodeRanges;
+
+    for (const PartDef& part : partCatalog()) {
+        if (part.meshName.empty()) continue;
+        const auto colon = part.meshName.find(':');
+        if (colon == std::string::npos) {
+            std::cerr << "[llm_npc] bad meshName (no ':'): " << part.meshName << "\n";
+            continue;
+        }
+        const std::string stem = part.meshName.substr(0, colon);
+        const std::string path = modularDir_ + "/" + stem + ".gltf";
+
+        // Load the model + its node map once per file.
+        auto modelIt = modularModels_.find(stem);
+        if (modelIt == modularModels_.end()) {
+            if (!std::filesystem::exists(path)) {
+                std::cerr << "[llm_npc] missing modular pack file: " << path
+                          << " (run tools/fetch_assets.sh; mesh parts draw "
+                             "fallback boxes)\n";
+                continue;
+            }
+            Model model = LoadModel(path.c_str());
+            if (model.meshCount == 0) {
+                std::cerr << "[llm_npc] failed to load modular file: " << path << "\n";
+                continue;
+            }
+            // Compact out unskinned prop meshes (the SciFi pistol) exactly
+            // like loadCharacter does — raylib's CPU skinning dereferences
+            // boneWeights unconditionally — but KEEP the old->new index
+            // remap: node resolution below still speaks pre-compaction
+            // (glTF file order) indices.
+            std::vector<int> remap(static_cast<std::size_t>(model.meshCount), -1);
+            int kept = 0;
+            for (int i = 0; i < model.meshCount; ++i) {
+                if (model.meshes[i].boneWeights != nullptr) {
+                    remap[static_cast<std::size_t>(i)] = kept;
+                    model.meshes[kept] = model.meshes[i];
+                    model.meshMaterial[kept] = model.meshMaterial[i];
+                    ++kept;
+                } else {
+                    UnloadMesh(model.meshes[i]);
+                }
+            }
+            model.meshCount = kept;
+            // Same routing rule as every character surface (issue #138).
+            if (celLoaded_ || fogLoaded_) {
+                for (int i = 0; i < model.materialCount; ++i) {
+                    model.materials[i].shader = celLoaded_ ? celShader_ : fogShader_;
+                }
+            }
+            // Tier A stance (plan: static assembly, no per-frame animation):
+            // pose the model ONCE at load to frame 0 of its Idle clip, so
+            // static part meshes stand naturally instead of in the glTF
+            // bind pose (T-pose arms). All four files share one skeleton
+            // and animation library, so mixed heads/bodies pose in
+            // agreement. Anchoring keeps using the bind-pose bounds — feet
+            // stay at y=0 and the neck line doesn't move at frame 0.
+            int clipCount = 0;
+            ModelAnimation* clips = LoadModelAnimations(path.c_str(), &clipCount);
+            for (int i = 0; i < clipCount; ++i) {
+                if (std::string(clips[i].name) == "Idle") {
+                    UpdateModelAnimation(model, clips[i], 0);
+                    break;
+                }
+            }
+            if (clips) UnloadModelAnimations(clips, clipCount);
+            modelIt = modularModels_.emplace(stem, model).first;
+            meshRemaps_.emplace(stem, std::move(remap));
+
+            std::ifstream in(path);
+            const nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+            auto& ranges = nodeRanges[stem];
+            if (j.is_object() && j.contains("meshes") && j.contains("nodes")) {
+                std::vector<int> base;
+                int running = 0;
+                for (const auto& mesh : j["meshes"]) {
+                    base.push_back(running);
+                    running += static_cast<int>(mesh.value("primitives",
+                                                           nlohmann::json::array())
+                                                    .size());
+                }
+                for (const auto& node : j["nodes"]) {
+                    if (!node.contains("mesh") || !node.contains("name")) continue;
+                    const int mi = node["mesh"].get<int>();
+                    if (mi < 0 || mi >= static_cast<int>(base.size())) continue;
+                    ranges[node["name"].get<std::string>()] = {
+                        base[static_cast<std::size_t>(mi)],
+                        static_cast<int>(j["meshes"][static_cast<std::size_t>(mi)]
+                                             .value("primitives",
+                                                    nlohmann::json::array())
+                                             .size())};
+                }
+            }
+        }
+
+        // Resolve this part's '+'-separated node list against the map.
+        PartMeshes resolved;
+        resolved.model = &modelIt->second;
+        const auto& ranges = nodeRanges[stem];
+        bool ok = true;
+        std::string nodeList = part.meshName.substr(colon + 1);
+        while (ok && !nodeList.empty()) {
+            const auto plus = nodeList.find('+');
+            const std::string token = nodeList.substr(0, plus);
+            nodeList = plus == std::string::npos ? "" : nodeList.substr(plus + 1);
+            const auto range = ranges.find(stem + "_" + token);
+            if (range == ranges.end()) {
+                std::cerr << "[llm_npc] modular node not found: " << stem << "_"
+                          << token << " (part " << part.id << ")\n";
+                ok = false;
+                break;
+            }
+            const std::vector<int>& remap = meshRemaps_[stem];
+            for (int i = 0; i < range->second.count; ++i) {
+                const int original = range->second.first + i;
+                if (original >= static_cast<int>(remap.size())) continue;
+                const int mapped = remap[static_cast<std::size_t>(original)];
+                if (mapped >= 0) resolved.meshes.push_back(mapped);
+            }
+        }
+        if (!ok || resolved.meshes.empty()) continue;
+
+        // Measured union bounds (bind pose) — what the renderer anchors by.
+        BoundingBox box =
+            GetMeshBoundingBox(modelIt->second.meshes[resolved.meshes.front()]);
+        for (const int idx : resolved.meshes) {
+            const BoundingBox b = GetMeshBoundingBox(modelIt->second.meshes[idx]);
+            box.min = Vector3{std::min(box.min.x, b.min.x), std::min(box.min.y, b.min.y),
+                              std::min(box.min.z, b.min.z)};
+            box.max = Vector3{std::max(box.max.x, b.max.x), std::max(box.max.y, b.max.y),
+                              std::max(box.max.z, b.max.z)};
+        }
+        resolved.boundsMin = box.min;
+        resolved.boundsMax = box.max;
+        partMeshes_.emplace(part.meshName, std::move(resolved));
+    }
+}
+
+const Assets::PartMeshes* Assets::partMeshes(const std::string& meshName) const {
+    const auto it = partMeshes_.find(meshName);
+    return it != partMeshes_.end() ? &it->second : nullptr;
 }
 
 const Assets::CharacterAsset* Assets::characterFor(int variantSeed, bool police) const {

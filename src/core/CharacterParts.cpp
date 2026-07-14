@@ -23,6 +23,22 @@ struct Rng {
     std::size_t pick(std::size_t n) { return n ? next() % n : 0; }
 };
 
+// Tag-level rule shared by styleCompatible and partsForCategory. The
+// quaternius mesh family (issue #139) is EXCLUSIVE: its parts are authored
+// in the pack's real glTF units (heads ~0.29 tall vs core's ~1.0), so the
+// "any" bridge tag deliberately does not reach it — a core primitive bowl
+// cut or Mii-scale eyes on a mesh head would be wildly out of scale.
+bool tagsCompatible(const std::string& a, const std::string& b) {
+    if (a == "quaternius" || b == "quaternius") return a == b;
+    return a == "any" || b == "any" || a == b;
+}
+
+// The family new random looks are generated from (issue #139): the default
+// pool switched from the core primitive families to the quaternius mesh
+// pack. Core parts stay in the catalog — stored looks keep validating and
+// the creator can still cycle onto them deliberately.
+constexpr const char* kDefaultBodyStyle = "quaternius";
+
 }  // namespace
 
 const std::vector<CategorySpec>& categorySpecs() {
@@ -119,6 +135,71 @@ const std::vector<PartDef>& partCatalog() {
         {"mouth_open", PartCategory::Mouth, "any", {0.26f, 0.18f, 0.08f}, {}},
         {"mouth_neutral", PartCategory::Mouth, "any", {0.28f, 0.06f, 0.08f}, {}},
         {"mouth_o", PartCategory::Mouth, "any", {0.16f, 0.16f, 0.08f}, {}},
+        // ---- Quaternius mesh family (issue #139) ----
+        // Everything below is in the pack's real glTF units, MEASURED from
+        // the POSITION accessors (never eyeballed, never hand-scaled): a
+        // body is the union of the file's Body+Legs+Feet nodes (~1.55
+        // tall, x spans the A-pose arms), a head is its Head node. The
+        // shared skeleton puts every neck at y=1.538, so all four bodies
+        // declare the same head socket and heads mix across bodies. Heads
+        // ship with their hair baked in ("hair_q_baked" keeps the Hair
+        // category filled without drawing a second haircut); eyes and
+        // mouths are primitive marks sized to these heads until the flat
+        // face textures land (issue #140). The 1.8u contract scale
+        // normalizes the unit difference from core exactly as designed.
+        {"body_q_adventurer", PartCategory::Body, "quaternius",
+         {1.650f, 1.570f, 0.460f}, {{"head", {0.f, 1.538f, 0.f}}},
+         "quaternius", "Adventurer:Body+Legs+Feet"},
+        {"body_q_scifi", PartCategory::Body, "quaternius",
+         {1.650f, 1.542f, 0.314f}, {{"head", {0.f, 1.538f, 0.f}}},
+         "quaternius", "SciFi:Body+Legs+Feet"},
+        {"body_q_soldier", PartCategory::Body, "quaternius",
+         {1.650f, 1.549f, 0.313f}, {{"head", {0.f, 1.538f, 0.f}}},
+         "quaternius", "Soldier:Body+Legs+Feet"},
+        {"body_q_witch", PartCategory::Body, "quaternius",
+         {1.650f, 1.541f, 0.391f}, {{"head", {0.f, 1.538f, 0.f}}},
+         "quaternius", "Witch:Body+Legs+Feet"},
+        // Heads: anchor at the measured bounds' bottom-center. The witch's
+        // hair hangs 0.06 below her neck line, so anchoring her bounds at
+        // the socket lifts her ~0.06 model units — accepted (the bounds
+        // convention stays uniform; the shift is invisible at contract
+        // scale). Face sockets sit just proud of each measured face front.
+        {"head_q_adventurer", PartCategory::Head, "quaternius",
+         {0.220f, 0.290f, 0.231f},
+         {{"eyes", {0.f, 0.142f, 0.118f}},
+          {"hair", {0.f, 0.290f, 0.f}},
+          {"mouth", {0.f, 0.052f, 0.120f}}},
+         "quaternius", "Adventurer:Head"},
+        {"head_q_scifi", PartCategory::Head, "quaternius",
+         {0.231f, 0.316f, 0.291f},
+         {{"eyes", {0.f, 0.140f, 0.148f}},
+          {"hair", {0.f, 0.316f, 0.f}},
+          {"mouth", {0.f, 0.050f, 0.148f}}},
+         "quaternius", "SciFi:Head"},
+        {"head_q_soldier", PartCategory::Head, "quaternius",
+         {0.222f, 0.291f, 0.245f},
+         {{"eyes", {0.f, 0.142f, 0.125f}},
+          {"hair", {0.f, 0.291f, 0.f}},
+          {"mouth", {0.f, 0.052f, 0.128f}}},
+         "quaternius", "Soldier:Head"},
+        {"head_q_witch", PartCategory::Head, "quaternius",
+         {0.526f, 0.566f, 0.548f},
+         {{"eyes", {0.f, 0.201f, 0.150f}},
+          {"hair", {0.f, 0.566f, 0.f}},
+          {"mouth", {0.f, 0.106f, 0.152f}}},
+         "quaternius", "Witch:Head"},
+        // Family-scale face marks (same ~43%-of-head-width ratio the core
+        // eyes use) and the baked-hair placeholder.
+        {"eyes_q_dot", PartCategory::Eyes, "quaternius",
+         {0.095f, 0.030f, 0.024f}, {}, "quaternius", ""},
+        {"eyes_q_wide", PartCategory::Eyes, "quaternius",
+         {0.120f, 0.044f, 0.024f}, {}, "quaternius", ""},
+        {"hair_q_baked", PartCategory::Hair, "quaternius", {0.f, 0.f, 0.f},
+         {}, "quaternius", ""},
+        {"mouth_q_smile", PartCategory::Mouth, "quaternius",
+         {0.075f, 0.024f, 0.020f}, {}, "quaternius", ""},
+        {"mouth_q_line", PartCategory::Mouth, "quaternius",
+         {0.070f, 0.014f, 0.020f}, {}, "quaternius", ""},
     };
     return parts;
 }
@@ -152,7 +233,7 @@ const PartDef* findPart(const std::string& id) {
 }
 
 bool styleCompatible(const PartDef& a, const PartDef& b) {
-    return a.styleTag == "any" || b.styleTag == "any" || a.styleTag == b.styleTag;
+    return tagsCompatible(a.styleTag, b.styleTag);
 }
 
 std::vector<const PartDef*> partsForCategory(PartCategory category,
@@ -160,7 +241,9 @@ std::vector<const PartDef*> partsForCategory(PartCategory category,
     std::vector<const PartDef*> out;
     for (const PartDef& part : partCatalog()) {
         if (part.category != category) continue;
-        if (styleTag == "any" || part.styleTag == "any" || part.styleTag == styleTag) {
+        // "any" as the QUERY means "list everything" (the creator's body
+        // row); otherwise the same rule the validity gate applies.
+        if (styleTag == "any" || tagsCompatible(part.styleTag, styleTag)) {
             out.push_back(&part);
         }
     }
@@ -242,7 +325,9 @@ CharacterLook randomizeLook(unsigned seed) {
     CharacterLook look;
 
     // Body first — it sets the style family the other picks must match.
-    const auto bodies = partsForCategory(PartCategory::Body, "any");
+    // Generated looks draw from the DEFAULT family only (issue #139); the
+    // full catalog stays reachable through the creator's body row.
+    const auto bodies = partsForCategory(PartCategory::Body, kDefaultBodyStyle);
     const PartDef* body = bodies[rng.pick(bodies.size())];
     look.part(PartCategory::Body) = body->id;
     for (const CategorySpec& spec : categorySpecs()) {
