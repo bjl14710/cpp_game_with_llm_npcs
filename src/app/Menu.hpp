@@ -44,9 +44,15 @@ class Menu {
     // saved and spawned) or a human-readable error shown as a toast.
     struct CreatorHooks {
         std::function<std::string(const std::string& name, const std::string& backstory,
-                                  const std::string& traits, const CharacterLook& look)>
-            onCreate;
+                                  const std::string& traits, const CharacterLook& look,
+                                  const std::string& traitId)>
+            onCreate;  // traitId "" = no structured trait picked
     };
+
+    // The structured-trait choices the creator's trait row cycles (issue
+    // #117); installed once by main from the loaded library. One trait per
+    // created character in the v1 UI — the file format supports three.
+    void setTraitChoices(std::vector<std::string> ids);
 
     // One display row of the player's journal, pre-rendered by main.cpp
     // from the shared fact store so the menu never touches WorldState.
@@ -81,6 +87,18 @@ class Menu {
     };
     void setAvatar(AvatarHooks hooks);
 
+    // Sandbox page (issue #112): lists saved maps; clicking one (or New)
+    // hands the map's file stem ("" = create new) to main, which switches
+    // into the editor. The menu never touches map files itself.
+    struct SandboxHooks {
+        std::function<std::vector<std::string>()> listMaps;
+        std::function<void(const std::string& stemOrEmpty)> onOpen;
+        // LLM generation (issue #129): the typed description; main runs
+        // the async generate-validate-retry chain and opens the result.
+        std::function<std::string(const std::string& description)> onGenerate;
+    };
+    void setSandbox(SandboxHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -114,7 +132,7 @@ class Menu {
     void render() const;
 
    private:
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox };
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -132,12 +150,18 @@ class Menu {
     MultiplayerHooks multiplayer_;
     std::string joinAddress_ = "127.0.0.1:40605";
     bool editingAddress_ = false;  // typed characters go into joinAddress_
+    std::string genDescription_;   // sandbox "Generate..." field (issue #129)
+    bool editingGen_ = false;
 
     // ---- Creator page state ----
     CreatorHooks creator_;
     AvatarHooks avatar_;
+    SandboxHooks sandbox_;
+    std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
     std::string creatorName_;
+    std::vector<std::string> traitChoices_;  // cycled by the trait row
+    int creatorTraitIndex_ = 0;              // 0 = none; else 1-based into choices
     std::string creatorBackstory_;
     std::string creatorTraits_;
     int editingField_ = 0;  // 0 none, 1 name, 2 backstory, 3 traits

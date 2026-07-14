@@ -138,6 +138,16 @@ class Npc {
     // shared fact bus whenever this NPC's knowledge set changes; injected
     // into every system prompt alongside the memory.
     void setGossip(std::string gossip) { gossip_ = std::move(gossip); }
+
+    // Installs the shared trait library (issue #116); persona().traitIds
+    // resolve against it at prompt time.
+    void setTraitRegistry(const std::vector<TraitDef>* registry) {
+        traitRegistry_ = registry;
+    }
+
+    // persona().traitIds resolved against the registry (unknown ids skip;
+    // they were logged at spawn).
+    std::vector<const TraitDef*> resolvedTraits() const;
     const std::string& gossip() const { return gossip_; }
 
     // --- Combat interface --------------------------------------------------
@@ -183,6 +193,10 @@ class Npc {
     std::uint64_t pendingId_ = 0;
     std::string pendingUserLine_;
     std::string memory_;  // persisted cross-session summary (may be empty)
+    // The loaded trait library (owned by main, outlives every NPC); null
+    // when no traits are in play. Resolution happens per prompt so the
+    // registry can be shared by every NPC without copies.
+    const std::vector<TraitDef>* traitRegistry_ = nullptr;
     std::string gossip_;  // facts heard around town (may be empty)
 
     Vec3 position_{};

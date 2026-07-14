@@ -176,7 +176,7 @@ void RaylibRenderer::drawCity(const City& city) {
     const Model* straight = assets_.prop("road_straight");
     const Model* crossing = assets_.prop("road_straight_crossing");
     const Model* junction = assets_.prop("road_junction");
-    if (straight && crossing && junction) {
+    if (city.hasStreets() && straight && crossing && junction) {
         constexpr float kTile = 16.f;
         for (const float sc : {-kStreetCenter, kStreetCenter}) {
             for (float t = -96.f; t <= 96.f; t += kTile) {
@@ -196,20 +196,23 @@ void RaylibRenderer::drawCity(const City& city) {
                 drawRoadTile(*straight, e, sc, 6.f, kStreetWidth, true);
             }
         }
-    } else {
+    } else if (city.hasStreets()) {
         for (const float c : {-kStreetCenter, kStreetCenter}) {
             DrawCube({c, 0.02f, 0.f}, kStreetWidth, 0.04f, half * 2.f, kAsphalt);
             DrawCube({0.f, 0.02f, c}, half * 2.f, 0.04f, kStreetWidth, kAsphalt);
         }
     }
     // Block slabs: plaza (center) is pale stone, park (north-east) stays
-    // grass, every other block gets a sidewalk-toned slab.
-    for (const float bx : {-64.f, 0.f, 64.f}) {
-        for (const float bz : {-64.f, 0.f, 64.f}) {
-            const bool plaza = bx == 0.f && bz == 0.f;
-            const bool park = bx == 64.f && bz == 64.f;
-            if (park) continue;
-            DrawCube({bx, 0.04f, bz}, 48.f, 0.08f, 48.f, plaza ? kPlaza : kSidewalk);
+    // grass, every other block gets a sidewalk-toned slab. Sandbox cities
+    // (no authored street grid) stay plain grass.
+    if (city.hasStreets()) {
+        for (const float bx : {-64.f, 0.f, 64.f}) {
+            for (const float bz : {-64.f, 0.f, 64.f}) {
+                const bool plaza = bx == 0.f && bz == 0.f;
+                const bool park = bx == 64.f && bz == 64.f;
+                if (park) continue;
+                DrawCube({bx, 0.04f, bz}, 48.f, 0.08f, 48.f, plaza ? kPlaza : kSidewalk);
+            }
         }
     }
 
@@ -223,7 +226,9 @@ void RaylibRenderer::drawCity(const City& city) {
         // The fountain is composed from primitives (no pack model). Must be
         // dispatched by id BEFORE the model lookup: modelForBuilding falls
         // back to a hashed generic building for uncurated ids.
-        if (b.id == "fountain") {
+        // Compare the BASE id: sandbox instances carry a '#' suffix
+        // ("fountain#4") and must hit the same composite recipe.
+        if (b.id.substr(0, b.id.find('#')) == "fountain") {
             drawFountain(b, assets_.sizeSpecFor(b).worldHeight);
             continue;
         }
@@ -593,6 +598,38 @@ void RaylibRenderer::setAvatarPalette(const std::string& paletteId) {
             Color{palette.outfit[0], palette.outfit[1], palette.outfit[2], 255};
         return;
     }
+}
+
+bool RaylibRenderer::screenToGround(Vector2 screen, Vec3& out) const {
+    const Ray ray = GetMouseRay(screen, camera_);
+    if (ray.direction.y >= -1e-4f) return false;  // parallel or skyward
+    const float t = -ray.position.y / ray.direction.y;
+    out = Vec3{ray.position.x + ray.direction.x * t, 0.f,
+               ray.position.z + ray.direction.z * t};
+    return true;
+}
+
+void RaylibRenderer::drawPlacementGhost(const Building& building, bool valid) {
+    const Color tint = valid ? Color{120, 230, 140, 140} : Color{235, 90, 90, 140};
+    if (const Model* model = assets_.modelForBuilding(building)) {
+        const Assets::SizeSpec& spec = assets_.sizeSpecFor(building);
+        if (spec.mode == Assets::SizeSpec::Mode::Uniform) {
+            drawModelUniform(*model, (building.minX + building.maxX) * 0.5f,
+                             (building.minZ + building.maxZ) * 0.5f,
+                             spec.worldHeight, tint);
+        } else {
+            drawModelFittedToAABB(*model, building.minX, building.minZ,
+                                  building.maxX, building.maxZ, building.height,
+                                  tint);
+        }
+    }
+    // The footprint outline always draws, even model-less, so the grid
+    // cell the piece will claim is unmistakable.
+    const Vector3 center{(building.minX + building.maxX) * 0.5f,
+                         building.height * 0.5f,
+                         (building.minZ + building.maxZ) * 0.5f};
+    DrawCubeWires(center, building.maxX - building.minX, building.height,
+                  building.maxZ - building.minZ, tint);
 }
 
 void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {

@@ -156,6 +156,12 @@ void World::tickCooldowns(float dt) {
     }
 }
 
+void World::loadCity(City city) {
+    city_ = std::move(city);
+    npcs_.clear();
+    projectiles_.clear();
+}
+
 int World::nearestNpcWithin(const Vec3& pos, float radius) const {
     int best = -1;
     float bestDist = radius;

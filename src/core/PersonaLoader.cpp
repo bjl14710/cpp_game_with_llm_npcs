@@ -125,6 +125,19 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                 // Carries a weapon: retaliates (turns Hostile) when attacked
                 // instead of fleeing. Same true/yes/1 convention.
                 result.value.persona.armed = (val == "true" || val == "yes" || val == "1");
+            } else if (key == "trait") {
+                // Repeated key: structured trait ids (issue #116). Capped
+                // so prompts stay bounded; existence against the library
+                // is checked at spawn (stale ids demote, logged).
+                if (result.value.persona.traitIds.size() >= 3) {
+                    result.error = id + ": more than 3 trait lines";
+                    return result;
+                }
+                if (val.empty()) {
+                    result.error = id + ": empty trait id";
+                    return result;
+                }
+                result.value.persona.traitIds.push_back(val);
             } else if (key == "look") {
                 // Appearance from the shared parts library. Structural
                 // parse only; whether the ids exist in the catalog is
@@ -215,6 +228,9 @@ std::string renderPersonaText(const LoadedPersona& loaded) {
             out << loaded.look.partIds[c] << ", ";
         }
         out << loaded.look.paletteId << '\n';
+    }
+    for (const std::string& traitId : p.traitIds) {
+        out << "trait = " << traitId << '\n';
     }
     for (const ScheduleEntry& entry : loaded.schedule) {
         out << "schedule = " << entry.startHour << '-' << entry.endHour << ", "

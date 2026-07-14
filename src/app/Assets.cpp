@@ -273,17 +273,21 @@ bool Assets::loadCityModel(const std::string& stem) {
 
 const Assets::SizeSpec& Assets::sizeSpecFor(const Building& building) const {
     static const SizeSpec fill{};  // Mode::Fill — the default contract
-    const auto it = sizeSpecs_.find(building.id);
+    // Same instance-suffix rule as modelForBuilding.
+    const auto it = sizeSpecs_.find(building.id.substr(0, building.id.find('#')));
     return it != sizeSpecs_.end() ? it->second : fill;
 }
 
 const Model* Assets::modelForBuilding(const Building& building) const {
     if (!loaded_) return nullptr;
-    const auto curated = curated_.find(building.id);
+    // Sandbox pieces carry an instance suffix ("bakery#2") so Building ids
+    // stay unique; every instance keys assets by the base id.
+    const std::string baseId = building.id.substr(0, building.id.find('#'));
+    const auto curated = curated_.find(baseId);
     const std::string stem =
         curated != curated_.end()
             ? curated->second
-            : genericBuildings_[stableHash(building.id) % genericBuildings_.size()];
+            : genericBuildings_[stableHash(baseId) % genericBuildings_.size()];
     const auto it = models_.find(stem);
     return it != models_.end() ? &it->second : nullptr;
 }

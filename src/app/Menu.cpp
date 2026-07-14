@@ -1,5 +1,7 @@
 #include "Menu.hpp"
 
+#include <algorithm>
+
 #include <utility>
 
 #include "Config.hpp"  // trim
@@ -27,6 +29,13 @@ constexpr int kIdLeave = 303;
 constexpr int kIdCreator = 4;
 constexpr int kIdJournal = 5;
 constexpr int kIdAvatar = 6;
+constexpr int kIdSandbox = 7;
+// Sandbox page: New button + one row per saved map (capped by layout).
+constexpr int kIdMapNew = 600;
+constexpr int kIdGenField = 601;
+constexpr int kIdGenGo = 602;
+constexpr int kIdMapBase = 610;
+constexpr int kMaxMapRows = 7;
 // Journal-page widgets.
 constexpr int kIdJournalPrev = 500;
 constexpr int kIdJournalNext = 501;
@@ -37,6 +46,7 @@ constexpr int kIdPartNext = 420;       // +category
 constexpr int kIdPalette = 430;
 constexpr int kIdRandomize = 431;
 constexpr int kIdCreate = 432;
+constexpr int kIdTrait = 433;
 
 // Display name for a catalog part id: the text after the category prefix
 // ("hair_bowl" → "bowl"), title-ish enough for a picker chip.
@@ -101,6 +111,13 @@ void Menu::setCreator(CreatorHooks hooks) { creator_ = std::move(hooks); }
 
 void Menu::setAvatar(AvatarHooks hooks) { avatar_ = std::move(hooks); }
 
+void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
+
+void Menu::setTraitChoices(std::vector<std::string> ids) {
+    traitChoices_ = std::move(ids);
+    creatorTraitIndex_ = 0;
+}
+
 void Menu::setJournal(JournalHooks hooks) { journal_ = std::move(hooks); }
 
 void Menu::open() {
@@ -119,9 +136,9 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 254.f;
+        float y = h * 0.5f - 290.f;
         for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator,
-                       kIdAvatar, kIdJournal, kIdQuit}) {
+                       kIdAvatar, kIdJournal, kIdSandbox, kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
@@ -150,14 +167,34 @@ std::vector<Menu::Hit> Menu::layout() const {
         for (int c = 0; c < kPartCategoryCount; ++c) {
             hits.push_back({Rectangle{rowX, y, 44.f, 40.f}, kIdPartPrev + c});
             hits.push_back({Rectangle{rowX + rowW - 44.f, y, 44.f, 40.f}, kIdPartNext + c});
-            y += 56.f;
+            y += 52.f;
         }
         hits.push_back({Rectangle{rowX, y, rowW, 40.f}, kIdPalette});
-        y += 64.f;
+        y += 52.f;
+        if (!avatarMode_ && !traitChoices_.empty()) {
+            // Structured personality (issue #117) — avatars have none.
+            hits.push_back({Rectangle{rowX, y, rowW, 40.f}, kIdTrait});
+        }
+        y += 56.f;
         hits.push_back({Rectangle{rowX, y, rowW * 0.47f, 48.f}, kIdRandomize});
         hits.push_back(
             {Rectangle{rowX + rowW * 0.53f, y, rowW * 0.47f, 48.f}, kIdCreate});
         hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 48.f}, kIdBack});
+    } else if (page_ == Page::Sandbox) {
+        const float x = (w - 420.f) * 0.5f;
+        float y = h * 0.18f;
+        hits.push_back({Rectangle{x, y, 420.f, 48.f}, kIdMapNew});
+        y += 60.f;
+        // Describe-a-map row (issue #129): text field + Generate button.
+        hits.push_back({Rectangle{x, y, 300.f, 44.f}, kIdGenField});
+        hits.push_back({Rectangle{x + 310.f, y, 110.f, 44.f}, kIdGenGo});
+        y += 64.f;
+        const int rows = std::min<int>(kMaxMapRows, static_cast<int>(sandboxMaps_.size()));
+        for (int i = 0; i < rows; ++i) {
+            hits.push_back({Rectangle{x, y, 420.f, 44.f}, kIdMapBase + i});
+            y += 56.f;
+        }
+        hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 44.f}, kIdBack});
     } else if (page_ == Page::Multiplayer) {
         const float x = (w - 420.f) * 0.5f;
         float y = h * 0.30f;
@@ -248,7 +285,28 @@ MenuResult Menu::update(float dt) {
         // Clicking empty space also drops focus (fall through to clicks).
     }
 
-    if (!editingAddress_ && IsKeyPressed(KEY_ESCAPE)) {
+    if (editingGen_) {
+        int ch = GetCharPressed();
+        while (ch != 0) {
+            if (ch >= 32 && ch < 127 && genDescription_.size() < 200) {
+                genDescription_.push_back(static_cast<char>(ch));
+            }
+            ch = GetCharPressed();
+        }
+        if ((IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) &&
+            !genDescription_.empty()) {
+            genDescription_.pop_back();
+        }
+        if (IsKeyPressed(KEY_ESCAPE)) editingGen_ = false;
+        if (IsKeyPressed(KEY_ENTER)) {
+            editingGen_ = false;
+            if (sandbox_.onGenerate && !trim(genDescription_).empty()) {
+                showToast(sandbox_.onGenerate(trim(genDescription_)));
+            }
+        }
+    }
+
+    if (!editingAddress_ && !editingGen_ && IsKeyPressed(KEY_ESCAPE)) {
         if (page_ != Page::Main) {
             page_ = Page::Main;
             return MenuResult::None;
@@ -281,6 +339,25 @@ MenuResult Menu::update(float dt) {
             } else if (hit.id == kIdJournal) {
                 page_ = Page::Journal;
                 journalPage_ = 0;
+            } else if (hit.id == kIdSandbox) {
+                page_ = Page::Sandbox;
+                sandboxMaps_ = sandbox_.listMaps ? sandbox_.listMaps()
+                                                 : std::vector<std::string>{};
+            } else if (hit.id == kIdMapNew) {
+                if (sandbox_.onOpen) sandbox_.onOpen("");
+            } else if (hit.id == kIdGenField) {
+                editingGen_ = true;
+            } else if (hit.id == kIdGenGo) {
+                editingGen_ = false;
+                if (sandbox_.onGenerate && !trim(genDescription_).empty()) {
+                    showToast(sandbox_.onGenerate(trim(genDescription_)));
+                }
+            } else if (hit.id >= kIdMapBase && hit.id < kIdMapBase + kMaxMapRows) {
+                const std::size_t index =
+                    static_cast<std::size_t>(hit.id - kIdMapBase);
+                if (sandbox_.onOpen && index < sandboxMaps_.size()) {
+                    sandbox_.onOpen(sandboxMaps_[index]);
+                }
             } else if (hit.id == kIdJournalPrev) {
                 if (journalPage_ > 0) --journalPage_;
             } else if (hit.id == kIdJournalNext) {
@@ -309,6 +386,10 @@ MenuResult Menu::update(float dt) {
                     if (palettes[i].id == draftLook_.paletteId) index = i;
                 }
                 draftLook_.paletteId = palettes[(index + 1) % palettes.size()].id;
+            } else if (hit.id == kIdTrait) {
+                editingField_ = 0;
+                creatorTraitIndex_ = (creatorTraitIndex_ + 1) %
+                                     (static_cast<int>(traitChoices_.size()) + 1);
             } else if (hit.id == kIdRandomize) {
                 editingField_ = 0;
                 creatorSeed_ = creatorSeed_ * 7919u + 13u;
@@ -419,9 +500,13 @@ void Menu::attemptCreate() {
         showToast("Name required");
         return;
     }
+    const std::string traitId =
+        creatorTraitIndex_ == 0
+            ? std::string()
+            : traitChoices_[static_cast<std::size_t>(creatorTraitIndex_ - 1)];
     const std::string error =
         creator_.onCreate(trim(creatorName_), trim(creatorBackstory_),
-                          trim(creatorTraits_), draftLook_);
+                          trim(creatorTraits_), draftLook_, traitId);
     if (!error.empty()) {
         showToast(error);
         return;
@@ -430,6 +515,7 @@ void Menu::attemptCreate() {
     creatorName_.clear();
     creatorBackstory_.clear();
     creatorTraits_.clear();
+    creatorTraitIndex_ = 0;
     creatorSeed_ = creatorSeed_ * 7919u + 13u;
     draftLook_ = randomizeLook(creatorSeed_);
 }
@@ -528,6 +614,16 @@ void Menu::render() const {
         else if (hit.id == kIdMultiplayer) label = "Multiplayer";
         else if (hit.id == kIdCreator) label = "Create Character";
         else if (hit.id == kIdAvatar) label = "Edit My Avatar";
+        else if (hit.id == kIdSandbox) label = "Sandbox Maps";
+        else if (hit.id == kIdMapNew) label = "+ New Map";
+        else if (hit.id == kIdGenField) {
+            label = genDescription_ + (editingGen_ ? "_" : "");
+            if (label.empty()) label = "(describe a map to generate)";
+        } else if (hit.id == kIdGenGo) label = "Generate";
+        else if (hit.id >= kIdMapBase && hit.id < kIdMapBase + kMaxMapRows) {
+            const std::size_t index = static_cast<std::size_t>(hit.id - kIdMapBase);
+            label = index < sandboxMaps_.size() ? sandboxMaps_[index] : "?";
+        }
         else if (hit.id == kIdJournal) label = "Journal";
         else if (hit.id == kIdJournalPrev) label = "< Prev";
         else if (hit.id == kIdJournalNext) label = "Next >";
@@ -560,6 +656,11 @@ void Menu::render() const {
             label = ">";
         } else if (hit.id == kIdPalette) {
             label = "Palette: " + draftLook_.paletteId;
+        } else if (hit.id == kIdTrait) {
+            label = "Trait: " + (creatorTraitIndex_ == 0
+                                     ? std::string("none")
+                                     : traitChoices_[static_cast<std::size_t>(
+                                           creatorTraitIndex_ - 1)]);
         } else if (hit.id == kIdRandomize) label = "Randomize";
         else if (hit.id == kIdCreate) label = avatarMode_ ? "Save Avatar" : "Save & Spawn";
         else if (hit.id == kIdHost) label = "Host on port " + std::to_string(kDefaultHostPort);
