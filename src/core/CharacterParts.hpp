@@ -41,6 +41,12 @@ struct PartDef {
     // catalog rows + renderer recipes + palettes under a new tag — never
     // changes to assembly or picker logic. Everything built-in is "core".
     std::string pack = "core";
+    // Mesh-backed parts (plan: stylized-character-assets step 3): the
+    // asset name the renderer loads and draws at this part's socket,
+    // contract-scaled. Empty = primitive recipe (all "core" parts). A
+    // mesh part still declares localSize (its MEASURED bounds — that is
+    // what sockets and the 1.8u contract consume) and sockets.
+    std::string meshName = "";
 };
 
 // A named flat-color palette (RGB 0-255) the renderer maps onto recipes.
