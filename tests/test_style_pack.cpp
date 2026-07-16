@@ -13,11 +13,12 @@
 using namespace llm_npc;
 
 TEST_CASE("every part and palette carries a pack tag (default core)") {
-    // Step 1 (pack seam). Live already — the defaulted field ships with
-    // the scaffold, so this one is NOT skipped: it pins the seam down.
+    // Step 1 (pack seam). The seam now carries two packs: the built-in
+    // "core" primitives and the "quaternius" mesh family (issue #139) —
+    // anything else is a typo'd row.
     for (const PartDef& part : partCatalog()) {
         CHECK_MESSAGE(!part.pack.empty(), part.id);
-        CHECK(part.pack == "core");  // only the built-in pack exists tonight
+        CHECK((part.pack == "core" || part.pack == "quaternius"));
     }
     for (const PartPalette& palette : paletteCatalog()) {
         CHECK_MESSAGE(!palette.pack.empty(), palette.id);
@@ -31,7 +32,11 @@ TEST_CASE("Mii proportions: heads read as ~half the body+head silhouette") {
     // measure is head.y / (headSocket.y + head.y) — the body+head
     // silhouette. 0.48-0.60 lands the plan's "head reads ~40-45% of
     // standing height" once a typical hair crown joins the assembly.
+    // Scoped to CORE parts: the quaternius mesh family (issue #139) is
+    // realistically proportioned by design and pins its own window in
+    // test_stylized_parts.cpp.
     for (const PartDef* body : partsForCategory(PartCategory::Body, "any")) {
+        if (body->pack != "core") continue;
         const auto socket = body->sockets.find("head");
         REQUIRE_MESSAGE(socket != body->sockets.end(), body->id);
         for (const PartDef* head :

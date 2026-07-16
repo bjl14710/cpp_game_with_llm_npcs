@@ -99,5 +99,119 @@ Texture2D bake(NpcFace face) {
     return out;
 }
 
+Texture2D bakeStylized(int eyeStyle, int mouthStyle, NpcFace mood) {
+    const Color dark{45, 38, 38, 255};
+    const Color lip{120, 58, 54, 255};
+    const Color blushTone{235, 140, 150, 220};
+
+    // Canvas anatomy (pixels): eye line high, mouth low, so the quad the
+    // renderer stretches over the face sockets lines features up with the
+    // mesh head's own eye/mouth heights.
+    constexpr float cx = 64.f;
+    constexpr float eyeY = 46.f;
+    constexpr float eyeDx = 27.f;
+    constexpr float mouthY = 96.f;
+
+    RenderTexture2D target = LoadRenderTexture(kSize, kSize);
+    BeginTextureMode(target);
+    ClearBackground(BLANK);  // decal: the head mesh is the background
+
+    // Surprise widens every eye style; sleepy lids narrow it.
+    const float eyeScale = mood == NpcFace::Surprised ? 1.3f : 1.f;
+
+    for (int side = -1; side <= 1; side += 2) {
+        const float ex = cx + eyeDx * static_cast<float>(side);
+        const bool winkClosed = eyeStyle == 6 && side > 0 &&
+                                mood != NpcFace::Surprised;
+        if (winkClosed) {
+            // The wink's closed lid: a cheerful horizontal dash.
+            DrawRectangleRec(Rectangle{ex - 11.f, eyeY - 3.f, 22.f, 6.f}, dark);
+        } else if (eyeStyle == 1) {  // wide: big solid rounds
+            DrawCircleV(Vector2{ex, eyeY}, 11.f * eyeScale, dark);
+        } else if (eyeStyle == 2) {  // round: ring + pupil
+            DrawRing(Vector2{ex, eyeY}, 7.f * eyeScale, 10.f * eyeScale, 0.f,
+                     360.f, 24, dark);
+            DrawCircleV(Vector2{ex, eyeY}, 3.5f, dark);
+        } else if (eyeStyle == 3) {  // happy: upward arcs (^ ^)
+            DrawRing(Vector2{ex, eyeY + 3.f}, 7.f, 11.f, 180.f, 360.f, 16, dark);
+        } else if (eyeStyle == 4) {  // sleepy: heavy lid over a half pupil
+            DrawCircleSector(Vector2{ex, eyeY}, 8.f, 0.f, 180.f, 16, dark);
+            DrawRectangleRec(Rectangle{ex - 10.f, eyeY - 6.f, 20.f, 6.f}, dark);
+        } else if (eyeStyle == 5) {  // star: a four-point sparkle
+            DrawRectanglePro(Rectangle{ex, eyeY, 22.f * eyeScale, 6.f},
+                             Vector2{11.f * eyeScale, 3.f}, 45.f, dark);
+            DrawRectanglePro(Rectangle{ex, eyeY, 22.f * eyeScale, 6.f},
+                             Vector2{11.f * eyeScale, 3.f}, -45.f, dark);
+        } else if (eyeStyle == 7) {  // glasses: framed lenses + pupils
+            DrawRing(Vector2{ex, eyeY}, 10.f, 13.f, 0.f, 360.f, 24, dark);
+            DrawCircleV(Vector2{ex, eyeY}, 4.f, dark);
+        } else {  // 0 dot (and the wink's open eye)
+            DrawCircleV(Vector2{ex, eyeY}, 7.f * eyeScale, dark);
+        }
+    }
+    if (eyeStyle == 7) {  // glasses bridge
+        DrawRectangleRec(Rectangle{cx - 15.f, eyeY - 2.f, 30.f, 4.f}, dark);
+    }
+
+    // Brows: same mood language as the emote set (angry inward-down, sad
+    // inward-up), raised for surprise. Screen y grows downward and raylib
+    // rotation is clockwise-positive, hence the sign flip per side.
+    float browTilt = 0.f;
+    if (mood == NpcFace::Angry) browTilt = 18.f;
+    if (mood == NpcFace::Sad) browTilt = -14.f;
+    const float browY = mood == NpcFace::Surprised ? eyeY - 24.f : eyeY - 18.f;
+    if (mood != NpcFace::Neutral && mood != NpcFace::Happy) {
+        for (int side = -1; side <= 1; side += 2) {
+            const float ex = cx + eyeDx * static_cast<float>(side);
+            DrawRectanglePro(Rectangle{ex, browY, 26.f, 5.f}, Vector2{13.f, 2.5f},
+                             -browTilt * static_cast<float>(side), dark);
+        }
+    }
+
+    if (mood == NpcFace::Embarrassed) {
+        DrawEllipse(static_cast<int>(cx - 44.f), static_cast<int>(eyeY + 18.f),
+                    10.f, 6.f, blushTone);
+        DrawEllipse(static_cast<int>(cx + 44.f), static_cast<int>(eyeY + 18.f),
+                    10.f, 6.f, blushTone);
+    }
+
+    // Mouth: the mood overrides the picked resting style — that is the
+    // whole point of retiring the emote billboard for this family.
+    int shape = mouthStyle;                      // 0 smile, 1 line, 2 open, 3 o
+    float cornerLift = shape == 0 ? 6.f : 0.f;   // smile corners up
+    if (mood == NpcFace::Happy) {
+        shape = 0;
+        cornerLift = 7.f;
+    } else if (mood == NpcFace::Angry || mood == NpcFace::Sad) {
+        shape = 0;
+        cornerLift = -6.f;  // downturned
+    } else if (mood == NpcFace::Surprised) {
+        shape = 2;
+    } else if (mood == NpcFace::Embarrassed) {
+        shape = 1;
+    }
+    if (shape == 0) {
+        DrawRectangleRec(Rectangle{cx - 15.f, mouthY - 3.f, 30.f, 6.f}, lip);
+        DrawCircleV(Vector2{cx - 16.f, mouthY - cornerLift * 0.7f}, 4.f, lip);
+        DrawCircleV(Vector2{cx + 16.f, mouthY - cornerLift * 0.7f}, 4.f, lip);
+    } else if (shape == 1) {
+        const float w = mood == NpcFace::Embarrassed ? 16.f : 26.f;
+        DrawRectangleRec(Rectangle{cx - w * 0.5f, mouthY - 2.5f, w, 5.f}, lip);
+    } else if (shape == 2) {
+        DrawEllipse(static_cast<int>(cx), static_cast<int>(mouthY), 9.f, 12.f, lip);
+    } else {
+        DrawRing(Vector2{cx, mouthY}, 5.f, 9.f, 0.f, 360.f, 24, lip);
+    }
+    EndTextureMode();
+
+    // Same framebuffer-independence copy as bake().
+    Image image = LoadImageFromTexture(target.texture);
+    ImageFlipVertical(&image);
+    Texture2D out = LoadTextureFromImage(image);
+    UnloadImage(image);
+    UnloadRenderTexture(target);
+    return out;
+}
+
 }  // namespace FaceTexture
 }  // namespace llm_npc

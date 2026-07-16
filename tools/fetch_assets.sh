@@ -23,6 +23,17 @@ CHARS_SHA_COMMIT="672074b73ba276876a19e8816ecdc5241817ab47"
 CHARS_URL="https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/archive/${CHARS_SHA_COMMIT}.zip"
 CHARS_SHA256="00777a7b9811a7c7f8dd3fda4e56604f6a93b33673d64557153f354d677b47af"
 
+# Quaternius Ultimate Modular Characters (CC0) — 4 modular rigged
+# characters (Adventurer, SciFi, Soldier, Witch), each with named
+# Body/Feet/Head/Legs mesh nodes on a shared skeleton and 24 shared
+# animation clips (Idle, Walk, Run, Gun_Shoot, Death, ...).
+# Quaternius distributes only via an unpinnable Google Drive folder, so
+# this fetches a GitHub mirror pinned by commit (CC0 permits mirroring);
+# the sha256 guards byte-identity either way.
+MODULAR_SHA_COMMIT="b84c33822779c827fec2074edbfe98c4ddafb0e5"
+MODULAR_URL="https://github.com/hukasu/bevy-modular-characters/archive/${MODULAR_SHA_COMMIT}.zip"
+MODULAR_SHA256="cc22bdd1dd7944535ce84a7822f491245c1726571ba19272d14440afa425e427"
+
 # Downloads + verifies one archive, then runs the caller-supplied unpack
 # function on the extracted tree.
 fetch() {
@@ -70,9 +81,23 @@ unpack_chars() {
     cp "$src"/*.glb "$MODELS/characters/"
 }
 
+# Modular characters: four self-contained .gltf files (embedded buffers,
+# flat-color materials, no textures) at the mirror's assets/ root; the
+# mirror's own code and the two stray .glb part files are not copied.
+unpack_modular() {
+    local x="$1"
+    local src
+    src="$(find "$x" -type d -name assets -path "*bevy-modular-characters*" | head -1)"
+    mkdir -p "$MODELS/characters_modular"
+    cp "$src"/Adventurer.gltf "$src"/SciFi.gltf "$src"/Soldier.gltf \
+       "$src"/Witch.gltf "$MODELS/characters_modular/"
+}
+
 fetch "KayKit City Builder Bits" "$CITY_URL" "$CITY_SHA256" \
       "$MODELS/city/citybits_texture.png" unpack_city
 fetch "KayKit Character Pack: Adventures" "$CHARS_URL" "$CHARS_SHA256" \
       "$MODELS/characters/Knight.glb" unpack_chars
+fetch "Quaternius Ultimate Modular Characters" "$MODULAR_URL" "$MODULAR_SHA256" \
+      "$MODELS/characters_modular/Adventurer.gltf" unpack_modular
 
 echo "[fetch_assets] all packs present under assets/models/"

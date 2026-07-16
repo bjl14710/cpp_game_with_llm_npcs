@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "raymath.h"
 #include "rlgl.h"
 
 #include "DayNight.hpp"
@@ -126,11 +127,22 @@ void RaylibRenderer::setTimeOfDay(float hours) {
                       static_cast<unsigned char>(sky.g * 255.f),
                       static_cast<unsigned char>(sky.b * 255.f), 255};
     lightLevel_ = lightLevelAt(hours);
+    const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
     if (const Shader* fog = assets_.fogShader()) {
-        const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
         SetShaderValue(*fog, assets_.fogColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(*fog, assets_.fogLightLoc(), &lightLevel_,
                        SHADER_UNIFORM_FLOAT);
+    }
+    // The character cel and outline programs fog with the same curves —
+    // characters and their rims haze into the same horizon as the city.
+    if (const Shader* cel = assets_.celShader()) {
+        SetShaderValue(*cel, assets_.celColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(*cel, assets_.celLightLoc(), &lightLevel_,
+                       SHADER_UNIFORM_FLOAT);
+    }
+    if (const Shader* outline = assets_.outlineShader()) {
+        SetShaderValue(*outline, assets_.outlineColorLoc(), fogColor,
+                       SHADER_UNIFORM_VEC4);
     }
 }
 
@@ -150,15 +162,35 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
     // (ground plane, slabs, fountain, viewmodel) through the same shader so
     // everything hazes consistently. Fog distance needs the camera each
     // frame.
+    const float eye[3] = {camera_.position.x, camera_.position.y,
+                          camera_.position.z};
+    if (const Shader* cel = assets_.celShader()) {
+        SetShaderValue(*cel, assets_.celCameraLoc(), eye, SHADER_UNIFORM_VEC3);
+    }
+    if (const Shader* outline = assets_.outlineShader()) {
+        SetShaderValue(*outline, assets_.outlineCameraLoc(), eye,
+                       SHADER_UNIFORM_VEC3);
+    }
     if (const Shader* fog = assets_.fogShader()) {
-        const float eye[3] = {camera_.position.x, camera_.position.y,
-                              camera_.position.z};
         SetShaderValue(*fog, assets_.fogCameraLoc(), eye, SHADER_UNIFORM_VEC3);
         BeginMode3D(camera_);
         BeginShaderMode(*fog);
         return;
     }
     BeginMode3D(camera_);
+}
+
+void RaylibRenderer::beginCharacterShader() {
+    if (const Shader* cel = assets_.celShader()) BeginShaderMode(*cel);
+}
+
+void RaylibRenderer::endCharacterShader() {
+    if (!assets_.celShader()) return;  // nothing was begun
+    if (const Shader* fog = assets_.fogShader()) {
+        BeginShaderMode(*fog);  // hand the batch back to the frame's shader
+    } else {
+        EndShaderMode();
+    }
 }
 
 void RaylibRenderer::drawCity(const City& city) {
@@ -299,6 +331,28 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
     DrawModelEx(character->model, position, Vector3{0.f, 1.f, 0.f}, visual.facingDeg,
                 Vector3{s, s, s}, WHITE);
 
+    // Cartoon rim (issue #138) — the mesh version of the #103 inverted
+    // hull: redraw every mesh through the outline shader (vertices pushed
+    // out along their world-space normals, solid rim color) with FRONT
+    // faces culled so only the silhouette band survives. The batch drains
+    // before each cull switch, exactly like the primitive hull; the CPU-
+    // skinned vertices are already posed from the draw above.
+    if (const Material* rim = assets_.outlineMaterial()) {
+        const Matrix local = MatrixMultiply(
+            MatrixScale(s, s, s),
+            MatrixRotate(Vector3{0.f, 1.f, 0.f}, visual.facingDeg * DEG2RAD));
+        const Matrix transform = MatrixMultiply(
+            MatrixMultiply(character->model.transform, local),
+            MatrixTranslate(position.x, position.y, position.z));
+        rlDrawRenderBatchActive();
+        rlSetCullFace(RL_CULL_FACE_FRONT);
+        for (int i = 0; i < character->model.meshCount; ++i) {
+            DrawMesh(character->model.meshes[i], *rim, transform);
+        }
+        rlDrawRenderBatchActive();
+        rlSetCullFace(RL_CULL_FACE_BACK);
+    }
+
     // Non-neutral moods float as an emote above the head — the same six
     // procedural faces the legacy renderer painted on, now billboarded.
     // The dead don't emote.
@@ -323,6 +377,14 @@ struct RecipeColors {
 // with a hint of blue so lines feel inked, not void.
 constexpr Color kOutlineColor{32, 30, 38, 255};
 
+// TODO(stylized step 3): add the MESH branch at the top of this dispatch:
+// if (!part.meshName.empty()) draw the loaded mesh at `at`, scaled so its
+// measured bounds fill `dim` (the contract already resolved the numbers) —
+// then return. The quaternius family flows through here with zero changes
+// to assembly/picker code. TODO(stylized step 4): quaternius heads draw a
+// FLAT FACE QUAD (head-oriented, not camera-billboard) at the face socket,
+// textured from FaceTexture's stylized set; mood = face-texture variant,
+// replacing the emote billboard for that family.
 // The ONE place part ids map to shapes — the graphics-pack seam (issue
 // #101). A content pack is exactly: catalog rows (PartDef/PartPalette
 // with their `pack` tag) + recipe branches HERE. Nothing else — not the
@@ -498,6 +560,11 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
             DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
             DrawSphere({at.x + dx, cy, at.z}, dim.y * 0.5f, c.dark);
         }
+    } else if (part.category == PartCategory::Mouth) {
+        // Generic mouth: a thin dark bar, so family-specific mouth ids
+        // (e.g. the quaternius-scale marks) render without a bespoke
+        // recipe branch each.
+        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
     } else if (part.localSize.y > 0.f) {
         // Generic recipe: any part without a bespoke shape renders as
         // its declared box (skin for heads, hair on top, outfit below)
@@ -506,6 +573,103 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                             : part.category == PartCategory::Hair ? c.hair
                                                                   : c.outfit;
         DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, color);
+    }
+}
+
+// Face-pick ids -> FaceTexture style indexes (issue #140). Unknown ids
+// (a stored look from a newer catalog) fall back to style 0 rather than
+// failing — same demote-gracefully rule looks follow everywhere.
+int stylizedEyeStyle(const std::string& id) {
+    const char* ids[FaceTexture::kEyeStyleCount] = {
+        "eyes_q_dot",    "eyes_q_wide", "eyes_q_round", "eyes_q_happy",
+        "eyes_q_sleepy", "eyes_q_star", "eyes_q_wink",  "eyes_q_glasses"};
+    for (int i = 0; i < FaceTexture::kEyeStyleCount; ++i) {
+        if (id == ids[i]) return i;
+    }
+    return 0;
+}
+
+int stylizedMouthStyle(const std::string& id) {
+    const char* ids[FaceTexture::kMouthStyleCount] = {
+        "mouth_q_smile", "mouth_q_line", "mouth_q_open", "mouth_q_o"};
+    for (int i = 0; i < FaceTexture::kMouthStyleCount; ++i) {
+        if (id == ids[i]) return i;
+    }
+    return 0;
+}
+
+// The flat face decal (issue #140): a HEAD-oriented textured quad spanning
+// the face sockets — drawn inside the figure's matrix, so it turns with
+// facingDeg and tips with the death pose instead of billboarding at the
+// camera. Alpha-blended over the mesh face, a hair proud of the surface so
+// depth keeps it in front.
+void drawStylizedFace(const Texture2D& texture, const PartDef& head,
+                      const Vec3& headAt, float s) {
+    const auto eyes = head.sockets.find("eyes");
+    const auto mouth = head.sockets.find("mouth");
+    if (eyes == head.sockets.end() || mouth == head.sockets.end()) return;
+
+    const float size = head.localSize.x * 0.72f * s;  // square decal
+    // Anchor the CANVAS eye line (46/128 from the top = 18/128 above quad
+    // center) to the head's eyes socket — the eye line is what reads, so
+    // it must land exactly; the mouth follows the canvas's fixed anatomy.
+    const float cy = headAt.y + eyes->second.y * s - size * (18.f / 128.f);
+    // Proud of the face by a bit MORE than the wrap sweeps back, so the
+    // outer strips end flush with the cheeks instead of buried in them.
+    const float zFront = headAt.z +
+                         std::max(eyes->second.z, mouth->second.z) * s +
+                         size * 0.075f;
+
+    // A flat plane "clings" to the near cheek at steep viewing angles
+    // (parallax against the curved face), so the decal is a shallow
+    // 3-strip wrap: full-front center third, outer thirds swept back.
+    const float half = size * 0.5f;
+    const float third = size / 3.f;
+    const float sweep = size * 0.06f;
+    const float xs[4] = {headAt.x - half, headAt.x - half + third,
+                         headAt.x + half - third, headAt.x + half};
+    const float zs[4] = {zFront - sweep, zFront, zFront, zFront - sweep};
+
+    rlSetTexture(texture.id);
+    rlBegin(RL_QUADS);
+    rlColor4ub(255, 255, 255, 255);
+    for (int strip = 0; strip < 3; ++strip) {
+        const float u0 = static_cast<float>(strip) / 3.f;
+        const float u1 = static_cast<float>(strip + 1) / 3.f;
+        rlNormal3f(0.f, 0.f, 1.f);  // near-frontal; banding follows the face
+        rlTexCoord2f(u0, 1.f);
+        rlVertex3f(xs[strip], cy - half, zs[strip]);
+        rlTexCoord2f(u1, 1.f);
+        rlVertex3f(xs[strip + 1], cy - half, zs[strip + 1]);
+        rlTexCoord2f(u1, 0.f);
+        rlVertex3f(xs[strip + 1], cy + half, zs[strip + 1]);
+        rlTexCoord2f(u0, 0.f);
+        rlVertex3f(xs[strip], cy + half, zs[strip]);
+    }
+    rlEnd();
+    rlSetTexture(0);
+}
+
+// Mesh-backed part (issue #139): draws the part's resolved meshes with
+// their bounds bottom-center on the assembly anchor — the same convention
+// primitive recipes use — under the one contract scale. DrawMesh composes
+// its transform with the surrounding rlgl matrix stack, so the figure's
+// facing/death-tip matrix applies exactly as it does to primitives.
+// `override` swaps in the outline material for the rim pass; nullptr draws
+// the model's own (cel-routed) materials.
+void drawPartMeshes(const Assets::PartMeshes& pm, const Vec3& at, float s,
+                    const Material* override) {
+    const float cx = (pm.boundsMin.x + pm.boundsMax.x) * 0.5f;
+    const float cz = (pm.boundsMin.z + pm.boundsMax.z) * 0.5f;
+    const Matrix m = MatrixMultiply(
+        MatrixMultiply(MatrixTranslate(-cx, -pm.boundsMin.y, -cz),
+                       MatrixScale(s, s, s)),
+        MatrixTranslate(at.x, at.y, at.z));
+    for (const int idx : pm.meshes) {
+        const Material& material =
+            override ? *override
+                     : pm.model->materials[pm.model->meshMaterial[idx]];
+        DrawMesh(pm.model->meshes[idx], material, m);
     }
 }
 
@@ -542,7 +706,40 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // Death pose: the figure tips onto its back (a rigid tip-over, the
     // composite counterpart of the pack models' death clip), lifted a
     // little so the torso doesn't sink through the ground slab.
-    const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
+    // Mesh heads wear a flat face DECAL (issue #140) instead of primitive
+    // eye/mouth marks, and their mood lives ON that face — no emote
+    // billboard for this family.
+    const PartDef* headPart = findPart(look.part(PartCategory::Head));
+    const bool meshFace = headPart && !headPart->meshName.empty() &&
+                          assets_.partMeshes(headPart->meshName) != nullptr;
+
+    // Tier-B locomotion (issue #142): CPU-skin each modular file this
+    // figure draws from (body and head may come from different files) to
+    // Idle or Walk at this figure's clock. Files share one animation
+    // library, so a mixed head keeps riding its neck. The dead freeze at
+    // Idle frame 0 under the rigid tip-over; rigged clips replace the
+    // procedural bob for mesh figures (bob stays for core primitives).
+    std::string stems[2];
+    int stemCount = 0;
+    for (const PlacedPart& placed : assembled.parts) {
+        if (placed.part->meshName.empty()) continue;
+        const std::string stem =
+            placed.part->meshName.substr(0, placed.part->meshName.find(':'));
+        const bool seen = stemCount > 0 && (stems[0] == stem ||
+                                            (stemCount > 1 && stems[1] == stem));
+        if (!seen && stemCount < 2) stems[stemCount++] = stem;
+    }
+    for (int i = 0; i < stemCount; ++i) {
+        assets_.poseModular(stems[i], walking && !dead, dead ? 0.f : phase);
+    }
+    const bool meshFigure = stemCount > 0;
+    const float bob = (walking && !dead && !meshFigure)
+                          ? std::fabs(std::sin(phase * 7.f)) * 0.05f
+                          : 0.f;
+
+    // Character surfaces band through the cel shader (issue #138); the
+    // frame's fog shader is restored before the emote billboard below.
+    beginCharacterShader();
     rlPushMatrix();
     rlTranslatef(position.x, position.y + bob + (dead ? 0.30f : 0.f), position.z);
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
@@ -560,7 +757,25 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     rlDrawRenderBatchActive();
     rlSetCullFace(RL_CULL_FACE_FRONT);
     for (const PlacedPart& placed : assembled.parts) {
+        // Face-decal families draw no eye/mouth geometry — nothing to hull.
+        if (meshFace && (placed.part->category == PartCategory::Eyes ||
+                         placed.part->category == PartCategory::Mouth)) {
+            continue;
+        }
         const Vec3 at = placed.position * s;
+        // Mesh-backed parts rim through the normal-inflate outline shader
+        // (issue #138's mesh technique) — the scale hull is for primitive
+        // recipes, whose shapes have no per-vertex normals to inflate by.
+        if (!placed.part->meshName.empty()) {
+            if (const Assets::PartMeshes* pm =
+                    assets_.partMeshes(placed.part->meshName)) {
+                if (const Material* rim = assets_.outlineMaterial()) {
+                    drawPartMeshes(*pm, at, s, rim);
+                }
+                continue;
+            }
+            // Unresolved mesh: its fallback box outlines like any recipe.
+        }
         const Vec3 dim = placed.part->localSize * s;
         const float cy = at.y + dim.y * 0.5f;
         rlPushMatrix();  // inflate about the part's center, not the feet
@@ -575,16 +790,42 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
 
     for (const PlacedPart& placed : assembled.parts) {
         // Anchor and size in world units — the contract scale is applied
-        // HERE so recipes never see it.
-        drawPartRecipe(*placed.part, placed.position * s,
-                       placed.part->localSize * s, colors);
+        // HERE so recipes never see it. Mesh-backed parts dispatch to
+        // their resolved meshes (issue #139); a part whose mesh didn't
+        // resolve draws its declared box so the figure never has holes.
+        const Vec3 at = placed.position * s;
+        if (meshFace && (placed.part->category == PartCategory::Eyes ||
+                         placed.part->category == PartCategory::Mouth)) {
+            continue;  // the face decal below carries eyes, mouth, AND mood
+        }
+        if (!placed.part->meshName.empty()) {
+            if (const Assets::PartMeshes* pm =
+                    assets_.partMeshes(placed.part->meshName)) {
+                drawPartMeshes(*pm, at, s, nullptr);
+                continue;
+            }
+        }
+        drawPartRecipe(*placed.part, at, placed.part->localSize * s, colors);
+    }
+    if (meshFace) {
+        for (const PlacedPart& placed : assembled.parts) {
+            if (placed.part->category != PartCategory::Head) continue;
+            drawStylizedFace(
+                assets_.stylizedFace(
+                    stylizedEyeStyle(look.part(PartCategory::Eyes)),
+                    stylizedMouthStyle(look.part(PartCategory::Mouth)),
+                    dead ? NpcFace::Neutral : face),
+                *placed.part, placed.position * s, s);
+        }
     }
     rlPopMatrix();
+    endCharacterShader();
 
-    // Same emote billboard the pack path draws, at the same height — the
-    // two render paths must stay indistinguishable to the player. The dead
-    // don't emote.
-    if (!dead && face != NpcFace::Neutral) {
+    // Emote billboard for CORE-family looks only, same height as the pack
+    // path draws it. Mesh-face families retired it (issue #140): their
+    // mood is already on the face, so a floating copy would double-report.
+    // The dead don't emote.
+    if (!dead && !meshFace && face != NpcFace::Neutral) {
         DrawBillboard(camera_, assets_.faceTexture(face),
                       Vector3{position.x, 2.45f, position.z}, 0.55f, WHITE);
     }
@@ -661,35 +902,85 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     const Color gunmetal{55, 58, 66, 255};
     const Color gripTone{38, 40, 46, 255};
 
+    // The first-person arm is a character surface too — same cel banding
+    // as the third-person figures (issue #138 routing rule).
+    beginCharacterShader();
     rlPushMatrix();
     rlTranslatef(camera_.position.x, camera_.position.y, camera_.position.z);
     rlRotatef(yawDeg, 0.f, 1.f, 0.f);
     rlRotatef(-pitchDeg, 1.f, 0.f, 0.f);
 
-    if (fist) {
-        // attackFraction runs 1 → 0 across the swing; sin turns that into
-        // extend-then-retract, so the arm shoots out from the lower right
-        // and pulls back — a punch, not a hovering prop.
-        const float ext = std::sin(attackFraction * PI);
-        const float reach = 0.34f + 0.55f * ext;
-        // Sleeve forearm rising slightly toward screen center, fist at the
-        // end. Local vectors — the matrix above carries them to the world.
-        DrawCylinderEx(Vector3{-0.26f, -0.40f, 0.16f},
-                       Vector3{-0.22f, -0.30f + 0.08f * ext, reach},
-                       0.055f, 0.045f, 10, sleeve);
-        DrawSphere(Vector3{-0.22f, -0.30f + 0.08f * ext, reach}, 0.075f, skin);
-    } else {
-        // Pistol: held silhouette (slide + barrel + grip + hand) with a
-        // recoil kick — back and muzzle-up — driven by attackFraction.
+    // attackFraction runs 1 → 0 across the swing; sin turns that into
+    // extend-then-retract for the fist. Pistol recoil (back and muzzle-up)
+    // is a pose transform, so it applies to rim and color passes alike.
+    const float ext = std::sin(attackFraction * PI);
+    const float reach = 0.34f + 0.55f * ext;
+    if (!fist) {
         rlTranslatef(0.f, 0.f, -0.07f * attackFraction);
         rlRotatef(-7.f * attackFraction, 1.f, 0.f, 0.f);
-        DrawCube(Vector3{-0.26f, -0.26f, 0.50f}, 0.045f, 0.075f, 0.26f, gunmetal);
-        DrawCylinderEx(Vector3{-0.26f, -0.25f, 0.60f}, Vector3{-0.26f, -0.25f, 0.75f},
-                       0.018f, 0.018f, 10, gunmetal);
-        DrawCube(Vector3{-0.26f, -0.345f, 0.44f}, 0.04f, 0.11f, 0.055f, gripTone);
-        DrawSphere(Vector3{-0.26f, -0.31f, 0.43f}, 0.042f, skin);  // hand
     }
+
+    // One prop, two palettes: the rim pass re-issues every shape through
+    // this inflated about ITS OWN center (the same per-part pivots the
+    // body hull uses — a single whole-prop pivot leaves the near side of
+    // each shape rimless).
+    const auto drawProp = [&](Color sleeveC, Color skinC, Color metalC,
+                              Color gripC, float inflate) {
+        const auto shape = [&](Vector3 center, auto&& draw) {
+            if (inflate > 1.f) {
+                rlPushMatrix();
+                rlTranslatef(center.x, center.y, center.z);
+                rlScalef(inflate, inflate, inflate);
+                rlTranslatef(-center.x, -center.y, -center.z);
+            }
+            draw();
+            if (inflate > 1.f) rlPopMatrix();
+        };
+        if (fist) {
+            // Sleeve forearm rising slightly toward screen center, fist at
+            // the end. Local vectors — the matrix above carries them to
+            // the world.
+            const Vector3 fistAt{-0.22f, -0.30f + 0.08f * ext, reach};
+            shape(Vector3{-0.24f, -0.35f + 0.04f * ext, (0.16f + reach) * 0.5f},
+                  [&] {
+                      DrawCylinderEx(Vector3{-0.26f, -0.40f, 0.16f}, fistAt,
+                                     0.055f, 0.045f, 10, sleeveC);
+                  });
+            shape(fistAt, [&] { DrawSphere(fistAt, 0.075f, skinC); });
+        } else {
+            // Pistol: held silhouette (slide + barrel + grip + hand).
+            shape(Vector3{-0.26f, -0.26f, 0.50f}, [&] {
+                DrawCube(Vector3{-0.26f, -0.26f, 0.50f}, 0.045f, 0.075f, 0.26f,
+                         metalC);
+            });
+            shape(Vector3{-0.26f, -0.25f, 0.675f}, [&] {
+                DrawCylinderEx(Vector3{-0.26f, -0.25f, 0.60f},
+                               Vector3{-0.26f, -0.25f, 0.75f}, 0.018f, 0.018f, 10,
+                               metalC);
+            });
+            shape(Vector3{-0.26f, -0.345f, 0.44f}, [&] {
+                DrawCube(Vector3{-0.26f, -0.345f, 0.44f}, 0.04f, 0.11f, 0.055f,
+                         gripC);
+            });
+            shape(Vector3{-0.26f, -0.31f, 0.43f}, [&] {
+                DrawSphere(Vector3{-0.26f, -0.31f, 0.43f}, 0.042f, skinC);  // hand
+            });
+        }
+    };
+
+    // Cartoon rim (issue #143 gate): the same #103 inverted hull every
+    // third-person figure gets — grouped passes, batch drained around the
+    // cull switches. The rim is proportionally larger than the body's
+    // (1.14 vs 1.06) because the prop sits half a meter from the eye.
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_FRONT);
+    drawProp(kOutlineColor, kOutlineColor, kOutlineColor, kOutlineColor, 1.14f);
+    rlDrawRenderBatchActive();
+    rlSetCullFace(RL_CULL_FACE_BACK);
+
+    drawProp(sleeve, skin, gunmetal, gripTone, 1.f);
     rlPopMatrix();
+    endCharacterShader();
 }
 
 void RaylibRenderer::endFrame() {

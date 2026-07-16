@@ -113,6 +113,14 @@ class RaylibRenderer {
     bool worldToScreen(const Vec3& world, Vector2& out) const;
 
    private:
+    // Routes the primitive batch through the character cel shader for the
+    // duration of a character draw (composite parts, viewmodel), then back
+    // to the frame's fog shader — BeginShaderMode is not a stack, so the
+    // restore is explicit (issue #138 routing rule: no character surface
+    // on the default lit material).
+    void beginCharacterShader();
+    void endCharacterShader();
+
     Assets& assets_;
     // Avatar-driven viewmodel colors (defaults match the pre-avatar look).
     Color avatarSkin_{224, 172, 138, 255};
