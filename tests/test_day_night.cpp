@@ -1,5 +1,6 @@
 // Tests for the pure day/night curves: band values and edge continuity.
 #include <cmath>
+#include <initializer_list>
 
 #include "DayNight.hpp"
 #include "doctest.h"
