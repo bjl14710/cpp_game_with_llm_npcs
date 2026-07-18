@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Build and run C++ exercise tests directly with g++ (no cmake needed).
+#
+# Usage:
+#   bash tests/exercises/cpp/run_cpp.sh                  # all tests
+#   bash tests/exercises/cpp/run_cpp.sh test_ring_ma     # one test
+#
+# HFT_EXERCISE_TARGET=solutions switches every include dir from exercises/
+# to solutions/.  Default is exercises/ (student stubs).
+#
+# Exit codes: 0 = all pass, 1 = compile error or test failure,
+#             42 = exercise not implemented yet (stub threw).
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
+TARGET="${HFT_EXERCISE_TARGET:-exercises}"
+BUILD="$HERE/build"
+mkdir -p "$BUILD"
+
+# ---------------------------------------------------------------------------
+# Map a test name to the include directories it needs (space-separated).
+# ---------------------------------------------------------------------------
+get_inc_dirs() {
+    case "$1" in
+        test_ring_ma|test_spsc_ring)
+            echo "$ROOT/$TARGET/04_spsc_ring" ;;
+        test_06_order_book)
+            echo "$ROOT/$TARGET/06_cpp_order_book" ;;
+        test_07_feed_handler)
+            echo "$ROOT/$TARGET/07_feed_handler" ;;
+        test_08_latency)
+            echo "$ROOT/$TARGET/08_latency_bench" ;;
+        *)
+            echo "" ;;
+    esac
+}
+
+if [ $# -gt 0 ]; then
+    tests=("$@")
+else
+    tests=(test_ring_ma test_spsc_ring
+           test_06_order_book
+           test_07_feed_handler
+           test_08_latency)
+fi
+
+status=0
+for t in "${tests[@]}"; do
+    # Build -I flags from the whitespace-separated directory list
+    INC_FLAGS=""
+    for d in $(get_inc_dirs "$t"); do
+        INC_FLAGS="$INC_FLAGS -I$d"
+    done
+
+    if ! g++ -std=c++20 -O2 -Wall -pthread $INC_FLAGS "$HERE/$t.cpp" -o "$BUILD/$t" 2>&1; then
+        echo "$t: COMPILE FAILED"
+        exit 1
+    fi
+    "$BUILD/$t"
+    rc=$?
+    if [ "$rc" -eq 42 ]; then
+        echo "$t: NOT IMPLEMENTED"
+        if [ "$status" -eq 0 ]; then status=42; fi
+    elif [ "$rc" -ne 0 ]; then
+        echo "$t: FAILED (exit $rc)"
+        exit 1
+    else
+        echo "$t: PASSED"
+    fi
+done
+exit "$status"

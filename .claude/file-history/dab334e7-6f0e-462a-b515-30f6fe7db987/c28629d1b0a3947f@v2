@@ -1,0 +1,36 @@
+"""Low-volatility long-only selection (betting-against-beta proxy) — scaffold.
+
+Spec: .claude/plans/low-volatility.md. Confidence = 1/sigma so the arena's
+existing top_n confidence ranking structurally prefers the calmest names.
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class LowVolatilityStrategy(DailyStrategy):
+    """Always-long with confidence inverse to trailing realized volatility.
+
+    NOT yet registered in strategies/registry.py — registration happens in
+    the implementing commit.
+    """
+
+    name = "lowvol"
+
+    def __init__(self, vol_lookback: int = 252) -> None:
+        self.vol_lookback = vol_lookback
+
+    @property
+    def warmup_bars(self) -> int:
+        return self.vol_lookback + 1
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """TODO(implement): sigma = trailing vol_lookback std of daily
+        returns, floored at 1e-4 (the sizing module's constant) so a
+        halted/stale ticker can't take infinite confidence;
+        return DailySignal(+1, confidence=1/sigma, "low-vol").
+        """
+        raise NotImplementedError("scaffold: see .claude/plans/low-volatility.md")
+
+
+__all__ = ["LowVolatilityStrategy"]

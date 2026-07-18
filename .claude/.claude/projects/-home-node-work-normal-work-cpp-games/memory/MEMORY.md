@@ -1,0 +1,1 @@
+- [LLM NPC city build](project_npc_city.md) — 21-commit plan in flight; staging map in npc_staging/NOTES.md; resume procedure inside

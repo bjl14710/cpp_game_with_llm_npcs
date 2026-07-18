@@ -1,0 +1,103 @@
+# Plan: Backtest-vs-Live Divergence — Measuring Look-Ahead Bias
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+The repo warns about look-ahead bias but never measures it. This milestone
+runs the flagship CCF lead-lag signal (CL=F vs XLE daily returns) two ways:
+the current "backtest" path where the full dataset is visible at once, and an
+"as-if-live" walk-forward path where each estimate may only use data up to
+its as-of date. The gap between the two — leader-sign agreement, peak-lag
+drift, and the full-sample estimate's unfair predictive advantage — becomes a
+set of concrete numbers written up in `docs/perf/`, the same way
+`01-flat-book.md` turned "cache locality matters" into 83 ns → 42 ns.
+
+## Goal
+A user can run one command and read one document that states, numerically,
+how different the lead-lag conclusion looks when the future is hidden.
+
+## Resolved Decisions
+1. **Signal:** CCF lead-lag (`analysis/leadlag.py`), per user choice — its
+   leader identity, peak lag, and peak correlation give three divergence
+   metrics; cointegration would only give a binary flip count.
+2. **"Live" means information-set restriction, not vendor PIT.** yfinance
+   history is retroactively adjusted (splits/dividends), so true
+   point-in-time vendor data is impossible on the free tier. "As-if-live"
+   here = no bar after the as-of date is visible. The writeup must state
+   this limitation explicitly.
+3. **Walk-forward shape:** trailing 252-trading-day window, stepped every 21
+   trading days (monthly), defaults overridable. At each step t: estimate
+   `ccf_leadlag` on `returns[t-252:t]` only, then score it on the *next* 21
+   days (out-of-sample) — vs the full-sample estimate scored on the same
+   21 days it was allowed to see during fitting.
+
+## Out of Scope (this version)
+- Cointegration/Granger walk-forward (same machinery could host it later).
+- Any trading strategy, PnL, or position simulation — the paper's
+  "predictive precedence ≠ tradeable" caveat stands; we score correlations,
+  not returns.
+- Vendor point-in-time data feeds.
+- Intraday walk-forward (daily bars only; HY intraday work is separate).
+
+## Affected Areas
+- New: `src/oil_alpha/analysis/walkforward.py` —
+  - `@dataclass WalkForwardStep {as_of, window_start, leader, peak_lag,
+    peak_corr, oos_corr_at_pit_lag, oos_corr_at_full_lag}`
+  - `@dataclass DivergenceReport {steps, full_sample: LeadLagResult,
+    leader_agreement_rate, mean_abs_lag_drift, mean_oos_gap, n_steps}`
+  - `walkforward_ccf(x, y, window=252, step=21, max_lag=10)` — strict slicing:
+    every estimate sees only `[t-window, t)`; scoring uses `[t, t+step)`.
+  - `divergence_report(x, y, ...)` — runs both paths and computes the gap.
+  - `__main__` CLI: fetches via the existing cached `sources.fetch_prices` /
+    `build_returns_frame` path and prints the report table + summary.
+- New: `tests/test_walkforward.py` — see Acceptance Criteria; the pinned
+  correctness check is a synthetic regime-flip series (known lead +2 for the
+  first half, −2 for the second): the full-sample estimate reports ONE
+  leader for the whole period while walk-forward tracks the flip, so
+  `leader_agreement_rate` and the OOS gap have hand-computable expectations.
+  Reuses `tests/test_leadlag.py`'s synthetic-lead construction.
+- New: `docs/perf/<next-free-number>-backtest-vs-live.md` — writeup in the
+  01-flat-book style: numbers table, mechanism, what it teaches. (Number
+  assigned at implementation time; 03 may already be taken by the
+  incremental-best book optimization queued in perf/02.)
+- `docs/learning/PROGRESS.md` — flag "look-ahead bias, measured" as a /teach
+  target once numbers exist.
+- NOT changed: `analysis/leadlag.py` (consumed as-is; walk-forward wraps it).
+
+## Implementation Order
+1. `walkforward.py` dataclasses + `walkforward_ccf` with strict-slicing
+   guards (an assertion that no index ≥ as-of enters an estimate).
+2. Synthetic regime-flip test + agreement/drift/OOS-gap tests; pytest green.
+3. CLI runner on real CL/XLE data (cached parquet path; no new API usage).
+4. The `docs/perf/` writeup with the measured numbers.
+5. PROGRESS.md note.
+
+## Acceptance Criteria
+- [ ] Given the synthetic regime-flip series, walk-forward tracks the flip
+      (leader changes across the boundary) while the full-sample estimate
+      reports a single leader; `leader_agreement_rate` matches the
+      hand-computed fraction within the step-granularity tolerance.
+- [ ] Given any inputs, no walk-forward estimate can see data at or after
+      its as-of date (guarded by an explicit test that poisons future rows
+      with NaN/sentinel values and asserts identical estimates).
+- [ ] Given real CL/XLE data, the CLI prints a DivergenceReport with all
+      three metrics and the writeup contains the same numbers.
+- [ ] `pytest` passes in full; no changes to existing test behaviour.
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|--------------------|
+| Series shorter than one window + one step | ValueError naming the minimum length |
+| Window with insufficient overlap after NaN alignment | Step skipped and counted, report shows n_skipped |
+| Peak at lag 0 in a step (contemporaneous) | Counted as agreeing only with a contemporaneous full-sample verdict |
+| yfinance data revisions between runs | Out of our control; writeup states the PIT limitation (Resolved Decision 2) |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `Walk-forward CCF engine + regime-flip correctness test` — walkforward.py
+   + tests (steps 1–2).
+2. `Backtest-vs-live divergence report on real CL/XLE + docs/perf writeup` —
+   CLI + measured numbers + writeup (steps 3–5).

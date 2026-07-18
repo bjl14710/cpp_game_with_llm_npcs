@@ -1,0 +1,22 @@
+# Plan: issue #22 — LPM3.5, 20-bit CPUX, reset-vector PC
+Status: QUEUED (overnight 2026-07-15)
+Branch: feature/issue-22-cpu-pmm-compliance (stacked on feature/issue-21-gpio-pxren)
+
+## Goal (SLAU367P §2.2.4, §4.3)
+1. POWER:MODE accepts LPM3.5
+2. CPU:REGISTER masking widened to 20 bits; CPU:PC validated even + ≤20-bit
+3. CPU:RESET loads PC from reset vector 0xFFFE (default target 0x4000 when
+   unset) instead of hardcoded 0xC000
+
+## Touch points
+silmulator/devices/msp430.py: _pm_mode VALID set, _cpu_reg, _cpu_pc,
+_cpu_reset, _do_reset. WDT probe reads _pc — update alongside.
+Four small handler edits; no new state beyond a reset-vector read.
+
+## Acceptance
+1. xfail flips (delete marker): test_lpm35_accepted
+2. Audit probes lpm35_rejected / cpu_reg_16bit / cpu_pc_unvalidated /
+   cpu_reset_pc go STALE → rescore; gate clean
+3. test_cpu_pc_set_query / test_cpu_register stay green (16-bit values
+   unchanged under 20-bit masks)
+4. Full suite green

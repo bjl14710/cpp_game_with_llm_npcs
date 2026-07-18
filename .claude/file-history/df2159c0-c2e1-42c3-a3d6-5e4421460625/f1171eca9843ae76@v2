@@ -1,0 +1,24 @@
+# Checkpoint
+Session started: 2026-06-28
+Goal: Work through all ready-for-ai issues
+Status: COMPLETE
+Issues to process: [#4, #6, #9, #26, #30, #31, #32, #33]
+Issues completed: [#4 (PR#35), #6 (PR#39), #9 (PR#36), #26 (PR#38), #30 (PR#34), #31 (PR#37), #32 (PR#40), #33 (PR#41)]
+Issues failed: []
+Issues skipped: []
+
+## Detail
+- #30: strategies/ BaseStrategy ABC + Signal — PR #34
+- #4:  robinhood_executor --loop mode — PR #35
+- #9:  NASDAQ-100 universe + micro-cap filter — PR #36
+- #31: EngulfingStrategy detector, 9 tests — PR #37
+- #26: morning_runner.py pipeline — PR #38
+- #6:  meanvar_long_short(), --allow_short flag — PR #39
+- #32: PaperEngine bar-by-bar sim, 9 tests — PR #40
+- #33: intraday-sim CLI + pyproject.toml — PR #41
+
+## Learning materials written
+- lessons/0032-candlestick-pattern-detection.html
+- drills/0004-candlestick-pattern-detection.html
+- lessons/0033-bar-by-bar-simulation.html
+- docs/learning/PROGRESS.md (created)

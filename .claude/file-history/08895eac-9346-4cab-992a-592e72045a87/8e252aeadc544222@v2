@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0006 · Driving the HFT Lab — How This Repo Teaches You High-Frequency Trading</title>
+<style>
+  :root{
+    --bg:#0a0d13; --panel:#121826; --panel2:#0e1420; --line:#222c40;
+    --ink:#e7eef7; --muted:#94a3b8; --faint:#5b6678;
+    --teal:#2fd4c4; --teal-dim:#1c8a80; --indigo:#8b8bff; --amber:#f0b000;
+    --green:#33c06a; --red:#f0556b;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;
+    background-image:radial-gradient(1200px 620px at 82% -12%,#14203a66,transparent 60%),
+                     radial-gradient(900px 500px at 5% 8%,#0f1c2e55,transparent 55%);}
+  .wrap{max-width:860px;margin:0 auto;padding:44px 22px 140px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--teal);display:flex;align-items:center;gap:10px;margin:0 0 14px}
+  .eyebrow .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);
+    box-shadow:0 0 0 4px color-mix(in srgb,var(--teal) 18%,transparent)}
+  h1{font-size:clamp(27px,4.2vw,40px);line-height:1.12;margin:0 0 10px;letter-spacing:-.01em}
+  .why{color:var(--muted);font-size:17px;margin:0 0 6px;max-width:64ch}
+  .why b{color:var(--ink)}
+  .bus{height:3px;border-radius:3px;margin:24px 0 8px;position:relative;overflow:hidden;
+    background:linear-gradient(90deg,#1b2334,#27324a,#1b2334)}
+  .bus::after{content:"";position:absolute;top:0;left:-30%;width:30%;height:100%;
+    background:linear-gradient(90deg,transparent,var(--teal),transparent);animation:pulse 3.4s linear infinite}
+  @keyframes pulse{to{left:130%}}
+  h2{font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--teal);margin:46px 0 14px;display:flex;align-items:center;gap:12px}
+  h2 .n{color:var(--faint);font-size:11px;border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+  h3{font-size:18px;margin:26px 0 8px;letter-spacing:-.01em}
+  p{margin:12px 0}
+  a{color:var(--teal)}
+  code{font-family:var(--mono);font-size:.92em;background:#0d1420;border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px;color:#d7e3f0}
+  .lead{font-size:16.5px;color:#cdd8e6}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+  .card.tight{padding:14px 18px}
+  .muted{color:var(--muted)}
+  .faint{color:var(--faint)}
+  /* code block */
+  pre{background:#0c111b;border:1px solid var(--line);border-left:3px solid var(--teal-dim);
+    border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;
+    line-height:1.6;margin:14px 0}
+  pre .c{color:#5f7288;font-style:italic}      /* comment */
+  pre .k{color:#7aa2ff}                          /* keyword */
+  pre .s{color:#8fd98f}                          /* string  */
+  pre .f{color:var(--teal)}                      /* function/ident */
+  pre .n{color:#e6b673}                          /* number  */
+  pre .d{color:var(--indigo)}                    /* decorator/path */
+  pre .m{color:#5f7288}                          /* de-emphasis */
+  /* two-layer diagram */
+  .layers{display:grid;grid-template-columns:1fr;gap:14px;margin:18px 0}
+  .layer{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--panel2);position:relative}
+  .layer .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+    padding:3px 8px;border-radius:20px;display:inline-block;margin-bottom:8px}
+  .layer.daily .tag{color:var(--amber);border:1px solid #5a4410;background:#2a220855}
+  .layer.hft .tag{color:var(--teal);border:1px solid var(--teal-dim);background:#0c2b2855}
+  .flow{font-family:var(--mono);font-size:12.5px;color:#cbd6e4;margin-top:6px;line-height:1.9;overflow-x:auto}
+  .flow .arw{color:var(--teal);padding:0 6px}
+  .flow .sub{color:var(--faint)}
+  /* table */
+  .tblwrap{overflow-x:auto;margin:16px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal);font-weight:600}
+  td code{white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .pill{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:20px;border:1px solid}
+  .pill.d{color:var(--amber);border-color:#5a4410}
+  .pill.h{color:var(--teal);border-color:var(--teal-dim)}
+  .pill.l{color:var(--indigo);border-color:#34347a}
+  /* callouts */
+  .note{border-left:3px solid var(--indigo);background:#14142a44;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .note b{color:var(--indigo)}
+  .warnbox{border-left:3px solid var(--amber);background:#2a220833;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .warnbox b{color:var(--amber)}
+  /* confused-with */
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  .vs .col{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--panel)}
+  .vs .col h4{margin:0 0 8px;font-size:15px}
+  .vs .col.a h4{color:var(--amber)} .vs .col.b h4{color:var(--teal)}
+  .vs ul{margin:8px 0 0;padding-left:18px} .vs li{margin:6px 0;font-size:13.5px;color:#cdd8e6}
+  /* quiz */
+  .question{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .question > p{margin:0 0 12px;font-weight:600}
+  .options{list-style:none;margin:0;padding:0}
+  .options li{border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin:8px 0;cursor:pointer;
+    transition:border-color .15s,background .15s;font-size:14.5px}
+  .options li:hover{border-color:var(--teal-dim);background:#0e1a1a}
+  .options li.picked{border-width:1.5px}
+  .options li.correct{border-color:var(--green);background:#0d2417}
+  .options li.wrong{border-color:var(--red);background:#26121a}
+  .feedback{margin:10px 0 0;font-size:13.5px;line-height:1.5}
+  .qtag{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase}
+  .scorebar{position:sticky;bottom:0;margin-top:20px;background:#0c111bee;border:1px solid var(--line);
+    border-radius:12px;padding:12px 16px;font-family:var(--mono);font-size:13px;display:flex;
+    justify-content:space-between;align-items:center;backdrop-filter:blur(6px)}
+  .scorebar b{color:var(--teal)}
+  .cyq{border:1px dashed var(--line);border-radius:12px;padding:14px 18px;margin:12px 0;background:#0d1420}
+  .cyq summary{cursor:pointer;font-weight:600;color:var(--ink)}
+  .cyq summary::marker{color:var(--teal)}
+  .cyq p{color:var(--muted);font-size:14px;margin:10px 0 0}
+  .progress-controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+  .mark{font-family:var(--mono);font-size:11px;border:1px solid var(--line);background:#0d1420;color:var(--muted);
+    border-radius:8px;padding:6px 11px;cursor:pointer}
+  .mark.done{color:var(--green);border-color:var(--green)}
+  footer{margin-top:52px;color:var(--faint);font-family:var(--mono);font-size:11.5px;border-top:1px solid var(--line);padding-top:16px}
+  :focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+  @media(max-width:620px){.vs{grid-template-columns:1fr}}
+  @media(prefers-reduced-motion:reduce){.bus::after{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow"><span class="dot"></span> Lesson 0006 · Orientation</p>
+  <h1>Driving the HFT Lab</h1>
+  <p class="why"><b>Why this matters:</b> lessons 0001–0005 each taught one technique. This one is the
+  <b>map</b> — how the whole repo fits together, what to run, and how each folder is a rung on a ladder
+  from a daily lead-lag study up to a nanosecond order book. Read this first when you come back cold.</p>
+
+  <div class="bus"></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">01</span> The one idea: two labs, one ladder</h2>
+
+  <p class="lead">This repo is not one program. It is <b>two research labs stacked on top of each other</b>,
+  joined by a compiled bridge. Both ask the same kind of question — <em>“does one thing lead another, and
+  what does it cost to trade on it?”</em> — but at timescales a billion times apart.</p>
+
+  <div class="layers">
+    <div class="layer daily">
+      <span class="tag">Layer 1 · Daily research (Python)</span>
+      <div><code>src/oil_alpha/</code> — the beginner-friendly starter kit the README describes.</div>
+      <div class="flow">
+        download <span class="arw">→</span> clean <span class="arw">→</span> analyze <span class="arw">→</span> cost
+        <br><span class="sub">yfinance/FRED · Apr-2020 &amp; roll-day traps · CCF/Granger/cointegration · budget + bp</span>
+      </div>
+      <div class="muted" style="margin-top:10px;font-size:13.5px">Data is <b>free daily closes</b>. The headline
+      result: <b>WTI futures (CL) lead the energy ETF (XLE)</b> at short lags. No order book needed.</div>
+    </div>
+    <div class="layer hft">
+      <span class="tag">Layer 2 · Intraday microstructure (C++ ⇄ Python)</span>
+      <div><code>cpp/itch/</code> + <code>src/oil_alpha/microstructure/</code> — the real HFT machinery.</div>
+      <div class="flow">
+        ITCH bytes <span class="arw">→</span> order book <span class="arw">→</span> signals <span class="arw">→</span> sim / replay
+        <br><span class="sub">parse frames · reconstruct book · OFI/microprice/Kyle-λ · replay clock · market-making · VHDL</span>
+      </div>
+      <div class="muted" style="margin-top:10px;font-size:13.5px">Data is a <b>real Nasdaq tick feed</b>
+      (the AAPL fixture). This is where you meet queues, latency, and hardware.</div>
+    </div>
+  </div>
+
+  <p>The README calls Layer 2 <em>“out of scope (future milestones)”</em> — that page was written for the daily
+  starter kit. Everything under <code>cpp/</code>, <code>hw/</code>, and <code>microstructure/</code> is that future,
+  now built. The learning materials (<code>docs/learning/</code>) and perf write-ups (<code>docs/perf/</code>)
+  are the third thing: the <b>lab notebook</b> that turns each build into a lesson.</p>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">02</span> The knowledge: what each layer actually does</h2>
+
+  <h3>Layer 1 — the daily study is one generator</h3>
+  <p>Everything in the daily lab flows through <b>one function</b>: <code>run_pipeline()</code> in
+  <code>src/oil_alpha/pipeline.py</code>. It is a <b>generator</b> — it <code>yield</code>s a
+  <code>ProgressEvent</code> after each stage instead of returning once at the end. That single design choice is
+  why the Streamlit GUI and the headless CLI can never disagree: <b>they consume the exact same event stream.</b></p>
+
+  <h3>Layer 2 — the C++ core is imported as one module</h3>
+  <p>The C++ under <code>cpp/itch/</code> is compiled into a Python extension called <code>signals_cpp</code>
+  (via pybind11 — that’s lesson 0001). Your Python analysis code does <code>import signals_cpp</code>, calls one
+  function, and gets back <b>columnar arrays</b> (one list per field) ready to drop into a DataFrame. The heavy
+  parsing runs at C++ speed; the plotting and stats stay in comfortable Python.</p>
+
+  <h3>The lab notebook — perf docs and lessons</h3>
+  <p><code>docs/perf/NN-*.md</code> records a <b>measured</b> claim after each build (a number, not a vibe).
+  <code>docs/learning/</code> turns the non-obvious concept behind that build into a lesson + drill + vocab.
+  <code>PROGRESS.md</code> is the running index of what’s been taught; <code>GLOSSARY.md</code> the shared vocabulary.</p>
+
+  <div class="note"><b>Mental hook:</b> Layer 1 answers <em>“is there an edge?”</em> with cheap daily data.
+  Layer 2 answers <em>“could you actually capture it?”</em> once queues, latency, and impact are real.
+  The gap between those two answers <em>is</em> high-frequency trading.</div>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">03</span> Minimal example: the generator spine</h2>
+  <p>Here is the pattern that runs the whole daily lab, stripped to its skeleton. Understand this and you
+  understand how to <em>drive</em> Layer 1 from either the GUI or a script.</p>
+
+<pre><span class="c"># The producer: one generator, yields once per stage (never returns early).</span>
+<span class="k">def</span> <span class="f">run_pipeline</span>(cfg=<span class="k">None</span>):
+    stages = [<span class="s">"download"</span>, <span class="s">"clean"</span>, <span class="s">"lead-lag"</span>, <span class="s">"cointegration"</span>, <span class="s">"costs"</span>]
+    <span class="k">for</span> i, stage <span class="k">in</span> <span class="f">enumerate</span>(stages):
+        <span class="k">yield</span> ProgressEvent(stage, <span class="s">"start"</span>, pct=i/<span class="f">len</span>(stages))   <span class="c"># tell the UI we began</span>
+        result = <span class="f">do_the_work</span>(stage)                                <span class="c"># the actual stats</span>
+        <span class="k">yield</span> ProgressEvent(stage, <span class="s">"ok"</span>, pct=(i+<span class="n">1</span>)/<span class="f">len</span>(stages)) <span class="c"># tell the UI we finished</span>
+    <span class="k">yield</span> ProgressEvent(<span class="s">"done"</span>, <span class="s">"done"</span>, pct=<span class="n">1.0</span>, payload=result) <span class="c"># last event carries everything</span>
+
+<span class="c"># Consumer A — a headless script (what `python -m oil_alpha.pipeline` does):</span>
+<span class="k">for</span> ev <span class="k">in</span> <span class="f">run_pipeline</span>():
+    <span class="f">print</span>(<span class="s">f"[{ev.pct:.0%}] {ev.stage}: {ev.status}"</span>)
+    <span class="k">if</span> ev.stage == <span class="s">"done"</span>:
+        summary = ev.payload            <span class="c"># the full PipelineResult</span>
+
+<span class="c"># Consumer B — the Streamlit dashboard (app/dashboard.py) walks the SAME loop,</span>
+<span class="c"># but paints a progress bar per event instead of printing. One source of truth.</span></pre>
+
+  <p class="muted">The real <code>run_pipeline</code> yields richer events (<code>warn</code>/<code>error</code>
+  statuses, per-stage payloads, an <code>APIBudget</code>, and <code>ComputeMetrics</code> timings), but the shape
+  is exactly this: <b>produce a stream, let any consumer drive it.</b></p>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">04</span> In this project: the command map</h2>
+  <p>These are the real invocations, grounded in the repo. Colour marks the layer:
+  <span class="pill d">daily</span> <span class="pill h">hft/c++</span> <span class="pill l">notebook</span>.</p>
+
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>Goal</th><th>Command</th><th>Where it lives</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill d">daily</span> Run the lead-lag study, headless</td>
+          <td><code>PYTHONPATH=src python -m oil_alpha.pipeline</code></td>
+          <td><code>src/oil_alpha/pipeline.py</code></td></tr>
+      <tr><td><span class="pill d">daily</span> Same study with the live GUI</td>
+          <td><code>streamlit run app/dashboard.py</code></td>
+          <td><code>app/dashboard.py</code></td></tr>
+      <tr><td><span class="pill h">c++</span> Compile the C++ extensions + tests</td>
+          <td><code>bash scripts/build_cpp.sh</code></td>
+          <td><code>CMakeLists.txt</code>, <code>cpp/*/CMakeLists.txt</code></td></tr>
+      <tr><td><span class="pill h">c++</span> Run the C++ unit tests</td>
+          <td><code>cd build &amp;&amp; ctest --output-on-failure</code></td>
+          <td><code>cpp/tests/*.cpp</code></td></tr>
+      <tr><td><span class="pill h">c++</span> Replay a real ITCH feed at set speed</td>
+          <td><code>./build/cpp/itch/replay_main …</code></td>
+          <td><code>cpp/itch/replay_clock.cpp</code></td></tr>
+      <tr><td><span class="pill h">c++</span> Market-making sim + latency sweep</td>
+          <td><code>python -m oil_alpha.microstructure.mm_analysis --latency-sweep</code></td>
+          <td><code>src/…/mm_analysis.py</code> ⇄ <code>cpp/itch/mm_simulator.hpp</code></td></tr>
+      <tr><td><span class="pill h">c++/hw</span> Run the VHDL flat-book parity sim</td>
+          <td><code>./scripts/run_vhdl_sim.sh &lt;golden.csv&gt; [DEPTH]</code></td>
+          <td><code>hw/vhdl/flat_book.vhd</code></td></tr>
+      <tr><td><span class="pill l">all</span> Run the whole Python test suite</td>
+          <td><code>pytest</code></td>
+          <td><code>tests/</code> (config in <code>pyproject.toml</code>)</td></tr>
+      <tr><td><span class="pill l">notebook</span> Track a perf number over time</td>
+          <td><code>python scripts/bench_history.py</code></td>
+          <td><code>docs/perf/history.csv</code></td></tr>
+      <tr><td><span class="pill l">notebook</span> Rebuild the lessons home page</td>
+          <td><code>python3 docs/learning/.tools/build_index.py docs/learning</code></td>
+          <td><code>docs/learning/index.html</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>How an HFT concept maps to a folder</h3>
+  <p>This is the ladder. Each rung is a real HFT idea and the file where you can read it working.</p>
+
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>HFT concept</th><th>Where in the repo</th><th>Lesson</th></tr></thead>
+    <tbody>
+      <tr><td>Lead-lag / who-moves-first (daily)</td><td><code>analysis/leadlag.py</code> (CCF, Granger)</td><td class="faint">—</td></tr>
+      <tr><td>Point-in-time / no look-ahead</td><td><code>analysis/walkforward.py</code></td><td class="faint">perf/03</td></tr>
+      <tr><td>Intraday lead-lag on real ticks</td><td><code>analysis/hayashi_yoshida.py</code></td><td class="faint">—</td></tr>
+      <tr><td>Feed parsing → order book</td><td><code>cpp/itch/itch_parser.cpp</code>, <code>order_book_flat.hpp</code></td><td class="faint">0003</td></tr>
+      <tr><td>Order-flow imbalance / microprice</td><td><code>cpp/itch/microstructure_signals.hpp</code></td><td class="faint">perf/02, 0005</td></tr>
+      <tr><td>Price impact (Kyle’s λ)</td><td><code>microstructure/kyles_lambda.py</code></td><td class="faint">0004</td></tr>
+      <tr><td>Deterministic replay &amp; latency</td><td><code>cpp/itch/replay_clock.cpp</code></td><td class="faint">—</td></tr>
+      <tr><td>Queue position &amp; market making</td><td><code>cpp/itch/mm_simulator.hpp</code>, <code>shadow_order.hpp</code></td><td class="faint">perf/04</td></tr>
+      <tr><td>Hardware book (constant-cycle)</td><td><code>hw/vhdl/flat_book.vhd</code></td><td class="faint">perf/05</td></tr>
+      <tr><td>C++⇄Python bridge (speed)</td><td><code>cpp/signals_py/bindings.cpp</code></td><td class="faint">0001</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="warnbox"><b>A build gotcha worth knowing.</b> Two import styles exist for the bridge:
+  <code>import signals_cpp</code> (when the compiled <code>.so</code> is on the path, e.g. inside <code>build/</code>)
+  vs <code>from oil_alpha import signals_cpp</code> (after an editable install drops the <code>.so</code> into
+  <code>src/oil_alpha/</code>). If <code>import signals_cpp</code> fails, you almost always just haven’t run
+  <code>scripts/build_cpp.sh</code> yet — the C++ isn’t compiled.</div>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">05</span> Often confused with each other</h2>
+  <p>The single biggest source of confusion in this repo is thinking the two “lead-lag” studies are the same
+  thing. They share a <em>question</em> but almost nothing else.</p>
+
+  <div class="vs">
+    <div class="col a">
+      <h4>Daily lead-lag (Layer 1)</h4>
+      <ul>
+        <li><b>Data:</b> free daily closes from yfinance/FRED — one row per day.</li>
+        <li><b>Question:</b> does WTI (CL) lead the energy ETF (XLE) day-to-day?</li>
+        <li><b>Tools:</b> CCF, Granger causality, cointegration on price levels.</li>
+        <li><b>Trap:</b> the <b>Epps effect</b> — coarse bars make everything look contemporaneous.</li>
+        <li><b>Lives in:</b> <code>analysis/leadlag.py</code>, pure Python, no order book.</li>
+      </ul>
+    </div>
+    <div class="col b">
+      <h4>Intraday microstructure lead-lag (Layer 2)</h4>
+      <ul>
+        <li><b>Data:</b> a real Nasdaq ITCH tick feed — millions of events per day.</li>
+        <li><b>Question:</b> does order-flow imbalance move the microprice next?</li>
+        <li><b>Tools:</b> a reconstructed book, OFI, Kyle’s λ, Hayashi-Yoshida on ticks.</li>
+        <li><b>Trap:</b> <b>look-ahead / queue fantasy</b> — assuming you’d have been filled.</li>
+        <li><b>Lives in:</b> <code>cpp/itch/</code> + <code>microstructure/</code>, C++ speed + Python stats.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted">They <b>share</b>: the “does X lead Y, and is it tradable after costs” shape, and the CCF
+  sign convention (peak lag <code>k&gt;0</code> ⇒ x leads y). They <b>diverge</b> on data granularity, the
+  dominant bias to fear, and whether an order book even exists. <b>Use Layer 1 to decide if an edge is worth
+  chasing; use Layer 2 to find out if microstructure would let you keep it.</b></p>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">06</span> Practice — click an answer</h2>
+  <p class="muted">Options shuffle on every load; there is no “always the first one.” Each choice explains itself.</p>
+
+  <div id="quiz">
+    <div class="question" data-question>
+      <span class="qtag">Q1 · architecture</span>
+      <p>Why can the Streamlit dashboard and the headless CLI never drift apart in the daily lab?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Exactly — run_pipeline is a generator; both the GUI and CLI iterate the same ProgressEvent stream, so there is one code path for the actual work.">Both consume the same <code>run_pipeline()</code> generator / event stream.</li>
+        <li data-correct="false" data-why="There is no shared cache of results driving this — the guarantee comes from a shared code path (the generator), not a shared data file.">They both read the same cached results file after each run.</li>
+        <li data-correct="false" data-why="Streamlit doesn't call the CLI; both are independent consumers of the same generator function.">The dashboard shells out to the CLI and screen-scrapes its output.</li>
+        <li data-correct="false" data-why="Tests protect against regressions but don't make the two front-ends share logic at runtime — the generator does.">A pytest test forces their outputs to match on every commit.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q2 · bridge</span>
+      <p>You add analysis code and hit <code>ModuleNotFoundError: No module named 'signals_cpp'</code>. Most likely cause?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Right — signals_cpp is compiled C++. Until scripts/build_cpp.sh runs, there is no .so to import. This is the #1 first-run stumble.">The C++ extension isn’t compiled yet — run <code>scripts/build_cpp.sh</code>.</li>
+        <li data-correct="false" data-why="It's not on PyPI — it's built from this repo's own cpp/ sources. pip won't find it.">You forgot to <code>pip install signals_cpp</code> from PyPI.</li>
+        <li data-correct="false" data-why="A missing docstring never causes an ImportError; this is about the compiled artifact existing.">A public function is missing its required docstring.</li>
+        <li data-correct="false" data-why="yfinance is the daily-data source and has nothing to do with the compiled C++ microstructure module.">Your yfinance API key expired.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q3 · layers</span>
+      <p>Which task belongs to <b>Layer 2</b> (intraday microstructure), not Layer 1 (daily)?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Yes — queue position only exists once you reconstruct a real order book from tick data; that's squarely Layer 2 (mm_simulator / shadow_order).">Estimating whether your passive quote would actually get filled, given its queue position.</li>
+        <li data-correct="false" data-why="That's Layer 1: Granger causality on daily closes lives in analysis/leadlag.py.">Testing whether daily WTI returns Granger-cause daily XLE returns.</li>
+        <li data-correct="false" data-why="Cointegration on daily price levels is a Layer 1 analysis step.">Checking if CL and XLE price levels are cointegrated over a year.</li>
+        <li data-correct="false" data-why="The April-2020 negative-print fix is a daily-data cleaning concern (clean.py), Layer 1.">Handling the April-2020 negative-WTI print when computing log returns.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q4 · notebook</span>
+      <p>What is the role of <code>docs/perf/NN-*.md</code> in the workflow?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Correct — each perf doc pins a measured number (e.g. fills −42% across a latency sweep) so a claim is evidence, not a vibe, and regressions are visible later.">It records a <b>measured</b> performance claim for a build, so results are evidence rather than assertion.</li>
+        <li data-correct="false" data-why="Lessons live in docs/learning/lessons/. Perf docs hold the measured numbers those lessons then explain.">It stores the interactive HTML lessons for each concept.</li>
+        <li data-correct="false" data-why="Dependencies are declared in requirements.txt / pyproject.toml, not the perf docs.">It lists the pip and system dependencies each feature needs.</li>
+        <li data-correct="false" data-why="Auth/config never lives in a perf write-up; those are markdown notes about measurements.">It holds the GitHub token and API config for the pipeline.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q5 · concepts</span>
+      <p>The daily lead-lag study and the intraday microstructure study <b>share</b> which of these?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Right — both are 'does X lead Y and could you keep it after costs', and both use the CCF sign convention (peak lag k>0 ⇒ x leads). Everything else — data granularity, dominant bias, whether a book exists — differs.">The “does X lead Y, net of costs” shape and the CCF sign convention.</li>
+        <li data-correct="false" data-why="Only Layer 2 reconstructs an order book; the daily layer works on closes and never touches a book.">Both reconstruct a limit order book from their input data.</li>
+        <li data-correct="false" data-why="The Epps effect is a coarse-bar artifact specific to the daily/low-frequency side, not shared.">Both are primarily threatened by the Epps effect.</li>
+        <li data-correct="false" data-why="Only the intraday side runs through the compiled signals_cpp bridge; the daily study is pure Python.">Both run their heavy computation through the C++ <code>signals_cpp</code> module.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+  </div>
+
+  <div class="scorebar">
+    <span>Quiz score</span>
+    <span><b id="score">0</b> / <span id="qtotal">5</span> answered correctly &nbsp;·&nbsp; <span id="answered" class="faint">0 attempted</span></span>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">07</span> Check your understanding</h2>
+  <p class="muted">No auto-grading — say your answer out loud, then expand to compare.</p>
+
+  <details class="cyq"><summary>1. A teammate says “just run the pipeline” but doesn’t say GUI or CLI. What single function do both ultimately drive, and what does its last yielded event contain?</summary>
+    <p>Both drive <code>run_pipeline()</code> in <code>src/oil_alpha/pipeline.py</code>. Its final event has
+    <code>stage="done"</code> and carries the full <code>PipelineResult</code> in <code>payload</code> — prices,
+    returns, lead-lag/Granger/cointegration results, cost estimates, the API budget, and compute metrics.</p></details>
+
+  <details class="cyq"><summary>2. You want to teach yourself how price impact is measured on real data. Which folder do you open, which lesson backs it, and which layer is it?</summary>
+    <p><code>src/oil_alpha/microstructure/kyles_lambda.py</code> — price impact (Kyle’s λ), Layer 2, backed by
+    lesson 0004. It consumes the microstructure event stream produced by the C++ book/signal engine.</p></details>
+
+  <details class="cyq"><summary>3. Why does the README say microstructure is “out of scope,” yet the repo is full of it?</summary>
+    <p>The README documents the original daily starter kit (Layer 1), whose free data can’t supply an order book.
+    The microstructure work (Layer 2) is exactly the “future milestone” it named — built later on the real ITCH
+    fixture. The README simply hasn’t been rewritten to advertise Layer 2 yet.</p></details>
+
+  <details class="cyq"><summary>4. What would tell you a lead-lag result is a sign/alignment bug rather than a real signal?</summary>
+    <p>The README’s tell: under a stable window CL should lead XLE at short lags. If your CCF peak says XLE leads
+    CL (the opposite), suspect a flipped sign or misaligned index before you believe you’ve found something —
+    that’s exactly what the CCF sign-convention test guards.</p></details>
+
+  <footer>
+    Lesson 0006 · Driving the HFT Lab · self-contained, offline · pairs with <code>/drill-me driving-the-hft-lab</code>
+  </footer>
+
+</div>
+
+<script>
+  // ---- shuffled, position-independent quiz ----
+  function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+  const answeredSet = new Set();
+  let correctCount = 0;
+  const scoreEl = document.getElementById('score');
+  const answeredEl = document.getElementById('answered');
+  document.getElementById('qtotal').textContent = document.querySelectorAll('[data-question]').length;
+
+  document.querySelectorAll('[data-question]').forEach((q, qi) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));  // randomize DOM order on load
+    const fb = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const correct = li.dataset.correct === 'true';                // attribute, never position
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked','correct','wrong'));
+        li.classList.add('picked', correct ? 'correct' : 'wrong');
+        if (correct) list.querySelectorAll('li').forEach(o => { if(o.dataset.correct==='true') o.classList.add('correct'); });
+        fb.hidden = false;
+        fb.innerHTML = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        fb.style.color = correct ? 'var(--green)' : 'var(--red)';
+        // score each question once, by its first attempt
+        if (!answeredSet.has(qi)) {
+          answeredSet.add(qi);
+          if (correct) correctCount++;
+          scoreEl.textContent = correctCount;
+          answeredEl.textContent = answeredSet.size + ' attempted';
+        }
+      });
+    });
+  });
+
+  // ---- lightweight per-section "mark read" ----
+  document.querySelectorAll('[data-mark]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const done = btn.classList.toggle('done');
+      btn.textContent = (done ? '✓ read' : '◻ mark section read');
+    });
+  });
+</script>
+</body>
+</html>

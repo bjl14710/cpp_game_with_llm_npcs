@@ -1,0 +1,94 @@
+# Plan: Demote Candlestick & Technical Strategies to Features/Filters
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+The research verdict: candlestick patterns and simple RSI/MACD rules have
+weak, contested evidence as STANDALONE alpha, but real value as inputs.
+So: stop treating `engulfing` and `technical` as independent arena
+contestants; instead (a) feed their information into the GBM as features
+(engulfing signal as a binary; MACD histogram — RSI is already a feature),
+and (b) offer them as optional confirmation gates for other strategies'
+entries. Historical arena results stay visible as reference; the
+strategies just stop earning live capital on their own.
+
+## Design Decisions
+- **New arena status `REFERENCE`** — recorded like EXCLUDED (kept in DB
+  and report, metrics visible, clearly labeled) but never live-ticked and
+  never ensemble-eligible. `arena-run backtest --strategies engulfing`
+  still works for research, always landing REFERENCE. A `--demote name`
+  admin path flips existing rows without re-screening (preserves their
+  historical metrics untouched, per the idea).
+- **GBM features, additively**: `build_features` gains
+  `engulf_signal` ∈ {−1, 0, +1} (from the existing detector on each
+  consecutive bar pair — zero new pattern code) and `macd_hist_norm`
+  (MACD histogram / close, the same formula as TechnicalStrategy's
+  confidence). Per CLAUDE.md's standing rule this mandates: retrain,
+  re-export ONNX (`gradient_boosting/model_to_onnx.py`), rebuild the C++
+  binary — called out as an explicit issue-level checklist item, and the
+  bundle feature-list contract (lesson 0035) makes old bundles keep
+  working against old feature sets by construction.
+- **Confirmation gating via a wrapper, not engine surgery**:
+  `strategies/confirmed.py` — `ConfirmedStrategy(base, confirmer,
+  mode="direction")`: emits base's signal only when the confirmer's signal
+  direction agrees (or isn't opposite, mode="veto"). Pure DailyStrategy
+  composition, mirroring EnsembleStrategy's pattern; registry-exposed via
+  explicit construction in arena CLI later (not this version's CLI —
+  wrapper + tests now, CLI sugar as follow-up).
+- **Regime assignments stay** on the demoted strategies (harmless, and
+  REFERENCE backtests still respect them for honest reference numbers).
+
+## Out of Scope
+- Removing the strategy code (they remain importable, tested, and
+  backtestable); intraday engulfing (intraday-sim untouched — its evidence
+  base is separate); auto-retraining any shipped model bundle (user
+  retrains deliberately); CLI sugar for ConfirmedStrategy.
+
+## Affected Areas
+- `strategy_arena.py` — REFERENCE status: gate short-circuit in
+  cmd_backtest for demoted names (configurable set stored in a small
+  `demoted` table or a status write — use status itself + `--demote`),
+  live/ensemble exclusion, report labeling.
+- `paper_trading_sim.py` — two new feature columns in `build_features`
+  (test the golden column list changes deliberately).
+- `strategies/confirmed.py` — new wrapper + tests.
+- `analyze_equity.py` — REFERENCE rendered distinctly in the report.
+- Tests: build_features golden-column update + value pins for both new
+  features; REFERENCE never ticked/ensembled; ConfirmedStrategy agree/
+  veto/disagree matrices; demote preserves historical metrics.
+
+## Implementation Order
+1. `ConfirmedStrategy` wrapper + tests (standalone, no behavior change).
+2. REFERENCE status + `--demote` + live/ensemble exclusions + report.
+3. build_features additions + pinned tests + ONNX/retrain checklist doc.
+
+## Acceptance Criteria
+- [ ] `--demote engulfing` flips status to REFERENCE, metrics unchanged
+- [ ] REFERENCE strategies: never in cmd_live's tick set, rejected as
+      ensemble members with a clear message, visible in report
+- [ ] `engulf_signal` pinned: bullish-engulfing pair → +1, bearish → −1,
+      else 0, on the same fixtures as test_engulfing.py
+- [ ] `macd_hist_norm` equals TechnicalStrategy's confidence formula on a
+      shared fixture
+- [ ] Old bundles (without the new features) still predict — feature-list
+      contract regression test
+- [ ] ConfirmedStrategy: agree → base signal through; oppose → HOLD;
+      confirmer-HOLD behavior differs correctly between direction/veto modes
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Demoting a currently-PAUSED strategy | Allowed; REFERENCE supersedes; breaker events kept |
+| Demoted name passed to `arena-run live --strategies` | Skipped with the standard status message |
+| Retraining before/after feature change mixed up | Bundle feature list pins order — old bundle + new frame keeps using OLD columns; documented in the retrain checklist |
+| ConfirmedStrategy warmup | max(base, confirmer) warmup_bars |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(strategies): ConfirmedStrategy confirmation-gate wrapper`
+2. `feat(arena): REFERENCE status + --demote for candlestick/technical`
+3. `feat(model): engulf_signal + macd_hist_norm features in build_features (+ retrain/ONNX checklist)`

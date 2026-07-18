@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0001 — How to Use Silmulator</title>
+<style>
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  :root {
+    --bg: #0f1420;
+    --surface: #1a2035;
+    --surface2: #222d48;
+    --surface3: #2a3860;
+    --accent: #4d9fff;
+    --gold: #ffc94d;
+    --green: #3dd68c;
+    --red: #f46a6a;
+    --orange: #ff9845;
+    --text: #d4daf0;
+    --text-dim: #7a84a8;
+    --border: #2e3a5a;
+    --code-bg: #0a0f1e;
+    --mono: 'Cascadia Code', 'Fira Mono', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.65; min-height: 100vh; }
+
+  /* ── Screens ───────────────────────────────────────────────── */
+  .screen { display: none; max-width: 780px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+  .screen.active { display: block; }
+
+  /* ── Start screen ──────────────────────────────────────────── */
+  .drill-header { text-align: center; margin-bottom: 2.5rem; }
+  .drill-label { font-family: var(--mono); font-size: 0.75rem; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 0.5rem; }
+  .drill-title { font-size: 2rem; color: #fff; margin-bottom: 0.4rem; }
+  .drill-sub { color: var(--accent); font-size: 0.95rem; }
+
+  .channel-grid { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: center; margin: 1.5rem 0; }
+  .chip {
+    font-family: var(--mono); font-size: 0.82rem; padding: 0.4rem 0.9rem;
+    border: 1px solid var(--border); border-radius: 20px; cursor: pointer;
+    background: var(--surface); color: var(--text-dim); user-select: none;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .chip.active { border-color: var(--accent); color: var(--accent); background: rgba(77,159,255,.12); }
+  .chip.all-chip { border-color: var(--gold); color: var(--gold); background: rgba(255,201,77,.08); }
+
+  .start-meta { text-align: center; color: var(--text-dim); font-size: 0.88rem; margin-bottom: 1rem; }
+
+  .shuffle-row { display: flex; align-items: center; justify-content: center; gap: 0.7rem; margin-bottom: 1.5rem; font-size: 0.88rem; color: var(--text-dim); }
+  .toggle { position: relative; display: inline-block; width: 36px; height: 20px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: var(--surface2); border-radius: 20px; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .slider:before {
+    content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform 0.2s;
+  }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider:before { transform: translateX(16px); }
+
+  /* ── Question screen ───────────────────────────────────────── */
+  .q-header { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .q-num-badge { font-family: var(--mono); font-size: 0.78rem; color: var(--text-dim); }
+  .q-progress-bar { flex: 1; height: 5px; background: var(--surface2); border-radius: 3px; min-width: 100px; }
+  .q-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+  .q-cat-tag { font-family: var(--mono); font-size: 0.72rem; padding: 0.2rem 0.6rem; border: 1px solid var(--border); border-radius: 12px; color: var(--text-dim); }
+  .q-type-tag { font-family: var(--mono); font-size: 0.72rem; padding: 0.2rem 0.6rem; border-radius: 12px; }
+  .q-type-tag.mc      { background: rgba(77,159,255,.15); color: var(--accent); }
+  .q-type-tag.written { background: rgba(255,152,69,.15); color: var(--orange); }
+
+  .q-text { font-size: 1.05rem; font-weight: 600; color: #fff; margin-bottom: 1.2rem; line-height: 1.5; }
+
+  pre.snippet {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.9rem 1.1rem; overflow-x: auto; font-family: var(--mono); font-size: 0.83rem;
+    line-height: 1.6; margin-bottom: 1.2rem;
+  }
+  .kw  { color: #c792ea; } .str { color: #c3e88d; } .cm  { color: #546e7a; font-style: italic; }
+  .fn  { color: #82aaff; } .num { color: #f78c6c; } .cls { color: #ffcb6b; }
+
+  /* MC */
+  .options { list-style: none; margin: 0; padding: 0; }
+  .options li {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 0.6rem 1rem; margin-bottom: 0.5rem; cursor: pointer; user-select: none;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .options li:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .options li:hover:not(.locked) { border-color: var(--accent); background: rgba(77,159,255,.08); }
+  .options li.correct { border-color: var(--green); background: rgba(61,214,140,.1); color: var(--green); }
+  .options li.wrong   { border-color: var(--red);   background: rgba(244,106,106,.1); color: var(--red); }
+  .options li.locked  { cursor: default; }
+  .mc-feedback { margin-top: 0.7rem; font-size: 0.88rem; padding: 0.5rem 0.8rem; border-radius: 5px; display: none; }
+  .mc-feedback.ok  { background: rgba(61,214,140,.12); color: var(--green); border: 1px solid rgba(61,214,140,.3); }
+  .mc-feedback.bad { background: rgba(244,106,106,.12); color: var(--red);   border: 1px solid rgba(244,106,106,.3); }
+
+  /* Written recall */
+  textarea {
+    width: 100%; min-height: 110px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.7rem 0.9rem; color: var(--text); font-family: inherit;
+    font-size: 0.93rem; resize: vertical; line-height: 1.55;
+  }
+  textarea:focus { outline: 2px solid var(--accent); }
+  .written-actions { display: flex; gap: 0.6rem; margin-top: 0.7rem; flex-wrap: wrap; }
+  .kw-result { margin-top: 0.8rem; font-size: 0.88rem; display: none; }
+  .kw-tally { font-weight: 700; margin-bottom: 0.4rem; }
+  .kw-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
+  .kw-chip { font-family: var(--mono); font-size: 0.78rem; padding: 0.2rem 0.55rem; border-radius: 12px; }
+  .kw-chip.hit  { background: rgba(61,214,140,.15); color: var(--green); border: 1px solid rgba(61,214,140,.3); }
+  .kw-chip.miss { background: rgba(244,106,106,.12); color: var(--red);   border: 1px solid rgba(244,106,106,.3); }
+  .kw-note { color: var(--text-dim); font-size: 0.8rem; margin-top: 0.3rem; }
+  .model-answer { display: none; margin-top: 0.8rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem 1rem; font-size: 0.9rem; line-height: 1.6; }
+  .model-label { font-family: var(--mono); font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
+  .selfrate { display: none; margin-top: 0.7rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; font-size: 0.88rem; color: var(--text-dim); }
+
+  /* Nav */
+  .q-nav { display: flex; gap: 0.6rem; margin-top: 1.5rem; flex-wrap: wrap; align-items: center; }
+  .q-nav-spacer { flex: 1; }
+
+  /* Buttons */
+  .btn {
+    font-family: var(--mono); font-size: 0.85rem; padding: 0.5rem 1.1rem;
+    border: 1px solid transparent; border-radius: 5px; cursor: pointer;
+    transition: opacity 0.15s, border-color 0.15s; user-select: none;
+  }
+  .btn:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border-color: var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); }
+  .btn-green { background: var(--green); color: #000; }
+  .btn-gold  { background: var(--gold);  color: #000; }
+  .btn-sm    { padding: 0.35rem 0.75rem; font-size: 0.78rem; }
+
+  /* Results */
+  .result-header { text-align: center; margin-bottom: 2rem; }
+  .score-big { font-size: 3.5rem; font-family: var(--mono); color: var(--accent); }
+  .score-label { color: var(--text-dim); font-size: 0.9rem; margin-top: 0.3rem; }
+  .result-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0; }
+  @media (max-width: 540px) { .result-sections { grid-template-columns: 1fr; } }
+  .result-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; }
+  .result-card h3 { font-family: var(--mono); font-size: 0.82rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.7rem; }
+  .missed-item { background: var(--surface2); border-radius: 5px; padding: 0.4rem 0.7rem; margin-bottom: 0.4rem; font-size: 0.88rem; }
+  .missed-item .mc-correct { color: var(--green); font-family: var(--mono); font-size: 0.82rem; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     START SCREEN
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-start" class="screen active">
+  <div class="drill-header">
+    <div class="drill-label">Drill 0001 · Active Recall</div>
+    <div class="drill-title">How to Use Silmulator</div>
+    <div class="drill-sub">20 questions · grounded in the real codebase</div>
+  </div>
+
+  <p style="text-align:center;color:var(--text-dim);margin-bottom:1rem;font-size:0.9rem;">Select the channels you want to drill, or toggle All.</p>
+
+  <div class="channel-grid" id="channel-grid">
+    <div class="chip all-chip active" data-channel="all">⚡ All channels</div>
+    <div class="chip active" data-channel="workflow">Place → Connect → Drive</div>
+    <div class="chip active" data-channel="code-path">SCPI code path</div>
+    <div class="chip active" data-channel="sil-hil-cil">SIL / HIL / CIL</div>
+    <div class="chip active" data-channel="real-code">Real code (codebase)</div>
+    <div class="chip active" data-channel="bugs">Bug fixes & why</div>
+  </div>
+
+  <p class="start-meta" id="start-meta">20 questions selected</p>
+
+  <div class="shuffle-row">
+    <span>Shuffle questions</span>
+    <label class="toggle"><input type="checkbox" id="shuffle-toggle" checked><span class="slider"></span></label>
+  </div>
+
+  <div style="text-align:center">
+    <button class="btn btn-primary" onclick="startDrill()" style="font-size:1rem;padding:0.7rem 2rem;">Begin Drill →</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     QUESTION SCREEN
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-question" class="screen">
+  <div class="q-header">
+    <span class="q-num-badge" id="q-num-badge">Q 1 / 20</span>
+    <div class="q-progress-bar"><div class="q-progress-fill" id="q-progress-fill" style="width:0%"></div></div>
+    <span class="q-cat-tag" id="q-cat-tag">workflow</span>
+    <span class="q-type-tag mc" id="q-type-tag">MC</span>
+  </div>
+
+  <div class="q-text" id="q-text"></div>
+  <pre class="snippet" id="q-snippet" style="display:none"></pre>
+
+  <!-- MC -->
+  <div id="mc-area" style="display:none">
+    <ul class="options" id="mc-options"></ul>
+    <div class="mc-feedback" id="mc-feedback"></div>
+  </div>
+
+  <!-- Written -->
+  <div id="written-area" style="display:none">
+    <textarea id="written-answer" placeholder="Type your answer here…"></textarea>
+    <div class="written-actions">
+      <button class="btn btn-secondary btn-sm" onclick="checkWritten()">Check my answer</button>
+      <button class="btn btn-secondary btn-sm" onclick="showModel()">Show model answer</button>
+    </div>
+    <div class="kw-result" id="kw-result">
+      <div class="kw-tally" id="kw-tally"></div>
+      <div class="kw-chips" id="kw-chips"></div>
+      <div class="kw-note">⚠ Keyword check is rough — judge honestly against the model answer.</div>
+    </div>
+    <div class="model-answer" id="model-answer">
+      <div class="model-label">Model answer</div>
+      <div id="model-text"></div>
+    </div>
+    <div class="selfrate" id="selfrate" style="display:none">
+      Rate yourself:
+      <button class="btn btn-green btn-sm" onclick="rateWritten('knew')">✓ Knew it</button>
+      <button class="btn btn-sm" style="background:var(--red);color:#fff" onclick="rateWritten('review')">↺ Needs review</button>
+    </div>
+  </div>
+
+  <div class="q-nav">
+    <button class="btn btn-secondary btn-sm" id="btn-prev" onclick="prevQ()">← Prev</button>
+    <div class="q-nav-spacer"></div>
+    <button class="btn btn-primary btn-sm" id="btn-next" onclick="nextQ()">Next →</button>
+    <button class="btn btn-gold btn-sm" id="btn-finish" style="display:none" onclick="showResults()">See results</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RESULTS SCREEN
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-results" class="screen">
+  <div class="result-header">
+    <div class="score-big" id="score-big">—</div>
+    <div class="score-label" id="score-label"></div>
+  </div>
+
+  <div class="result-sections">
+    <div class="result-card">
+      <h3>MC misses</h3>
+      <div id="mc-misses-list"><em style="color:var(--text-dim);font-size:0.88rem">None — clean sweep!</em></div>
+    </div>
+    <div class="result-card">
+      <h3>Written — needs review</h3>
+      <div id="written-review-list"><em style="color:var(--text-dim);font-size:0.88rem">None flagged.</em></div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:0.7rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;">
+    <button class="btn btn-secondary" onclick="reviewMissed()">Review missed only</button>
+    <button class="btn btn-primary"   onclick="location.reload()">Restart fresh</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// QUESTION BANK
+// ═══════════════════════════════════════════════════════════════════
+const BANK = [
+
+// ── CHANNEL: workflow ─────────────────────────────────────────────
+{
+  id:'w1', channel:'workflow', type:'mc',
+  text:'You open Silmulator with an empty canvas. What are the three steps, in order, for a complete simulation session?',
+  options:[
+    { text:'Place blocks → Connect ports with wires → Drive with SCPI commands', correct:true,  why:'Correct. Every Silmulator session follows Place → Connect → Drive in that order.' },
+    { text:'Send SCPI commands → Observe responses → Save the layout', correct:false, why:'Sending commands comes last, not first — there are no blocks to target yet.' },
+    { text:'Connect ports → Place blocks on canvas → Load source code', correct:false, why:'You need blocks on the canvas before you can connect their ports.' },
+    { text:'Open the SCPI Console → Load a layout file → Place blocks', correct:false, why:'The layout file is for restoring an existing setup; you still Place first when starting fresh.' },
+  ]
+},
+{
+  id:'w2', channel:'workflow', type:'written',
+  text:'Describe two ways to add a hardware block to the canvas. (No code needed — describe the UI actions.)',
+  concepts:[
+    { label:'Library panel / double-click', terms:['library','double-click','double click','doubleclick'] },
+    { label:'Toolbar button', terms:['toolbar','tool bar','button'] },
+    { label:'Add menu', terms:['add menu','menu'] },
+    { label:'Add Selected Block button', terms:['add selected','add block'] },
+  ],
+  model:'You can (1) double-click an instrument name in the Library panel on the left dock, (2) click the corresponding toolbar button across the top of the window, or (3) use the Add menu in the menu bar. The library panel also has an "Add Selected Block" button. All paths call the same canvas.add_block() internally.'
+},
+{
+  id:'w3', channel:'workflow', type:'mc',
+  text:'You drag from a port on a Power Supply block and release over a port on an MSP430 block. What color does the wire turn when the connection succeeds?',
+  options:[
+    { text:'Solid gold / yellow', correct:true,  why:'Correct. WireItem uses QPen(QColor(255, 200, 50)) — a gold/amber colour — for connected wires.' },
+    { text:'Blue (same as a free port)', correct:false, why:'Blue is the idle port colour (COLOR_IDLE = QColor(100, 180, 255)). A completed wire is gold.' },
+    { text:'Green (same as a connected port dot)', correct:false, why:'Green is the port dot colour when connected (COLOR_CONNECTED). The wire itself is gold.' },
+    { text:'White dashed line', correct:false, why:'White dashed is the in-progress "rubber" temp wire. Once released it becomes a solid gold permanent wire.' },
+  ]
+},
+{
+  id:'w4', channel:'workflow', type:'mc',
+  text:'What happens when you select a block on the canvas and type a SCPI command in the SCPI Console?',
+  options:[
+    { text:'The command is processed by the block\'s underlying device object, and the response is shown in the console.', correct:true,  why:'Correct. ConsolePanel._send() calls block.send_command(), which calls self.device.process(cmd).' },
+    { text:'The command is broadcast to every block on the canvas simultaneously.', correct:false, why:'Broadcast requires the Simulate → "Send Broadcast Command…" menu. The console targets only selected blocks.' },
+    { text:'The command is queued and only sent when you click "Run parsed commands".',  correct:false, why:'"Run parsed commands" is a Code Input block action. The console sends immediately.' },
+    { text:'The command travels along the wire to the connected block.',  correct:false, why:'Wires don\'t route console commands. The console addresses the selected block directly.' },
+  ]
+},
+{
+  id:'w5', channel:'workflow', type:'written',
+  text:'What is the difference between the two source-code loading modes in the Code Input block: snippet mode vs. project mode?',
+  concepts:[
+    { label:'Snippet: single buffer / paste', terms:['snippet','paste','single','buffer'] },
+    { label:'Project: folder / tree / walk', terms:['folder','project','tree','walk','directory','rtos','firmware'] },
+    { label:'Project uses CodeProject.from_path', terms:['from_path','code_project','codeproject','load_project'] },
+    { label:'Both extract SCPI calls', terms:['scpi','command','extract','parse'] },
+  ],
+  model:'Snippet mode: you paste a single block of text directly into the editor dialog; the CodeParser processes that one buffer. Project mode: you right-click → "Load project folder…" and point at a directory root (e.g. an RTOS tree). CodeProject.from_path() walks the tree, discovers every .c/.cpp/.py file, parses each, ignores build/dist/__pycache__ dirs, and aggregates all SCPI calls. The block face switches from showing "Code: N chars" to "Project: <name>" + "Files: N/M".'
+},
+
+// ── CHANNEL: code-path ────────────────────────────────────────────
+{
+  id:'c1', channel:'code-path', type:'mc',
+  snippet:`<span class="cm"># silmulator/gui/main_window.py — ConsolePanel</span>
+<span class="kw">def</span> <span class="fn">_send</span>(self) -> None:
+    cmd = self._cmd_input.toPlainText().strip()
+    selected = [item <span class="kw">for</span> item <span class="kw">in</span> self.canvas.selectedItems()
+                <span class="kw">if</span> isinstance(item, BaseBlock)]
+    <span class="kw">for</span> block <span class="kw">in</span> selected:
+        response = block.<span class="fn">send_command</span>(cmd)
+        ...`,
+  text:'Looking at ConsolePanel._send(): if no blocks are selected when you press Send, what happens?',
+  options:[
+    { text:'The method returns early after logging "No block selected on canvas"', correct:true,  why:'Correct. The list comprehension produces [], the for loop body never runs, and the method logs the no-selection message.' },
+    { text:'The command is broadcast to all blocks because selected is empty', correct:false, why:'An empty list means the for-loop body never executes — no command is sent anywhere.' },
+    { text:'A RuntimeError is raised because send_command requires a block', correct:false, why:'No exception — the for-loop over an empty list is a no-op.' },
+    { text:'The last-used block receives the command by default', correct:false, why:'There is no "last-used block" fallback; the method guards on the selected list.' },
+  ]
+},
+{
+  id:'c2', channel:'code-path', type:'written',
+  text:'Trace the complete call path from the moment a user presses Send in the SCPI Console to the moment the voltage is stored inside the Power Supply device. Name each method and file.',
+  concepts:[
+    { label:'ConsolePanel._send()', terms:['consolepanel','_send','console'] },
+    { label:'BaseBlock.send_command()', terms:['send_command','baseblock','base_block'] },
+    { label:'BaseDevice.process()', terms:['process','basedevice','base_device'] },
+    { label:'ScpiParser / _handlers lookup', terms:['scpi','parser','_handlers','handler','parse'] },
+    { label:'PowerSupply handler sets voltage', terms:['power_supply','voltage','channel.voltage','set_voltage'] },
+  ],
+  model:`1. ConsolePanel._send()  (main_window.py) — grabs the cmd string and calls block.send_command(cmd) for each selected block.
+2. BaseBlock.send_command()  (base_block.py) — delegates to self.device.process(cmd); logs the (cmd, response) pair.
+3. BaseDevice.process()  (base_device.py) — parses the raw string with ScpiParser, looks up self._handlers["VOLT"], calls the registered handler.
+4. PowerSupply._set_voltage() / channel handler  (power_supply.py) — stores channel.voltage = 3.3 (or similar); returns "" or the new value string.
+Response travels back up the chain and ConsolePanel logs it.`
+},
+{
+  id:'c3', channel:'code-path', type:'mc',
+  snippet:`<span class="cm"># silmulator/gui/blocks/code_input_block.py</span>
+<span class="kw">def</span> <span class="fn">_run_commands</span>(self) -> None:
+    <span class="kw">if not</span> self._parsed_commands:
+        <span class="kw">return</span>
+    connected_blocks = self.<span class="fn">_get_connected_blocks</span>()
+    <span class="kw">for</span> parsed_cmd <span class="kw">in</span> self._parsed_commands:
+        <span class="kw">for</span> block <span class="kw">in</span> connected_blocks:
+            block.<span class="fn">send_command</span>(parsed_cmd.scpi_command)`,
+  text:'In _run_commands(), what determines which hardware blocks receive each SCPI command?',
+  options:[
+    { text:'The Code Input block\'s output ports must be wired to them via _get_connected_blocks()', correct:true,  why:'Correct. _get_connected_blocks() walks self._ports, finds ports whose connected_to is not None, and returns the parent_block of each peer port. Only wired blocks receive the commands.' },
+    { text:'All blocks currently on the canvas receive every command', correct:false, why:'_get_connected_blocks() only returns blocks that are wired to this Code Input block\'s ports, not every scene block.' },
+    { text:'Only the block selected on the canvas receives the command', correct:false, why:'Selection state is not consulted here — connectivity (port wiring) is what matters.' },
+    { text:'The command is dispatched by matching its SCPI verb to the target device type', correct:false, why:'There is no verb-to-device routing here; the same command is replayed to every connected block.' },
+  ]
+},
+{
+  id:'c4', channel:'code-path', type:'mc',
+  snippet:`<span class="cm"># silmulator/devices/base_device.py</span>
+<span class="kw">def</span> <span class="fn">_register</span>(self, path: str, fn: Callable) -> None:
+    self._handlers[path.<span class="fn">upper</span>()] = fn`,
+  text:'Why does _register() uppercase the path before storing it?',
+  options:[
+    { text:'SCPI is case-insensitive; upper-casing normalises lookup so "volt" and "VOLT" hit the same handler', correct:true,  why:'Correct. IEEE 488.2 SCPI commands are case-insensitive. Normalising to uppercase means the parser only needs to uppercase the incoming string once and all lookups succeed.' },
+    { text:'Python dicts are faster with uppercase string keys', correct:false, why:'Python dict lookup time has nothing to do with case; it hashes the string.' },
+    { text:'The SCPI spec mandates uppercase-only command strings', correct:false, why:'The spec allows mixed case — VOLT, volt, Volt are all valid. The implementation uppercases internally to normalise them.' },
+    { text:'Uppercase keys prevent collision with dunder methods like __str__', correct:false, why:'Python dunder methods start with __, not SCPI verbs. Case normalisation is purely about SCPI semantics.' },
+  ]
+},
+{
+  id:'c5', channel:'code-path', type:'written',
+  text:'A wire on the canvas connects a Function Generator block\'s CH1_OUT port to an Oscilloscope block\'s CH1_IN port. You type "FREQ 1000" in the SCPI Console while the Function Generator is selected. Does the command travel along the wire to the oscilloscope? Why or why not?',
+  concepts:[
+    { label:'Wire is visual / structural only (for Code Input routing)', terms:['visual','structural','wire does not route','does not travel','code input'] },
+    { label:'Console sends to selected block directly', terms:['selected','direct','console send'] },
+    { label:'Wire used by _get_connected_blocks', terms:['_get_connected_blocks','connected_blocks','port.connected_to'] },
+  ],
+  model:'No. The wire on the canvas is a visual/structural marker. When you type a command in the SCPI Console it goes to the currently *selected* block only — directly via ConsolePanel._send() → block.send_command(). The wire is not an active transport for console commands. Wires are only read by CodeInputBlock._get_connected_blocks() when running parsed source-code commands: it walks the port graph to find which blocks to dispatch to. So "FREQ 1000" goes only to the Function Generator.'
+},
+
+// ── CHANNEL: sil-hil-cil ─────────────────────────────────────────
+{
+  id:'s1', channel:'sil-hil-cil', type:'mc',
+  text:'Your colleague says "I\'m doing HIL testing with Silmulator — I pasted my firmware C source into the Code Input block and wired it to a simulated oscilloscope." Is this HIL? If not, what is it?',
+  options:[
+    { text:'No — it\'s CIL (Code-in-the-Loop), because the source code is the test input and all hardware is simulated.', correct:true,  why:'Correct. HIL requires the real embedded controller running in real-time. Here everything is virtual — source code in, simulated instruments out. That\'s CIL.' },
+    { text:'Yes — it\'s HIL because the source code represents real hardware logic.', correct:false, why:'HIL requires the real embedded hardware (the actual MCU/ECU) to be physically present and running. Source code on a PC is not "in the loop" hardware.' },
+    { text:'No — it\'s SIL, because no real hardware is used anywhere.', correct:false, why:'SIL means both controller and environment are simulated as software models. CIL is more specific: the source code itself is the artifact under test (not a model of it).' },
+    { text:'No — it\'s unit testing, because individual SCPI commands are tested in isolation.', correct:false, why:'Unit testing is at the function/class level. Running source code against simulated instruments across a session is CIL.' },
+  ]
+},
+{
+  id:'s2', channel:'sil-hil-cil', type:'mc',
+  text:'In a true HIL test rig, what component is the "Hardware" that is "in the Loop"?',
+  options:[
+    { text:'The real embedded controller (MCU/ECU) running actual firmware', correct:true,  why:'Correct. In HIL the controller itself is real hardware running in real-time; the plant/environment (instruments, actuators) is simulated.' },
+    { text:'The simulated instruments (oscilloscope, power supply, etc.)', correct:false, why:'The instruments are the simulated side in HIL — they\'re the "plant model." The controller is the real hardware.' },
+    { text:'The host PC running Silmulator', correct:false, why:'The PC runs the simulation; it\'s not "in the loop" in the HIL sense.' },
+    { text:'The VISA/GPIB bus connecting controller to instruments', correct:false, why:'The bus is infrastructure, not the loop component. HIL refers to the controller being real hardware executing real firmware.' },
+  ]
+},
+{
+  id:'s3', channel:'sil-hil-cil', type:'written',
+  text:'Explain in one or two sentences the key difference between SIL and CIL, and give the Silmulator action that represents each.',
+  concepts:[
+    { label:'SIL: algorithm/software model, no real hardware or source code as artifact', terms:['algorithm','model','software','sil'] },
+    { label:'CIL: source code is the unit under test', terms:['source code','source','code under test','cil','code-in-the-loop'] },
+    { label:'Silmulator action for CIL: Code Input block + paste/load', terms:['code input','paste','load project','code input block'] },
+  ],
+  model:'SIL (Software-in-the-Loop) tests an algorithm or software model running as pure software against a simulated environment — there is no source code as an artifact; the logic is modelled directly. CIL (Code-in-the-Loop) treats the actual source files as the artifact under test: you feed real .c/.cpp/.py files into the Code Input block and run their extracted SCPI calls against simulated hardware. In Silmulator: pasting or loading a project into the Code Input block and running it is CIL; SIL would be writing Python that drives the device objects directly without a GUI.'
+},
+
+// ── CHANNEL: real-code ────────────────────────────────────────────
+{
+  id:'r1', channel:'real-code', type:'mc',
+  snippet:`<span class="cm"># silmulator/gui/canvas.py — CanvasScene</span>
+<span class="kw">def</span> <span class="fn">add_block</span>(self, device_type: str,
+             pos: <span class="cls">Optional</span>[<span class="cls">QPointF</span>] = None) -> <span class="cls">Optional</span>[<span class="cls">BaseBlock</span>]:
+    cls = BLOCK_REGISTRY.<span class="fn">get</span>(device_type)
+    <span class="kw">if</span> cls <span class="kw">is None</span>:
+        <span class="kw">return None</span>
+    block = <span class="fn">cls</span>()
+    <span class="kw">if</span> pos <span class="kw">is None</span>:
+        pos = self.<span class="fn">find_free_position</span>(cls)
+    ...`,
+  text:'What does add_block() return if you pass a device_type string that is not in BLOCK_REGISTRY?',
+  options:[
+    { text:'None — no block is created and no exception is raised', correct:true,  why:'Correct. BLOCK_REGISTRY.get(device_type) returns None for unknown types; the method immediately returns None.' },
+    { text:'A ValueError naming the unrecognised device type', correct:false, why:'No exception is raised — the method silently returns None. Callers are expected to check the return value.' },
+    { text:'A default BaseBlock instance with no ports', correct:false, why:'There is no generic fallback — if the key is not in the registry the method returns None immediately.' },
+    { text:'The previously added block, unchanged', correct:false, why:'The method returns None, not a reference to any existing block.' },
+  ]
+},
+{
+  id:'r2', channel:'real-code', type:'mc',
+  snippet:`<span class="cm"># silmulator/gui/canvas.py — CanvasScene.clear()</span>
+<span class="kw">def</span> <span class="fn">clear</span>(self) -> None:
+    <span class="fn">super</span>().<span class="fn">clear</span>()
+    self._blocks = {}
+    self._wires  = {}
+    self._connecting = <span class="kw">None</span>
+    self._temp_wire  = <span class="kw">None</span>`,
+  text:'Why must CanvasScene override clear() rather than relying on QGraphicsScene.clear() alone?',
+  options:[
+    { text:'QGraphicsScene.clear() deletes the C++ Qt items but leaves _blocks/_wires holding dangling Python references, causing crashes on the next save or reset.', correct:true,  why:'Correct. PyQt wraps C++ objects; once Qt deletes them, the Python-side dict entries are dangling. Touching them (to_dict, reset_all) raises a RuntimeError.' },
+    { text:'QGraphicsScene.clear() doesn\'t remove child items — only the top-level scene rect.', correct:false, why:'QGraphicsScene.clear() does remove all items. The problem is that the Python-level bookkeeping dicts are not touched by it.' },
+    { text:'The override is needed to emit block_removed and wire_removed signals for each item.', correct:false, why:'clear() does not emit per-item signals; for a clean slate that\'s acceptable. The override is about dict hygiene, not signals.' },
+    { text:'super().clear() would raise NotImplementedError in PyQt6.', correct:false, why:'QGraphicsScene.clear() is a perfectly callable standard method in PyQt6. The override calls it first with super().clear().' },
+  ]
+},
+{
+  id:'r3', channel:'real-code', type:'written',
+  snippet:`<span class="cm"># silmulator/gui/canvas.py — mousePressEvent (before the fix)</span>
+<span class="kw">def</span> <span class="fn">mousePressEvent</span>(self, event) -> None:
+    <span class="kw">if</span> event.button() == <span class="cls">Qt</span>.MouseButton.LeftButton:
+        port = self.<span class="fn">_port_at</span>(event.scenePos())
+        <span class="kw">if</span> port <span class="kw">is not None</span>:
+            self.<span class="fn">_start_wire</span>(port, event.scenePos())
+            <span class="kw">return</span>   <span class="cm"># ← no event.accept() here</span>
+    <span class="fn">super</span>().<span class="fn">mousePressEvent</span>(event)`,
+  text:'Explain why the missing event.accept() call caused wire connections to fail. Be specific about what QGraphicsView did instead.',
+  concepts:[
+    { label:'Unaccepted event propagates to QGraphicsView', terms:['propagat','view','accept','unaccepted','not accepted'] },
+    { label:'RubberBandDrag mode intercepts', terms:['rubberband','rubber band','rubber-band','drag mode'] },
+    { label:'Rubber-band / selection rectangle overrides drag', terms:['selection','rubber band selection','selection rect'] },
+    { label:'connect_ports never called', terms:['connect_ports','never reached','never called','not called'] },
+  ],
+  model:'When the scene handles a mouse press (by calling _start_wire and returning), but does NOT call event.accept(), Qt considers the event "not consumed" and propagates it to the parent QGraphicsView. The view is in RubberBandDrag mode; on receiving an unaccepted left-press it interprets the press as the start of a rubber-band selection rectangle. The selection rectangle then draws over the drag, churns the scene selection on every mouse-move, and "wins" the interaction — so mouseReleaseEvent is consumed by the rubber-band machinery rather than by the scene\'s wire-completion logic. connect_ports() is never called and no wire is created. The fix is event.accept() after _start_wire() so the view ignores the drag entirely.'
+},
+{
+  id:'r4', channel:'real-code', type:'mc',
+  snippet:`<span class="cm"># silmulator/gui/blocks/function_generator_block.py</span>
+<span class="kw">class</span> <span class="cls">FunctionGeneratorBlock</span>(<span class="cls">BaseBlock</span>):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self) -> None:
+        <span class="fn">super</span>().__init__(<span class="cls">FunctionGenerator</span>(), <span class="str">"Function Generator"</span>)`,
+  text:'Before the recent fix this line read "Function Gen" instead of "Function Generator". What broke as a result, and why?',
+  options:[
+    { text:'Saving a layout stored "Function Gen" but from_dict() looked it up in BLOCK_REGISTRY under "Function Generator" — the key didn\'t match so the block (and all its wires) was silently dropped on reload.', correct:true,  why:'Correct. to_dict() serialises block.device_type; from_dict() calls add_block(bdata["type"]); BLOCK_REGISTRY.get("Function Gen") returns None, so the block is skipped and its wires\' port_map entries never created.' },
+    { text:'The title bar on the block showed "Function Gen" but that\'s purely cosmetic — no functionality was affected.', correct:false, why:'device_type is not just cosmetic; it is the round-trip key used in to_dict()/from_dict(). A mismatch destroys the block on reload.' },
+    { text:'The FunctionGenerator device object threw a ValueError on init because the name didn\'t match its MODEL string.', correct:false, why:'BaseDevice never validates the name passed to it. The problem is purely in the serialisation round-trip, not in device init.' },
+    { text:'"Function Gen" was missing from BLOCK_REGISTRY so the block couldn\'t be added to the canvas at all.', correct:false, why:'The block could still be added (the class is in the registry under "Function Generator"). The failure happened only on save/reload, not on initial placement.' },
+  ]
+},
+{
+  id:'r5', channel:'real-code', type:'mc',
+  snippet:`<span class="cm"># silmulator/gui/canvas.py — find_free_position()</span>
+PLACEMENT_MARGIN = <span class="num">40</span>
+...
+occupied = [
+    <span class="cls">QRectF</span>(b.x(), b.y(), b.BLOCK_WIDTH, b.BLOCK_HEIGHT)
+    .<span class="fn">adjusted</span>(-PLACEMENT_MARGIN, -PLACEMENT_MARGIN,
+               PLACEMENT_MARGIN,  PLACEMENT_MARGIN)
+    <span class="kw">for</span> b <span class="kw">in</span> self._blocks.<span class="fn">values</span>()
+]`,
+  text:'Why does find_free_position() expand each existing block\'s rect by PLACEMENT_MARGIN (40 px) in all directions before checking for overlap?',
+  options:[
+    { text:'Connection port dots extend outside the block rect; the margin ensures port circles and their wires stay visible between neighbouring blocks.', correct:true,  why:'Correct. ConnectionPort is placed at the block edge (x_frac=0.0 or 1.0); its PORT_RADIUS is 6 px, and wires need some breathing room too. 40 px prevents the port from being visually clipped by the adjacent block.' },
+    { text:'Qt\'s bounding-rect calculation is inexact and the 40 px compensates for floating-point rounding.', correct:false, why:'The margin has nothing to do with float precision. It exists to leave visual breathing room for edge ports and wires.' },
+    { text:'The margin prevents the shadow effect (QGraphicsDropShadowEffect, offset 4/4) from overlapping neighbours.', correct:false, why:'The shadow offset is 4 px and blur radius 15 px — not 40 px. The margin is sized for port visibility, not shadow overlap.' },
+    { text:'PLACEMENT_MARGIN equals GRID_SIZE (20 px × 2) so that snapping always produces exact-grid positions.', correct:false, why:'GRID_SIZE is 20; PLACEMENT_MARGIN is 40 (= 2 × GRID_SIZE) by coincidence, but the purpose is port/wire clearance, not snap arithmetic.' },
+  ]
+},
+
+// ── CHANNEL: bugs ─────────────────────────────────────────────────
+{
+  id:'b1', channel:'bugs', type:'mc',
+  text:'After the recent fix, mousePressEvent, mouseMoveEvent, and mouseReleaseEvent all call event.accept() when handling wire interactions. What behaviour does each accept() call prevent?',
+  options:[
+    { text:'Press: stops rubber-band from starting; Move: stops rubber-band from extending/selecting; Release: stops view from intercepting the release as a rubber-band end.', correct:true,  why:'Correct. All three are needed: the view\'s rubber-band state machine fires on unaccepted press, unaccepted move, and unaccepted release. Missing any one of the three could leave partial rubber-band artifacts.' },
+    { text:'All three prevent the scene from emitting spurious wire_added signals.', correct:false, why:'event.accept() has nothing to do with signal emission; it tells the view whether to handle the event itself.' },
+    { text:'Press: prevents propagation; Move and Release are only there for symmetry.', correct:false, why:'Move and Release must also be accepted — without them the rubber-band continues to extend and commit itself on release.' },
+    { text:'They prevent the CanvasView\'s wheelEvent from zooming during a wire drag.', correct:false, why:'WheelEvent is separate from mouse-button events; accepting button events has no effect on wheel events.' },
+  ]
+},
+{
+  id:'b2', channel:'bugs', type:'written',
+  text:'A QA engineer says: "I ran all the existing canvas tests and they passed — so the wiring bug must not exist." Why were the tests passing even though the GUI was broken?',
+  concepts:[
+    { label:'Tests called _start_wire / _port_at directly', terms:['_start_wire','_port_at','direct','call'] },
+    { label:'Bypassed real mouse path / QGraphicsView', terms:['bypass','mouse path','qgraphicsview','view','real mouse'] },
+    { label:'Rubber-band only triggered via QGraphicsView mouse events', terms:['rubberband','rubber band','view event','mouse event'] },
+  ],
+  model:'The existing tests bypassed the real Qt mouse-event path entirely. They called scene._start_wire(), scene._port_at(), and scene.connect_ports() directly — the same logical path, but without sending events through QGraphicsView. The rubber-band bug only fires when an unaccepted QMouseEvent propagates from the scene up to the view; that propagation never happens in a direct Python method call. The new test uses QTest.mousePress/Move/Release (or QApplication.sendEvent) through CanvasView\'s viewport so the real event-dispatch chain fires, and that test would have caught the missing accept() calls.'
+},
+{
+  id:'b3', channel:'bugs', type:'mc',
+  text:'Before the fix, every block added via the toolbar appeared at QPointF(200, 150). What problem did this cause for the first block placed?',
+  options:[
+    { text:'Later blocks stacked directly on top, hiding the first block\'s ports under newer blocks so its connections became invisible and unclickable.', correct:true,  why:'Correct. Qt renders later items above earlier ones; a block at (200,150) with a higher Z covers the first block\'s edge ports. Since ports are child items of the first block they were hidden by the overlapping block body.' },
+    { text:'QGraphicsScene raised an error because two items cannot share the same position.', correct:false, why:'QGraphicsScene imposes no uniqueness constraint on item positions — multiple items at the same coordinates is perfectly valid.' },
+    { text:'The canvas auto-scrolled to (200,150) on every add, losing the user\'s current viewport.', correct:false, why:'add_block() calls setPos() on the item; it doesn\'t pan the view.' },
+    { text:'Only the last-added block was visible because each one replaced the previous at that coordinate.', correct:false, why:'Items accumulate; none replace each other. The problem is occlusion (the newer block drawn on top), not replacement.' },
+  ]
+},
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// ENGINE
+// ═══════════════════════════════════════════════════════════════════
+
+const CHANNELS = ['workflow','code-path','sil-hil-cil','real-code','bugs'];
+let activeChannels = new Set(CHANNELS);
+let questions = [];
+let currentIdx = 0;
+let savedAnswers = {};   // id → { typed, kwResult, modelShown, selfRate }
+let mcResults   = {};   // id → 'correct' | 'wrong'
+let writtenRatings = {}; // id → 'knew' | 'review'
+let reviewMode = false;
+let reviewQueue = [];
+
+// Channel chip wiring
+document.querySelectorAll('.chip:not(.all-chip)').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const ch = chip.dataset.channel;
+    if (activeChannels.has(ch)) activeChannels.delete(ch);
+    else activeChannels.add(ch);
+    chip.classList.toggle('active', activeChannels.has(ch));
+    // sync all-chip
+    document.querySelector('.all-chip').classList.toggle('active', activeChannels.size === CHANNELS.length);
+    updateStartMeta();
+  });
+});
+document.querySelector('.all-chip').addEventListener('click', () => {
+  const allOn = activeChannels.size === CHANNELS.length;
+  if (allOn) { activeChannels.clear(); } else { CHANNELS.forEach(c => activeChannels.add(c)); }
+  document.querySelectorAll('.chip:not(.all-chip)').forEach(c => c.classList.toggle('active', !allOn));
+  document.querySelector('.all-chip').classList.toggle('active', !allOn);
+  updateStartMeta();
+});
+function updateStartMeta() {
+  const n = BANK.filter(q => activeChannels.has(q.channel)).length;
+  document.getElementById('start-meta').textContent = `${n} question${n===1?'':'s'} selected`;
+}
+
+function shuffle(a) {
+  for (let i = a.length-1; i>0; i--) {
+    const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+
+function startDrill() {
+  questions = BANK.filter(q => activeChannels.has(q.channel));
+  if (document.getElementById('shuffle-toggle').checked) shuffle(questions);
+  if (!questions.length) return;
+  currentIdx = 0; savedAnswers = {}; mcResults = {}; writtenRatings = {}; reviewMode = false;
+  showScreen('screen-question');
+  renderQ();
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function renderQ() {
+  const q = questions[currentIdx];
+  const n = questions.length;
+
+  document.getElementById('q-num-badge').textContent = `Q ${currentIdx+1} / ${n}`;
+  document.getElementById('q-progress-fill').style.width = ((currentIdx+1)/n*100)+'%';
+  document.getElementById('q-cat-tag').textContent = q.channel;
+  const typeTag = document.getElementById('q-type-tag');
+  typeTag.textContent = q.type === 'mc' ? 'MC' : 'Written';
+  typeTag.className = 'q-type-tag ' + (q.type==='mc' ? 'mc' : 'written');
+  document.getElementById('q-text').innerHTML = q.text;
+
+  const snippetEl = document.getElementById('q-snippet');
+  if (q.snippet) { snippetEl.style.display='block'; snippetEl.innerHTML=q.snippet; }
+  else snippetEl.style.display='none';
+
+  document.getElementById('mc-area').style.display     = q.type==='mc' ? 'block' : 'none';
+  document.getElementById('written-area').style.display= q.type!=='mc' ? 'block' : 'none';
+
+  if (q.type === 'mc') renderMC(q);
+  else renderWritten(q);
+
+  // nav buttons
+  document.getElementById('btn-prev').disabled = currentIdx===0;
+  const isLast = currentIdx === n-1;
+  document.getElementById('btn-next').style.display   = isLast ? 'none' : 'inline-block';
+  document.getElementById('btn-finish').style.display = isLast ? 'inline-block' : 'none';
+}
+
+function renderMC(q) {
+  const list = document.getElementById('mc-options');
+  list.innerHTML = '';
+  const fb = document.getElementById('mc-feedback');
+  fb.style.display='none';
+
+  const opts = [...q.options];
+  shuffle(opts);
+  const prev = mcResults[q.id]; // 'correct' | 'wrong' | undefined
+
+  opts.forEach(opt => {
+    const li = document.createElement('li');
+    li.setAttribute('tabindex','0');
+    li.setAttribute('data-correct', opt.correct ? 'true' : 'false');
+    li.setAttribute('data-why', opt.why);
+    li.textContent = opt.text;
+    if (prev) {
+      li.classList.add('locked');
+      if (opt.correct) li.classList.add('correct');
+      // If this was the chosen wrong one — we don't know which exactly after a re-render,
+      // so just re-lock all and show feedback from stored result.
+    }
+    li.addEventListener('click', () => {
+      if (li.classList.contains('locked')) return;
+      list.querySelectorAll('li').forEach(x => x.classList.add('locked'));
+      const correct = li.dataset.correct === 'true';
+      li.classList.add(correct ? 'correct' : 'wrong');
+      if (!correct) list.querySelectorAll('[data-correct="true"]').forEach(x=>x.classList.add('correct'));
+      mcResults[q.id] = correct ? 'correct' : 'wrong';
+      fb.style.display='block';
+      fb.className='mc-feedback '+(correct?'ok':'bad');
+      fb.textContent=(correct?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+    });
+    li.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') li.click(); });
+    list.appendChild(li);
+  });
+
+  if (prev) {
+    fb.style.display='block';
+    fb.className='mc-feedback '+(prev==='correct'?'ok':'bad');
+    fb.textContent = prev==='correct' ? '✓ You got this one.' : '✗ This one needs review.';
+  }
+}
+
+function renderWritten(q) {
+  const ta = document.getElementById('written-answer');
+  const kwResult = document.getElementById('kw-result');
+  const modelDiv = document.getElementById('model-answer');
+  const selfRate = document.getElementById('selfrate');
+
+  const saved = savedAnswers[q.id] || {};
+  ta.value = saved.typed || '';
+  kwResult.style.display = saved.kwResult ? 'block' : 'none';
+  if (saved.kwResult) { document.getElementById('kw-tally').innerHTML=saved.kwResult.tally; document.getElementById('kw-chips').innerHTML=saved.kwResult.chips; }
+  modelDiv.style.display = saved.modelShown ? 'block' : 'none';
+  if (saved.modelShown) document.getElementById('model-text').textContent = q.model;
+  selfRate.style.display = saved.modelShown ? 'flex' : 'none';
+}
+
+function saveWrittenState() {
+  const q = questions[currentIdx];
+  if (!q || q.type !== 'written') return;
+  if (!savedAnswers[q.id]) savedAnswers[q.id] = {};
+  savedAnswers[q.id].typed = document.getElementById('written-answer').value;
+}
+
+function checkWritten() {
+  const q = questions[currentIdx];
+  const text = (document.getElementById('written-answer').value || '').toLowerCase();
+  const hits = q.concepts.map(c => ({ label:c.label, hit: c.terms.some(t=>text.includes(t.toLowerCase())) }));
+  const got = hits.filter(h=>h.hit).length;
+  const total = hits.length;
+  const tally = `<strong>${got} / ${total} key concepts detected</strong>`;
+  const chips = hits.map(h=>`<span class="kw-chip ${h.hit?'hit':'miss'}">${h.hit?'✓':'✗'} ${h.label}</span>`).join('');
+  const kwResult = document.getElementById('kw-result');
+  document.getElementById('kw-tally').innerHTML = tally;
+  document.getElementById('kw-chips').innerHTML = chips;
+  kwResult.style.display = 'block';
+  if (!savedAnswers[q.id]) savedAnswers[q.id]={};
+  savedAnswers[q.id].kwResult = {tally, chips};
+  savedAnswers[q.id].typed = document.getElementById('written-answer').value;
+}
+
+function showModel() {
+  const q = questions[currentIdx];
+  const md = document.getElementById('model-answer');
+  document.getElementById('model-text').textContent = q.model;
+  md.style.display = 'block';
+  document.getElementById('selfrate').style.display = 'flex';
+  if (!savedAnswers[q.id]) savedAnswers[q.id]={};
+  savedAnswers[q.id].modelShown = true;
+  savedAnswers[q.id].typed = document.getElementById('written-answer').value;
+}
+
+function rateWritten(rating) {
+  const q = questions[currentIdx];
+  writtenRatings[q.id] = rating;
+  if (!savedAnswers[q.id]) savedAnswers[q.id]={};
+  savedAnswers[q.id].selfRate = rating;
+  // visual feedback
+  const sr = document.getElementById('selfrate');
+  sr.querySelectorAll('button').forEach(b=>b.style.opacity='0.4');
+  const chosen = rating==='knew' ? sr.children[1] : sr.children[2];
+  if(chosen) chosen.style.opacity='1';
+}
+
+function prevQ() { saveWrittenState(); if (currentIdx>0){ currentIdx--; renderQ(); } }
+function nextQ() { saveWrittenState(); if (currentIdx<questions.length-1){ currentIdx++; renderQ(); } }
+
+function showResults() {
+  saveWrittenState();
+  const mcTotal   = questions.filter(q=>q.type==='mc').length;
+  const mcCorrect = Object.values(mcResults).filter(v=>v==='correct').length;
+  const mcAnswered= Object.keys(mcResults).length;
+  const pct = mcAnswered===0 ? 0 : Math.round(mcCorrect/mcTotal*100);
+
+  document.getElementById('score-big').textContent = `${mcCorrect}/${mcTotal}`;
+  const label = pct===100 ? '🎉 Perfect MC score!' : pct>=60 ? `${pct}% — good, review misses below` : `${pct}% — worth re-reading the lesson`;
+  document.getElementById('score-label').textContent = label + `  |  Written: see self-ratings below`;
+
+  // MC misses
+  const misses = questions.filter(q=>q.type==='mc' && mcResults[q.id]==='wrong');
+  const missList = document.getElementById('mc-misses-list');
+  if (misses.length===0) { missList.innerHTML='<em style="color:var(--text-dim);font-size:.88rem">None — clean sweep!</em>'; }
+  else { missList.innerHTML = misses.map(q=>`<div class="missed-item">${q.text.slice(0,80)}…<br><span class="mc-correct">✓ ${q.options.find(o=>o.correct).text.slice(0,60)}</span></div>`).join(''); }
+
+  // Written needs review
+  const revList = document.getElementById('written-review-list');
+  const needsReview = questions.filter(q=>q.type==='written' && writtenRatings[q.id]==='review');
+  if (needsReview.length===0) { revList.innerHTML='<em style="color:var(--text-dim);font-size:.88rem">None flagged.</em>'; }
+  else { revList.innerHTML = needsReview.map(q=>`<div class="missed-item">${q.text.slice(0,80)}…</div>`).join(''); }
+
+  showScreen('screen-results');
+}
+
+function reviewMissed() {
+  const mcMisses   = questions.filter(q=>q.type==='mc'      && mcResults[q.id]==='wrong');
+  const writtenRev = questions.filter(q=>q.type==='written'  && writtenRatings[q.id]==='review');
+  reviewQueue = [...mcMisses, ...writtenRev];
+  if (!reviewQueue.length) return;
+  // Reset their answers so they can try again
+  mcMisses.forEach(q=>{ delete mcResults[q.id]; });
+  writtenRev.forEach(q=>{ delete writtenRatings[q.id]; delete savedAnswers[q.id]; });
+  questions = reviewQueue;
+  currentIdx = 0; reviewMode = true;
+  showScreen('screen-question');
+  renderQ();
+}
+</script>
+</body>
+</html>

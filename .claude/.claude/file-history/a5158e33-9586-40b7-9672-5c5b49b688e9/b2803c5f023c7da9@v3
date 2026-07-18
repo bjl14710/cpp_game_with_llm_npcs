@@ -1,0 +1,96 @@
+# CLAUDE.md — LLM-NPC Town Game
+
+## What This Is
+A C++ town game where NPCs are powered by embedded LLMs. Players
+converse with characters who have personalities, memories, and the
+ability to take consequential actions in the game world. The LLM
+generates structured JSON output — C++ renders and validates it.
+
+## Stack
+- C++ game engine and rendering
+- LLM dialogue via cloud model (Sonnet) prototyping → local Ollama/Gemma
+- Structured JSON NPC output schema (schema-as-contract)
+- PyQt6 or C++ GUI for game window and HUD
+- pytest for schema validation and dialogue tests
+- cmake + ctest for C++ layer
+
+## Issue Tracker
+GitHub — use .claude/skills/github/SKILL.md for all issue operations
+
+## Test Commands
+```bash
+mkdir -p build && cd build && cmake .. && make -j4 && \
+  ctest --output-on-failure && cd ..
+pytest tests/ -v
+python3 tests/validate_schema.py
+```
+
+## The NPC Output Schema (never change without updating C++ validation)
+```json
+{
+  "dialogue": "string",
+  "mood": "curious|friendly|suspicious|hostile|neutral|afraid|happy|sad",
+  "gesture": "nod|shake_head|point|shrug|wave|cross_arms|none",
+  "internal_thought": "string (debug only, never shown to player)",
+  "proposed_action": null,
+  "relationship_delta": 0
+}
+```
+
+proposed_action when non-null:
+```json
+{
+  "type": "give_item|give_weapon|start_quest|open_shop|share_information|refuse_service",
+  "parameters": {},
+  "trust_required": 0
+}
+```
+
+## Hard Rules
+- LLM output is UNTRUSTED INPUT — validate everything before executing
+- Schema-as-contract: LLM generates JSON, C++ renders and executes it
+- trust_required in LLM JSON is NEVER trusted — C++ uses game state score
+- Every new proposed_action type must be added to the C++ validation allowlist
+- No NPC system prompt should exceed 800 tokens
+- System prompts must be model-agnostic (work on Ollama/Gemma, not just cloud)
+- Never commit docs/learning/, OVERNIGHT_REPORT.md, or .claude/memory/
+- Never merge to main — feature branches and draft PRs only
+
+## Preferred Agents (use for implementation)
+- npc-dialogue-designer — NPC characters, system prompts, schema
+- game-state-auditor — trust boundary and proposed_action validation
+- prompt-optimizer — after any system prompt change, if > 800 tokens
+
+## Agent Routing Rules
+After implementing each issue, before committing, check what changed:
+
+| What changed | Agent to invoke | Model |
+|---|---|---|
+| NPC output schema | game-state-auditor + strict-reviewer | Opus |
+| proposed_action type added | game-state-auditor | Opus |
+| C++ action validation layer | game-state-auditor + strict-reviewer | Opus |
+| Trust threshold logic | game-state-auditor | Opus |
+| New NPC character/system prompt | npc-dialogue-designer (review) | Sonnet |
+| System prompt token count > 800 | prompt-optimizer | Sonnet |
+| HUD or GUI change | reviewer | Sonnet |
+| Weapon/inventory system | strict-reviewer | Opus |
+| Game engine core | strict-reviewer | Opus |
+| Test additions | reviewer | Sonnet |
+| Documentation | reviewer | Sonnet |
+
+Run game-state-auditor (Opus) before ANY commit that touches:
+- The NPC JSON schema definition
+- The C++ proposed_action handler
+- The trust scoring system
+- The action validation allowlist
+
+This is non-negotiable — schema/trust bugs silently corrupt game state.
+
+## Concepts Worth Teaching
+- Schema-as-contract: LLM output as structured data
+- Trust boundary design between LLM and game engine
+- LLM character constraint and knowledge domain design
+- Token efficiency patterns for NPC system prompts
+- Qt signal/slot for real-time HUD updates
+- Weapon inventory state machines
+- JSON schema validation in C++

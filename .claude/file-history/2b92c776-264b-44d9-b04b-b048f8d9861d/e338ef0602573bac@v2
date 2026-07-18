@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Milestone + issues for the city polish pass (deferred aesthetic items)."""
+import os
+import time
+from datetime import datetime
+from pathlib import Path
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+USERNAME = "bjl14710"
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/issue-N-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+COMMON = ("Screenshot verification via `./build/cpp_game_with_llm_npcs --frames 90 "
+          "shot.png` (deterministic plaza camera). `make -C tests test` stays green. "
+          "Follow the size-contract rule: every new visible obstacle is authored in "
+          "City with a collider and rendered from that data (the #62 pattern); no "
+          "per-asset scale constants (the SizeSpec table is the only sizing source).")
+
+SPECS = [
+    {
+        "title": "feat(render): proper plaza fountain instead of the base-tile stand-in",
+        "slug": "plaza-fountain",
+        "what": ("The fountain renders as a flat 'base' tile pancake (noted in PR #47). "
+                 "Build a composite fountain at its authored footprint: tiered "
+                 "cylinders + a translucent blue water disc from raylib primitives "
+                 "(the KayKit city pack has no fountain model), sized by the existing "
+                 "SizeSpec entry."),
+        "where": ("src/app/RaylibRenderer.cpp (a drawFountain helper dispatched by the "
+                  "'fountain' id in the buildings pass), src/app/Assets.cpp (drop the "
+                  "'fountain'->'base' curated mapping)."),
+        "verify": ("Screenshot from the park side shows a recognizable tiered fountain "
+                   "with a water surface at the authored spot; collision unchanged "
+                   "(test_city.cpp still green)."),
+        "constraints": COMMON,
+        "economy_note": ("Primitives only (DrawCylinder + a blue alpha disc) — no new "
+                         "assets, no water animation/shader in v1."),
+        "concept": "Composite modeling from primitives when the asset pack has a gap",
+    },
+    {
+        "title": "feat(render): real road tiles with lane markings on the street grid",
+        "slug": "road-tiles",
+        "what": ("Streets are flat asphalt DrawCube strips. The city pack ships "
+                 "road_straight / road_straight_crossing / road_corner / road_junction "
+                 "tiles (already downloaded, already loaded by Assets) — lay them along "
+                 "the documented street grid (16-unit streets centered at +-32, "
+                 "junctions at the four crossings, crossings where sidewalks meet)."),
+        "where": ("src/app/RaylibRenderer.cpp drawCity's ground section (replace the "
+                  "asphalt strips); tile pitch derived from the road model's bounds, "
+                  "scaled to the 16-unit street width via the Fill contract per tile."),
+        "verify": ("Screenshot shows lane markings and crossings on all four streets; "
+                   "60fps holds in the plaza (tiles are ~28 draws per street — cheap)."),
+        "constraints": COMMON,
+        "economy_note": ("Use the four road models already in assets/models/city — no "
+                         "new downloads; grid math from City's documented 3x3/64 layout "
+                         "constants, no new config."),
+        "concept": "Tiling modular kit pieces over a parametric grid",
+    },
+    {
+        "title": "feat(city): street life — parked cars and alley props with colliders",
+        "slug": "street-dressing",
+        "what": ("The city has one taxi and empty streets. Author 4-6 parked cars "
+                 "(car_sedan, car_hatchback, car_police outside the station) and a few "
+                 "alley props (dumpster, trash_A/B) as City obstacles with real "
+                 "colliders, rendered through the existing curated-stem + SizeSpec "
+                 "path exactly like the taxi."),
+        "where": ("src/core/City.cpp makeDowntown (new entries), src/app/Assets.cpp "
+                  "(curated stems + Uniform specs), tests/test_city.cpp (extend the "
+                  "obstacle-completeness test with the new ids)."),
+        "verify": ("Obstacle-completeness test covers every new id; screenshot shows "
+                   "parked cars along street edges and the police car by the station; "
+                   "player cannot walk through any of them."),
+        "constraints": COMMON + (" Keep spawn/walk routes clear: nothing inside the "
+                                 "plaza, nothing blocking a shop door (NPC ReturnHome "
+                                 "paths must stay walkable — eyeball via a follow test)."),
+        "economy_note": ("Models are already downloaded and loaded. Pure data additions "
+                         "+ one test extension; zero new rendering code."),
+        "concept": "Set dressing as authored data: liveliness without new systems",
+    },
+    {
+        "title": "feat(render): distance fog and warm directional tint",
+        "slug": "atmosphere-pass",
+        "what": ("The horizon is a hard ground/sky line and everything renders at full "
+                 "flat brightness (deferred from #42's polish budget). Add a simple "
+                 "distance-fog + warm-tint shader applied to the 3D pass: fog color "
+                 "matched to the sky, density tuned so the far city edge softens but "
+                 "the plaza stays crisp."),
+        "where": ("src/app/RaylibRenderer.{hpp,cpp}: a small fragment shader (inline "
+                  "string or assets/shaders/), applied to models via material shader "
+                  "assignment in Assets after load; beginFrame sets fog uniforms from "
+                  "the camera."),
+        "verify": ("Two screenshots (plaza view + long street view): distant buildings "
+                   "visibly haze toward the sky color, near objects unchanged; 60fps "
+                   "holds; suite green (renderer-only change)."),
+        "constraints": COMMON + (" raylib 5.5 default material shader must be replaced "
+                                 "per-material — verify character skinning still works "
+                                 "with the custom shader (CPU skinning writes vertices, "
+                                 "so it should; screenshot the characters to prove it)."),
+        "economy_note": ("One shader, two uniforms (fogColor, fogDensity). No shadow "
+                         "mapping, no post-processing stack, no day/night cycle."),
+        "concept": "Distance fog in a forward renderer: depth-based color blending",
+    },
+]
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+milestone = None
+for m in repo.get_milestones(state="open"):
+    if m.title.startswith("City polish"):
+        milestone = m
+        break
+if milestone is None:
+    milestone = retry(lambda: repo.create_milestone(
+        title="City polish: aesthetic fixes",
+        description=("Deferred visual polish from the raylib migration: a real "
+                     "fountain, road tiles with markings, parked cars and props "
+                     "with colliders, and a fog/tint atmosphere pass. All items "
+                     "follow the size-contract and authored-collider rules.")),
+        "milestone")
+print(f"milestone #{milestone.number}: {milestone.title}")
+
+existing = {i.title.lower() for i in repo.get_issues(state="all") if not i.pull_request}
+created = []
+for spec in SPECS:
+    if spec["title"].lower() in existing:
+        print(f"exists: {spec['title']}")
+        continue
+    body = TEMPLATE.format(**{k: spec[k] for k in
+                              ("what", "where", "verify", "constraints",
+                               "economy_note", "slug", "concept")})
+    issue = retry(lambda: repo.create_issue(
+        title=spec["title"], body=body, labels=["ready-for-ai"],
+        assignees=[USERNAME], milestone=milestone), spec["title"])
+    retry(lambda: issue.edit(body=body.replace("feature/issue-N-",
+                                               f"feature/issue-{issue.number}-")),
+          f"edit #{issue.number}")
+    created.append((issue.number, spec["title"], spec["concept"], issue.html_url))
+    print(f"created #{issue.number}: {spec['title']}")
+
+print("\n=== ready-for-ai queue ===")
+label = repo.get_label("ready-for-ai")
+for i in repo.get_issues(state="open", labels=[label]):
+    if not i.pull_request:
+        print(f"  #{i.number:3} {i.title}")
+
+summary = (f"# Issue Planning Summary\nDate: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+           f"Repo: {repo.full_name}\nFocus: some aesthetic fixes (city polish)\n"
+           f"Milestone: #{milestone.number}\n\n## Issues Created\n")
+for num, title, concept, url in created:
+    summary += f"- #{num}: {title}\n  Concept: {concept}\n  URL: {url}\n\n"
+summary += ("\n## What Was NOT Planned\n"
+            "- Viewmodel asset upgrade (pack weapons are fantasy-themed; primitives\n"
+            "  read better for a fist/pistol city game — revisit with a modern pack).\n"
+            "- 'Speaking options' (canned replies): flagged design question, not\n"
+            "  aesthetics.\n"
+            "- Day/night cycle, shadows, water animation: beyond the polish budget.\n")
+Path(".claude/memory/planning-session.md").write_text(summary)
+print("\nsummary saved")

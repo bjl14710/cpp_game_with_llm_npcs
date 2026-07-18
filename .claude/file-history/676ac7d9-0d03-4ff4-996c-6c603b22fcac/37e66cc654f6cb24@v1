@@ -1,0 +1,20 @@
+# Checkpoint
+Session: 2026-06-28 overnight — visual regression testing epic
+Status: COMPLETE
+
+Issues to process: [#2, #3, #4, #5, #6]
+Issues completed: [#2, #3, #4, #5, #6]  (all closed, draft PRs #7-#11)
+Issues failed: []
+Issues skipped: []
+
+## Per-issue
+#2 -> PR #7  branch feature/issue-2-visual-test-infrastructure (base fix_hardware_connectors)
+#3 -> PR #8  branch feature/issue-3-visual-test-main-window (base #2)
+#4 -> PR #9  branch feature/issue-4-visual-test-block-components (base #3)
+#5 -> PR #10 branch feature/issue-5-visual-test-canvas-interaction (base #4)
+#6 -> PR #11 branch feature/issue-6-visual-test-overnight-integration (base #5)
+Learning: lessons/0008 + drills/0008 (committed on #6 branch); index rebuilt.
+
+## Key deviation
+Stacked PRs based on fix_hardware_connectors (main lacks the app code).
+Tests: 303 passing headless (QT_QPA_PLATFORM=offscreen).

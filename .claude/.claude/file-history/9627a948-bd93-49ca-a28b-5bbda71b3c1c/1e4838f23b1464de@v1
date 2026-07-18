@@ -1,0 +1,87 @@
+"""Tests for block instantiation on the canvas.
+
+Covers every registered block type plus a tiny "hello world" custom device
+to verify the BaseBlock + BaseDevice contract still holds for new blocks
+that users might author.
+"""
+from __future__ import annotations
+import pytest
+from PyQt6.QtCore import QPointF
+
+from silmulator.gui.canvas import CanvasScene, BLOCK_REGISTRY
+from silmulator.gui.blocks.base_block import BaseBlock, ConnectionPort
+from silmulator.devices.base_device import BaseDevice
+from silmulator.scpi.parser import ScpiCommand
+
+
+@pytest.fixture
+def scene(qapp):
+    return CanvasScene()
+
+
+@pytest.mark.parametrize("device_type", list(BLOCK_REGISTRY.keys()))
+def test_add_block_creates_visible_block(scene, device_type):
+    block = scene.add_block(device_type, QPointF(0, 0))
+
+    assert isinstance(block, BaseBlock)
+    assert block.block_id and len(block.block_id) >= 4
+    # device_type label on the block may abbreviate the registry key (e.g.
+    # "Function Generator" → "Function Gen"); just require it's non-empty.
+    assert isinstance(block.device_type, str) and block.device_type
+    assert scene.get_block(block.block_id) is block
+    assert block in scene.items()
+
+
+@pytest.mark.parametrize("device_type", list(BLOCK_REGISTRY.keys()))
+def test_blocks_have_at_least_one_port(scene, device_type):
+    block = scene.add_block(device_type, QPointF(0, 0))
+    assert len(block.ports) >= 1
+    for p in block.ports:
+        assert isinstance(p, ConnectionPort)
+        assert p.parent_block is block
+
+
+def test_unknown_block_type_returns_none(scene):
+    assert scene.add_block("NotARealDevice") is None
+
+
+def test_remove_block_removes_from_scene(scene):
+    block = scene.add_block("Oscilloscope", QPointF(0, 0))
+    bid = block.block_id
+    scene.remove_block(block)
+    assert scene.get_block(bid) is None
+    assert block not in scene.items()
+
+
+# ---------------------------------------------------------------------------
+# Hello-world custom block: smoke test for the user-defined block path.
+# ---------------------------------------------------------------------------
+
+
+class HelloDevice(BaseDevice):
+    MODEL = "HELLO"
+
+    def _setup_handlers(self) -> None:
+        self._register("HELLO", self._hello)
+
+    def _hello(self, cmd: ScpiCommand) -> str:
+        return "world"
+
+
+class HelloBlock(BaseBlock):
+    def __init__(self) -> None:
+        super().__init__(HelloDevice(), "Hello")
+
+    def _setup_ports(self) -> None:
+        self.add_port("OUT", "OUT", 1.0, 0.5)
+
+
+def test_hello_world_custom_block(scene):
+    BLOCK_REGISTRY["Hello"] = HelloBlock
+    try:
+        block = scene.add_block("Hello", QPointF(0, 0))
+        assert isinstance(block, HelloBlock)
+        assert block.send_command("HELLO?") == "world"
+        assert block.command_log[-1] == ("HELLO?", "world")
+    finally:
+        BLOCK_REGISTRY.pop("Hello", None)

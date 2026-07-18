@@ -1,0 +1,105 @@
+---
+description: Generate a Merge Request / Pull Request description for the current branch, comparing it to its base. Output is copy-paste ready.
+---
+
+Produce a Merge Request description for the current branch, comparing it to
+its base branch. The output should be ready to paste directly into GitHub,
+GitLab, or wherever I open the MR.
+
+## Step 1 — Identify the Base
+- Determine the base branch. Priority order:
+  1. Use "$1" if given (e.g. `/mr-description develop`)
+  2. Otherwise detect: `git merge-base` against `main`, `master`, or `develop`
+     — whichever exists and gives a sensible diff
+  3. If ambiguous, ask which base I want before continuing
+- State which base you chose and which commit hash it resolves to.
+
+## Step 2 — Gather the Facts
+Run these and use their output (don't show me the raw output):
+- `git log <base>..HEAD --pretty=format:"%h %s"`  (commit list)
+- `git diff <base>..HEAD --stat`                   (file change summary)
+- `git diff <base>..HEAD`                          (actual changes, for the why)
+- Read the meaningfully-changed files yourself to understand purpose, not
+  just lines moved.
+
+## Step 3 — Produce the Description
+Output exactly this structure, in Markdown, ready to paste:
+
+```markdown
+## Summary
+[2-3 sentences: what this change accomplishes and why it exists.
+Plain language, no jargon dump. Lead with the user-visible impact
+or the problem being solved, not the implementation detail.]
+
+## Changes by File
+| File | Change Type | Purpose |
+|------|-------------|---------|
+| path/to/file.py | added / modified / deleted / renamed | One-line reason this file changed |
+| ... | ... | ... |
+
+(Group trivial changes — formatting-only, generated files, lockfile updates
+— at the bottom of the table or summarize them as a single row like
+"3 generated files | regenerated | snapshot update".)
+
+## Why
+[A short section explaining the reasoning behind the change. What problem
+prompted it? What alternative approaches were considered or rejected?
+What tradeoffs were accepted? This is the part future-you and reviewers
+care about most. 1-2 short paragraphs.]
+
+## Testing
+[How was this verified? Tests added, tests run, manual checks, edge cases
+exercised. If a test suite was run, give pass/fail numbers.]
+
+## Risk and Rollback
+[What's the blast radius if this breaks? How to revert?
+Skip this section entirely for trivial changes — only include for changes
+touching shared infrastructure, data models, auth, public APIs, or
+anything else with meaningful blast radius.]
+
+## Diagram
+[INCLUDE ONLY WHEN IT GENUINELY HELPS. Apply this test:
+- Does the change reorganize architecture, add a new flow between modules,
+  introduce a state machine, or change how components communicate? → diagram
+- Is it a bug fix, small refactor, doc update, config tweak, or single-file
+  change? → no diagram, omit this section entirely
+
+When included, use Mermaid. Pick the right type:
+- flowchart  → for data or call flow between components
+- sequenceDiagram  → for ordered interactions over time
+- stateDiagram-v2  → for state transitions
+- classDiagram  → for new type hierarchies
+
+Show the "after" state, optionally with a brief "before" if the contrast
+is the point of the change.]
+
+## Checklist
+- [ ] Tests pass locally
+- [ ] No new linter or type-check errors
+- [ ] Documentation updated (if user-facing)
+- [ ] Breaking changes noted in description (if any)
+[Add or remove items based on what this project actually cares about —
+infer from CLAUDE.md and the repo's existing PR template if one exists
+at .github/PULL_REQUEST_TEMPLATE.md or similar.]
+```
+
+## Step 4 — Tone and Quality Rules
+- Write for a reviewer who hasn't been in your head. They need to understand
+  what changed and why, fast.
+- "Purpose" cells should answer "why this file?" not just restate the
+  filename. "Updated parser.py" is useless. "Added short-form SCPI command
+  support so MEAS works in addition to MEASure" is useful.
+- The Summary should let someone decide in 10 seconds whether to keep reading.
+- The Why section is where reviewers form opinions — be honest about
+  tradeoffs. If you cut a corner, say so.
+- Don't pad. If a section would be empty or trivial, omit it (except Summary,
+  Changes by File, and Why, which are always required).
+- If commit messages are good, draw on them; if they're sparse, infer purpose
+  from the actual diff.
+
+## Step 5 — Output
+Print the description as a single fenced markdown block so I can copy it
+cleanly. Don't print anything else after it — no "here's what I generated"
+preamble or postamble — just the description, ready to paste.
+
+Also save a copy to docs/walkthroughs/mr-<branch-name>-<date>.md as a record.

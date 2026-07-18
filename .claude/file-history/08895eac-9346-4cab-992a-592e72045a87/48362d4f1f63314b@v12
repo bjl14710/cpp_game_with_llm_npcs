@@ -1,0 +1,27 @@
+// Golden-vector generator for the VHDL flat book (SCAFFOLD).
+// Plan: .claude/plans/vhdl-flat-book.md, step 1.
+//
+// Reuses OrderBookFlat as the oracle: emits a CSV of level operations
+// (op, side, tick_index, shares) interleaved with expected outputs
+// (level totals, best bid/ask index+shares, clamp events) for
+//   (a) a hand-written edge-case sequence: clamp-at-zero, best-level
+//       removal, side emptying, boundary indexes 0 and DEPTH-1;
+//   (b) a seeded pseudo-random ~10k-op sequence (fixed seed — determinism).
+// The VHDL testbench replays the ops and asserts identical outputs; the CSV
+// header carries a version comment the testbench checks before running.
+//
+// TODO(vhdl-1): implement per the plan. Keep the CSV schema in ONE place
+// (a header string constant) shared conceptually with flat_book_tb.vhd.
+
+#include "order_book_flat.hpp"
+
+#include <cstdio>
+
+int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+    std::fprintf(stderr,
+        "golden_vectors is scaffolded but not implemented yet "
+        "(plan: .claude/plans/vhdl-flat-book.md step 1)\n");
+    return 2;
+}

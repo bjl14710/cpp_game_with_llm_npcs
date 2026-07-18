@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+TEMPLATE = """## What to change
+{what}
+
+## How to verify it's done
+{verify}
+
+## Branch name
+`feature/motion-collision-viewmodel`
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    {"title": "fix(npc): derive facing from motion (kills the moonwalk class)",
+     "what": ("facing_direction was stored state, set by conversational "
+              "behaviors but never by combat movement — fleeing NPCs "
+              "moonwalked. Npc::deriveFacingFromMotion reorients from actual "
+              "per-frame displacement above a walking-pace threshold; called "
+              "once per frame after all movers."),
+     "verify": "Facing-derivation unit tests in test_npc_behavior.cpp pass.",
+     "concept": "Derived state vs stored state: single-source game facing"},
+    {"title": "fix(city): author colliders for every visible obstacle",
+     "what": ("Traffic lights and park bushes were renderer-only geometry "
+              "(walk-through). Now authored in City::makeDowntown; the "
+              "renderer draws them from that data via the size contracts. "
+              "Audit found no other clippable obstacle types."),
+     "verify": "Obstacle-completeness test in test_city.cpp passes.",
+     "concept": "Visual/collision single-sourcing: data completeness audits"},
+    {"title": "feat(render): first-person weapon viewmodels from equipped state",
+     "what": ("drawViewmodel renders the equipped weapon (fist/pistol) "
+              "anchored to the camera, driven only by player().weapon + "
+              "attackAnimFraction; per-weapon visuals are table rows so new "
+              "WeaponKinds need no code branches."),
+     "verify": "Viewmodel visible in screenshots; punches thrust, gun recoils.",
+     "concept": "Animation driven by authoritative state, not synced copies"},
+]
+
+body = (
+    "Third PR in the chain (#57 memory -> #58 sizes+weapons -> this). Three "
+    "symptoms, one disease — state stored in two places — each fixed at the "
+    "source per the ticket:\n\n"
+    "1. **Moonwalk**: confirmed exactly as diagnosed — combat movement (added "
+    "in #58) moved NPCs without touching facing. `Npc::deriveFacingFromMotion` "
+    "now derives facing from actual displacement, once per frame, after every "
+    "mover; walking-pace threshold preserves standing turns and corpse poses. "
+    "New animation states can't reintroduce the bug.\n"
+    "2. **Clipping**: traffic lights + park bushes were renderer-only geometry. "
+    "Now authored obstacles in City (renderer draws FROM collision data via the "
+    "size contracts). Full audit: no other clippable types; sidewalks/roads are "
+    "flat by design, not missing colliders.\n"
+    "3. **Fist/gun animations**: there was no viewmodel at all. Camera-anchored "
+    "first-person prop driven solely by the authoritative "
+    "`player().weapon` + `attackAnimFraction` pair; per-weapon visuals are one "
+    "table row each (punch thrust / pistol recoil). Screenshot round-trip "
+    "caught and fixed a mirrored right-vector on the first draft.\n\n"
+    "**Verified:** 127 tests / 782 assertions green (new facing + obstacle "
+    "tests), build + smoke + screenshots at each step.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(
+            title="fix: derived facing, collider completeness, weapon viewmodels",
+            body=body, head="feature/motion-collision-viewmodel",
+            base="feature/size-contract-and-weapons", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)
+
+for spec in SPECS:
+    for attempt in range(3):
+        try:
+            issue = repo.create_issue(
+                title=spec["title"],
+                body=TEMPLATE.format(**spec) + f"\nImplemented in PR #{pr.number}.",
+                labels=["ai-completed"], assignees=["bjl14710"])
+            print(f"issue #{issue.number}: {spec['title']}")
+            break
+        except GithubException as e:
+            print(f"  attempt {attempt+1}: {e.status}")
+            time.sleep(5)

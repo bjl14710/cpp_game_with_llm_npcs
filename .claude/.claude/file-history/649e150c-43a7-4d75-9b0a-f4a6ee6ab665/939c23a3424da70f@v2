@@ -1,0 +1,168 @@
+"""Grading suite — Exercise 03: stat-arb pairs utilities + risk tools.
+
+Run:  uv run pytest tests/exercises/test_03_stat_arb_risk.py -v
+"""
+import numpy as np
+import pytest
+
+
+@pytest.fixture
+def pairs(load_exercise):
+    return load_exercise("03_stat_arb_risk", "pairs")
+
+
+@pytest.fixture
+def risk(load_exercise):
+    return load_exercise("03_stat_arb_risk", "risk")
+
+
+@pytest.fixture
+def cointegrated_pair():
+    """y = 2x + stationary AR(1) noise — cointegrated by construction."""
+    rng = np.random.default_rng(seed=42)
+    n = 500
+    x = 100.0 + np.cumsum(rng.normal(0, 1.0, n))
+    e = np.zeros(n)
+    shocks = rng.normal(0, 0.5, n)
+    for t in range(1, n):
+        e[t] = 0.8 * e[t - 1] + shocks[t]
+    y = 2.0 * x + e
+    return y, x, e
+
+
+@pytest.fixture
+def independent_walks():
+    rng = np.random.default_rng(seed=7)
+    n = 500
+    a = 100.0 + np.cumsum(rng.normal(0, 1.0, n))
+    b = 100.0 + np.cumsum(rng.normal(0, 1.0, n))
+    return a, b
+
+
+class TestPairs:
+    def test_hedge_ratio_recovers_known_beta(self, pairs, cointegrated_pair):
+        y, x, _ = cointegrated_pair
+        assert pairs.hedge_ratio(y, x) == pytest.approx(2.0, abs=0.05)
+
+    def test_spread_series_arithmetic(self, pairs):
+        y = np.array([10.0, 12.0, 14.0])
+        x = np.array([4.0, 5.0, 6.0])
+        np.testing.assert_allclose(pairs.spread_series(y, x, 2.0),
+                                   [2.0, 2.0, 2.0])
+
+    def test_zscore_is_standardized(self, pairs, cointegrated_pair):
+        _, _, e = cointegrated_pair
+        z = pairs.zscore(e)
+        assert np.mean(z) == pytest.approx(0.0, abs=1e-10)
+        assert np.std(z, ddof=1) == pytest.approx(1.0, abs=1e-10)
+
+    def test_cointegrated_spread_rejects_unit_root(self, pairs, cointegrated_pair):
+        y, x, _ = cointegrated_pair
+        beta = pairs.hedge_ratio(y, x)
+        spread = pairs.spread_series(y, x, beta)
+        # AR(1) rho=0.8 spread: DF stat should be far below the 5% critical
+        assert pairs.dickey_fuller_stat(spread) < -3.5
+
+    def test_independent_walks_do_not_reject(self, pairs, independent_walks):
+        a, b = independent_walks
+        beta = pairs.hedge_ratio(a, b)
+        spread = pairs.spread_series(a, b, beta)
+        assert pairs.dickey_fuller_stat(spread) > -2.86
+
+    def test_half_life_matches_ar1_construction(self, pairs, cointegrated_pair):
+        _, _, e = cointegrated_pair
+        # rho = 0.8 -> theoretical half-life = -ln2/ln(0.8) ~ 3.1 bars
+        assert pairs.half_life(e) == pytest.approx(3.1, abs=1.0)
+
+    def test_half_life_inf_for_random_walk(self, pairs):
+        rng = np.random.default_rng(seed=3)
+        walk = np.cumsum(rng.normal(0, 1.0, 500))
+        hl = pairs.half_life(walk)
+        # A random walk shouldn't produce a short half-life (the AR(1)
+        # fixture above comes out near 3 bars; a walk is at least an order
+        # of magnitude slower)
+        assert hl > 30 or np.isinf(hl)
+
+
+class TestCUSUM:
+    def test_silent_on_pure_noise(self, risk):
+        rng = np.random.default_rng(seed=11)
+        det = risk.CUSUMDetector(k=0.5, h=8.0)
+        assert not any(det.update(x) for x in rng.normal(0, 1.0, 300))
+
+    def test_fires_soon_after_injected_shift(self, risk):
+        rng = np.random.default_rng(seed=11)
+        data = rng.normal(0, 1.0, 200)
+        data[100:] += 2.0  # 2-sigma upward shift at t=100
+        det = risk.CUSUMDetector(k=0.5, h=8.0)
+        first_alarm = next(
+            (i for i, x in enumerate(data) if det.update(x)), None
+        )
+        assert first_alarm is not None
+        assert 100 <= first_alarm <= 130
+
+    def test_reset_clears_state(self, risk):
+        det = risk.CUSUMDetector(k=0.5, h=2.0)
+        det.update(10.0)
+        det.reset()
+        assert det.pos == 0.0 and det.neg == 0.0
+
+    def test_validation(self, risk):
+        with pytest.raises(ValueError):
+            risk.CUSUMDetector(k=-0.1, h=5.0)
+        with pytest.raises(ValueError):
+            risk.CUSUMDetector(k=0.5, h=0.0)
+
+
+class TestOTR:
+    def test_ratio_arithmetic(self, risk):
+        t = risk.OTRTracker()
+        t.record_order(10)
+        t.record_cancel(6)
+        t.record_trade(4)
+        assert t.ratio() == pytest.approx(4.0)  # (10 + 6) / 4
+
+    def test_messages_without_trades_is_inf(self, risk):
+        t = risk.OTRTracker()
+        t.record_order(5)
+        assert np.isinf(t.ratio())
+
+    def test_quiet_tracker_ratio_zero(self, risk):
+        assert risk.OTRTracker().ratio() == 0.0
+
+    def test_breach_flag(self, risk):
+        t = risk.OTRTracker()
+        t.record_order(100)
+        t.record_trade(1)
+        assert t.breached(50.0)
+        assert not t.breached(200.0)
+
+
+class TestWalkforwardSplits:
+    def test_split_shapes_and_chronology(self, risk):
+        splits = risk.walkforward_splits(n=100, train=50, test=10, embargo=5)
+        assert len(splits) > 0
+        for tr, te in splits:
+            assert len(tr) == 50 and len(te) == 10
+            assert tr.max() < te.min()
+            # embargo gap between end of train and start of test
+            assert te.min() - tr.max() - 1 == 5
+
+    def test_test_windows_tile_without_overlap(self, risk):
+        splits = risk.walkforward_splits(n=100, train=40, test=10)
+        all_test = np.concatenate([te for _, te in splits])
+        assert len(all_test) == len(np.unique(all_test))
+        # consecutive test windows are adjacent
+        starts = [te.min() for _, te in splits]
+        assert all(b - a == 10 for a, b in zip(starts, starts[1:]))
+
+    def test_never_exceeds_n(self, risk):
+        splits = risk.walkforward_splits(n=73, train=30, test=10, embargo=2)
+        for tr, te in splits:
+            assert te.max() < 73
+
+    def test_validation(self, risk):
+        with pytest.raises(ValueError):
+            risk.walkforward_splits(n=100, train=0, test=10)
+        with pytest.raises(ValueError):
+            risk.walkforward_splits(n=100, train=10, test=10, embargo=-1)

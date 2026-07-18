@@ -1,0 +1,56 @@
+# Plan: Canvas Panning via Middle-Mouse-Drag
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Canvas panning doesn't work via mouse today and requires "fit view" just to
+see the whole layout — almost certainly because `QGraphicsView`'s drag mode
+isn't set to pan-on-drag, compounded by the scene's `sceneRect` likely being
+computed too tightly around existing items, leaving nowhere to actually
+scroll into (a documented Qt trap, not just a hunch). Fix it by wiring
+middle-mouse-button-drag specifically to pan — preserving left-drag for
+rubber-band multi-select — and giving the scene a generously padded,
+properly maintained `sceneRect`.
+
+## Goal
+A user can middle-mouse-drag anywhere on the canvas to pan smoothly to any
+area, without needing "fit view" first, while left-drag rubber-band selection
+keeps working exactly as it does today.
+
+## Out of Scope (this version)
+- Space+drag or left-drag panning modes — explicitly decided against, to preserve rubber-band select
+- Zoom behavior changes — mouse wheel zoom, if present, is untouched by this plan
+- Minimap or other navigation aids
+
+## Affected Areas
+- `silmulator/gui/canvas.py` — view/scene setup, mouse event handling, `sceneRect` configuration
+- New file: `tests/test_canvas_pan.py` (pytest-qt-based, matching existing GUI test patterns)
+
+## Implementation Order
+1. Audit the current `QGraphicsView` setup first: confirm the drag-mode setting (or absence of one) and how/when `sceneRect` is computed — read the actual code before changing anything
+2. Implement middle-mouse-drag panning: `QGraphicsView.DragMode.ScrollHandDrag` is bound to the left button by default, so this needs a custom `mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent` override on middle-button events that adjusts the view's scrollbars directly (or temporarily remaps the middle-press to look like a left-press internally), rather than relying on built-in `ScrollHandDrag` alone
+3. Fix `sceneRect`: pad it generously around the current items' bounding rect rather than a tight fit, and recompute it as blocks are added/removed/moved instead of leaving it fixed at scene-creation time
+4. Verify: from any scrolled position, middle-mouse-drag reaches every part of the canvas smoothly, and left-drag rubber-band select is unaffected
+5. Confirm "fit view" still works as a convenience action, just no longer the only way to navigate
+
+## Acceptance Criteria
+- [ ] Middle-mouse-drag pans the canvas smoothly in all directions without needing "fit view" first
+- [ ] Left-mouse-drag on empty canvas still performs rubber-band multi-select, unaffected by the pan fix
+- [ ] `sceneRect` expands to accommodate blocks placed far from the origin, rather than clipping/blocking panning there
+- [ ] Tests pass: `python -m pytest tests/test_canvas_pan.py -v`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| User pans far into empty space with no blocks nearby | Allowed, within a generous padded bound — not hard-blocked at a tight sceneRect edge |
+| Middle-mouse-drag starts on top of a block, not empty canvas | Still pans the view; does not attempt to drag the block underneath |
+| Window is resized while panned away from center | View does not snap back to fit-view automatically; panned position is preserved |
+
+## Open Questions
+- Should there be a finite outer bound on how far a user can pan into empty space (to avoid getting "lost"), or fully unbounded? Recommend a generous but finite bound proportional to current content size — confirm once the audit clarifies current `sceneRect` logic.
+
+## Suggested GitHub Issues
+1. `canvas: audit current QGraphicsView drag-mode + sceneRect configuration`
+2. `canvas: middle-mouse-button panning implementation`
+3. `canvas: sceneRect padding/recompute policy so panning isn't artificially bounded`

@@ -1,0 +1,15 @@
+# Live checkpoint — overnight 2026-07-17
+Goal: work all ready-for-ai issues (queue: #35 only)
+Status: IN PROGRESS
+Mainline: master. PRs #28-#33 stacked, all open. PR #28 CONFLICTING vs master
+(PROGRESS.md Session-3 collision — exactly issue #35's subject).
+
+Plan for #35 (docs-only, works on existing stack branches, no new branch):
+1. baseline suite on master (record macOS visual-golden failures as pre-existing)
+2. issue-18 branch: merge master, resolve keep-both + renumber #18 entry -> Session 4, push
+3. cascade merges up: 19 -> 20 -> 21 -> 22 -> 23 (19 via detached HEAD from
+   origin ref — local issue-19 has the stale 18efa05 duplicate, do not touch it)
+4. tip: renumber Sessions 4-8 -> 5-9, verify suite+audit, push
+5. verify every PR merge-clean against its base
+6. learning 0015 (three-way merge semantics) + PROGRESS Session 10 + index +
+   report + repo checkpoint on tip; close #35

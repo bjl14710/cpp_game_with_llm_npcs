@@ -1,0 +1,9 @@
+{
+  "id": "3",
+  "subject": "Issue #4: Block component visual tests",
+  "description": "test_gui_blocks.py: one render test per block type with goldens",
+  "activeForm": "Building block visual tests (#4)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

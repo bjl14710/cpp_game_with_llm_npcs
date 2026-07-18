@@ -1,0 +1,28 @@
+# Learning Progress
+
+## Session 1 — 2026-06-16
+
+### Taught
+- [0001-sdr-driver-abstraction.html](lessons/0001-sdr-driver-abstraction.html)
+  - Topic: SDR Driver Abstraction Layer (C function pointer vtables)
+  - How readsb uses a struct of function pointers to support RTL-SDR, BladeRF, HackRF, PlutoSDR, SoapySDR, Beast, and file input through one unified interface
+  - Covered: function pointers, dispatch tables, null-object pattern, conditional compilation
+
+## Session 2 — 2026-06-16
+
+### Taught
+- [0002-signal-path-iq-to-magnitude.html](lessons/0002-signal-path-iq-to-magnitude.html)
+  - Topic: Signal Path — IQ samples → magnitude values + how to debug it
+  - Covered: UC8 format (interleaved I/Q uint8_t pairs), the 65536-entry lookup table (convert.c), converter function pointer, mag_buf struct fields (data, length, sampleTimestamp, mean_level, mean_power, dropped), ring buffer (MODES_MAG_BUFFERS=12, first_free_buffer, first_filled_buffer), trailing_samples overlap, rtlsdrCallback() flow, antiSpam pattern, debug_sampleCounter (--debug K)
+
+- [0003-configuration-layer.html](lessons/0003-configuration-layer.html)
+  - Topic: Configuration Layer — CLI → Modes.* fields + how to debug it
+  - Covered: struct _Modes as global singleton, three-layer option system (help.h declaration → readsb.h enum → readsb.c parse_opt handler), enum starting at 700 to avoid ASCII collisions, --debug multi-character flag pattern (iterates string, sets each Modes.debug_X), --devel tokenized string flags, gain deferral (strdup then parse later), the commented-out parse_opt trace, device-type ordering requirement
+
+### Apparent Level
+- Unknown (first session) — not yet confirmed via quiz answers
+
+### Suggested Next Concepts
+- **Mode S frame detection** — how `demod_2400.c` detects preambles in `mag_buf.data`, bit extraction, DF type dispatch
+- **Aircraft state tracking** — how `struct aircraft` is updated per message, the hash table lookup in `trackUpdateFromMessage()`
+- **The network layer** — how Beast/SBS/raw format clients are managed, the output flush interval logic

@@ -1,0 +1,29 @@
+"""Read-only GitHub recon for /plan-github: repo, open issues, milestones, labels."""
+import os, subprocess, re, sys
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+if not token:
+    sys.exit("No token in GH_TOKEN/TOKEN")
+
+# Detect repo from git remote.
+remote = subprocess.check_output(
+    ["git", "remote", "get-url", "origin"], text=True).strip()
+m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", remote)
+full = m.group(1)
+gh = Github(token)
+repo = gh.get_repo(full)
+print(f"REPO: {repo.full_name}")
+
+print("\nOPEN ISSUES:")
+for i in repo.get_issues(state="open"):
+    if i.pull_request is None:
+        print(f"  #{i.number} [{','.join(l.name for l in i.labels)}] {i.title}")
+
+print("\nMILESTONES (open+closed), highest number last:")
+ms = list(repo.get_milestones(state="all"))
+for mi in sorted(ms, key=lambda x: x.number):
+    print(f"  #{mi.number} ({mi.state}) {mi.title}")
+
+print("\nLABELS:")
+print("  " + ", ".join(sorted(l.name for l in repo.get_labels())))

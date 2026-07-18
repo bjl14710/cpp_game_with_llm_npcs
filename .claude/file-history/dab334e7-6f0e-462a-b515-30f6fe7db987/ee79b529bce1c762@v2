@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0008 — Position-Sizing Pipeline</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161d26; --ink:#dfe6ee; --dim:#8b97a5; --line:#2a3644;
+          --up:#4cc38a; --down:#e5534b; --gold:#e8a33d; --hit:#4cc38a; --miss:#e5534b; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f4ef; --panel:#ffffff; --ink:#1d2733; --dim:#617080; --line:#d8d2c4;
+            --up:#0e7a4f; --down:#c0362c; --gold:#a86a10; --hit:#0e7a4f; --miss:#c0362c; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.6 -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2rem 1.25rem 5rem; }
+  h1 { font:700 1.25rem/1.3 'SF Mono', Menlo, Consolas, monospace; margin:0 0 .3rem; }
+  .chip, button, .qmeta { font-family:'SF Mono', Menlo, Consolas, monospace; }
+  .chip { display:inline-block; border:1px solid var(--line); border-radius:999px;
+          padding:.3rem .8rem; margin:.25rem; cursor:pointer; font-size:.8rem; user-select:none; }
+  .chip.on { border-color:var(--gold); color:var(--gold); }
+  button { background:var(--panel); color:var(--ink); border:1px solid var(--line);
+           border-radius:8px; padding:.55rem 1.1rem; font-size:.85rem; cursor:pointer; }
+  button:hover { border-color:var(--gold); }
+  button.primary { border-color:var(--gold); color:var(--gold); font-weight:700; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+           padding:1.2rem 1.4rem; margin:1rem 0; }
+  .qmeta { display:flex; justify-content:space-between; font-size:.75rem; color:var(--dim); }
+  .progress { height:8px; background:var(--line); border-radius:4px; margin:.5rem 0 1.2rem; }
+  .progress > div { height:100%; background:var(--gold); border-radius:4px; width:0; }
+  .options { list-style:none; padding:0; }
+  .options li { border:1px solid var(--line); border-radius:8px; padding:.6rem .9rem;
+                margin:.45rem 0; cursor:pointer; background:var(--bg); }
+  .options li:hover { border-color:var(--gold); }
+  .options li.right { border-color:var(--up); }
+  .options li.wrong { border-color:var(--down); }
+  textarea { width:100%; min-height:7rem; background:var(--bg); color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:.7rem;
+             font:14px/1.5 -apple-system, sans-serif; }
+  .feedback { margin-top:.8rem; font-size:.92rem; }
+  .hit { color:var(--hit); } .missed { color:var(--miss); }
+  .model { border-left:3px solid var(--gold); padding:.5rem .9rem; margin-top:.8rem;
+           background:var(--bg); border-radius:0 8px 8px 0; font-size:.95rem; }
+  .nav { display:flex; justify-content:space-between; margin-top:1.2rem; gap:.5rem; }
+  .note { font-size:.78rem; color:var(--dim); }
+  .score-big { font:700 2rem/1 'SF Mono', Menlo, monospace; color:var(--gold); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+<h1>DRILL 0008 · position-sizing pipeline</h1>
+<p class="note">Companion to lesson 0039. Keyword scan is rough — self-judge
+against the model answers.</p>
+
+<section id="start">
+  <div class="panel">
+    <div id="chips"></div>
+    <p style="margin-top:1rem"><button class="primary" id="begin">begin ▸</button></p>
+  </div>
+</section>
+
+<section id="quiz" class="hidden">
+  <div class="qmeta"><span id="qpos"></span><span id="qtag"></span><span id="qtype"></span></div>
+  <div class="progress"><div id="pbar"></div></div>
+  <div class="panel" id="qbody"></div>
+  <div class="nav"><button id="prev">◂ prev</button><button id="next">next ▸</button></div>
+</section>
+
+<section id="results" class="hidden">
+  <div class="panel">
+    <p class="score-big" id="finalScore"></p>
+    <p class="note">Log the result in docs/learning/PROGRESS.md.</p>
+    <p><button class="primary" id="reviewMissed">review missed ▸</button>
+       <button id="restart">restart</button></p>
+  </div>
+</section>
+
+<script>
+const QUESTIONS = [
+{ ch:"pipeline", type:"written",
+  q:"List the four sizing stages in run_strategy_walkforward in order, and state each one's range.",
+  concepts:[
+    {c:"relative weights conf/σ, Σ≤1", terms:["conf","relative","σ","sigma","cap","max_pos"]},
+    {c:"vol-target multiplier (0,1]", terms:["vol_target","target_vol","realized","min(1"]},
+    {c:"kelly multiplier [0,1]", terms:["kelly","edge","μ/σ","mu/var","clamp"]},
+    {c:"ATR overlay removes candidates", terms:["atr","suppress","stop","cooldown","candidate"]}],
+  model:"1) Relative weights: confidence ÷ trailing σ, per-name cap max_pos, cash remainder — sums to ≤1. 2) Vol-target multiplier min(1, target_vol/realized ledger vol) ∈ (0,1]. 3) Kelly multiplier clamp(λ·μ/σ², 0, 1). 4) ATR trailing-stop overlay — not a weight at all: it removes breached tickers from candidates for cooldown_days."},
+{ ch:"pipeline", type:"written",
+  q:"Why do the vol-target and Kelly multipliers MULTIPLY instead of taking the min or the average? And what structural guarantee does ≤1-each give?",
+  concepts:[
+    {c:"independent questions/discounts", terms:["independent","different question","both true","both apply"]},
+    {c:"min ignores, average invents", terms:["min","ignore","average","invent"]},
+    {c:"product ≤ 1 → never levered", terms:["≤ 1","<= 1","never lever","no leverage","borrow"]}],
+  model:"They answer independent questions (market currently too wild vs measured edge too thin) — if both are true, both discounts apply, so multiply. min() would discard one true finding; averaging computes a number neither control asked for. Because every factor is ≤1, the product is ≤1: the long-only book structurally cannot lever, no flag combination can break that."},
+{ ch:"pipeline", type:"mc",
+  q:"Relative weights sum to 0.9 (cap left cash), vol_mult 0.8, kelly_mult 0.5. Gross deployment?",
+  opts:[
+    {t:"0.36", ok:true, why:"0.9 × 0.8 × 0.5 — all three stages compose."},
+    {t:"0.5", ok:false, why:"That's min(), which ignores two of the three findings."},
+    {t:"0.9", ok:false, why:"Relative weights alone — the multipliers still apply."},
+    {t:"0.73", ok:false, why:"That's an average — nothing computes that."}],
+},
+{ ch:"kelly", type:"written",
+  q:"Write the fractional-Kelly formula as implemented, its lambda bounds, the bootstrap rule, and what a negative edge produces.",
+  concepts:[
+    {c:"f* = μ/σ² on trade returns", terms:["μ/σ","mu/var","mean/var","continuous"]},
+    {c:"λ ∈ [0.25, 0.5], clamp [0,1]", terms:["0.25","0.5","clamp","[0, 1]","[0,1]"]},
+    {c:"<30 trades → 1.0", terms:["30","min_trades","bootstrap","1.0"]},
+    {c:"negative edge → 0, visible", terms:["negative","zero","0.0","report","loud"]}],
+  model:"multiplier = clamp(λ · μ/σ², 0, 1) with μ, σ² the mean and variance of per-trade signed returns (position × fwd_ret). λ is hard-limited to [0.25, 0.5] — full Kelly deliberately not offered because the edge estimate is noisy. Fewer than 30 trades → exactly 1.0 (sizing unchanged until evidence exists). A negative estimated edge clamps to 0: the strategy keeps ticking with zero exposure, a loud visible anomaly rather than a silent skip."},
+{ ch:"kelly", type:"written",
+  q:"The plan said live Kelly should read the stored trades table; the implementation uses the run's own in-window accumulation in both paths. Why was the deviation correct?",
+  concepts:[
+    {c:"determinism/backfill invariant", terms:["determin","backfill","replay","invariant"]},
+    {c:"one shared code path", terms:["one code path","same path","shared","identical"]},
+    {c:"table would diverge backtest vs live", terms:["diverge","differ","drift","two sources"]}],
+  model:"The arena's core invariant is that live is a deterministic recompute — backfill replays must produce identical results. Estimating from the stored table in live but from the in-run blotter in backtest creates two data sources that can disagree (e.g., after gaps or re-screens), silently breaking replay identity. One in-window accumulation shared by both paths keeps the invariant, at the cost of a shorter live estimation window — the documented trade-off."},
+{ ch:"stops", type:"written",
+  q:"Walk through what happens when a long position's Close crosses its ATR trail on bar T: what is realized, what is suppressed, when can the ticker trade again, and what resets the trail besides a stop?",
+  concepts:[
+    {c:"bar T's return stays realized", terms:["realized","stays","no intrabar","breach bar"]},
+    {c:"suppressed from T+1 candidates", terms:["suppress","next bar","candidates","t+1"]},
+    {c:"cooldown_days until re-entry", terms:["cooldown","5","re-enter","bars"]},
+    {c:"drop or direction flip resets", terms:["flip","dropped","continuity","reset"]}],
+  model:"Bar T's return is still realized — the engine only sees closes, so cancelling it would be an intrabar-fill fantasy. From T+1 the ticker is removed from candidates for cooldown_days bars (the exit mechanism IS the suppression). It can trade again when the cooldown expires and the strategy still signals. The trail also resets on broken continuity: the strategy dropping the name, or flipping direction — a new position starts a fresh extreme."},
+{ ch:"stops", type:"mc",
+  q:"How do the three stop/pause mechanisms rank by scope, smallest to largest?",
+  opts:[
+    {t:"ATR trail (position) → ledger breaker (strategy) → portfolio breaker (all strategies)", ok:true,
+     why:"Price-path per position; equity per ledger; summed equity across every live ledger."},
+    {t:"Ledger breaker → ATR → portfolio", ok:false, why:"ATR is the narrowest — one ticker's position."},
+    {t:"Portfolio → ledger → ATR", ok:false, why:"Reversed."},
+    {t:"They all act on the same scope", ok:false, why:"Three distinct scopes is the whole design."}],
+},
+{ ch:"stops", type:"mc",
+  q:"Which recovers WITHOUT a human?",
+  opts:[
+    {t:"Only the ATR stop (cooldown expiry re-admits the ticker)", ok:true,
+     why:"Both breakers require explicit `arena-run resume` / `resume --all` — detection automated, judgment human."},
+    {t:"All three auto-recover", ok:false, why:"Breakers never un-pause themselves."},
+    {t:"The portfolio breaker after a green day", ok:false, why:"resume --all is the only path."},
+    {t:"None", ok:false, why:"ATR suppression expires on its own by design — it's a tactical, not judgment, control."}],
+},
+{ ch:"pipeline", type:"written",
+  q:"You want to add a fifth sizing stage (say, a regime-based multiplier). Name the two properties it must have to fit the pipeline without breaking its guarantees.",
+  concepts:[
+    {c:"bounded ≤ 1 (never levers)", terms:["≤ 1","<= 1","bounded","cap","lever"]},
+    {c:"deterministic from replayable data", terms:["determin","replay","reconstruct","backfill","history"]}],
+  model:"(1) Output in [0, 1] so the multiplicative composition still cannot lever the long-only book. (2) Computed only from data a live backfill can reconstruct (price history, the run's own accumulating state) — never wall-clock, randomness, or external mutable state — so the deterministic-replay invariant survives. Anything meeting those two just multiplies in."},
+];
+
+const CH_LABELS = { pipeline:"pipeline", kelly:"kelly", stops:"stops & breakers" };
+let active = new Set(Object.keys(CH_LABELS));
+let deck = [], idx = 0;
+const state = QUESTIONS.map(() => ({ typed:"", mc:null, self:null }));
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+  [a[i],a[j]]=[a[j],a[i]]; } return a; }
+const $ = id => document.getElementById(id);
+
+Object.entries(CH_LABELS).forEach(([k,label])=>{
+  const c = document.createElement("span");
+  c.className = "chip on"; c.textContent = label;
+  c.addEventListener("click", ()=>{ active.has(k) ? (active.delete(k), c.classList.remove("on"))
+                                                  : (active.add(k), c.classList.add("on")); });
+  $("chips").appendChild(c);
+});
+
+function startSession(indices){
+  deck = shuffle(indices.slice()); idx = 0;
+  $("start").classList.add("hidden"); $("results").classList.add("hidden");
+  $("quiz").classList.remove("hidden");
+  render();
+}
+$("begin").addEventListener("click", ()=>{
+  const pool = QUESTIONS.map((q,i)=>({q,i})).filter(x=>active.has(x.q.ch)).map(x=>x.i);
+  if (pool.length) startSession(pool);
+});
+
+function render(){
+  const q = QUESTIONS[deck[idx]], st = state[deck[idx]];
+  $("qpos").textContent = "Q " + (idx+1) + " / " + deck.length;
+  $("qtag").textContent = "[" + CH_LABELS[q.ch] + "]";
+  $("qtype").textContent = q.type === "mc" ? "multiple choice" : "written recall";
+  $("pbar").style.width = (100*(idx+1)/deck.length) + "%";
+  const body = $("qbody"); body.innerHTML = "";
+  const p = document.createElement("p"); p.innerHTML = "<strong>"+q.q+"</strong>"; body.appendChild(p);
+  q.type === "mc" ? renderMC(q, st, body) : renderWritten(q, st, body);
+  $("prev").disabled = idx === 0;
+  $("next").textContent = idx === deck.length-1 ? "finish ▸" : "next ▸";
+}
+
+function renderMC(q, st, body){
+  const ul = document.createElement("ul"); ul.className = "options";
+  const items = q.opts.map(o=>{
+    const li = document.createElement("li");
+    li.textContent = o.t; li.dataset.correct = o.ok ? "true" : "false"; li.dataset.why = o.why;
+    return li;
+  });
+  shuffle(items).forEach(li=>ul.appendChild(li));
+  body.appendChild(ul);
+  const fb = document.createElement("p"); fb.className = "feedback"; fb.hidden = true;
+  body.appendChild(fb);
+  items.forEach(li=>li.addEventListener("click", ()=>{
+    const correct = li.dataset.correct === "true";
+    if (st.mc === null) st.mc = correct;
+    li.classList.add(correct ? "right" : "wrong");
+    fb.hidden = false;
+    fb.innerHTML = (correct ? "<span class='hit'>✓ Correct.</span> " :
+                              "<span class='missed'>✗ Not quite.</span> ") + li.dataset.why;
+  }));
+}
+
+function renderWritten(q, st, body){
+  const ta = document.createElement("textarea");
+  ta.value = st.typed; ta.placeholder = "type your answer from memory…";
+  ta.addEventListener("input", ()=>{ st.typed = ta.value; });
+  body.appendChild(ta);
+  const row = document.createElement("p");
+  const check = document.createElement("button"); check.textContent = "check my answer";
+  const show = document.createElement("button"); show.textContent = "show me the answer";
+  row.append(check, " ", show); body.appendChild(row);
+  const fb = document.createElement("div"); fb.className = "feedback"; body.appendChild(fb);
+  check.addEventListener("click", ()=>{
+    const text = (st.typed||"").toLowerCase();
+    const hits = q.concepts.map(c=>({c:c.c, hit:c.terms.some(t=>text.includes(t.toLowerCase()))}));
+    fb.innerHTML = "<p><strong>" + hits.filter(h=>h.hit).length + " / " + q.concepts.length +
+      " key concepts detected</strong></p>" +
+      hits.map(h=>"<div class='"+(h.hit?"hit":"missed")+"'>"+(h.hit?"✓ ":"✗ ")+h.c+"</div>").join("");
+  });
+  show.addEventListener("click", ()=>{
+    fb.innerHTML = "<div class='model'><strong>Model answer.</strong> " + q.model + "</div>" +
+      "<p>Self-rate: <button data-rate='solid'>knew it</button> " +
+      "<button data-rate='review'>needs review</button></p>";
+    fb.querySelectorAll("[data-rate]").forEach(b=>b.addEventListener("click", ()=>{
+      st.self = b.dataset.rate;
+    }));
+  });
+}
+
+$("prev").addEventListener("click", ()=>{ if(idx>0){idx--;render();} });
+$("next").addEventListener("click", ()=>{ idx < deck.length-1 ? (idx++, render()) : finish(); });
+function finish(){
+  $("quiz").classList.add("hidden"); $("results").classList.remove("hidden");
+  const mc = deck.filter(i=>QUESTIONS[i].type==="mc");
+  const w = deck.filter(i=>QUESTIONS[i].type==="written");
+  $("finalScore").textContent =
+    "MC " + mc.filter(i=>state[i].mc===true).length + "/" + mc.length +
+    " · written solid " + w.filter(i=>state[i].self==="solid").length + "/" + w.length;
+}
+$("reviewMissed").addEventListener("click", ()=>{
+  const missed = deck.filter(i=>{
+    const q = QUESTIONS[i], st = state[i];
+    return q.type==="mc" ? st.mc!==true : st.self!=="solid";
+  });
+  if (missed.length) startSession(missed);
+});
+$("restart").addEventListener("click", ()=>{
+  state.forEach(s=>{ s.typed=""; s.mc=null; s.self=null; });
+  $("results").classList.add("hidden"); $("start").classList.remove("hidden");
+});
+</script>
+</main>
+</body>
+</html>

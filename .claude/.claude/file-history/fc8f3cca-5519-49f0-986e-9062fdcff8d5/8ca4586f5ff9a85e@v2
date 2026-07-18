@@ -1,0 +1,138 @@
+"""Cross-correlation and Granger causality on stationary returns (paper Part 2.2-2.3).
+
+Sign convention (stated explicitly, as the paper insists): we define
+``rho(k) = corr(x_t, y_{t+k})``. A peak at **k > 0** means today's ``x`` predicts
+future ``y``, i.e. **x leads y**. ``ccf_leadlag`` returns the full curve over
+``[-max_lag, +max_lag]`` plus the peak, and is unit-tested against a synthetic
+known lead so the convention can't silently drift.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+
+@dataclass
+class LeadLagResult:
+    lags: np.ndarray            # integer lags, -max_lag .. +max_lag
+    ccf: np.ndarray             # corr(x_t, y_{t+k}) at each lag
+    peak_lag: int               # lag maximising |ccf|
+    peak_corr: float
+    leader: str                 # name of x or y, or "contemporaneous"
+    x_name: str
+    y_name: str
+
+    @property
+    def x_leads(self) -> bool:
+        return self.peak_lag > 0
+
+
+def _norm(a: np.ndarray) -> np.ndarray:
+    a = a - a.mean()
+    sd = a.std()
+    return a / sd if sd > 0 else a
+
+
+def ccf_leadlag(x: pd.Series, y: pd.Series, max_lag: int = 10) -> LeadLagResult:
+    """Cross-correlation of two aligned return series over +/- ``max_lag``.
+
+    ``rho(k) = corr(x_t, y_{t+k})``; positive peak lag => x leads y. We compute
+    it directly (mean-removed, unit-variance dot products) rather than relying on
+    a library's lag convention -- the paper warns to "check its lag convention
+    against a known lead before trusting signs."
+    """
+    joined = pd.concat([x, y], axis=1, join="inner").dropna()
+    xv = _norm(joined.iloc[:, 0].to_numpy())
+    yv = _norm(joined.iloc[:, 1].to_numpy())
+    n = len(xv)
+    lags = np.arange(-max_lag, max_lag + 1)
+    ccf = np.empty(len(lags), dtype=float)
+    for i, k in enumerate(lags):
+        if k >= 0:
+            # corr(x_t, y_{t+k}): drop the last k of x, first k of y.
+            a, b = xv[: n - k], yv[k:]
+        else:
+            a, b = xv[-k:], yv[: n + k]
+        ccf[i] = float(np.dot(a, b) / len(a)) if len(a) > 0 else np.nan
+
+    peak_idx = int(np.nanargmax(np.abs(ccf)))
+    peak_lag = int(lags[peak_idx])
+    if peak_lag > 0:
+        leader = x.name
+    elif peak_lag < 0:
+        leader = y.name
+    else:
+        leader = "contemporaneous"
+    return LeadLagResult(
+        lags=lags,
+        ccf=ccf,
+        peak_lag=peak_lag,
+        peak_corr=float(ccf[peak_idx]),
+        leader=str(leader),
+        x_name=str(x.name),
+        y_name=str(y.name),
+    )
+
+
+@dataclass
+class GrangerResult:
+    direction: str              # "x->y"
+    best_lag: int
+    p_value: float              # min p across lags (ssr F-test) at best_lag
+    p_by_lag: dict[int, float]
+
+    @property
+    def significant(self) -> bool:
+        return self.p_value < 0.05
+
+
+def _granger_one(data: pd.DataFrame, maxlag: int) -> GrangerResult:
+    """data columns must be [target y, predictor x]; tests x -> y."""
+    import contextlib
+    import io
+
+    from statsmodels.tsa.stattools import grangercausalitytests
+
+    # statsmodels prints per-lag tables to stdout; capture and discard them.
+    with contextlib.redirect_stdout(io.StringIO()):
+        res = grangercausalitytests(data, maxlag=maxlag)
+    p_by_lag = {lag: float(out[0]["ssr_ftest"][1]) for lag, out in res.items()}
+    best_lag = min(p_by_lag, key=p_by_lag.get)
+    return GrangerResult(
+        direction=f"{data.columns[1]}->{data.columns[0]}",
+        best_lag=best_lag,
+        p_value=p_by_lag[best_lag],
+        p_by_lag=p_by_lag,
+    )
+
+
+def granger_both_directions(
+    x: pd.Series, y: pd.Series, maxlag: int = 10
+) -> dict[str, GrangerResult]:
+    """Run Granger causality both ways on stationary returns (paper Part 2.3).
+
+    Returns ``{"x->y": ..., "y->x": ...}``. The paper stresses running both
+    directions: x Granger-causing y is predictive precedence, not true causation.
+    """
+    joined = pd.concat([x, y], axis=1, join="inner").dropna()
+    xv, yv = joined.iloc[:, 0], joined.iloc[:, 1]
+    x_to_y = _granger_one(pd.concat([yv, xv], axis=1), maxlag)   # x predicts y
+    y_to_x = _granger_one(pd.concat([xv, yv], axis=1), maxlag)   # y predicts x
+    return {"x->y": x_to_y, "y->x": y_to_x}
+
+
+def rolling_correlation(x: pd.Series, y: pd.Series, window: int = 60) -> pd.Series:
+    joined = pd.concat([x, y], axis=1, join="inner").dropna()
+    return joined.iloc[:, 0].rolling(window).corr(joined.iloc[:, 1]).dropna()
+
+
+def rolling_beta(asset: pd.Series, factor: pd.Series, window: int = 60) -> pd.Series:
+    """Rolling slope of ``asset = alpha + beta*factor`` (e.g. XLE beta to oil)."""
+    joined = pd.concat([asset, factor], axis=1, join="inner").dropna()
+    a, f = joined.iloc[:, 0], joined.iloc[:, 1]
+    cov = a.rolling(window).cov(f)
+    var = f.rolling(window).var()
+    return (cov / var).dropna().rename("beta")

@@ -1,0 +1,114 @@
+/**
+ * Grading tests — Exercise 04 Part A: RingMA (O(1) moving average).
+ *
+ * Built and run by run_cpp.sh; -I points at exercises/04_spsc_ring or
+ * solutions/04_spsc_ring depending on HFT_EXERCISE_TARGET.
+ *
+ * Exit codes: 0 = pass, 1 = fail, 42 = not implemented (stub threw).
+ */
+#include "ring_ma.hpp"
+
+#include <cmath>
+#include <deque>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+#define ASSERT(cond, msg)                                              \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            std::cerr << "FAIL: " << msg << "\n";                     \
+            return 1;                                                  \
+        }                                                              \
+    } while (0)
+
+int test_empty_average_is_zero() {
+    RingMA<4> ma;
+    ASSERT(ma.size() == 0, "fresh window should be empty");
+    ASSERT(!ma.warmed_up(), "fresh window should not be warmed up");
+    ASSERT(std::fabs(ma.average() - 0.0) < 1e-12,
+           "average of empty window should be 0.0");
+    return 0;
+}
+
+int test_partial_window_average() {
+    RingMA<4> ma;
+    ma.push(2.0);
+    ma.push(4.0);
+    ASSERT(ma.size() == 2, "size should be 2 after two pushes");
+    ASSERT(!ma.warmed_up(), "not warmed up before N samples");
+    ASSERT(std::fabs(ma.average() - 3.0) < 1e-12,
+           "average of {2,4} should be 3.0, got " + std::to_string(ma.average()));
+    return 0;
+}
+
+int test_warmup_flag() {
+    RingMA<3> ma;
+    ma.push(1.0);
+    ma.push(1.0);
+    ma.push(1.0);
+    ASSERT(ma.warmed_up(), "warmed up after exactly N samples");
+    ASSERT(ma.size() == 3, "size saturates at N");
+    ma.push(1.0);
+    ASSERT(ma.size() == 3, "size stays at N after wraparound");
+    return 0;
+}
+
+int test_matches_naive_across_wraparound() {
+    constexpr std::size_t W = 5;
+    RingMA<W> ma;
+    std::deque<double> naive;
+
+    // Deterministic pseudo-random-ish sequence, long enough to wrap many times
+    double x = 100.0;
+    for (int i = 0; i < 200; ++i) {
+        x += ((i * 37) % 11) - 5;  // jiggle
+        ma.push(x);
+        naive.push_back(x);
+        if (naive.size() > W) naive.pop_front();
+
+        double expect = 0.0;
+        for (double v : naive) expect += v;
+        expect /= static_cast<double>(naive.size());
+
+        ASSERT(std::fabs(ma.average() - expect) < 1e-9,
+               "average diverged from naive recompute at i=" + std::to_string(i)
+               + ": got " + std::to_string(ma.average())
+               + ", expected " + std::to_string(expect));
+    }
+    return 0;
+}
+
+int main() {
+    struct Test {
+        const char* name;
+        int (*fn)();
+    };
+    Test tests[] = {
+        {"empty_average_is_zero",          test_empty_average_is_zero},
+        {"partial_window_average",         test_partial_window_average},
+        {"warmup_flag",                    test_warmup_flag},
+        {"matches_naive_across_wraparound", test_matches_naive_across_wraparound},
+    };
+
+    try {
+        int failed = 0;
+        for (auto& t : tests) {
+            if (t.fn() != 0) {
+                std::cerr << "  [FAILED] " << t.name << "\n";
+                ++failed;
+            } else {
+                std::cout << "  [PASSED] " << t.name << "\n";
+            }
+        }
+        if (failed == 0) {
+            std::cout << "ALL TESTS PASSED\n";
+            return 0;
+        }
+        std::cerr << failed << " TEST(S) FAILED\n";
+        return 1;
+    } catch (const std::logic_error& e) {
+        std::cout << "NOT IMPLEMENTED: " << e.what() << "\n";
+        return 42;
+    }
+}

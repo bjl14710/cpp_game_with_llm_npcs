@@ -1,0 +1,17 @@
+# Learning Progress
+
+## Session 1 — 2026-06-16
+
+### Taught
+- [0001-sdr-driver-abstraction.html](lessons/0001-sdr-driver-abstraction.html)
+  - Topic: SDR Driver Abstraction Layer (C function pointer vtables)
+  - How readsb uses a struct of function pointers to support RTL-SDR, BladeRF, HackRF, PlutoSDR, SoapySDR, Beast, and file input through one unified interface
+  - Covered: function pointers, dispatch tables, null-object pattern, conditional compilation
+
+### Apparent Level at Start
+- Unknown (first session)
+
+### Suggested Next Concepts
+- **IQ samples and the converter pipeline** — how raw USB bytes (uint8_t pairs) become `uint16_t` magnitude values in `mag_buffers`; see `convert.c` and `sdr_rtlsdr.c:rtlsdrCallback()`
+- **The ring buffer / FIFO** — `mag_buffers[]`, `first_free_buffer`, `first_filled_buffer`; the lock/wake dance between reader and decoder threads
+- **Mode S frame decoding** — how `demod_2400.c` detects preambles and extracts bits from magnitude data

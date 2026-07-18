@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Drill 0002 — ML Algorithms in Statistics</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#080f0a;--surface:#0f1a12;--surface2:#172219;--surface3:#1e2e21;
+    --border:#2d4030;--text:#dceee0;--muted:#6b8f72;
+    --accent:#4ade80;--accent2:#22c55e;--dim-accent:#16532a;
+    --red:#f87171;--red-bg:#2d0f0f;--yellow:#facc15;--blue:#60a5fa;
+    --mono:'JetBrains Mono',monospace;--sans:'Inter',system-ui,sans-serif;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:1rem}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+  /* Header */
+  .header{width:100%;max-width:820px;margin-bottom:2rem;text-align:center}
+  .header .eyebrow{font-family:var(--mono);font-size:.72rem;color:var(--accent);
+    letter-spacing:.14em;text-transform:uppercase;margin-bottom:.4rem}
+  .header h1{font-size:1.75rem;font-weight:700;margin-bottom:.3rem}
+  .header p{color:var(--muted);font-size:.88rem}
+  /* tree decoration */
+  .tree-deco{font-family:var(--mono);font-size:.72rem;color:var(--dim-accent);
+    line-height:1.4;margin-bottom:.75rem;user-select:none}
+
+  /* Start screen */
+  #start-screen{width:100%;max-width:820px}
+  .section-label{font-family:var(--mono);font-size:.7rem;color:var(--accent);
+    letter-spacing:.14em;text-transform:uppercase;margin-bottom:.65rem}
+  .channel-grid{display:flex;flex-wrap:wrap;gap:.45rem;margin-bottom:1.4rem}
+  .chip{padding:.3rem .75rem;border-radius:9999px;border:1px solid var(--border);
+    background:var(--surface2);color:var(--text);font-size:.8rem;cursor:pointer;
+    transition:border-color .15s,background .15s;user-select:none}
+  .chip.active{border-color:var(--accent);background:var(--dim-accent);color:var(--accent)}
+  .chip:hover{border-color:var(--accent)}
+  .info-box{background:var(--surface);border:1px solid var(--border);border-radius:.6rem;
+    padding:.9rem 1.1rem;font-size:.84rem;color:var(--muted);line-height:1.65;margin-bottom:1.4rem}
+  .info-box strong{color:var(--text)}
+  .toggle-row{display:flex;align-items:center;gap:.55rem;font-size:.85rem;
+    color:var(--muted);margin-bottom:1.4rem}
+  .toggle{width:36px;height:20px;background:var(--border);border-radius:10px;
+    cursor:pointer;position:relative;transition:background .15s}
+  .toggle.on{background:var(--accent2)}
+  .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;
+    background:#fff;border-radius:50%;transition:transform .15s}
+  .toggle.on::after{transform:translateX(16px)}
+  .start-btn{padding:.65rem 2rem;background:var(--accent2);border:none;border-radius:.5rem;
+    color:#031307;font-family:var(--sans);font-size:1rem;font-weight:700;cursor:pointer;
+    transition:opacity .15s}
+  .start-btn:hover{opacity:.85}
+
+  /* Question screen */
+  #question-screen{display:none;width:100%;max-width:820px}
+  .prog-wrap{background:var(--surface2);border-radius:9999px;height:4px;margin-bottom:.55rem}
+  .prog-fill{height:4px;background:var(--accent2);border-radius:9999px;transition:width .3s}
+  .prog-meta{display:flex;justify-content:space-between;align-items:center;
+    font-size:.78rem;color:var(--muted);margin-bottom:1.1rem}
+  .tag-row{display:flex;gap:.4rem}
+  .tag{padding:.12rem .55rem;border-radius:.2rem;font-family:var(--mono);
+    font-size:.67rem;font-weight:600;text-transform:uppercase;letter-spacing:.07em}
+  .tag-mc{background:#062312;color:var(--accent)}
+  .tag-wr{background:#1a1206;color:var(--yellow)}
+  .tag-ch{background:var(--surface3);color:var(--muted)}
+
+  .q-card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;
+    padding:1.4rem;margin-bottom:.85rem}
+  .q-text{font-size:1.02rem;line-height:1.7;margin-bottom:1.1rem}
+  .q-text code{font-family:var(--mono);font-size:.87em;background:var(--surface3);
+    padding:.1em .3em;border-radius:.25rem;color:#86efac}
+  pre.snip{background:var(--surface3);border:1px solid var(--border);border-radius:.45rem;
+    padding:.9rem 1rem;margin:.8rem 0;overflow-x:auto;font-family:var(--mono);
+    font-size:.8rem;line-height:1.75;color:var(--text)}
+  pre.snip .kw{color:#c792ea}
+  pre.snip .fn{color:#82aaff}
+  pre.snip .num{color:#f78c6c}
+  pre.snip .cm{color:#546e7a;font-style:italic}
+  pre.snip .hi{color:#ffcb6b}
+  pre.snip .str{color:#a5d6ff}
+
+  /* MC */
+  .opt-list{list-style:none;display:flex;flex-direction:column;gap:.5rem}
+  .opt-list li{padding:.65rem .95rem;border:1px solid var(--border);border-radius:.45rem;
+    cursor:pointer;font-size:.91rem;line-height:1.5;transition:border-color .15s,background .15s}
+  .opt-list li:hover:not(.locked){border-color:var(--accent);background:var(--surface2)}
+  .opt-list li.correct-c{border-color:var(--accent2)!important;background:#062312!important}
+  .opt-list li.wrong-c{border-color:var(--red)!important;background:var(--red-bg)!important}
+  .opt-list li.show-c{border-color:var(--accent2)!important;background:#062312!important;opacity:.6}
+  .opt-why{display:none;font-size:.8rem;color:var(--muted);margin-top:.35rem;font-style:italic}
+  .opt-list li.correct-c .opt-why,
+  .opt-list li.wrong-c .opt-why,
+  .opt-list li.show-c .opt-why{display:block}
+  .opt-list li.correct-c .opt-why{color:#86efac}
+  .opt-list li.wrong-c .opt-why{color:#fca5a5}
+  .opt-list li.show-c .opt-why{color:#86efac}
+  .mc-fb{margin-top:.7rem;padding:.5rem .9rem;border-radius:.4rem;font-size:.88rem;display:none}
+  .mc-fb.ok{background:#062312;border:1px solid var(--accent2);color:#86efac}
+  .mc-fb.bad{background:var(--red-bg);border:1px solid var(--red);color:#fca5a5}
+
+  /* WR */
+  .wr-ta{width:100%;min-height:95px;background:var(--surface3);border:1px solid var(--border);
+    border-radius:.4rem;padding:.7rem;color:var(--text);font-family:var(--sans);
+    font-size:.91rem;line-height:1.6;resize:vertical;transition:border-color .15s}
+  .wr-ta:focus{outline:none;border-color:var(--accent)}
+  .wr-btns{display:flex;gap:.65rem;margin-top:.65rem;flex-wrap:wrap}
+  .btn{padding:.45rem 1rem;border-radius:.35rem;border:none;font-family:var(--sans);
+    font-size:.83rem;font-weight:500;cursor:pointer;transition:opacity .15s}
+  .btn:hover{opacity:.85}
+  .btn-chk{background:var(--accent2);color:#031307}
+  .btn-rev{background:var(--surface3);border:1px solid var(--border);color:var(--text)}
+  .btn-knew{background:#062312;border:1px solid var(--accent2);color:#86efac}
+  .btn-review{background:var(--red-bg);border:1px solid var(--red);color:#fca5a5}
+  .kw-box{margin-top:.75rem;background:var(--surface2);border:1px solid var(--border);
+    border-radius:.45rem;padding:.7rem .9rem;font-size:.83rem;display:none}
+  .kw-box .tally{font-family:var(--mono);font-size:.95rem;margin-bottom:.4rem;font-weight:600}
+  .kw-hit{color:var(--accent2)}
+  .kw-miss{color:var(--red)}
+  .kw-note{font-size:.73rem;color:var(--muted);margin-top:.35rem;font-style:italic}
+  .model-ans{margin-top:.75rem;background:var(--surface3);border:1px solid var(--border);
+    border-radius:.45rem;padding:.9rem 1rem;font-size:.86rem;line-height:1.7;display:none}
+  .model-ans h4{font-family:var(--mono);font-size:.68rem;color:var(--accent);
+    letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem}
+  .self-rate{display:none;gap:.55rem;flex-wrap:wrap;margin-top:.65rem}
+
+  /* Nav */
+  .nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:.4rem}
+  .btn-nav{padding:.45rem 1.1rem;background:var(--surface2);border:1px solid var(--border);
+    border-radius:.35rem;color:var(--text);font-family:var(--sans);font-size:.88rem;
+    cursor:pointer;transition:border-color .15s}
+  .btn-nav:hover{border-color:var(--accent)}
+  .btn-nav:disabled{opacity:.3;cursor:default}
+  .btn-finish{padding:.5rem 1.4rem;background:var(--accent2);border:none;border-radius:.35rem;
+    color:#031307;font-weight:700;font-family:var(--sans);font-size:.88rem;cursor:pointer}
+  .ans-indicator{font-size:.77rem;color:var(--muted)}
+
+  /* Results */
+  #results-screen{display:none;width:100%;max-width:820px}
+  .res-card{background:var(--surface);border:1px solid var(--border);border-radius:.9rem;
+    padding:1.4rem;margin-bottom:.9rem}
+  .res-big{font-family:var(--mono);font-size:2.4rem;font-weight:700;color:var(--accent2);
+    margin-bottom:.3rem}
+  .res-sub{color:var(--muted);font-size:.88rem;margin-bottom:1.1rem}
+  .ch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.65rem}
+  .ch-stat{background:var(--surface2);border:1px solid var(--border);border-radius:.4rem;padding:.7rem}
+  .ch-nm{font-size:.78rem;color:var(--muted);margin-bottom:.2rem}
+  .ch-sc{font-family:var(--mono);font-weight:600;font-size:.88rem}
+  .res-btn{padding:.55rem 1.4rem;border:none;border-radius:.4rem;font-family:var(--sans);
+    font-size:.88rem;font-weight:500;cursor:pointer;margin-right:.65rem;margin-top:.5rem}
+  .res-btn.p{background:var(--accent2);color:#031307;font-weight:700}
+  .res-btn.s{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="tree-deco">if pred &gt; 0.01 → BUY else if pred &lt; -0.01 → SELL else HOLD</div>
+  <div class="eyebrow">DRILL 0002</div>
+  <h1>ML Algorithms in Statistics</h1>
+  <p>Gradient Boosting · Linear Regression &amp; OLS · Logistic Regression · Walk-Forward · Feature Engineering · CAPM</p>
+</div>
+
+<!-- START -->
+<div id="start-screen">
+  <div class="section-label">Channels</div>
+  <div class="channel-grid" id="ch-chips">
+    <div class="chip active" data-ch="all">All</div>
+    <div class="chip active" data-ch="gbm">Gradient Boosting</div>
+    <div class="chip active" data-ch="ols">OLS &amp; Regression</div>
+    <div class="chip active" data-ch="logistic">Logistic Regression</div>
+    <div class="chip active" data-ch="wf">Walk-Forward &amp; Eval</div>
+    <div class="chip active" data-ch="features">Feature Engineering</div>
+    <div class="chip active" data-ch="capm">CAPM as ML</div>
+  </div>
+  <div class="info-box">
+    <strong>20 questions</strong> — 8 multiple-choice + 12 written recall. All grounded in
+    <code>paper_trading_sim.py</code>, <code>walkforward_sim.py</code>,
+    <code>solutions/03_stat_arb_risk/pairs.py</code>, and related files.
+    MC options shuffle on every load. Written recall uses keyword detection — always self-judge.
+  </div>
+  <div class="toggle-row">
+    <div class="toggle on" id="shuf-tog"></div>
+    <span>Shuffle question order</span>
+  </div>
+  <button class="start-btn" id="start-btn">Begin drill →</button>
+</div>
+
+<!-- QUESTION -->
+<div id="question-screen">
+  <div class="prog-wrap"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+  <div class="prog-meta">
+    <div class="tag-row">
+      <span class="tag tag-ch" id="q-ch-tag">—</span>
+      <span class="tag" id="q-type-tag">—</span>
+    </div>
+    <span id="q-ctr">Q 1 / 20</span>
+  </div>
+  <div class="q-card">
+    <div class="q-text" id="q-text"></div>
+    <div id="q-body"></div>
+  </div>
+  <div class="nav-row">
+    <button class="btn-nav" id="btn-prev" disabled>← Prev</button>
+    <span class="ans-indicator" id="ans-ind"></span>
+    <button class="btn-nav" id="btn-next">Next →</button>
+  </div>
+  <button class="btn-finish" id="btn-finish" style="display:none;margin-top:.9rem;width:100%">
+    See results →
+  </button>
+</div>
+
+<!-- RESULTS -->
+<div id="results-screen">
+  <div class="res-card">
+    <div class="res-big" id="res-big">—</div>
+    <div class="res-sub" id="res-sub">—</div>
+    <div class="ch-grid" id="ch-breakdown"></div>
+  </div>
+  <button class="res-btn p" id="btn-retry">Restart</button>
+  <button class="res-btn s" id="btn-miss">Review missed only</button>
+</div>
+
+<script>
+'use strict';
+
+/* ─── Question bank ───────────────────────────────────────── */
+const ALL_Q = [
+
+// ═══════════════════════════════════════════════════
+// GRADIENT BOOSTING
+// ═══════════════════════════════════════════════════
+
+{id:'mc-gbm-residuals', type:'mc', channel:'gbm', ch_label:'Gradient Boosting',
+ text:`In gradient boosting with squared-error loss, what does each new tree learn to predict?`,
+ opts:[
+   {t:'The residuals of the current ensemble — the difference between the target and what the model predicts so far.',c:true,
+    w:'Correct. For MSE loss, the negative gradient equals y − F(x) (residuals). Each tree fits a function approximating the current error.'},
+   {t:'The original target values, independently re-sampled with replacement from the training data.',c:false,
+    w:'That describes Random Forest (bagging). In GBM, each tree corrects the previous ensemble\'s errors — residuals, not re-sampled targets.'},
+   {t:'The absolute value of the prediction error, so that large mistakes get larger trees.',c:false,
+    w:'Wrong — the gradient of squared error is the signed residual (y − ŷ), not the absolute error. MAE loss uses sign(y − ŷ) as the gradient.'},
+   {t:'The raw input features projected onto the direction of maximum variance.',c:false,
+    w:'Wrong — that describes PCA dimensionality reduction. GBM trees fit residuals in the target space, not projections of features.'},
+ ]},
+
+{id:'mc-gbm-lr', type:'mc', channel:'gbm', ch_label:'Gradient Boosting',
+ text:`The model in <code>paper_trading_sim.py:123</code> uses <code>GradientBoostingRegressor(random_state=42)</code> with no other arguments. What are the sklearn defaults for <code>n_estimators</code> and <code>learning_rate</code>?`,
+ opts:[
+   {t:'n_estimators=100, learning_rate=0.1',c:true,
+    w:'Correct. sklearn GradientBoostingRegressor defaults: n_estimators=100, learning_rate=0.1, max_depth=3, subsample=1.0.'},
+   {t:'n_estimators=100, learning_rate=0.01',c:false,
+    w:'Wrong — learning_rate defaults to 0.1 in sklearn, not 0.01. AdaBoost defaults to 1.0; XGBoost defaults to 0.3. Each library differs.'},
+   {t:'n_estimators=200, learning_rate=0.1',c:false,
+    w:'Wrong — sklearn\'s default is 100 trees, not 200. The docstring confirms: n_estimators=100 as the baseline.'},
+   {t:'n_estimators=50, learning_rate=0.05',c:false,
+    w:'Wrong — sklearn\'s defaults are n_estimators=100 and learning_rate=0.1. The repo uses these exact defaults (no hyperparameter tuning).'},
+ ]},
+
+{id:'wr-gbm-funcspace', type:'wr', channel:'gbm', ch_label:'Gradient Boosting',
+ text:'Explain <strong>function-space gradient descent</strong> as used in gradient boosting. What "gradient" is being descended, and what does adding a new tree correspond to in that framing?',
+ concepts:[
+   {label:'Loss is a function of F(x), not weights', terms:['loss','function','f(x)','ensemble','prediction','gradient of loss']},
+   {label:'Gradient w.r.t. F(x) = residuals for MSE', terms:['residual','gradient','mse','squared','y - f','y−f','y - ŷ']},
+   {label:'New tree fits the negative gradient', terms:['new tree','fit','negative gradient','approximate','residual','correct']},
+   {label:'Step scaled by learning rate ν', terms:['learning rate','nu','ν','scale','step','contribution','shrink']},
+   {label:'Additive update: F += ν × tree', terms:['additive','update','add','f +=','accumulate','ensemble grows']},
+ ],
+ answer:`<h4>Model Answer</h4>
+Standard gradient descent updates <em>weights</em> θ by θ ← θ − η·∇_θ L. In boosting, the parameters are the prediction function F(x) itself — we take a "gradient step in function space."
+<br><br>
+At round m, the "gradient" we need is ∂L/∂F(xᵢ) for each training point. For MSE: ∂½(yᵢ − F(xᵢ))²/∂F = −(yᵢ − F(xᵢ)) = −residualᵢ.
+<br><br>
+We can't subtract an arbitrary function directly, so we fit a <strong>shallow tree</strong> to approximate −gradient = the residuals. That tree is the "direction" of steepest descent in function space.
+<br><br>
+Then we update: F_{m+1}(x) = F_m(x) + ν × h_m(x), where ν is the learning rate (step size) and h_m is the new tree. The ensemble grows one tree at a time, each step reducing the loss.
+<br><br>
+<strong>In the repo:</strong> <code>GradientBoostingRegressor(n_estimators=100, learning_rate=0.1)</code> runs 100 such rounds with ν=0.1. The final prediction is F(x) = Σ 0.1 × h_m(x).`
+},
+
+{id:'wr-gbm-lr-tradeoff', type:'wr', channel:'gbm', ch_label:'Gradient Boosting',
+ text:'Explain the <strong>learning rate ν as a bias-variance tradeoff</strong>. Why does lower ν (e.g. 0.01) + more trees generally generalize better than higher ν (0.5) + fewer trees, given fixed compute?',
+ concepts:[
+   {label:'Small ν makes each step conservative', terms:['conserv','small step','cautious','slow','smaller contribution']},
+   {label:'More trees needed to reach same training loss', terms:['more tree','compensate','same loss','n_estimators','more rounds']},
+   {label:'Each tree corrects a smaller fraction of error → less overfitting per tree', terms:['overfit','variance','less memoriz','noise','generali']},
+   {label:'Shrinkage regularizes the ensemble', terms:['regulariz','shrinkage','prevent','overfit','shrink','control']},
+ ],
+ answer:`<h4>Model Answer</h4>
+With large ν: each tree's signal is amplified, so the ensemble reaches low training loss quickly with few trees. But each tree has a chance to fit noise patterns aggressively — the ensemble overfits.
+<br><br>
+With small ν: each tree contributes only a tiny fraction of its signal. To reach the same training loss you need many more trees, but each individual tree is a weaker "correction" — there's less opportunity for any single tree to memorize training-set noise.
+<br><br>
+<strong>Shrinkage as regularization:</strong> ν < 1 acts like L2 regularization in the function space. The "ridge" is built in: no single tree can dominate the ensemble because its contribution is scaled down. The combination of many small steps explores the loss surface more carefully.
+<br><br>
+<strong>Practical tradeoff:</strong> Lower ν requires proportionally more compute (more trees), but generalization improves. Lesson 0025 notes the repo's defaults (ν=0.1, M=100) are untuned — a Bayesian search over ν and M on walk-forward Sharpe is the correct tuning procedure.`
+},
+
+{id:'wr-gbm-vs-rf', type:'wr', channel:'gbm', ch_label:'Gradient Boosting',
+ text:'Compare <strong>Gradient Boosting</strong> vs <strong>Random Forest</strong> at the algorithmic level. State two key differences. Which tends to have lower bias? Which lower variance?',
+ concepts:[
+   {label:'Sequential vs parallel (independent) trees', terms:['sequential','parallel','independent','series','order','one at a time']},
+   {label:'GBM corrects errors (boosting); RF averages independent models (bagging)', terms:['boosting','bagging','error','average','resample','bootstrap','correction']},
+   {label:'GBM lower bias (can reduce to near zero in-sample)', terms:['lower bias','gbm','overfit','flexible','in-sample']},
+   {label:'RF lower variance (averaging independent trees reduces variance)', terms:['lower variance','rf','random forest','independent','average','stable']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Algorithmic differences:</strong>
+<ol style="margin:.4rem 0 .4rem 1.2rem;line-height:1.8">
+  <li><strong>Sequential vs parallel:</strong> GBM builds trees one at a time, each fitting the previous ensemble's residuals. RF builds trees independently in parallel (bootstrap samples + random feature subsets), then averages.</li>
+  <li><strong>Error correction vs error averaging:</strong> GBM explicitly reduces remaining error each round (boosting). RF reduces variance by averaging uncorrelated estimates (bagging). GBM optimizes a loss; RF averages for stability.</li>
+</ol>
+<strong>Bias-Variance:</strong> GBM has lower bias (each round explicitly drives training error toward zero — given enough trees and small ν, training loss → 0). RF has lower variance (averaged independent trees cancel out idiosyncratic noise). In practice, GBM overfits more easily, which is why walk-forward OOS evaluation is essential.`
+},
+
+// ═══════════════════════════════════════════════════
+// OLS & LINEAR REGRESSION
+// ═══════════════════════════════════════════════════
+
+{id:'mc-ols-dof', type:'mc', channel:'ols', ch_label:'OLS & Regression',
+ text:`In <code>solutions/03_stat_arb_risk/pairs.py:18</code>:
+<pre class="snip">dof = <span class="fn">len</span>(y) - X.<span class="hi">shape</span>[<span class="num">1</span>]</pre>
+What does <code>dof</code> represent and why is it <code>len(y) − X.shape[1]</code>?`,
+ opts:[
+   {t:'Degrees of freedom for variance estimation: n observations minus p parameters (including the intercept column in X).',c:true,
+    w:'Correct. X.shape[1] = number of columns including the constant. Dividing residual sum of squares by (n − p) gives the unbiased estimator σ̂². This is the denominator of the t-statistic.'},
+   {t:'The number of residuals that are free to vary after fitting the regression line through all data points.',c:false,
+    w:'This is the colloquial definition and is correct in spirit, but the answer about what dof equals numerically is (a).'},
+   {t:'The number of parameters estimated minus one, used as a Bessel\'s correction for finite-sample standard errors.',c:false,
+    w:'Wrong — Bessel\'s correction for univariate std is (n-1), but in regression the correction is (n - p) where p is the number of fitted parameters.'},
+   {t:'The length of the residual vector minus two, accounting for estimating both slope and intercept separately.',c:false,
+    w:'Wrong — X.shape[1] counts all columns (intercept + all slopes), so dof = n − number_of_columns. For simple regression (1 slope + 1 intercept), dof = n − 2; for multiple regression with k slopes + intercept, dof = n − (k+1).'},
+ ]},
+
+{id:'mc-ols-lstsq', type:'mc', channel:'ols', ch_label:'OLS & Regression',
+ text:`<code>pairs.py:16</code> uses <code>np.linalg.lstsq(X, y, rcond=None)</code> rather than <code>np.linalg.inv(X.T @ X) @ X.T @ y</code>. Why?`,
+ opts:[
+   {t:'lstsq uses QR/SVD decomposition which is numerically stable when X is near-singular or collinear; direct inversion amplifies rounding errors.',c:true,
+    w:'Correct. The normal equations form (X\'X)⁻¹X\'y amplify errors in ill-conditioned X\'X. lstsq uses QR or SVD — stable even when X is rank-deficient or nearly so.'},
+   {t:'lstsq is faster by a constant factor for all matrix sizes since it avoids forming X.T @ X explicitly.',c:false,
+    w:'Wrong — lstsq is not always faster; it performs more work (QR/SVD) than a naive matrix multiply + invert. The advantage is stability, not speed.'},
+   {t:'np.linalg.inv only accepts square matrices, while X.T @ X may not be square when rows < columns.',c:false,
+    w:'Wrong — X.T @ X is always square (p × p). The problem with inv is numerical instability when X.T @ X is near-singular, not a shape error.'},
+   {t:'lstsq automatically handles missing values in X by dropping rows before solving.',c:false,
+    w:'Wrong — lstsq does not handle NaNs. The feature matrix must be pre-cleaned. The advantage of lstsq is numerical stability via QR/SVD.'},
+ ]},
+
+{id:'wr-ols-normal-eq', type:'wr', channel:'ols', ch_label:'OLS & Regression',
+ text:'Walk through the <strong>normal equations</strong> for OLS. Starting from "minimize the sum of squared residuals," derive the β̂ formula. Why should you use <code>lstsq</code> rather than computing <code>inv(X\'X)</code> directly?',
+ concepts:[
+   {label:'Objective: minimize ‖y − Xβ‖²', terms:['minimize','sum of squared','residual','‖y','loss']},
+   {label:'Take derivative, set to zero: X\'Xβ = X\'y', terms:['derivative','x\'x','normal equation','x.t','xt','first order']},
+   {label:'Solution: β̂ = (X\'X)⁻¹X\'y', terms:['β̂','beta hat','inverse','solution','(x\'x)⁻¹']},
+   {label:'lstsq uses QR/SVD — stable when X\'X is ill-conditioned', terms:['lstsq','qr','svd','stable','ill-condition','near-singular','collinear']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Derivation:</strong>
+<ol style="margin:.4rem 0 .4rem 1.2rem;line-height:1.8">
+  <li>Objective: minimize L(β) = ‖y − Xβ‖² = (y − Xβ)ᵀ(y − Xβ).</li>
+  <li>Expand: L = yᵀy − 2βᵀXᵀy + βᵀXᵀXβ.</li>
+  <li>Differentiate w.r.t. β, set to zero: ∂L/∂β = −2Xᵀy + 2XᵀXβ = 0.</li>
+  <li>Normal equations: <strong>XᵀXβ = Xᵀy</strong>.</li>
+  <li>Solution: <strong>β̂ = (XᵀX)⁻¹Xᵀy</strong> (when XᵀX is invertible).</li>
+</ol>
+<strong>Why lstsq:</strong> Forming XᵀX then calling inv() is numerically unstable when features are collinear (XᵀX near-singular). Tiny eigenvalues in XᵀX become huge after inversion, amplifying rounding error. <code>np.linalg.lstsq</code> uses QR or SVD internally — stable even for rank-deficient X. In trading, features like MA5 and MA10 are highly correlated, making this stability crucial.`
+},
+
+{id:'wr-r2', type:'wr', channel:'ols', ch_label:'OLS & Regression',
+ text:'Define <strong>R²</strong>. What does it mean for OOS R² to be negative? What should you expect for a well-calibrated daily-return prediction model in walk-forward OOS evaluation?',
+ concepts:[
+   {label:'R² = 1 − SSR/TSS', terms:['1 - ssr','1 − ssr','tss','total sum','ssr','residual sum']},
+   {label:'Fraction of variance explained', terms:['fraction','variance','explained','proportion']},
+   {label:'Negative OOS R²: model worse than predicting the mean', terms:['negative','worse than mean','mean prediction','baseline','0','below']},
+   {label:'OOS R² 1-5% is typical for daily returns', terms:['1%','2%','3%','4%','5%','small','few percent','daily','normal','typical']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>R² = 1 − SSR/TSS</strong> where SSR = Σ(yᵢ − ŷᵢ)² (residual sum of squares) and TSS = Σ(yᵢ − ȳ)² (total sum of squares).
+<br><br>
+R² measures the fraction of variance in y explained by the model. R²=1.0: perfect; R²=0: same as always predicting the mean; R²<0: model is <em>worse</em> than just predicting ȳ.
+<br><br>
+<strong>Negative OOS R²:</strong> When the model was tuned on a training set with characteristics that don't generalize, it can actively harm predictions on new data. The signal learned is noise-specific.
+<br><br>
+<strong>Realistic expectation:</strong> For daily equity return prediction with GBM in a walk-forward OOS evaluation, R² of 0.01–0.05 (1–5%) is normal. This is not "basically zero" — a model with consistent OOS R² > 0 outperforms random guessing every day. Combined with cross-sectional selection (top-N tickers), even 2% R² can produce positive alpha. The in-sample R² will be much higher (0.3–0.6) due to overfitting.`
+},
+
+// ═══════════════════════════════════════════════════
+// LOGISTIC REGRESSION
+// ═══════════════════════════════════════════════════
+
+{id:'mc-logistic-why-not', type:'mc', channel:'logistic', ch_label:'Logistic Regression',
+ text:'Why does this repo deliberately avoid logistic regression for predicting <code>fwd_ret_1d</code>?',
+ opts:[
+   {t:'The cross-sectional ranking step needs predicted magnitudes, not just direction. Binarizing the target (up/down) destroys the magnitude information that makes top-N selection work.',c:true,
+    w:'Correct. The strategy sorts tickers by predicted return magnitude and picks the top N. If you classify up/down, all "up" predictions look the same — you can\'t rank them. Regression preserves the ordering.'},
+   {t:'Logistic regression requires the target to be bounded in [0, 1], but returns can exceed ±100%.',c:false,
+    w:'Wrong — logistic regression accepts binary labels {0, 1}, and the target is the binarized direction, not the return value itself. The issue is information loss, not a range constraint.'},
+   {t:'Logistic regression has no closed-form solution, making it too slow to retrain monthly in walkforward_sim.py.',c:false,
+    w:'Wrong — iterative logistic regression (LBFGS) is very fast in sklearn; speed is not the issue. The reason is the information loss from binarizing the continuous target.'},
+   {t:'Logistic regression cannot handle continuous features like vol_10 and rsi_14 without binning them first.',c:false,
+    w:'Wrong — logistic regression applies a linear combination of features (continuous or not) to a sigmoid; no binning is required.'},
+ ]},
+
+{id:'wr-log-loss', type:'wr', channel:'logistic', ch_label:'Logistic Regression',
+ text:'Write the <strong>log-loss formula</strong> for binary classification. Why does this loss function produce calibrated probability estimates? Compare it to squared error.',
+ concepts:[
+   {label:'Formula: −[y·ln(p̂) + (1−y)·ln(1−p̂)]', terms:['log','ln','cross-entropy','y·ln','(1-y)','log loss','binary cross']},
+   {label:'Unbounded penalty for confident wrongness', terms:['confident','wrong','infinite','unbounded','penali','0 log 0']},
+   {label:'Gradient pushes p̂ toward calibrated frequency', terms:['calibrat','frequency','pushes','gradient','probability','real frequency']},
+   {label:'Squared error does not calibrate probabilities', terms:['mse','squared','mean square','different','calibrat','bounded']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Log-loss:</strong> ℓ = −[y·ln(p̂) + (1−y)·ln(1−p̂)] for y ∈ {0,1} and p̂ ∈ (0,1).
+<br><br>
+<strong>Why it calibrates:</strong> The loss is −ln(p̂) when y=1. As p̂ → 0 (confident wrong prediction), the loss → ∞. This asymmetric, unbounded penalty forces the model to never commit too confidently to wrong predictions. The global minimum occurs exactly when p̂ = P(y=1 | x) — the true conditional probability. Minimizing expected log-loss over the data distribution gives a calibrated model.
+<br><br>
+<strong>vs Squared error:</strong> MSE is bounded (max loss = 1 when y=1, p̂=0). A model can achieve low MSE by predicting 0.5 everywhere — not calibrated. Log-loss punishes overconfident wrong predictions far more severely, which forces the optimizer to estimate true frequencies.`
+},
+
+{id:'wr-sigmoid', type:'wr', channel:'logistic', ch_label:'Logistic Regression',
+ text:'Write the <strong>sigmoid function</strong> formula. What are its outputs at z=0, z=+2, z=−2? Explain why it is the natural link function for converting a linear score to a probability.',
+ concepts:[
+   {label:'σ(z) = 1/(1+e⁻ᶻ)', terms:['1/(1+e','1 / (1+e','sigma','sigmoid','formula']},
+   {label:'σ(0) = 0.5', terms:['0.5','0.50','half','z=0']},
+   {label:'σ(2) ≈ 0.88, σ(−2) ≈ 0.12', terms:['0.88','0.12','88%','12%','z=2','z=-2','pm 2']},
+   {label:'Maps ℝ → (0,1), interpreting score as probability', terms:['maps','real','(0,1)','probability','bounded','0 to 1','output']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>σ(z) = 1 / (1 + e⁻ᶻ)</strong>
+<ul style="margin:.4rem 0 .4rem 1.2rem;line-height:1.8">
+  <li>σ(0) = 0.5 — at zero score, model is maximally uncertain</li>
+  <li>σ(+2) ≈ 0.88 — a strong positive score maps to 88% probability</li>
+  <li>σ(−2) ≈ 0.12 — a strong negative score maps to 12% probability</li>
+</ul>
+<strong>Why it's natural:</strong> A linear model Xβ produces scores in (−∞, +∞). We need to compress that to a probability in (0, 1). The sigmoid is the natural choice because:
+<ol style="margin:.4rem 0 .4rem 1.2rem;line-height:1.8">
+  <li>It maps ℝ continuously to (0, 1) — never exactly 0 or 1, which keeps log-loss finite.</li>
+  <li>It is monotonically increasing, preserving the ordering of scores.</li>
+  <li>It arises from the logistic distribution; P(y=1|x) = σ(xᵀβ) is the maximum-likelihood model under the logistic family.</li>
+</ol>`
+},
+
+// ═══════════════════════════════════════════════════
+// WALK-FORWARD & EVALUATION
+// ═══════════════════════════════════════════════════
+
+{id:'mc-wf-startplustest', type:'mc', channel:'wf', ch_label:'Walk-Forward & Eval',
+ text:`In <code>risk.py:94</code>:
+<pre class="snip">start += test</pre>
+What property does this single line enforce across all generated splits?`,
+ opts:[
+   {t:'Consecutive test windows tile end-to-end with no gaps or overlaps, so every sample in the dataset is tested exactly once.',c:true,
+    w:'Correct. By advancing start by test (not by 1 or by train), the next split\'s test window starts exactly where the previous one ended. Every test day is evaluated once; no double-counting or gaps.'},
+   {t:'The training window grows by one test period after each split (expanding window behavior).',c:false,
+    w:'Wrong — start += test moves the entire window forward. The training indices in the next split start at the new start, not at 0. That\'s a rolling window; an expanding window would keep start=0 and grow train.'},
+   {t:'Each new training set includes the previous split\'s test data, providing extra samples for the next model.',c:false,
+    w:'Wrong — the new training indices start at start (=old_start + test), so the old test rows are in the gap between the new training start and where the old training started. They may or may not be included depending on train size.'},
+   {t:'The embargo gap increases by one day for each successive split, providing stronger protection against autocorrelation.',c:false,
+    w:'Wrong — embargo is a fixed parameter; start += test only advances the window position.'},
+ ]},
+
+{id:'mc-strict-lt', type:'mc', channel:'wf', ch_label:'Walk-Forward & Eval',
+ text:`In <code>walkforward_sim.py:210</code>, the rolling-retrain uses:
+<pre class="snip">sub = f[f.index <span class="hi">&lt;</span> dt]   <span class="cm"># strict less-than</span></pre>
+What would happen if this were changed to <code>f[f.index &lt;= dt]</code> (less-than-or-equal)?`,
+ opts:[
+   {t:'The model would train on day dt\'s features and label during the prediction step for day dt, introducing look-ahead bias.',c:true,
+    w:'Correct. The label for row dt is fwd_ret_1d = next-day return, computed as ret.shift(-1). Including dt in training means the model saw dt\'s features paired with dt+1\'s return — future information — during the very prediction it makes for dt.'},
+   {t:'The simulation would crash with a KeyError because dt does not exist in the feature index after the retrain.',c:false,
+    w:'Wrong — the predict step (f.loc[dt]) is separate from the training step. Including dt in training is silent and runs without error; it\'s a subtle logical bug, not a runtime error.'},
+   {t:'Training set grows by exactly one row, which is negligible for any realistic dataset of 250+ rows.',c:false,
+    w:'Wrong — the problem is not the size of the training set but *which* one row is added. That row has a label derived from the next day\'s price — the exact return the model is about to predict. Even one leaked row creates systematic upward bias.'},
+   {t:'The monthly retrain schedule would trigger one day earlier each month, causing a timing mismatch with the test evaluation.',c:false,
+    w:'Wrong — the retrain schedule is controlled by _should_retrain(), which checks calendar month boundaries. Including dt in training doesn\'t change when retraining is triggered.'},
+ ]},
+
+{id:'wr-lookahead-two-layers', type:'wr', channel:'wf', ch_label:'Walk-Forward & Eval',
+ text:'Describe the <strong>two layers of look-ahead bias</strong> that can corrupt an ML trading backtest. For each, give the specific form it takes in the context of this repo.',
+ concepts:[
+   {label:'Layer 1: feature/target leakage (shift direction)', terms:['shift','feature','target','fwd_ret','shift(-1)','shift(0)','label']},
+   {label:'Layer 2: model training on test data', terms:['train','test','same data','in-sample','seen','future','training set includes']},
+   {label:'Repo example of layer 1', terms:['paper_trading','build_features','shift(-1)','shift(0)']},
+   {label:'Repo example of layer 2', terms:['f[f.index < dt]','<= dt','walkforward','retrain','seen future','monthly']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Layer 1 — Feature/target leakage:</strong> The label for day t is <code>fwd_ret_1d = ret.shift(-1)</code> — tomorrow's return. If you accidentally used <code>shift(0)</code> (today's return), the model would learn to predict the present using features from the present — a triviality that scores perfectly in backtests but is unavailable in real trading (you don't know today's return before the day ends).
+<br><br>
+<strong>Layer 2 — Training leakage:</strong> If you train a model on all data 2016–2024 and then "backtest" it on the same 2016–2024 period, the model saw every test row during training. In-sample performance is inflated by memorization of noise patterns. In <code>walkforward_sim.py</code>, the guard is <code>f[f.index &lt; dt]</code> — strictly past data only — preventing this on every prediction date.`
+},
+
+{id:'wr-embargo', type:'wr', channel:'wf', ch_label:'Walk-Forward & Eval',
+ text:'Explain the <strong>embargo gap</strong> in <code>walkforward_splits()</code>. Why is it needed when the label is <code>fwd_ret_1d = ret.shift(-1)</code>? How large should the embargo be in practice?',
+ concepts:[
+   {label:'fwd_ret_1d at row t references row t+1\'s price', terms:['shift(-1)','next day','t+1','future price','row t+1','tomorrow']},
+   {label:'Last training row\'s label derived from first test-adjacent row', terms:['last training','first test','adjacent','label','contaminate','border']},
+   {label:'Embargo of ≥1 day breaks that contamination', terms:['embargo','1 day','gap','break','protect','≥1','at least']},
+   {label:'Longer embargo if rolling features overlap (MA, vol)', terms:['rolling','feature','ma','vol','overlap','window','longer','10 day','5 day']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Why embargo is needed:</strong> The target at training row T is <code>fwd_ret_1d[T] = ret[T+1]</code> — it references day T+1's price. If the first test row is day T+1, the training set contains T+1's price embedded in the label of row T. Without embargo, the model has seen day T+1 during training.
+<br><br>
+<strong>Minimum embargo = 1 day</strong> breaks this: with embargo=1, the test window starts at T+2, so the training/label contamination is not present in any test row.
+<br><br>
+<strong>Longer embargo for rolling features:</strong> Features like <code>vol_10</code>, <code>ma_10</code>, and <code>rsi_14</code> use 10–14 day lookback windows. Rows immediately after the training boundary share overlapping feature windows with training rows — the features are correlated. A conservative approach is embargo ≥ max feature window (14 days for RSI), though in practice 1–5 days is common.`
+},
+
+// ═══════════════════════════════════════════════════
+// FEATURE ENGINEERING
+// ═══════════════════════════════════════════════════
+
+{id:'mc-features-magap', type:'mc', channel:'features', ch_label:'Feature Engineering',
+ text:`In <code>paper_trading_sim.py:65</code>:
+<pre class="snip">out[<span class="str">"ma_gap"</span>] = (out[<span class="str">"ma_5"</span>] / out[<span class="str">"ma_10"</span>]) - <span class="num">1</span></pre>
+What does <code>ma_gap</code> capture and why is it more useful than using <code>ma_5</code> and <code>ma_10</code> as separate features?`,
+ opts:[
+   {t:'It captures the normalized momentum signal — how much the short-term trend diverges from the medium-term trend, as a scale-free ratio.',c:true,
+    w:'Correct. ma_5/ma_10 − 1 is dimensionless and comparable across tickers of different price levels. Positive = short MA above long MA (uptrend); negative = short below long (downtrend). Dividing removes price-level confounding.'},
+   {t:'It removes mean-reversion effects by differencing the two MAs, producing a stationary feature.',c:false,
+    w:'Wrong — the ratio is not guaranteed to be stationary; it simply normalizes the MAs to each other. Stationarity would require more formal treatment (e.g., ADF test on the ratio).'},
+   {t:'It averages the two MAs to provide a smoother 7.5-day price estimate as a single feature.',c:false,
+    w:'Wrong — the formula is division (ma_5/ma_10) − 1, not an arithmetic average. The result measures the relative gap, not an average.'},
+   {t:'It measures the absolute momentum in dollar terms, making the feature comparable to the raw price close.',c:false,
+    w:'Wrong — dividing and subtracting 1 makes ma_gap dimensionless (a fractional difference), the opposite of dollar-terms.'},
+ ]},
+
+{id:'wr-features-all', type:'wr', channel:'features', ch_label:'Feature Engineering',
+ text:'List and explain all <strong>6 features</strong> produced by <code>build_features()</code> in <code>paper_trading_sim.py</code>. For each, explain what market phenomenon it is designed to capture.',
+ concepts:[
+   {label:'ret_1d: 1-day simple return (momentum/noise)', terms:['ret_1d','1-day','daily return','pct_change','momentum','return']},
+   {label:'ma_5, ma_10: 5 and 10 day moving averages (trend)', terms:['ma_5','ma_10','moving average','5','10','trend','smooth']},
+   {label:'ma_gap: normalized gap between MAs (trend direction)', terms:['ma_gap','gap','ratio','normalized','relative','direction']},
+   {label:'vol_10: 10-day rolling std of returns (volatility regime)', terms:['vol_10','volatil','std','rolling','10','regime']},
+   {label:'rsi_14: RSI normalized to [0,1] (overbought/oversold)', terms:['rsi','relative strength','oversold','overbought','14','momentum oscillator']},
+ ],
+ answer:`<h4>Model Answer</h4>
+From <code>paper_trading_sim.py:62-67</code>:
+<ol style="margin:.4rem 0 .4rem 1.2rem;line-height:1.8">
+  <li><strong>ret_1d</strong> = <code>close.pct_change()</code> — yesterday's 1-day return. Captures short-term price momentum and noise.</li>
+  <li><strong>ma_5</strong> = 5-day moving average of close. Smoothed price level over the short term.</li>
+  <li><strong>ma_10</strong> = 10-day moving average of close. Smoothed price level over a medium term.</li>
+  <li><strong>ma_gap</strong> = (ma_5/ma_10) − 1 — normalized gap between short and medium MA. Positive = short-term uptrend; negative = downtrend. Scale-free, comparable across tickers.</li>
+  <li><strong>vol_10</strong> = 10-day rolling std of ret_1d. Volatility regime: high vol periods vs low vol. GBM can learn "buy during low-vol momentum" patterns.</li>
+  <li><strong>rsi_14</strong> = RSI(14) / 100 — Relative Strength Index normalized to [0,1]. RSI > 0.7: potentially overbought (possible reversal); RSI < 0.3: potentially oversold.</li>
+</ol>
+<strong>Target:</strong> fwd_ret_1d = ret_1d.shift(-1) — next day's return. Note: close price itself is not a feature (non-stationary); all features are transformations that are approximately stationary.`
+},
+
+// ═══════════════════════════════════════════════════
+// CAPM AS ML
+// ═══════════════════════════════════════════════════
+
+{id:'mc-capm-ols', type:'mc', channel:'capm', ch_label:'CAPM as ML',
+ text:'CAPM is estimated via OLS: <strong>r_s = α + β·r_m + ε</strong>. This is mathematically identical to <code>hedge_ratio(y, x)</code> in <code>pairs.py</code>. What is the only structural difference?',
+ opts:[
+   {t:'The x-vector: hedge_ratio regresses one stock on another; CAPM regresses the strategy on the market index.',c:true,
+    w:'Correct. Both run OLS slope: β = cov(y,x)/var(x). The math is identical; the domain is different. hedge_ratio uses asset B as x; CAPM uses SPY/market returns as x.'},
+   {t:'CAPM adds an explicit risk-free rate term, making it a two-variable OLS while hedge_ratio is a one-variable problem.',c:false,
+    w:'Wrong — the risk-free rate r_f is subtracted from both sides first (Jensen\'s alpha version) or absorbed into α. Both models remain simple linear regressions with one predictor.'},
+   {t:'CAPM constrains the intercept α to equal zero, while hedge_ratio estimates a free intercept.',c:false,
+    w:'Wrong — unconstrained CAPM estimated via OLS includes a free intercept (Jensen\'s alpha). Setting α=0 is the CAPM null hypothesis, not the estimation procedure.'},
+   {t:'hedge_ratio uses log returns while CAPM uses simple returns, requiring different numerical procedures.',c:false,
+    w:'Wrong — pairs.py uses whatever array you pass in; CAPM implementations typically use simple daily returns too. The choice of return type is independent of the OLS algorithm.'},
+ ]},
+
+{id:'wr-capm-full', type:'wr', channel:'capm', ch_label:'CAPM as ML',
+ text:`Your walk-forward backtest produces strategy equity. Describe how you would use OLS (via <code>pairs.py:_ols()</code>) to compute <strong>Jensen's alpha</strong> and <strong>beta</strong> for this strategy vs SPY. Include the regression specification and what output you care about.`,
+ concepts:[
+   {label:'y = strategy daily returns; x = SPY daily returns', terms:['strategy','spy','market','y = ','x = ','regress','returns']},
+   {label:'OLS with intercept: X = [1s, market_ret]', terms:['intercept','ones','constant','column','np.column_stack','x.column','matrix']},
+   {label:'Beta = slope coefficient (β̂[1])', terms:['slope','beta','β̂[1]','market exposure','coefficient[1]']},
+   {label:'Alpha = intercept (β̂[0]) in annualized terms', terms:['intercept','alpha','β̂[0]','annualiz','× 252']},
+   {label:'t-statistic to test if alpha is real', terms:['t-stat','t-statistic','significant','real','noise','se','standard error']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Setup:</strong> Get daily simple returns from the strategy equity series (<code>equity.pct_change().dropna()</code>) and SPY returns over the same period.
+<br><br>
+<strong>OLS specification:</strong>
+<pre style="background:#1e2e21;border-radius:.35rem;padding:.7rem;font-family:monospace;font-size:.82rem;margin:.5rem 0">
+r_strategy = α + β·r_SPY + ε
+X = np.column_stack([np.ones(len(r_spy)), r_spy])
+beta, se = _ols(r_strategy, X)
+alpha_daily, beta_market = beta[0], beta[1]
+</pre>
+<strong>Outputs:</strong>
+<ul style="margin:.4rem 0 .4rem 1.2rem;line-height:1.8">
+  <li><strong>β = beta[1]</strong>: market sensitivity. β ≈ 0 = market-neutral; β = 1 = full market exposure.</li>
+  <li><strong>α = beta[0]</strong>: daily Jensen's alpha. Annualize: <code>alpha_annual = alpha_daily × 252</code>.</li>
+  <li><strong>t-statistic</strong> = beta[0] / se[0]: is the alpha statistically distinguishable from zero? |t| > 2 is conventional significance. If t is small, the alpha may be noise.</li>
+</ul>
+<strong>Note:</strong> The lesson 0028 self-assignment proposes adding <code>alpha_beta()</code> to <code>analyze_equity.py</code> — this is the implementation.`
+},
+
+{id:'wr-capm-alpha-interpret', type:'wr', channel:'capm', ch_label:'CAPM as ML',
+ text:'A strategy returns 18% annually. SPY returns 12%. Beta = 0.8. <br>(a) Compute Jensen\'s alpha. <br>(b) If a second strategy has the same 18% return but beta = 1.5, what is its alpha? <br>(c) Which strategy is more valuable to an investor who can already access SPY?',
+ concepts:[
+   {label:'Alpha = r_s − β × r_m', terms:['alpha','= r_s','− β','minus beta','subtract','formula','capm']},
+   {label:'Strategy A alpha: 18% − 0.8×12% = 8.4%', terms:['8.4','8.4%','0.8 × 12','8.4 percent','strategy a']},
+   {label:'Strategy B alpha: 18% − 1.5×12% = 0%', terms:['0%','zero','0 alpha','1.5 × 12','18%','strategy b']},
+   {label:'Strategy A is more valuable (positive alpha vs zero alpha)', terms:['strategy a','more valuable','8.4','positive alpha','a is better','a wins']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>(a) Strategy A alpha:</strong> α_A = 18% − 0.8 × 12% = 18% − 9.6% = <strong>8.4%</strong>
+<br><strong>(b) Strategy B alpha:</strong> α_B = 18% − 1.5 × 12% = 18% − 18% = <strong>0%</strong>
+<br><br>
+<strong>(c) Strategy A is more valuable.</strong>
+<br><br>
+Strategy B earns 18% with β=1.5, but an investor who already holds SPY could get the same 18% by just putting 1.5× leverage into SPY (and SPY is free). Strategy B adds no value that can't be replicated cheaply.
+<br><br>
+Strategy A earns 8.4% alpha — a return that comes from genuine skill and cannot be replicated by any linear combination of SPY exposure. This is what investors pay hedge fund fees for.
+<br><br>
+This is the core intuition: beta is free (buy index funds); alpha is scarce (pay for it).`
+},
+
+]; // end ALL_Q
+
+/* ─── State ─────────────────────────────────── */
+let questions = [];
+let current = 0;
+const state = {};
+function gs(id){ if(!state[id]) state[id]={answered:false,correct:null,typed:'',selfRated:null,revealed:false,chosenIdx:undefined}; return state[id]; }
+
+/* ─── Channel chips ─────────────────────────── */
+const chips = document.querySelectorAll('#ch-chips .chip');
+let activeCh = new Set(['gbm','ols','logistic','wf','features','capm']);
+chips.forEach(chip=>{
+  chip.addEventListener('click',()=>{
+    const ch = chip.dataset.ch;
+    if(ch==='all'){
+      const allOn = activeCh.size===6;
+      if(allOn){activeCh.clear();chips.forEach(c=>c.classList.remove('active'));chip.classList.add('active');}
+      else{activeCh=new Set(['gbm','ols','logistic','wf','features','capm']);chips.forEach(c=>c.classList.add('active'));}
+    } else {
+      if(activeCh.has(ch)){activeCh.delete(ch);chip.classList.remove('active');}
+      else{activeCh.add(ch);chip.classList.add('active');}
+    }
+  });
+});
+
+/* ─── Shuffle toggle ────────────────────────── */
+let shuffleOn = true;
+const shufTog = document.getElementById('shuf-tog');
+shufTog.addEventListener('click',()=>{shuffleOn=!shuffleOn;shufTog.classList.toggle('on',shuffleOn);});
+
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+/* ─── Start ─────────────────────────────────── */
+document.getElementById('start-btn').addEventListener('click',startDrill);
+function startDrill(){
+  questions=ALL_Q.filter(q=>activeCh.has(q.channel));
+  if(shuffleOn)shuffle(questions);
+  current=0;
+  document.getElementById('start-screen').style.display='none';
+  document.getElementById('question-screen').style.display='block';
+  render();
+}
+
+/* ─── Render ────────────────────────────────── */
+function render(){
+  const q=questions[current], qs=gs(q.id);
+  const pct=(current/questions.length)*100;
+  document.getElementById('prog-fill').style.width=pct+'%';
+  document.getElementById('q-ctr').textContent=`Q ${current+1} / ${questions.length}`;
+  document.getElementById('q-ch-tag').textContent=q.ch_label;
+  const tt=document.getElementById('q-type-tag');
+  tt.textContent=q.type==='mc'?'Multiple Choice':'Written Recall';
+  tt.className='tag '+(q.type==='mc'?'tag-mc':'tag-wr');
+  document.getElementById('q-text').innerHTML=q.text;
+  const body=document.getElementById('q-body');
+  body.innerHTML=q.type==='mc'?buildMC(q,qs):buildWR(q,qs);
+  if(q.type==='mc')attachMC(q,qs); else attachWR(q,qs);
+  document.getElementById('btn-prev').disabled=current===0;
+  const isLast=current===questions.length-1;
+  document.getElementById('btn-next').style.display=isLast?'none':'inline-block';
+  document.getElementById('btn-finish').style.display=isLast?'block':'none';
+  const ind=document.getElementById('ans-ind');
+  if(qs.answered){
+    if(q.type==='mc') ind.textContent=qs.correct?'✓ correct':'✗ incorrect';
+    else ind.textContent=qs.selfRated==='knew'?'✓ knew it':qs.selfRated==='review'?'⚑ needs review':qs.revealed?'⚑ revealed':'';
+  } else ind.textContent='';
+}
+
+/* ─── MC ─────────────────────────────────────── */
+function buildMC(q,qs){
+  let h='<ul class="opt-list" id="mc-list">';
+  q.opts.forEach((o,i)=>{ let c=''; if(qs.answered){c=o.c?'show-c':'';}
+    h+=`<li data-idx="${i}" data-correct="${o.c}" class="${c}">${o.t}<div class="opt-why">${o.w}</div></li>`;});
+  h+='</ul>';
+  if(qs.answered){
+    h+=`<div class="mc-fb ${qs.correct?'ok':'bad'}" style="display:block">${qs.correct?'✓ Correct.':'✗ Incorrect.'}</div>`;
+  } else h+='<div class="mc-fb" id="mc-fb"></div>';
+  return h;
+}
+function attachMC(q,qs){
+  const list=document.getElementById('mc-list');
+  if(!list)return;
+  if(!qs.answered){shuffle([...list.children]).forEach(li=>list.appendChild(li));}
+  if(qs.answered && qs.chosenIdx!==undefined){
+    list.querySelectorAll('li').forEach(li=>{
+      const idx=parseInt(li.dataset.idx), cor=li.dataset.correct==='true';
+      if(idx===qs.chosenIdx) li.classList.add(cor?'correct-c':'wrong-c');
+      else if(cor) li.classList.add('show-c');
+    });
+  }
+  if(qs.answered)return;
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(qs.answered)return;
+      const cor=li.dataset.correct==='true';
+      qs.answered=true;qs.correct=cor;qs.chosenIdx=parseInt(li.dataset.idx);
+      list.querySelectorAll('li').forEach(item=>{
+        const ic=item.dataset.correct==='true';
+        if(item===li)item.classList.add(cor?'correct-c':'wrong-c'); else if(ic)item.classList.add('show-c');
+        item.classList.add('locked');item.style.cursor='default';
+      });
+      const fb=document.getElementById('mc-fb');
+      if(fb){fb.className='mc-fb '+(cor?'ok':'bad');fb.textContent=cor?'✓ Correct.':'✗ Incorrect.';fb.style.display='block';}
+      document.getElementById('ans-ind').textContent=cor?'✓ correct':'✗ incorrect';
+    });
+  });
+}
+
+/* ─── WR ─────────────────────────────────────── */
+function buildWR(q,qs){
+  return `<textarea class="wr-ta" id="wr-ta" placeholder="Type your answer here...">${qs.typed||''}</textarea>
+  <div class="wr-btns">
+    <button class="btn btn-chk" id="wr-chk">Check keywords</button>
+    <button class="btn btn-rev" id="wr-reveal">Show model answer</button>
+  </div>
+  <div class="kw-box" id="kw-box"></div>
+  <div class="model-ans" id="model-ans"></div>
+  <div class="self-rate" id="self-rate" style="display:none">
+    <button class="btn btn-knew" id="rate-knew">✓ Knew it</button>
+    <button class="btn btn-review" id="rate-review">⚑ Needs review</button>
+  </div>`;
+}
+function attachWR(q,qs){
+  const ta=document.getElementById('wr-ta');
+  if(!ta)return;
+  ta.addEventListener('input',()=>{qs.typed=ta.value;});
+  const kwBox=document.getElementById('kw-box');
+  const modelAns=document.getElementById('model-ans');
+  const selfRate=document.getElementById('self-rate');
+  if(qs.revealed){
+    modelAns.innerHTML=q.answer;modelAns.style.display='block';selfRate.style.display='flex';
+    showKw(q,qs,kwBox);
+  }
+  document.getElementById('wr-chk').addEventListener('click',()=>{qs.typed=ta.value;showKw(q,qs,kwBox);});
+  document.getElementById('wr-reveal').addEventListener('click',()=>{
+    qs.revealed=true;qs.answered=true;
+    modelAns.innerHTML=q.answer;modelAns.style.display='block';selfRate.style.display='flex';
+    showKw(q,qs,kwBox);
+    document.getElementById('ans-ind').textContent='⚑ revealed';
+  });
+  document.getElementById('rate-knew').addEventListener('click',()=>{
+    qs.selfRated='knew';qs.answered=true;
+    document.getElementById('ans-ind').textContent='✓ knew it';
+  });
+  document.getElementById('rate-review').addEventListener('click',()=>{
+    qs.selfRated='review';qs.answered=true;
+    document.getElementById('ans-ind').textContent='⚑ needs review';
+  });
+}
+function showKw(q,qs,box){
+  const txt=(qs.typed||'').toLowerCase();
+  const hits=q.concepts.map(c=>({label:c.label,hit:c.terms.some(t=>txt.includes(t.toLowerCase()))}));
+  const got=hits.filter(h=>h.hit).length, tot=hits.length;
+  const col=got===tot?'#4ade80':got>=tot*.6?'#facc15':'#f87171';
+  box.style.display='block';
+  box.innerHTML=`<div class="tally" style="color:${col}">${got} / ${tot} key concepts detected</div>`+
+    hits.map(h=>`<div class="${h.hit?'kw-hit':'kw-miss'}">${h.hit?'✓':'✗'} ${h.label}</div>`).join('')+
+    `<div class="kw-note">Keyword scan is rough — self-judge against the model answer.</div>`;
+}
+
+/* ─── Navigation ─────────────────────────────── */
+document.getElementById('btn-prev').addEventListener('click',()=>{if(current>0){current--;render();}});
+document.getElementById('btn-next').addEventListener('click',()=>{if(current<questions.length-1){current++;render();}});
+document.getElementById('btn-finish').addEventListener('click',showResults);
+
+/* ─── Results ────────────────────────────────── */
+function showResults(){
+  document.getElementById('question-screen').style.display='none';
+  document.getElementById('results-screen').style.display='block';
+  const mcQs=questions.filter(q=>q.type==='mc');
+  const mcC=mcQs.filter(q=>gs(q.id).correct===true).length;
+  const mcA=mcQs.filter(q=>gs(q.id).answered).length;
+  const wrQs=questions.filter(q=>q.type==='wr');
+  const wrK=wrQs.filter(q=>gs(q.id).selfRated==='knew').length;
+  const wrR=wrQs.filter(q=>gs(q.id).selfRated==='review').length;
+  document.getElementById('res-big').textContent=mcA?`MC: ${mcC}/${mcA}`:'MC: —';
+  document.getElementById('res-sub').textContent=`Written recall: ${wrK} knew · ${wrR} needs review · ${wrQs.length-wrK-wrR} unrated`;
+  const chs=[...new Set(questions.map(q=>q.channel))];
+  document.getElementById('ch-breakdown').innerHTML=chs.map(ch=>{
+    const cq=questions.filter(q=>q.channel===ch);
+    const mc=cq.filter(q=>q.type==='mc');const wr=cq.filter(q=>q.type==='wr');
+    const mcScore=mc.filter(q=>gs(q.id).correct).length;
+    const wrKnew=wr.filter(q=>gs(q.id).selfRated==='knew').length;
+    return `<div class="ch-stat"><div class="ch-nm">${cq[0].ch_label}</div><div class="ch-sc">${mc.length?`MC ${mcScore}/${mc.length}`:''}${mc.length&&wr.length?' · ':''}${wr.length?`WR ${wrKnew}/${wr.length} knew`:''}</div></div>`;
+  }).join('');
+}
+document.getElementById('btn-retry').addEventListener('click',()=>{
+  Object.keys(state).forEach(k=>delete state[k]);
+  document.getElementById('results-screen').style.display='none';
+  document.getElementById('start-screen').style.display='block';
+});
+document.getElementById('btn-miss').addEventListener('click',()=>{
+  const missed=questions.filter(q=>{const qs=gs(q.id);if(q.type==='mc')return qs.answered&&!qs.correct;return qs.selfRated==='review'||(qs.answered&&!qs.selfRated);});
+  if(!missed.length){alert('No missed questions!');return;}
+  questions=missed;current=0;
+  document.getElementById('results-screen').style.display='none';
+  document.getElementById('question-screen').style.display='block';
+  render();
+});
+</script>
+</body>
+</html>

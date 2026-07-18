@@ -1,0 +1,84 @@
+# Learning Progress
+
+Tracks which concepts have been covered with lesson, drill, and vocab files.
+
+---
+
+## Covered
+
+### 0001 — pybind11 + CMake FetchContent: Compiling a C++ Extension Importable from Python
+
+**Date added:** 2026-06-28
+**Status:** Complete
+
+**Context:** Added after the repo received its first C++ build layer — the `oil_volume_cpp` extension exposing `rolling_mean(values, window)` via pybind11 + scikit-build-core.
+
+**Files:**
+- Lesson: [lessons/0001-pybind11-cmake-extension.html](lessons/0001-pybind11-cmake-extension.html)
+- Drill: [drills/0001-pybind11-cmake-extension.html](drills/0001-pybind11-cmake-extension.html)
+- Vocab: [vocab/0001-pybind11-cmake-extension.html](vocab/0001-pybind11-cmake-extension.html)
+
+**Key concepts covered:**
+- Why C++ extensions in a Python trading system (performance, memory layout, SIMD, GIL release)
+- How pybind11 works: PYBIND11_MODULE macro, type casters, py::arg, return_value_policy
+- CMake structure: root CMakeLists.txt + subdirectory, pybind11_add_module
+- PYBIND11_FINDPYTHON=ON vs legacy FindPythonLibs
+- FetchContent vs find_package hybrid strategy
+- scikit-build-core as the pyproject.toml build backend
+- The editable install flow and its limitations for C++ code
+- The parity test pattern: C++ result vs NumPy reference within 1e-9
+- ABI tags and why upgrading Python requires a recompile
+
+**Source files studied:**
+- `cpp/oil_volume/bindings.cpp`
+- `cpp/oil_volume/CMakeLists.txt`
+- `CMakeLists.txt` (root)
+- `pyproject.toml`
+- `scripts/build_cpp.sh`
+- `tests/test_cpp_bridge.py`
+
+---
+
+### 0002 — Driving the Lab & the HFT Concept Map (usage + orientation)
+
+**Date added:** 2026-07-05
+**Status:** Lesson delivered; drill created, not yet attempted (scores pending)
+
+**Context:** Requested via `/teach how to use this HFT application and what HFT
+concepts are there to learn from this`. An orientation module: how to run every
+part of the system, plus a map of which HFT/quant concept lives in which file.
+All run commands were **live-verified during the session** (see verification
+notes below).
+
+**Files:**
+- Lesson: [lessons/0002-hft-system-map-and-usage.html](lessons/0002-hft-system-map-and-usage.html)
+- Drill: [drills/0002-hft-system-map-and-usage.html](drills/0002-hft-system-map-and-usage.html) — 19 questions (13 written recall / 6 MC), channels: running the app, architecture, order book/ITCH/latency, lead-lag statistics, reading real code
+
+**Key concepts covered:**
+- Two-layer architecture: Python daily-frequency research vs C++ nanosecond-scale HFT engineering, and which questions each answers
+- The four ways to drive the repo: Streamlit GUI, headless pipeline, pytest/ctest, latency benchmarks
+- Generator-based pipeline (`run_pipeline()` yielding ProgressEvents; GUI and CLI share one code path)
+- CCF sign convention ρ(k)=corr(x_t, y_{t+k}), k>0 ⇒ x leads; Granger = predictive precedence, not causation
+- Correlation on returns vs cointegration on levels (stationarity)
+- ITCH 5.0 essentials: message subset, big-endian, ×10000 fixed-point prices, defensive parsing
+- Flat-array order book: (price−min)/tick indexing, cache locality as latency, p50 83→42 ns
+- Tail latency (p99/p99.9) as the trading-relevant metric; HDR histogram
+- Concept map incl. future milestones (Kyle's λ, OFI, microprice, Avellaneda-Stoikov, Hayashi-Yoshida)
+
+**Verification notes (2026-07-05, macOS, Python 3.12 venv):**
+- `pytest`: 35/35 pass; `ctest`: 15/15 pass; headless pipeline ran on live data (2,894 rows, 27.7 s)
+- Live-run result over 2015→2026: peak lag 0 (corr 0.58), Granger significant only XLE→CL (p=0.0006) — window-dependent, discussed in lesson scenario A
+- Two bugs found & fixed while verifying: `scripts/build_cpp.sh` macOS portability (empty-array under `set -u`, `nproc`), and missing CMake `install()` rule that made `pip install -e .` ship no compiled extension
+
+**Next suggested:** attempt drill 0002 and record scores here; then a deep-dive
+lesson on the ITCH parser internals (`itch_parser.cpp` byte-level walk) or the
+Granger/cointegration statistics, depending on which drill channels feel shakiest.
+
+---
+
+## Backlog
+
+- ITCH parser internals: byte-level parsing, endianness, framing (`cpp/itch/itch_parser.cpp`)
+- Granger causality & cointegration theory (statsmodels internals, unit roots)
+- The latency histogram: bucket/sub-bucket math (`cpp/common/latency_histogram.hpp`)
+- Future milestones when data exists: Kyle's λ, OFI, microprice, Avellaneda-Stoikov

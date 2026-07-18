@@ -1,0 +1,2 @@
+- [GitHub auth setup](github-auth-setup.md) — bjl14710; real token in TOKEN, session GH_TOKEN may be stale; gh installed
+- [Stacked PR workflow](stacked-pr-workflow.md) — Brandon merges stacks top-down, sometimes live during sessions; PROGRESS.md invariant + regenerate index.html

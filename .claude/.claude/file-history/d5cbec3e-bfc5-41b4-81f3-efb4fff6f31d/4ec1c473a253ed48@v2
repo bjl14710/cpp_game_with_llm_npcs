@@ -1,0 +1,58 @@
+# Learning Progress
+
+> Stateful tracker for `/teach`. Read this before teaching anything new.
+> The "map" of what the user has learned, what landed, what to teach next.
+
+## How to use this file
+
+- One row per lesson under **Lessons taught**.
+- Status reflects the user's chat-time grasp, not just whether they opened
+  the HTML.
+- **Suggested next** is the single most useful concept to teach in this
+  project, given the user's current level and the code they're writing.
+
+## Lessons taught
+
+| #     | Topic                                | File                                                                 | Status     | Notes |
+| ----- | ------------------------------------ | -------------------------------------------------------------------- | ---------- | ----- |
+| 0001  | Embedded LLMs in game applications   | [lessons/0001-embedded-llm-in-games.html](lessons/0001-embedded-llm-in-games.html) | In progress | First /teach lesson. Covers sidecar vs in-process, persona+history, async drain pattern. Real code walkthrough uses LlmClient.cpp / Npc.cpp from cpp_game_with_llm_npcs. |
+
+## Concepts demonstrated in the project but not yet formally taught
+
+These are concepts the user has *seen* in the code I wrote but hasn't yet
+had a lesson on. Each is a candidate for a follow-up `/teach`.
+
+- **Producer/consumer with `condition_variable`** — `LlmClient::workerLoop`.
+  Why a CV beats spinning; how `notify_one` vs `notify_all` differ.
+- **RAII for thread lifetime** — `LlmClient` ctor starts the thread, dtor
+  joins it. What goes wrong if you forget either.
+- **Header-only vendored deps** — `external/httplib.h`, `external/json.hpp`.
+  When this beats a package manager and when it doesn't.
+- **CMake `find_package` vs `target_include_directories`** — the difference
+  between a real find module (SFML) and just adding `external/` to the
+  include path.
+- **System fonts on Linux vs Windows** — the path-probing in
+  `findSystemFont()`. Why bundling a font is the alternative.
+- **Filesystem path walking with `std::filesystem`** — how `main.cpp`
+  locates `config/llm.cfg` whether launched from project root or `build/`.
+
+## Suggested next topic
+
+**Producer/consumer with `std::condition_variable`.** The user has working
+code that uses one (`LlmClient::workerLoop`), but hasn't been taught
+*why*: why a CV instead of a `sleep()` poll loop, why the predicate inside
+`wait()`, why two separate mutexes for requests vs replies. This is the
+single most reused threading primitive they'll touch in this codebase, and
+it's already sitting in their repo waiting to be explained.
+
+A close second is **prompt engineering for persona consistency** — once
+they actually run the game and Wren goes off-script, that lesson becomes
+the immediate next thing they need.
+
+## Things the user has *struggled* with
+
+(empty — fill in as we go)
+
+## Things the user has *grasped firmly*
+
+(empty — fill in as we go)

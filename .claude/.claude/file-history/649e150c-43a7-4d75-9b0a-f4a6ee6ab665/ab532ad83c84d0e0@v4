@@ -1,0 +1,35 @@
+# Learning Progress — HFT_practice
+
+A running map of what's been taught, how well it landed, and what to teach next.
+The HTML lessons in `lessons/` are the durable artifact; this file is the index.
+
+## Lessons completed
+
+| # | Topic | File | Date | Grasp |
+|---|-------|------|------|-------|
+| 0001 | Basic HFT concepts: bid/ask/spread, LOB, market making, latency, FPGA vs CPU | [0001-basic-hft-concepts.html](lessons/0001-basic-hft-concepts.html) | 2026-06-09 | TBD — quiz pending |
+| 0002 | FPGAs in HFT: registered pipelines, valid handshakes, walkthrough of all three `fpga/*.vhd` modules, latency budget | [0002-fpgas-in-hft.html](lessons/0002-fpgas-in-hft.html) | 2026-06-09 | TBD — quiz pending |
+| 0003 | ML algorithms in trading: linear regression vs MA rule vs gradient boosting, step-by-step boosting, feature engineering in `build_features`, why regression beats classification for ranking | [0003-ml-algorithms-in-trading.html](lessons/0003-ml-algorithms-in-trading.html) | 2026-06-09 | TBD — quiz pending |
+
+## What the learner now knows
+(Update after each lesson based on quiz performance and chat questions.)
+
+- *Lessons 0001–0003 delivered; verify retention with post-lesson Q&A.*
+
+## What was hard
+- *Capture friction points here — they signal what to drill next.*
+
+## Suggested next lessons (in order)
+
+1. **Walk-forward backtesting and look-ahead bias** — formalize the temporal discipline that lesson 0003 hinted at. Ground in `walkforward_sim.py` rolling retrain logic, contrast with `paper_trading_sim.py`'s single-split backtest. Concepts: leakage, survivorship bias, in-sample vs out-of-sample R².
+2. **Mean-variance portfolio optimization** — what `predict_next.py:meanvar_long_only` actually does, why `w ∝ Σ⁻¹μ` is the canonical answer, what shrinkage (`--shrink`) buys, and why the per-name cap (`--max_w`) is non-negotiable in practice.
+3. **The Limit Order Book in depth** — price-time priority, queue position, what "top of book" means. Ground in `fpga/market_maker.vhd` quoting logic.
+4. **Adverse selection and inventory risk** — the two things that kill market makers. Illustrated against `market_maker.vhd`'s blind quote logic (no inventory tracking — a real gap). Motivates the README "Risk engine" roadmap item.
+5. **From model to silicon** — the ONNX bridge in `gradient_boosting/main.cpp` plus the hls4ml / Vitis AI path mentioned in `fpga/README.md`. Why HFT firms compile models, what stays in CPU.
+6. **Synthesis, place-and-route, and timing closure** — what actually happens when you run `vivado_hls -f fpga/hls_synthesis.tcl`, and why "meeting timing" is the real bottleneck in FPGA HFT development.
+
+## Notes for future-me (the teacher)
+
+- This repo is named "HFT_practice" but its Python is daily-frequency. Don't perpetuate the misnomer — be clear about which files are genuinely HFT-style (the VHDL + C++ ONNX path) and which are quant rebalancing.
+- Best teaching examples already in repo: `fpga/market_maker.vhd`, `gradient_boosting/main.cpp`, `paper_trading_sim.py` (`build_features`), `walkforward_sim.py` for risk overlay concepts.
+- User reads code; lean on real files over abstractions.

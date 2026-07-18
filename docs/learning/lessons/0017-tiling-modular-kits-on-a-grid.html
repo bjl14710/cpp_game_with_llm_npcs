@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0017 — Tiling Modular Kit Pieces over a Parametric Grid</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0017 · Rendering · from issue #65 (road tiles)</div>
+<h1>Tiling Modular Kit Pieces over a Parametric Grid</h1>
+<p>Modular asset kits (KayKit, Synty, Kenney) ship roads, walls, and floors
+as <em>tiles</em>: origin-centered, uniform footprint, designed to butt
+seamlessly. The skill is not placing them by hand — it's deriving every
+placement from the same constants that define your world.</p>
+
+<h2>Anchor the tile grid to the world's landmarks</h2>
+<p>The downtown layout is parametric: 3×3 blocks on a 64-unit pitch, 16-unit
+streets centered at ±32, map edge at ±110. The naive tiling — start at one
+edge and step by tile size — misaligns everything that matters: 220/16 is
+not an integer, and junction art must land <em>exactly</em> where streets
+cross.</p>
+<p>Anchor to the landmarks instead: junctions at (±32,±32) are multiples of
+16, so putting tile <em>centers</em> at multiples of 16 makes every junction
+a tile center by construction. Then:</p>
+<pre><code>t = -96, -80, ..., 96          13 tiles, covering ±104
+t == ±32   → junction tile     (both streets pass through; draw once)
+|‖t|-32| == 16 → zebra tile    (the arm beside each junction)
+±(104..110)  → end cap         (a compressed tile fills the last 6 units)</code></pre>
+<p>The leftover 6 units at each edge get a tile <em>fitted</em> to the odd
+footprint — the Fill contract handles non-square targets, and squished lane
+dashes at the map's far edge are invisible in practice.</p>
+
+<h2>Scale footprint and thickness separately</h2>
+<p>The tiles are 2×2×0.1. Filling a 16-unit street means scaling XZ by 8 —
+but scaling Y by 8 too would raise a 0.8-unit curb over what collision
+treats as flat ground. Players would see a knee-high sidewalk they can walk
+through. The fix: XZ scale comes from the model bounds (Fill contract),
+Y is pinned to a constant 0.05 sliver.</p>
+<div class="callout warn"><strong>General rule.</strong> Ground tiles scale
+in-plane only. Any vertical feature (curb, rail) modeled into a ground tile
+becomes a collision lie the moment you scale it.</div>
+
+<h2>Rotation happens in model space</h2>
+<p><code>DrawModelEx</code> applies <em>scale, then rotation, then
+translation</em>. A 90°-yawed tile therefore has its model-space X axis
+covering the world's Z span — the scale computation must swap axes when the
+rotation flag is set. Getting this wrong on non-square fits stretches the
+lane dashes sideways.</p>
+
+<h2>Always keep the primitive fallback</h2>
+<p>The old asphalt strips didn't die: they render whenever the road models
+are missing, preserving the "clone the repo without running
+<code>fetch_assets.sh</code>" path. A renderer that requires optional assets
+is a renderer with a mandatory dependency.</p>
+
+<div class="callout good"><strong>Cost check.</strong> 4 street runs × 13
+tiles + 8 end caps ≈ 60 <code>DrawModelEx</code> calls of a 2-triangle-dozen
+mesh — noise next to the skinned characters. Tiling is cheap; don't
+prematurely batch.</div>
+</div></body>
+</html>

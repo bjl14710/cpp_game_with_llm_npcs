@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Draft PR for world time + ticket bookkeeping (#78-#81)."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+body = (
+    "Closes #78, closes #79, closes #80, closes #81 (milestone #7). "
+    "Stacks on #77 (base = `feature/character-creator`); plan: "
+    "`.claude/plans/world-time-and-schedules.md`.\n\n"
+    "## What this delivers\n"
+    "One authoritative world clock on a new generic shared-fact store "
+    "(the **world bus** that the gossip and journal projects plug into "
+    "next), NPC daily routines driven by it, and a full day/night visual "
+    "cycle — the town lives on a schedule and the light follows.\n\n"
+    "## Design\n"
+    "- **WorldState**: string-keyed facts (number and/or text) owned by "
+    "World; the clock is its first fact (`world_time_seconds`). 1 real "
+    "second = 1 game minute (24-minute day), starts 09:00, wraps at "
+    "midnight. Deliberately minimal: no subscriptions/persistence/"
+    "replication until a consumer needs them.\n"
+    "- **Injected time**: `Npc::update` takes the hour as a parameter — "
+    "NPCs keep no clock of their own (a test passes different hours to "
+    "the same NPC and watches the destination change). Schedules are "
+    "authored in `.persona` files (`schedule = HH-HH, x, z, activity`), "
+    "wrap midnight, pause politely when the player is near, and yield to "
+    "combat/instructed behaviors. Activity labels ride the nameplates.\n"
+    "- **Day/night**: pure curves in `DayNight.hpp` (band edges "
+    "continuity-tested); sky clear color, fog color, and a new "
+    "`lightLevel` shader uniform all derive from the same hour, so fog "
+    "keeps melting into the horizon at midnight exactly like noon.\n"
+    "- **Deterministic smokes**: `--hour H` pins the clock (screenshots "
+    "at 09:00 / 19:30 / 00:00 verified day, warm dusk haze, and dark "
+    "night).\n\n"
+    "## Verification\n"
+    "- Suite 149 cases / 1449 assertions green (clock wrap, fact "
+    "round-trips, schedule selection incl. midnight wrap and edge "
+    "hours, no-private-clock, pause-near-player, malformed schedule "
+    "lines, curve continuity).\n"
+    "- Down-street screenshots at three pinned hours.\n\n"
+    "## Logged limitations\n"
+    "Guests run their own clock from the same 09:00 start (replication "
+    "lands with gossip's protocol bump); time doesn't persist across "
+    "restarts (first consumer of that is gossip persistence).\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+pr = retry(lambda: repo.create_pull(
+    title="feat(world): shared clock on the world bus, NPC schedules, day/night",
+    body=body,
+    head="feature/world-time",
+    base="feature/character-creator",
+    draft=True), "create pr")
+print(f"PR #{pr.number}: {pr.html_url}")
+
+for number in (78, 79, 80, 81):
+    issue = retry(lambda: repo.get_issue(number), f"issue {number}")
+    retry(lambda: issue.add_to_labels("ai-completed"), "label")
+    try:
+        issue.remove_from_labels("ai-in-progress")
+    except GithubException:
+        pass
+    retry(lambda: issue.create_comment(
+        f"Implemented in draft PR #{pr.number}. Suite 149/1449 green; "
+        "day/dusk/night screenshots verified."), "comment")
+    retry(lambda: issue.edit(state="closed"), "close")
+    print(f"issue #{number} closed")

@@ -1,0 +1,303 @@
+"""Four milestones + 21 issues for: sandbox editor, traits, groups, world-gen."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+gh = Github(token)
+repo = gh.get_repo(full)
+username = gh.get_user().login
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+existing_titles = {i.title.lower() for i in retry(repo.get_issues, state="open")}
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`{branch}` (one atomic commit per issue; branch stacked per the milestone description)
+
+## Concept for learning materials
+{concept}
+"""
+
+SHARED = ("Read .claude/skills/sandbox-worldgen/SKILL.md FIRST — the cross-feature "
+          "contracts (map JSON, repopulation seam, trait order, turn caps, validator "
+          "discipline) live there. Scaffold headers are the interface spec; un-skip the "
+          "matching test stub in the same commit.")
+
+MILESTONES = [
+    dict(
+        title="Sandbox map editor",
+        description=("Build maps from pieces, place NPCs, play them. Plan: .claude/plans/"
+                     "sandbox-map-editor.md. Skill: .claude/skills/sandbox-worldgen/SKILL.md. "
+                     "Branch feature/sandbox-map-editor (scaffolded, stacked on "
+                     "feature/mii-style-visual-overhaul). BUILD ORDER: this milestone first."),
+        branch="feature/sandbox-map-editor",
+        specs=[
+            dict(title="feat(sandbox): piece catalog + map format + validate + buildCity",
+                 what=("Implement PieceCatalog.cpp (~20 starter rows sized from City::makeDowntown's "
+                       "authored AABBs) and SandboxMap.cpp: toJson/fromJson per the contract in "
+                       "SandboxMap.hpp, validateMap returning EVERY error (unknown id, off-grid, out of "
+                       "bounds, solid-footprint overlap, NPC-in-solid, malformed source), and buildCity "
+                       "compiling solid pieces to Building rows (id = assetId + '#' + n)."),
+                 where="src/core/PieceCatalog.{hpp,cpp}, src/core/SandboxMap.{hpp,cpp}; un-skip 4 stubs in tests/test_sandbox_map.cpp",
+                 verify=("Round-trip byte-stable; every validator failure class named; buildCity AABBs match "
+                         "footprints exactly; resolveMovement blocks on a placed solid like a native building. "
+                         "make -C tests test green."),
+                 constraints=(SHARED + " Error strings must be LLM-retry-feedback quality — they are reused "
+                              "verbatim by llm-world-generation."),
+                 economy="nlohmann json (vendored) only; no new deps; the catalog is data rows, zero piece-specific code.",
+                 concept="compile-to-existing-systems: an editor with no new runtime"),
+            dict(title="feat(world): repopulation seam — loadCity + extracted spawn paths",
+                 what=("World::loadCity(City) swapping city_ and clearing npcs_/projectiles_ in place (World "
+                       "can't be reassigned — Npc holds LlmClient&); extract main.cpp's roster spawning and "
+                       "per-NPC side arrays (npcLooks, npcLastPos, wasCaught, savedTurns) into reusable "
+                       "lambdas (spawnTownRoster, spawnMapNpcs, resetNpcSideArrays)."),
+                 where="src/core/World.{hpp,cpp} (TODO marker in place), src/app/main.cpp; un-skip the round-trip stub in tests/test_sandbox_map.cpp",
+                 verify=("Town -> loadCity(map) -> loadCity(makeDowntown) round-trips: collision correct, roster "
+                         "respawned, side arrays sized right (World-level test + smoke boot). Existing tests untouched."),
+                 constraints=SHARED + " Pure refactor on the main.cpp side — town behavior byte-identical.",
+                 economy="No new types beyond the lambdas; loadCity is ~10 lines; the extraction is a move, not a rewrite.",
+                 concept="swapping world contents when the world cannot be reassigned"),
+            dict(title="feat(render): instance-suffixed asset lookup + --map smoke flag",
+                 what=("Strip an instance suffix at '#' in the curated-model lookup so 'bakery#2' finds the "
+                       "bakery model; add a --map <file> flag beside --frames that loads a map fixture at boot "
+                       "for headless screenshots."),
+                 where="src/app/Assets.cpp (lookup), src/app/main.cpp (flag parse + boot path)",
+                 verify=("A fixture map JSON renders its pieces with real models in a --frames screenshot; "
+                         "unknown-id pieces draw the generic fallback; suite green."),
+                 constraints=SHARED + " The '#' strip is the ONLY renderer-side change this milestone allows.",
+                 economy="One small helper + one flag branch; reuse the existing --frames parsing block.",
+                 concept="stable asset ids vs instance identity"),
+            dict(title="feat(sandbox): editor mode — camera, ghost cursor, place/delete, save",
+                 what=("AppMode::SandboxEdit: high tilted pan camera (WASD pans, scroll zooms), mouse ray -> "
+                       "ground -> snapped tile with a translucent ghost of the current piece (green/red by "
+                       "validity), click place / right-click delete / [ ] cycle pieces, Escape back (autosave "
+                       "draft); Menu Sandbox page: list saves/maps/*.json, New (name), Edit, Play."),
+                 where="src/app/main.cpp (mode + input + ghost render), src/app/Menu.{hpp,cpp} (Sandbox page)",
+                 verify=("Screenshot: ghost preview snapped to grid; invalid placement red + refused; save -> quit "
+                         "-> load reproduces the map byte-stable. Suite green (core paths already tested)."),
+                 constraints=SHARED + " Ghost renders through the NORMAL building path with a tint — no bespoke preview renderer.",
+                 economy="Follow the Menu page pattern exactly (layout()/Hit/kId rows); no rotation, no undo in v1.",
+                 concept="ray-to-grid cursor with validity preview"),
+            dict(title="feat(sandbox): NPC placement from both character pools",
+                 what=("In-editor NPC picker cycling the shipped roster + CharacterStore characters (Tab toggles "
+                       "piece/NPC placement); placed NPCs render their real looks in-editor; play mode spawns "
+                       "them through the standard persona/look pipeline with schedules SUPPRESSED; deleted "
+                       "character ids skip with a logged reason at load."),
+                 where="src/app/main.cpp, src/app/Menu.cpp (picker rows); un-skip the placed-NPC stub in tests/test_sandbox_map.cpp",
+                 verify=("Fixture map with persona:baker + character:<id> spawns both in play mode with correct "
+                         "looks; scheduled NPC stays placed (test); dialogue works in-map (manual note)."),
+                 constraints=SHARED + " One spawn pipeline — placement must NOT duplicate the roster/store spawn code (use the step-2 lambdas).",
+                 economy="The picker is a cycler row like the creator's part rows; no new UI widgets.",
+                 concept="one spawn pipeline, three entry points"),
+            dict(title="chore(qa): sandbox fixture map + visual gate + report",
+                 what=("Author a small fixture map (shops, props, road paint, two NPCs — one premade, one "
+                       "created); visual-qa subagent screenshots it via --map and judges scale/collision/looks; "
+                       "report + decisions into OVERNIGHT_REPORT.md; town round-trip smoke."),
+                 where="tests fixture + docs/qa/screenshots/sandbox/ (gitignored) + OVERNIGHT_REPORT.md (local)",
+                 verify="QA verdict recorded; pieces render at correct scale; NPCs stand with correct looks; core collision tests green.",
+                 constraints=SHARED + " Findings recorded, not acted on beyond this milestone's own acceptance.",
+                 economy="No code beyond fixes a failed gate requires.",
+                 concept="fixture-driven visual verification"),
+        ]),
+    dict(
+        title="NPC trait system + rating loop",
+        description=("Traits as data + human-curated rating loop. Plan: .claude/plans/npc-traits-and-ratings.md. "
+                     "Branch feature/npc-traits, stacked on feature/sandbox-map-editor. BUILD ORDER: second."),
+        branch="feature/npc-traits",
+        specs=[
+            dict(title="feat(traits): trait files, loader, and starter library",
+                 what=("Implement Trait.cpp: loadAllTraits parsing traits/*.trait (name=, repeated rule=, paired "
+                       "example_user=/example_npc=; grumpy.trait is the format spec), malformed files skipped "
+                       "with named errors; author 6-8 starter traits with 2-3 rules + 1-2 exchanges each."),
+                 where="src/core/Trait.{hpp,cpp}, traits/*.trait; un-skip the parse stub in tests/test_traits.cpp",
+                 verify="Parse/skip tests green; every starter trait loads; unpaired example lines are named errors.",
+                 constraints=SHARED + " Loader mirrors loadAllPersonas exactly (sorted, errors collected, never fatal).",
+                 economy="Same key=value parsing helpers as PersonaLoader — no format library.",
+                 concept="behavior as curated data files"),
+            dict(title="feat(traits): ordered prompt composition with post-memory reinforcement",
+                 what=("Persona gains traitIds (repeated `trait =` key, round-tripped, <=3 cap as parse error); "
+                       "renderSystemPrompt composes identity -> trait rules+examples -> knowledge/gossip -> "
+                       "memory -> trait REINFORCEMENT (after memory — the anti-drift contract); registry "
+                       "threaded by reference so Persona stays I/O-free; unknown ids demote at spawn, logged."),
+                 where="src/core/Persona.hpp (marker in place), src/core/PersonaLoader.cpp, src/core/Npc.{hpp,cpp}, src/app/main.cpp (load traits at startup); un-skip 3 stubs in tests/test_traits.cpp",
+                 verify=("STRING-INDEX order test green (backstory < rules < examples < memory < reinforcement); "
+                         "trait key round-trips; unknown-id demotion logged; persona_prompt CLI dumps the assembly for eyeballing."),
+                 constraints=SHARED + " Legacy free-text `traits =` adjectives untouched — the new key is additive.",
+                 economy="Two render functions + one vector member; no prompt-template engine.",
+                 concept="prompt assembly order as a tested contract"),
+            dict(title="feat(creator): trait picker on the creator page",
+                 what=("A trait cycler/toggle row (up to 3) on the creator page in NPC mode; chosen ids flow "
+                       "through renderPersonaText into the store and spawn with the character. Editing an "
+                       "EXISTING character may be deferred with a logged note if the surgery is heavy."),
+                 where="src/app/Menu.{hpp,cpp}, src/app/main.cpp creator hooks",
+                 verify="Create a character with 2 traits -> stored persona text carries them -> spawned NPC's prompt shows them (CLI dump).",
+                 constraints=SHARED + " Avatar mode shows NO trait row (avatars have no persona).",
+                 economy="Reuse the part-cycler row pattern; no new widget kinds.",
+                 concept="data-driven UI rows"),
+            dict(title="feat(ratings): in-dialogue rating capture to curated review files",
+                 what=("After a completed NPC reply: unobtrusive [+]/[-] affordance; good appends {trait ids, "
+                       "persona id, player line, reply, ts} to saves/ratings/candidates.jsonl, bad to "
+                       "rejected.jsonl (with context); one rating per reply; store-unavailable degrades to no-op."),
+                 where="src/app/DialogUI.{hpp,cpp}, src/app/main.cpp, new src/core/RatingLog.{hpp,cpp}; un-skip the rating stub in tests/test_traits.cpp",
+                 verify=("JSONL rows well-formed (test); the live system prompt is BYTE-IDENTICAL before/after "
+                         "rating (test) — no auto-promotion exists anywhere."),
+                 constraints=SHARED + " Human curation is the design: promotion = manually editing a .trait file. Do not build promotion.",
+                 economy="RatingLog is an append-only file writer (~40 lines); no sqlite table for v1.",
+                 concept="human-in-the-loop few-shot curation"),
+            dict(title="docs(traits): LoRA escalation path (document, do not build)",
+                 what=("docs/design/TRAIT_FINE_TUNE_PATH.md: what the rating loop accumulates, how it would map "
+                       "to LoRA training rows, and the measured signal (trait-adherence failures despite "
+                       "conditioning) that would justify escalation. No training code."),
+                 where="docs/design/TRAIT_FINE_TUNE_PATH.md (committed — it is design doc, not report)",
+                 verify="Doc exists, names the data shapes and the decision criteria; zero code changes in the commit.",
+                 constraints="Document only — the brief forbids training work this ticket.",
+                 economy="One markdown file.",
+                 concept="conditioning-vs-training decision criteria"),
+        ]),
+    dict(
+        title="Follow + group conversations",
+        description=("N-way turn-based dialogue over the existing pipeline. Plan: .claude/plans/"
+                     "group-conversations.md. Branch feature/group-conversations, stacked on "
+                     "feature/npc-traits. BUILD ORDER: third."),
+        branch="feature/group-conversations",
+        specs=[
+            dict(title="feat(npc): mood-gated follow via the existing action pipeline",
+                 what=("'Follow me' already reaches NpcAction::Follow through propose-validate-commit; add the "
+                       "mood gate to VALIDATION (Hostile/Afraid refuse; the refusal reads in-character) and a "
+                       "group-full refusal (player + 3 NPCs cap)."),
+                 where="src/core/Npc.cpp validation path; un-skip the follow stub (tests/test_group_session.cpp or test_npc_action.cpp — implementer's call, note it)",
+                 verify="Willing NPC follows; Hostile/Afraid refusal tested at the validation layer; existing action tests green.",
+                 constraints=SHARED + " No parallel follow mechanic — the action door is the only door.",
+                 economy="A predicate in the existing validator; zero new systems.",
+                 concept="player intent through the same propose-validate-commit door"),
+            dict(title="feat(dialogue): GroupSession — participants, addressing, turn caps",
+                 what=("Implement GroupSession.cpp to the scaffold header: labeled transcript, addressed-by-name "
+                       "(leading name, full-name wins ties, no-match = round-robin), kMaxConsecutiveNpcTurns=2 "
+                       "enforcement, per-speaker prompt assembly (their persona/traits/memory/gossip + named transcript)."),
+                 where="src/core/GroupSession.{hpp,cpp}; un-skip 3 stubs in tests/test_group_session.cpp",
+                 verify="Addressing/cap/labeling unit tests green against the FakeBackend pattern; solo DialogueSession untouched.",
+                 constraints=SHARED + " Do NOT refactor DialogueSession — group is additive; solo stays byte-identical.",
+                 economy="Pure core state machine; no threading (single-flight client is the concurrency model).",
+                 concept="turn-taking as testable core state"),
+            dict(title="feat(app): group conversation wiring — party, routing, labeled UI",
+                 what=("Party tracking (followers), T near a second NPC with followers opens a group; request-id "
+                       "-> {group, npcIndex} routing (pendingRoutes pattern); DialogUI shows speaker names, a "
+                       "party line, and a turn indicator during NPC-to-NPC exchanges; per-turn latency logged."),
+                 where="src/app/main.cpp, src/app/DialogUI.{hpp,cpp}",
+                 verify="Manual flow note + screenshot of a labeled 3-way transcript; solo dialogue regression-checked; latency numbers in stderr.",
+                 constraints=SHARED + " Strictly sequential turns — never issue a request while one streams.",
+                 economy="Mirror the existing pendingRoutes map; no new routing abstraction.",
+                 concept="request-id routing with per-speaker fan-in"),
+            dict(title="feat(memory): per-perspective summaries and attributed facts in groups",
+                 what=("On close, each participant summarizes THE TRANSCRIPT from their own perspective into "
+                       "their private memory; per-reply fact extraction attributes to the SPEAKING NPC on the "
+                       "world bus; participant death/leave drops them with a transcript note."),
+                 where="src/app/main.cpp close/extraction paths; un-skip 2 stubs in tests/test_group_session.cpp",
+                 verify="Attribution + per-perspective tests green; journal shows facts credited to the right speaker.",
+                 constraints=SHARED + " Reuse the existing summary/fact request kinds — new prompts, not new plumbing.",
+                 economy="No schema changes to stores; source field already exists on facts.",
+                 concept="one transcript, N private memories"),
+            dict(title="chore(report): group latency measurements + ambient-chatter write-up",
+                 what=("Measure per-turn latency across a 3-NPC session; record numbers + the honest "
+                       "ambient-chatter assessment (include only if it fell out of the group mechanism; "
+                       "otherwise the follow-up design sketch) in OVERNIGHT_REPORT.md."),
+                 where="OVERNIGHT_REPORT.md (local)",
+                 verify="Numbers present; ambient-chatter decision stated plainly.",
+                 constraints="Observations and measurements only.",
+                 economy="No code beyond the timing already added in the wiring issue.",
+                 concept="latency budgeting for multi-agent LLM turns"),
+        ]),
+    dict(
+        title="LLM world generation",
+        description=("Natural language -> validated map + cast specs. Plan: .claude/plans/llm-world-generation.md. "
+                     "Branch feature/llm-world-generation, stacked on feature/group-conversations. BUILD ORDER: "
+                     "fourth — the map half needs the sandbox milestone merged into the stack first."),
+        branch="feature/llm-world-generation",
+        specs=[
+            dict(title="feat(worldgen): validation layer for generated casts",
+                 what=("Implement WorldGenValidate.cpp: validateCast (persona parses via parsePersonaText, look "
+                       "via lookIsValid, trait ids exist, names non-empty + unique; errors suggest nearest valid "
+                       "ids), extractJsonObject (fences/prose tolerated), renderRetryFeedback."),
+                 where="src/core/WorldGenValidate.{hpp,cpp}; un-skip all 4 stubs in tests/test_worldgen_validate.cpp",
+                 verify="Every failure class named (tests, offline); valid fixtures pass; map side reuses validateMap (no duplication).",
+                 constraints=SHARED + " One entrance to the load path — nothing generated loads except through validation.",
+                 economy="The existing parsers ARE the validators — wrap, don't reimplement.",
+                 concept="validators as the real API of generative features"),
+            dict(title="feat(worldgen): cast generation with error-feedback retries",
+                 what=("Prompt template (description + part/trait catalog digest + schema + rules) through the "
+                       "internal LlmClient request kind; parse -> validate -> retry with errors verbatim (cap 3) "
+                       "-> plain failure; headless CLI hook for testing without the game."),
+                 where="src/core/WorldGen.{hpp,cpp}, CLI hook (persona_prompt pattern)",
+                 verify="Live smoke: 5 descriptions -> generated characters load through existing loaders; failure path reports plainly; unit tests offline.",
+                 constraints=SHARED + " If traits haven't merged beneath this branch, omit the trait field from the schema (logged).",
+                 economy="Reuse the internal request routing summaries/facts use; no new client capabilities.",
+                 concept="closed-world schema prompting"),
+            dict(title="chore(bench): schema-validity benchmark across local models",
+                 what=("Implement tools/bench_schema_models.py per its docstring: fixed prompt corpus, per-model "
+                       "validity/retry/latency, validation via a C++ CLI (--validate-cast/--validate-map) so the "
+                       "bench and game share ONE contract; pick worldgen_model in llm.cfg by measured validity."),
+                 where="tools/bench_schema_models.py (stub in place), small validate CLI, config/llm.cfg key, bench/REPORT.md",
+                 verify=">=2 models measured; numbers in bench/REPORT.md + OVERNIGHT_REPORT.md; configured model is the measured winner.",
+                 constraints=(SHARED + " Model picked by measurement, never by label — 'Ornith' is a candidate to "
+                              "test if pulled, not a default. Cloud leg only if the pluggable backend is configured; otherwise log the skip."),
+                 economy="Mirror bench_npc_models.py structure; validation logic stays in C++.",
+                 concept="task-fit model selection by measured validity"),
+            dict(title="feat(worldgen): map generation against the sandbox format",
+                 what=("Prompt with the piece-catalog digest emitting the sandbox map JSON; strict validateMap "
+                       "gate + retry loop; valid results load through the normal sandbox load path in EDIT mode."),
+                 where="src/core/WorldGen.{hpp,cpp} (map side)",
+                 verify="Live smoke: a description yields a map that opens in the editor; invalid outputs retried with specific feedback; nothing loads unvalidated.",
+                 constraints=SHARED + " STRICT mode (LLM loads never auto-repair) vs the editor's repairable hand-loads — keep the two modes distinct.",
+                 economy="The sandbox milestone's validator and loader are reused untouched.",
+                 concept="piece catalogs as a generation vocabulary"),
+            dict(title="feat(worldgen): combined description -> populated, editable map + sandbox entry",
+                 what=("One flow: description -> map + cast + placements (cast members become the map's npc "
+                       "entries); 'Generate...' text input on the sandbox menu with progress + plain failure "
+                       "toast; results always land in EDIT mode, hand-fixable."),
+                 where="src/core/WorldGen.cpp, src/app/Menu.cpp (sandbox page), src/app/main.cpp",
+                 verify="'fishing village with a grumpy old sailor and two kids' end-to-end: editable map, in-character NPCs placed; report includes the transcript of one full run.",
+                 constraints=SHARED + " Generated output is a draft the player owns — never a locked artifact.",
+                 economy="Composes the two generation paths; no third pipeline.",
+                 concept="generate-validate-load pipelines"),
+        ]),
+]
+
+created_all = []
+for m in MILESTONES:
+    milestone = retry(repo.create_milestone, title=m["title"], description=m["description"])
+    print(f"Milestone #{milestone.number}: {m['title']}")
+    for spec in m["specs"]:
+        if spec["title"].lower() in existing_titles:
+            print(f"  Skipping (exists): {spec['title']}")
+            continue
+        body = TEMPLATE.format(branch=m["branch"], **{k: spec[k] for k in
+                               ("what", "where", "verify", "constraints", "economy", "concept")})
+        issue = retry(repo.create_issue, title=spec["title"], body=body,
+                      labels=["ready-for-ai"], assignees=[username], milestone=milestone)
+        created_all.append((issue.number, m["title"], spec["title"], spec["concept"]))
+        print(f"  #{issue.number}: {spec['title']}")
+
+print(f"\nTOTAL: {len(created_all)} issues across 4 milestones")

@@ -1,0 +1,40 @@
+"""Daily adapter for the existing intraday EngulfingStrategy.
+
+Reuses the 2-candle engulfing detection from :mod:`strategies.engulfing`
+verbatim — this module only translates between the arena's daily contract
+(full history in, DailySignal out) and the intraday contract (prev/curr
+bars in, Signal out). Pattern logic must NOT be duplicated here.
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+from strategies.engulfing import EngulfingStrategy
+
+
+class DailyEngulfingStrategy(DailyStrategy):
+    """Bullish/bearish engulfing patterns evaluated on the last two daily bars."""
+
+    name = "engulfing"
+
+    def __init__(self) -> None:
+        self._inner = EngulfingStrategy()
+
+    @property
+    def warmup_bars(self) -> int:
+        """Two bars: the engulfed candle and the engulfing candle."""
+        return 2
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Map the intraday Signal on df's last two rows to a DailySignal.
+
+        TODO(implement): take prev = df.iloc[-2], curr = df.iloc[-1], call
+        self._inner.generate_signal(prev, curr), then map:
+          BUY  -> DailySignal(+1, confidence=1.0, reason="bullish engulfing")
+          SELL -> DailySignal(-1, confidence=1.0, reason="bearish engulfing")
+          HOLD -> HOLD
+        Return HOLD if len(df) < self.warmup_bars.
+        """
+        raise NotImplementedError("scaffold: see TODO above")
+
+
+__all__ = ["DailyEngulfingStrategy"]

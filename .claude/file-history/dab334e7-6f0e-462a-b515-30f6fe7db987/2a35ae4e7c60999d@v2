@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0040 — Streamlit's Execution Model: Whole-Script Reruns and Where State Lives</title>
+<style>
+  :root { --bg:#0f1419; --panel:#161d26; --ink:#e6e1d7; --dim:#9aa4b2; --accent:#e8a33d;
+          --good:#4cc38a; --bad:#e5534b; --code-bg:#1c2530; --border:#2a3644; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#faf8f4; --panel:#ffffff; --ink:#1f2933; --dim:#5b6572; --accent:#b06f0e;
+            --good:#0e7a4f; --bad:#c0362c; --code-bg:#f0ede6; --border:#ddd6c8; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.65 Georgia, 'Times New Roman', serif; }
+  main { max-width:46rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.6rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size:1.22rem; margin:2.6rem 0 .8rem; color:var(--accent);
+       border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  .kicker { color:var(--dim); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; }
+  .why { background:var(--panel); border-left:4px solid var(--accent); padding:.8rem 1rem;
+         margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; overflow-x:auto; font:13.5px/1.55 'SF Mono', Menlo, Consolas, monospace; }
+  code { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:.88em;
+         background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  .cm { color:var(--dim); font-style:italic; }
+  table { border-collapse:collapse; width:100%; font-size:.9em; margin:1rem 0; }
+  th, td { border:1px solid var(--border); padding:.45rem .65rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .options { list-style:none; padding:0; }
+  .options li { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                padding:.6rem .9rem; margin:.45rem 0; cursor:pointer; }
+  .options li:hover { border-color:var(--accent); }
+  .options li.picked-right { border-color:var(--good); }
+  .options li.picked-wrong { border-color:var(--bad); }
+  .feedback { font-size:.92em; padding:.5rem .8rem; border-radius:6px; background:var(--panel); }
+  .question { margin:2rem 0; }
+  #score { font-weight:bold; }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">HFT Practice · Lesson 0040</p>
+<h1>Streamlit's Execution Model: Whole-Script Reruns and Where State Lives</h1>
+<div class="why"><strong>Why this matters:</strong> the platform now has a real
+Streamlit app (<code>streamlit_app/dashboard.py</code>, PR #75). Streamlit's core
+trick — rerun the ENTIRE script on every interaction — is what makes it feel
+effortless, and it is also the thing that silently breaks apps whose authors
+don't know where state is allowed to live.</div>
+
+<h2 id="s1">1 · The model</h2>
+<p>Click a button, type in a box, switch a tab: Streamlit throws away the frame
+and executes your script again from line 1. Widgets aren't event handlers —
+they're <em>functions that return their current value during this rerun</em>.
+<code>st.button</code> returns <code>True</code> exactly once (the rerun caused by the
+click), then <code>False</code> on every later rerun. There is no callback soup and
+no DOM to reconcile — but it means module-level variables reset on every
+interaction, so anything that must SURVIVE a rerun needs an explicit home:</p>
+<table>
+<tr><th>State</th><th>Correct home</th><th>In our console</th></tr>
+<tr><td>Widget values</td><td>The widgets themselves (keyed by position/label)</td><td>Sidebar paths, tickers, interval</td></tr>
+<tr><td>Accumulated data across interactions</td><td><code>st.session_state</code></td><td><code>tape_seen</code> (signal dedupe), <code>tape_lines</code> (bounded scrollback)</td></tr>
+<tr><td>Module globals</td><td><strong>Nowhere</strong> — reset every rerun</td><td>Deliberately none</td></tr>
+</table>
+<pre><code><span class="cm"># dashboard.py — why the tape survives the rerun the button causes:</span>
+seen = st.session_state.setdefault("tape_seen", {})
+lines = st.session_state.setdefault("tape_lines", [])
+if refresh:                      <span class="cm"># True only on the click-rerun</span>
+    lines.append(...)            <span class="cm"># mutates the session_state object</span>
+    st.session_state["tape_lines"] = lines[-200:]  <span class="cm"># bounded scrollback</span></code></pre>
+
+<h2 id="s2">2 · The two guards this repo added</h2>
+<p><strong>Import-safety guard.</strong> <code>streamlit run</code> executes the file
+top-to-bottom, so apps put their build at module level — but our suite must be
+able to import the module in an environment with NO streamlit. The fix pins the
+launch to a real script-run context:</p>
+<pre><code>if __name__ == "__main__" or _in_streamlit_run():
+    main()
+<span class="cm"># _in_streamlit_run(): streamlit.runtime.scriptrunner.get_script_run_ctx()
+# is not None — true under `streamlit run` AND under AppTest, false for
+# plain imports. Pinned by test_plain_import_never_launches_the_app.</span></code></pre>
+<p><strong>Logic/presentation split.</strong> Reruns make UI code awkward to unit
+test — so everything testable lives in <code>streamlit_app/data.py</code> (pure, no
+streamlit import, read-only <code>mode=ro</code> SQLite), and the UI file is thin
+enough that <code>streamlit.testing.v1.AppTest</code> can exercise it whole: run the
+script, assert on <code>at.metric</code>/<code>at.dataframe</code>/<code>at.exception</code>.</p>
+
+<h2 id="s3">3 · Often confused</h2>
+<table>
+<tr><th>Pair</th><th>Distinction</th></tr>
+<tr><td>Rerun model vs callback model (Tkinter/FastAPI)</td><td>gui_app.py wires callbacks to long-lived widgets; webapp routes handle one request each. Streamlit re-executes everything and RECONSTRUCTS widgets — state lives in session_state, not in the widget tree or module.</td></tr>
+<tr><td><code>st.session_state</code> vs <code>@st.cache_data</code></td><td>session_state is per-browser-tab mutable memory; cache_data memoizes function results across reruns (and users) keyed by arguments. The tape's dedupe dict must NOT be cached — it's stateful, not a pure function result.</td></tr>
+<tr><td>The lab web theme vs this console</td><td>The webapp's "lab" theme is FastAPI wearing Streamlit's CSS; this is actual Streamlit — reruns, session_state, AppTest and all. Two different programs that happen to share an aesthetic.</td></tr>
+</table>
+
+<h2 id="s4">4 · Practice</h2>
+<p>Score: <span id="score">0 / 0</span></p>
+
+<div class="question" data-question>
+  <p><strong>Q1.</strong> A module-level <code>tape_lines = []</code> in dashboard.py would appear to "work" briefly, then always show an empty tape. Why?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Every interaction reruns the whole script — module globals are rebuilt from scratch each time, so the list resets to [] on the very next click.">Each interaction reruns the script, resetting the global to []</li>
+    <li data-correct="false" data-why="Threading isn't the issue — the script rerun is.">Streamlit runs each widget in its own thread</li>
+    <li data-correct="false" data-why="Garbage collection is irrelevant; the name is simply re-bound on rerun.">The GC collects lists without references</li>
+    <li data-correct="false" data-why="st.code renders whatever it's given; the data vanished before rendering.">st.code can't display lists</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q2.</strong> Why does <code>st.button("↻ Refresh")</code> only fetch the tape once per click instead of on every subsequent rerun?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Buttons carry no debounce — the rerun semantics do the work.">Streamlit debounces buttons for 30 seconds</li>
+    <li data-correct="true" data-why="A button returns True only during the single rerun its click caused; the next interaction reruns the script and the button reads False again.">The button returns True only on the click-caused rerun</li>
+    <li data-correct="false" data-why="session_state stores the RESULTS, but the fetch gate is the button's return value.">session_state suppresses repeat fetches</li>
+    <li data-correct="false" data-why="No cache is involved on this path — and caching a stateful poll would be wrong anyway.">cache_data memoizes the fetch</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q3.</strong> The dashboard deliberately does NOT use ArenaState to read the arena DB. What's the reason?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Speed is fine either way; the issue is what the constructor DOES.">ArenaState is too slow for a dashboard</li>
+    <li data-correct="true" data-why="ArenaState's constructor runs guarded ALTER-TABLE migrations — writes. A viewer must never mutate a ledger, so data.py opens its own mode=ro connection that CANNOT write, enforced by SQLite itself (pinned by test).">ArenaState's constructor migrates (writes); the console opens mode=ro instead</li>
+    <li data-correct="false" data-why="It imports fine — the choice is about write-safety, not availability.">strategy_arena can't be imported without streamlit</li>
+    <li data-correct="false" data-why="compare_strategies IS used — just handed a read-only connection.">compare_strategies requires a raw connection</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q4.</strong> Why do the AppTest console tests auto-skip in the core dev environment?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="They're fast (~2s) — speed isn't the reason.">They're too slow for CI</li>
+    <li data-correct="true" data-why="streamlit lives in an OPT-IN extra (`uv sync --extra dashboard`); importorskip makes the suite green without it — which is itself the contract that core installs stay streamlit-free.">streamlit is an opt-in extra; importorskip enforces the streamlit-free core contract</li>
+    <li data-correct="false" data-why="AppTest works headlessly — no browser involved.">AppTest needs a real browser</li>
+    <li data-correct="false" data-why="They run the real dashboard.py, not a mock.">They only test mocks</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<script>
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+let answered = 0, right = 0;
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = q.querySelector('.feedback');
+  let done = false;
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      const correct = li.dataset.correct === 'true';
+      if (!done){ answered++; if (correct) right++; done = true; }
+      li.classList.add(correct ? 'picked-right' : 'picked-wrong');
+      feedback.hidden = false;
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      document.getElementById('score').textContent = right + ' / ' + answered;
+    });
+  });
+});
+</script>
+</main>
+</body>
+</html>

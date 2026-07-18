@@ -1,0 +1,95 @@
+# Plan: Native Streamlit Dashboard (third GUI)
+Date: 2026-07-15
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Add a genuine Streamlit app — not the CSS homage (that's the webapp's "lab"
+theme, shipped) — as a third GUI alongside the Tkinter desktop app and the
+FastAPI webapp. It mirrors the layout patterns of the HFT learning app's
+oil dashboard (`st.set_page_config(layout="wide")`, sidebar of controls,
+`st.metric` cards in columns, tabs, wide dataframes) but reads THIS
+platform's artifacts: the arena database, equity CSVs, and the live-watch
+signal engine. Strictly read-only/research — no arena mutations, no orders.
+
+## Goal
+`uv run streamlit run streamlit_app/dashboard.py` opens a wide-layout
+research console: arena standings with metric cards and status badges,
+equity-curve analysis with charts, and a manual-refresh live-signals tape.
+
+## Design Decisions (recommended options, standing preference)
+- **Dependency as an opt-in extra, not a core dep**: `streamlit>=1.30`
+  under `[project.optional-dependencies] dashboard`. The scaffold does NOT
+  install it; `uv sync --extra dashboard` is the implementer's first step.
+  Core `uv sync` stays exactly as heavy as today.
+- **Logic/presentation split for testability**: all data access lives in
+  `streamlit_app/data.py` (pure functions over the arena DB / CSVs /
+  live_watch — importable and testable WITHOUT streamlit installed);
+  `dashboard.py` is presentation only and imports streamlit lazily at run
+  time. The pytest suite never needs streamlit.
+- **Three tabs, mirroring the oil app's structure**:
+  ① Arena — headline `st.metric` row (tracked / live / diverged), the
+  `compare_strategies` table via `st.dataframe`, status badges as emoji
+  prefixes (dataframes can't render HTML badges — ✅ PASS, ⏸ PAUSED,
+  📚 REFERENCE, 🔬 RESEARCH, 🚫 EXCLUDED).
+  ② Equity — sidebar path input (default `walkforward_equity.csv`),
+  `compute_metrics` cards + `st.line_chart` of equity (+ gross overlay
+  when the CSV has `equity_gross`).
+  ③ Live signals — ticker/interval/strategy controls in the sidebar,
+  a "↻ Refresh" button calling `live_watch.watch_once` (manual refresh,
+  not st.autorefresh — no extra dependency, no surprise API hammering).
+- **Chart convention carried over**: crimson dashed reference lines
+  (the oil app's signature) for drawdown peaks/thresholds where drawn.
+- **Read-only invariant**: data.py takes paths, opens SQLite read-only
+  (`mode=ro` URI) so a dashboard bug can never mutate a ledger.
+
+## Out of Scope (this version)
+- Running backtests/live ticks from the dashboard (arena-run stays the CLI)
+- Auth (localhost tool, same posture as gui-hft)
+- st.autorefresh / websocket live streaming; Plotly (st.line_chart first)
+- Replacing either existing GUI (this is explicitly a third)
+
+## Affected Areas
+- New: `streamlit_app/__init__.py`, `streamlit_app/data.py` (pure:
+  `arena_rows(db_path)`, `arena_headline(rows)`, `equity_metrics(csv)`,
+  `live_tape(tickers, interval, strategy_name)`),
+  `streamlit_app/dashboard.py` (presentation).
+- `pyproject.toml` — `dashboard` optional extra; `streamlit_app` added to
+  packages.
+- New: `tests/test_streamlit_data.py` — data.py only; no streamlit import.
+- `.gitignore` — nothing new needed (no artifacts).
+
+## Implementation Order
+1. `data.py` pure functions + tests (arena read-only URI, badge mapping,
+   headline counts, equity metrics passthrough, live tape lines).
+2. `dashboard.py` presentation: page config, sidebar, three tabs wired to
+   data.py; verified manually via `streamlit run`.
+3. Docs: run instructions in the module docstring + PROGRESS note.
+
+## Acceptance Criteria
+- [ ] `uv sync` (no extra) unchanged; suite green without streamlit installed
+- [ ] `uv sync --extra dashboard && uv run streamlit run
+      streamlit_app/dashboard.py` serves all three tabs against real
+      artifacts when present
+- [ ] `arena_rows()` opens the DB read-only — an attempted write in a test
+      raises (pinned)
+- [ ] Empty/missing DB and missing CSV render friendly empty states, not
+      tracebacks
+- [ ] Badge mapping covers all six statuses
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"` with NO
+      streamlit in the environment
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| streamlit not installed, dashboard.py executed | Clear SystemExit naming `uv sync --extra dashboard` |
+| Arena DB locked by a concurrent arena-run live | Read-only connection retries once, then friendly notice |
+| Equity CSV without an `equity` column | Same error message analyze-equity gives, rendered as st.error |
+| live tape fetch failure | The existing per-ticker error isolation from watch_once flows through |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(dashboard): streamlit_app/data.py — read-only data layer + tests`
+2. `feat(dashboard): three-tab Streamlit console (arena / equity / live tape)`

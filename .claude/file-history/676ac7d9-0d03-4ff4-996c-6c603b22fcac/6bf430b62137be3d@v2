@@ -1,0 +1,25 @@
+# Plan: issue #20 — FR5994 clock-system compliance
+Status: QUEUED (overnight 2026-07-15)
+Branch: feature/issue-20-clock-compliance (stacked on feature/issue-19-timer-compliance)
+
+## Goal (SLAU367P §3.3.2/§3.3.3)
+1. MCLK/SMCLK source sets = {LFXT, VLO, LFMODCLK, DCO, MODCLK, HFXT}
+   (drop REFO/DCOCLKDIV); ACLK = {LFXT, VLO, LFMODCLK}
+2. All dividers validated to /1../32
+3. CLOCK:*:FREQUENCY? computed from the SELECTED source: VLO ≈ 9.4 kHz,
+   MODCLK ≈ 4.8 MHz typ, LFMODCLK = MODCLK/128 — not always DCO/LFXT
+
+## Touch points
+silmulator/devices/msp430.py _clk_* handlers; ClockState may need
+vlo/modclk frequencies. One VALID-set constant per clock, one
+source→frequency helper; no new files.
+
+## Acceptance
+1. xfails flip (delete markers): test_mclk_divider_64_rejected,
+   test_mclk_source_modclk_accepted
+2. Audit probes mclk_source_set / mclk_divider_64 /
+   smclk_source_unvalidated / aclk_divider_unvalidated /
+   mclk_freq_ignores_source go STALE → rescore; gate clean
+3. Fault suite: DCO drift tests still pass for DCO-sourced clocks
+4. TIMERn:INTERVAL? and UART BAUD:ACTUAL? keep working (effective clock tree)
+5. Full suite green

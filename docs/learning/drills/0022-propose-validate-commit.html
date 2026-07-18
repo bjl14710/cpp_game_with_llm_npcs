@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0022 — Propose, Validate, Commit</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0022 · pairs with lesson 0022</div>
+<h1>Drill: Propose, Validate, Commit</h1>
+
+<div class="q"><h3>1. The model replies with one perfect fact and one with
+direction "telepathy". What commits?</h3>
+<details><summary>Answer</summary><div class="a"><p>Nothing. Validation is
+all-or-nothing — a partially-bad proposal yields an empty result, so
+half-good output can't half-corrupt the store.</p></div></details></div>
+
+<div class="q"><h3>2. The player tells Marge the same secret twice, a game
+day apart. How many facts exist and whose timestamp wins?</h3>
+<details><summary>Answer</summary><div class="a"><p>One.
+<code>factIdFor</code> hashes subject+content, and <code>addFact</code>
+keeps the existing record — the FIRST commit's stamp and source survive.
+The second commit only (re-)grants knowledge.</p></div></details></div>
+
+<div class="q"><h3>3. Why must gossip spread by flipping knowledge bits on
+the store instead of NPC→NPC messages?</h3>
+<details><summary>Answer</summary><div class="a"><p>Any future reader (the
+journal tonight, quests later) sees the complete knowledge state by
+reading ONE place. A message channel would put truth in transit — the
+journal would need to eavesdrop on every conversation instead of querying
+the bus.</p></div></details></div>
+
+<div class="q"><h3>4. Name the three propagation gates and what each
+protects.</h3>
+<details><summary>Answer</summary><div class="a"><p>Radius (6u): gossip
+requires actual proximity — schedules create the encounters. Age (30 game
+minutes): a secret doesn't teleport across town the tick after it's told.
+Chance (35%, one fact per pair per tick): spread is gradual and traceable
+— conservative by instruction, easier to loosen than walk back.</p>
+</div></details></div>
+
+<div class="q"><h3>5. Journal bonus: why is same-subject SAME-content from
+two tellers not flagged?</h3>
+<details><summary>Answer</summary><div class="a"><p>That's corroboration —
+two people agreeing. A conflict needs the same normalized subject with
+DIFFERING content; both sides get flagged so the player sees the
+disagreement, not a verdict.</p></div></details></div>
+</div></body>
+</html>

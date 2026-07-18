@@ -1,0 +1,113 @@
+# Plan: Historical Shock-Period Stress Testing for walkforward_sim.py
+Date: 2026-07-07
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: S
+
+## The Idea (one paragraph)
+Live paper-trading over a few months is very unlikely to include a genuine
+market shock, so strategies never get tested against the scenarios that
+matter most for risk. This adds a `--stress` mode to `walkforward_sim.py`
+that, instead of running once over `--start`/`--end`, replays the same
+simulation independently over each of a small registry of known historical
+shock windows (the Feb–Mar 2020 COVID crash, the 2022 selloff, plus room to
+add more) and reports one set of metrics per shock period side by side with
+the normal rolling-window run.
+
+## Goal
+One flag answers "how would this strategy have behaved during a real crash?"
+without hand-picking date ranges every time.
+
+## Design Decisions
+- **Shock windows are a small, hardcoded, well-known registry**, not
+  user-authored config in this version — they're historical facts, not
+  opinions: `covid_2020` (2020-02-15 to 2020-04-15), `selloff_2022`
+  (2022-01-01 to 2022-10-15), and `vol_spike_2018` (2018-10-01 to
+  2018-12-24, the Q4 2018 selloff) as a third, less commonly cited one for
+  variety. Extensible later via a `--shocks_json` override file, but the
+  built-in three ship as the default and require no authoring to use.
+- **Scope: `walkforward_sim.py`, both simulation paths**, matching the idea's
+  named file exactly. `--stress` reruns the GBM `simulate_walkforward` path
+  when a `--model` bundle is given, and is exposed as a reusable helper
+  (`run_shock_tests`) that also accepts a `DailyStrategy` so the arena's
+  generic path can call it too — arena CLI wiring (`arena-run backtest
+  --stress`) is listed as a fast-follow issue rather than bundled here, to
+  keep this plan's diff to one file's CLI.
+- **Output**: one row per shock period (period name, window dates, Sharpe,
+  CAGR, MaxDD, worst single day) printed as a table, plus one optional CSV
+  per period if `--out_equity_csv` is given (suffixed with the period name).
+  The normal `--start`/`--end` run, if also requested, prints first, so
+  `--stress` is additive, not a replacement for the standard run.
+
+## Out of Scope (this version)
+- User-authored custom shock windows beyond the `--shocks_json` override
+  hook (the hook exists; authoring UX is not polished this round)
+- Wiring into `arena-run backtest` (fast-follow — the helper is written to
+  be reusable, but CLI plumbing there is separate)
+- Intraday shock analysis (`intraday_sim.py` / `PaperEngine`) — daily bars
+  only, matching the rest of the arena's scope
+- Statistical significance testing of shock-period results (small samples by
+  construction; this is a diagnostic report, not a hypothesis test)
+
+## Affected Areas
+- New: `shocks.py` — `SHOCKS: Dict[str, Tuple[str, str]]` (name → (start,
+  end) registry as above); `load_shocks(json_path: str | None) ->
+  Dict[str, Tuple[str, str]]` (returns `SHOCKS` merged with/overridden by an
+  optional JSON file of the same shape).
+- `walkforward_sim.py` — `run_shock_tests(bundle_path_or_strategy, tickers,
+  shocks, **sim_kwargs) -> pd.DataFrame` (one row per shock: runs the
+  appropriate simulate function — `simulate_walkforward` if given a bundle
+  path, `run_strategy_walkforward` if given a `DailyStrategy` instance —
+  over each window, computes metrics via `analyze_equity.compute_metrics`
+  plus a `worst_day` column, catches and reports per-window failures such as
+  "no data available for this ticker in this window" without aborting the
+  other windows). `main()` gains `--stress` (flag) and `--shocks_json`
+  (optional override path).
+- New tests: `tests/test_shocks.py` — registry shape, `load_shocks` merge
+  behavior, `run_shock_tests` against synthetic multi-year data (mocked
+  `fetch_history`, no live calls) producing one row per window with sane
+  metrics, and a deliberately-missing-data window reporting a failure row
+  instead of crashing the whole stress run.
+
+## Implementation Order
+1. `shocks.py` — registry + `load_shocks` + unit tests (dates, merge/override
+   behavior, malformed JSON handling).
+2. `run_shock_tests` in `walkforward_sim.py`, dispatching on bundle-path vs.
+   `DailyStrategy` input; per-window try/except so one bad window doesn't
+   kill the report; tests against synthetic data.
+3. CLI wiring (`--stress`, `--shocks_json`) + printed table format
+   (period, dates, Sharpe, CAGR, MaxDD, worst_day) + optional per-period CSVs.
+
+## Acceptance Criteria
+- [ ] `SHOCKS` contains at least `covid_2020`, `selloff_2022`, and
+      `vol_spike_2018` with correct, well-known date ranges
+- [ ] `load_shocks(None)` returns the built-in registry unchanged;
+      `load_shocks(path)` merges/overrides by name from the JSON file
+- [ ] `run_shock_tests` given a GBM bundle path produces one metrics row per
+      shock window, each computed only from that window's data
+- [ ] `run_shock_tests` given a `DailyStrategy` instance uses
+      `run_strategy_walkforward` and produces the same row shape
+- [ ] A shock window with no available data for any ticker produces a
+      failure row (not a crash) that names the window and the reason
+- [ ] `walkforward-sim --model ... --stress` prints the shock table in
+      addition to (not instead of) the standard run when `--start`/`--end`
+      are also given
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"` — no live API
+      calls (fetch_history mocked with synthetic multi-year OHLCV)
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Ticker has no history covering a shock window (e.g. IPO'd after 2022) | That ticker excluded from that window's universe; window still runs with remaining tickers; noted in output if the whole universe is empty |
+| `--shocks_json` file malformed | Clear error naming the file and the parse problem; built-in registry NOT silently used as a fallback (avoids masking a typo) |
+| `--stress` passed without `--model` and without any `--strategies` (generic path) | Clear `SystemExit` — nothing to stress-test |
+| Overlapping or out-of-order shock windows in a custom JSON | Each processed independently; no assumption of chronological or non-overlapping order |
+| A shock window entirely outside the fetched ticker's available history range | Reported as a failure row: "no bars in window", not an empty-but-silent success |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(stress): shocks.py registry + load_shocks override hook` — pure data + merge logic + tests
+2. `feat(walkforward): run_shock_tests dispatching on bundle or DailyStrategy` — reusable helper, per-window failure isolation
+3. `feat(walkforward): --stress/--shocks_json CLI + shock table output` — user-facing wiring
+4. `feat(arena): --stress wiring in arena-run backtest (fast-follow)` — reuses run_shock_tests, deferred from this plan

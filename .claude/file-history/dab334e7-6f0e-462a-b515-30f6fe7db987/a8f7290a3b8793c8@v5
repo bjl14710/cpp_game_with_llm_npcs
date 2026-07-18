@@ -1,0 +1,863 @@
+#!/usr/bin/env python3
+import argparse
+from typing import List, Dict, Tuple
+
+import numpy as np
+import pandas as pd
+import joblib
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.mixture import GaussianMixture
+from tqdm import tqdm
+from paper_trading_sim import build_features, fetch_history
+from costs import CostModel, adv_dollars, day_cost
+import os
+
+
+def _to_yahoo_symbol(sym: str) -> str:
+    """Normalize symbols for Yahoo Finance (e.g., BRK.B -> BRK-B)."""
+    return sym.replace(".", "-").strip().upper()
+
+
+def parse_tickers(arg_str: str, file_path: str | None) -> List[str]:
+    if file_path:
+        with open(file_path, "r", encoding="utf-8") as f:
+            raw = [ln for ln in f if ln.strip() and not ln.startswith("#")]
+    else:
+        raw = [t for t in arg_str.split(",") if t.strip()]
+    # Normalize for Yahoo
+    return [_to_yahoo_symbol(t) for t in raw]
+
+
+def compute_returns(data: Dict[str, pd.DataFrame], lookback: int, end_date: pd.Timestamp) -> pd.DataFrame:
+    rets = []
+    names = []
+    for t, df in tqdm(data.items()):
+        if "Close" not in df.columns:
+            continue
+        sub = df[df.index <= end_date]
+        r = sub["Close"].pct_change().dropna()
+        if not r.empty:
+            rets.append(r)
+            names.append(t)
+    if not rets:
+        return pd.DataFrame()
+    panel = pd.concat(rets, axis=1)
+    panel.columns = names
+    panel = panel.dropna(how="any")
+    # Drop columns with insufficient history or near-zero variance
+    if panel.shape[0] < 2 or panel.shape[1] == 0:
+        return pd.DataFrame()
+    std = panel.std(axis=0, ddof=1)
+    good_cols = [c for c in panel.columns if np.isfinite(std.get(c, np.nan)) and float(std.get(c, 0.0)) > 1e-12]
+    panel = panel[good_cols]
+    if panel.empty:
+        return pd.DataFrame()
+    if lookback > 0 and len(panel) > lookback:
+        panel = panel.iloc[-lookback:]
+    return panel
+
+
+def meanvar_long_only(mu: np.ndarray, Sigma: np.ndarray, max_w: float | None = 0.3) -> np.ndarray:
+    eps = 1e-6
+    # Clean matrix: replace NaNs/inf and add ridge
+    Sigma = np.nan_to_num(Sigma, nan=0.0, posinf=0.0, neginf=0.0)
+    Sigma_reg = Sigma + eps * np.eye(Sigma.shape[0])
+    try:
+        w = np.linalg.pinv(Sigma_reg) @ mu
+    except Exception:
+        # Fallback if SVD fails
+        n = len(mu)
+        return np.ones(n) / max(1, n)
+    w = np.maximum(w, 0.0)
+    s = w.sum()
+    if s <= 0:
+        w = np.ones_like(w) / len(w)
+    else:
+        w = w / s
+    if max_w is not None and max_w > 0:
+        for _ in range(10):
+            over = w > max_w
+            if not np.any(over):
+                break
+            excess = float((w[over] - max_w).sum())
+            w[over] = max_w
+            under = ~over
+            if np.any(under):
+                denom = float(w[under].sum())
+                if denom > 0:
+                    w[under] = w[under] + excess * (w[under] / denom)
+                else:
+                    w[under] = w[under] + excess / under.sum()
+            w = np.maximum(w, 0)
+            w = w / w.sum()
+    return w
+
+
+def meanvar_long_short(mu: np.ndarray, Sigma: np.ndarray, max_w: float | None = 0.3) -> np.ndarray:
+    """Compute mean-variance weights allowing negative (short) positions.
+
+    Same as ``meanvar_long_only`` but without the non-negativity projection,
+    so assets with negative predicted returns can receive negative weights.
+    Weights are normalized to sum to 1 (net-long bias).  The optional
+    *max_w* cap clips the absolute weight of each asset, then re-normalizes.
+    """
+    eps = 1e-6
+    Sigma = np.nan_to_num(Sigma, nan=0.0, posinf=0.0, neginf=0.0)
+    Sigma_reg = Sigma + eps * np.eye(Sigma.shape[0])
+    try:
+        w = np.linalg.pinv(Sigma_reg) @ mu
+    except Exception:
+        n = len(mu)
+        return np.ones(n) / max(1, n)
+    s = w.sum()
+    if s == 0:
+        w = np.ones_like(w) / len(w)
+    else:
+        w = w / s
+    if max_w is not None and max_w > 0:
+        # Clip absolute values, preserve signs, re-normalize to sum=1.
+        w = np.clip(w, -max_w, max_w)
+        s2 = w.sum()
+        if s2 != 0:
+            w = w / s2
+    return w
+
+
+def simulate_walkforward(bundle_path: str,
+                         tickers: List[str],
+                         start: str,
+                         end: str,
+                         top_n: int,
+                         optimize: str,
+                         cov_lookback: int,
+                         shrink: float,
+                         max_w: float,
+                         capital: float,
+                         trade_cost_bps: float,
+                         use_news: bool = False,
+                         news_features_csv: str | None = None,
+                         rolling_retrain: bool = False,
+                         retrain_freq: str = "monthly",
+                         train_window_days: int = 756,
+                         min_train_days: int = 252,
+                         # Risk overlay options
+                         risk_overlay: bool = False,
+                         risk_vol_window: int = 20,
+                         risk_vol_threshold: float = 0.025,
+                         risk_dd_window: int = 120,
+                         risk_dd_threshold: float = -0.10,
+                         risk_scale: float = 0.5,
+                         risk_shrink: float | None = None,
+                         risk_max_w: float | None = None,
+                         cusum_threshold: float = 3.0,
+                         hmm_states: int = 2,
+                         hmm_prob: float = 0.6,
+                         event_calendar_csv: str | None = None,
+                         event_scale: float = 0.5,
+                         allow_short: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    bundle = joblib.load(bundle_path)
+    model = bundle["model"]
+    feat_cols: List[str] = bundle["features"]
+
+    raw = fetch_history(tickers, start, end)
+    if not raw:
+        raise RuntimeError("No data fetched; check tickers/dates.")
+
+    # Optional: load daily news features and map by ticker
+    news_map: Dict[str, pd.DataFrame] = {}
+    if use_news and news_features_csv:
+        if not os.path.exists(news_features_csv):
+            raise RuntimeError(f"news_features_csv not found: {news_features_csv}")
+        nf = pd.read_csv(news_features_csv)
+        if {"date", "ticker"}.issubset(nf.columns):
+            nf["date"] = pd.to_datetime(nf["date"]).dt.tz_localize(None)
+            for t, sub in nf.groupby("ticker"):
+                tmp = sub.drop(columns=["ticker"]).set_index("date").sort_index()
+                # coerce numeric
+                for c in tmp.columns:
+                    if c != "date":
+                        tmp[c] = pd.to_numeric(tmp[c], errors="coerce")
+                # Prefix to avoid collisions
+                tmp = tmp.add_prefix("news_")
+                news_map[t] = tmp
+
+    feats: Dict[str, pd.DataFrame] = {}
+    for t, df in tqdm(raw.items()):
+        f = build_features(df).dropna()
+        # Merge news features if available for this ticker
+        if use_news and t in news_map:
+            f = f.join(news_map[t], how="left")
+            # Fill missing news columns with 0 (neutral)
+            for c in f.columns:
+                if c.startswith("news_"):
+                    f[c] = f[c].fillna(0.0)
+        # Ensure all feature columns exist for consistency
+        missing_cols = [c for c in feat_cols if c not in f.columns]
+        if missing_cols:
+            continue
+        feats[t] = f
+
+    all_dates = sorted(set().union(*[set(f.index) for f in feats.values()]))
+    if not all_dates:
+        raise RuntimeError("No features available for simulation.")
+
+    equity = capital
+    daily = []
+    blotter_rows = []
+
+    traded_cost = (trade_cost_bps / 10000.0)
+
+    # Helpers for rolling retrain
+    def _select_feat_cols(df: pd.DataFrame) -> List[str]:
+        ignore = {"fwd_ret_1d", "ticker"}
+        return [c for c in df.columns if c not in ignore and pd.api.types.is_numeric_dtype(df[c])]
+
+    def _should_retrain(prev_dt: pd.Timestamp | None, current_dt: pd.Timestamp) -> bool:
+        if not rolling_retrain:
+            return False
+        if prev_dt is None:
+            return True
+        if retrain_freq == "daily":
+            return True
+        if retrain_freq == "weekly":
+            return current_dt.week != prev_dt.week or (current_dt - prev_dt).days >= 5
+        if retrain_freq == "monthly":
+            return (current_dt.year != prev_dt.year) or (current_dt.month != prev_dt.month)
+        if retrain_freq == "quarterly":
+            prev_q = (prev_dt.month - 1) // 3
+            cur_q = (current_dt.month - 1) // 3
+            return (current_dt.year != prev_dt.year) or (cur_q != prev_q)
+        return False
+
+    dynamic_feat_cols: List[str] | None = None
+    last_train_dt: pd.Timestamp | None = None
+
+    for dt in tqdm(all_dates):
+        # Build per-ticker predictions at date dt
+        preds = []
+        # Optional: retrain using data up to dt (exclusive)
+        if rolling_retrain and _should_retrain(last_train_dt, dt):
+            tr_frames = []
+            for t, f in feats.items():
+                sub = f[f.index < dt]
+                if train_window_days and train_window_days > 0 and len(sub) > train_window_days:
+                    sub = sub.iloc[-train_window_days:]
+                if not sub.empty:
+                    tr_frames.append(sub)
+            if tr_frames:
+                train_df = pd.concat(tr_frames, axis=0)
+                if "fwd_ret_1d" in train_df.columns:
+                    train_df = train_df.dropna(subset=["fwd_ret_1d"])
+                if len(train_df) >= min_train_days:
+                    dynamic_feat_cols = _select_feat_cols(train_df)
+                    if dynamic_feat_cols:
+                        X_train = train_df[dynamic_feat_cols].astype(float).values
+                        y_train = train_df["fwd_ret_1d"].astype(float).values
+                        model = GradientBoostingRegressor(random_state=42)
+                        model.fit(X_train, y_train)
+                        last_train_dt = dt
+                    # else: not enough columns; keep prior model
+                # else: not enough samples; keep prior model
+            # else: no frames; keep prior model
+        for t, f in feats.items():
+            if dt in f.index:
+                row = f.loc[dt]
+                use_cols = dynamic_feat_cols if (rolling_retrain and dynamic_feat_cols) else feat_cols
+                if any(c not in f.columns for c in use_cols):
+                    continue
+                X = row[use_cols].astype(float).values.reshape(1, -1)
+                yhat = float(model.predict(X)[0])
+                # Realized next-day return (fwd_ret_1d) at dt, if available
+                fwd = float(row.get("fwd_ret_1d", np.nan))
+                preds.append((t, yhat, fwd))
+        if not preds:
+            continue
+        day_df = pd.DataFrame(preds, columns=["ticker", "pred", "fwd_ret_1d"]).dropna()
+        if day_df.empty:
+            continue
+        day_sorted = day_df.sort_values("pred", ascending=False)
+        picks = day_sorted.head(top_n).copy()
+
+        # Risk model on picks
+        universe = picks["ticker"].tolist()
+        w: np.ndarray
+        if optimize == "meanvar" and len(universe) >= 2:
+            ret_panel = compute_returns(raw, lookback=cov_lookback, end_date=dt)
+            ret_panel = ret_panel[[t for t in universe if t in ret_panel.columns]]
+            if ret_panel.shape[1] >= 2 and ret_panel.shape[0] >= 2:
+                Sigma_emp = ret_panel.cov().to_numpy()
+                # Clean covariance
+                if not np.isfinite(Sigma_emp).all():
+                    Sigma_emp = np.nan_to_num(Sigma_emp, nan=0.0, posinf=0.0, neginf=0.0)
+                lam = min(max(shrink, 0.0), 1.0)
+                diag = np.diag(np.diag(Sigma_emp))
+                Sigma = (1 - lam) * Sigma_emp + lam * diag
+                mu = picks.set_index("ticker").loc[universe]["pred"].to_numpy()
+                if not np.isfinite(mu).all():
+                    w = np.ones(len(universe)) / len(universe)
+                else:
+                    alloc_fn = meanvar_long_short if allow_short else meanvar_long_only
+                    w = alloc_fn(mu, Sigma, max_w=max_w)
+            else:
+                w = np.ones(len(universe)) / len(universe)
+        else:
+            w = np.ones(len(universe)) / max(1, len(universe))
+
+        # Risk overlay: compute market stress and scale exposure
+        if risk_overlay:
+            # Build a market proxy from SPY if present, else cross-sectional mean
+            market_ret = None
+            if "SPY" in raw and "Close" in raw["SPY"].columns:
+                sub = raw["SPY"][raw["SPY"].index <= dt]["Close"].pct_change().dropna()
+                market_ret = sub
+            if market_ret is None or market_ret.empty:
+                panel_proxy = compute_returns(raw, lookback=max(risk_dd_window, risk_vol_window) + 2, end_date=dt)
+                if not panel_proxy.empty:
+                    market_ret = panel_proxy.mean(axis=1)
+            stress = False
+            if market_ret is not None and not market_ret.empty:
+                # Realized vol
+                vol = market_ret.rolling(risk_vol_window).std().iloc[-1] if len(market_ret) >= risk_vol_window else None
+                # Drawdown over window
+                hist = market_ret[-risk_dd_window:] if len(market_ret) >= risk_dd_window else market_ret
+                cum = (1 + hist).cumprod()
+                dd = (cum / cum.cummax() - 1).min() if len(cum) else 0.0
+                # CUSUM change detection
+                sigma = market_ret.std() if len(market_ret) > 1 else 0.0
+                k = cusum_threshold * (sigma if sigma > 0 else 1.0)
+                pos, neg = 0.0, 0.0
+                for r in market_ret.values:
+                    pos = max(0.0, pos + r - k)
+                    neg = min(0.0, neg + r + k)
+                cusum_hit = (pos > 0) or (neg < 0)
+                # GMM regime proxy
+                gm_hit = False
+                try:
+                    arr = market_ret.values.reshape(-1, 1)
+                    if len(arr) >= max(50, hmm_states * 20):
+                        gm = GaussianMixture(n_components=hmm_states, random_state=42)
+                        gm.fit(arr)
+                        probs = gm.predict_proba(arr)
+                        vars_ = gm.covariances_.flatten()
+                        stress_comp = int(np.argmax(vars_))
+                        if probs[-1, stress_comp] >= hmm_prob:
+                            gm_hit = True
+                except Exception:
+                    gm_hit = False
+
+                high_vol = (vol is not None) and (vol > risk_vol_threshold)
+                deep_dd = (dd is not None) and (dd < risk_dd_threshold)
+                stress = bool(high_vol or deep_dd or cusum_hit or gm_hit)
+
+            # Event calendar (global dates)
+            if event_calendar_csv and os.path.exists(event_calendar_csv):
+                try:
+                    ec = pd.read_csv(event_calendar_csv)
+                    if "date" in ec.columns:
+                        edates = pd.to_datetime(ec["date"]).dt.normalize().values
+                        if pd.Timestamp(dt).normalize().to_datetime64() in edates:
+                            stress = True
+                            if event_scale is not None:
+                                w = w * float(event_scale)
+                except Exception:
+                    pass
+
+            if stress:
+                # Optionally recompute with higher shrink / tighter caps
+                if risk_shrink is not None and optimize == "meanvar" and ret_panel.shape[1] >= 2 and ret_panel.shape[0] >= 2:
+                    lam2 = min(max(float(risk_shrink), 0.0), 1.0)
+                    diag2 = np.diag(np.diag(Sigma_emp))
+                    Sigma2 = (1 - lam2) * Sigma_emp + lam2 * diag2
+                    cap = risk_max_w if risk_max_w is not None else max_w
+                    w = meanvar_long_only(mu, Sigma2, max_w=cap)
+                # Scale exposure toward cash
+                w = w * float(risk_scale)
+
+        # Realized return (weighted) for this date
+        realized = float(np.dot(w, picks.set_index("ticker").loc[universe]["fwd_ret_1d"].to_numpy()))
+        equity *= (1 + realized)
+        equity *= (1 - traded_cost)
+
+        # Record
+        daily.append({"date": dt, "equity": equity, "n_picks": int(len(universe)), "realized": realized})
+        for ti, wi in zip(universe, w):
+            blotter_rows.append({"date": dt, "ticker": ti, "weight": wi, "pred": float(picks[picks["ticker"] == ti]["pred"].iloc[0])})
+
+    equity_df = pd.DataFrame(daily).set_index("date")
+    blotter_df = pd.DataFrame(blotter_rows)
+    return equity_df, blotter_df
+
+
+_CONF_EPS = 1e-6   # confidence floor: a real signal never gets a zero share
+_VOL_FLOOR = 1e-4  # daily-vol floor: one dead-flat ticker can't dominate the book
+
+
+def _capped_normalized(raw: Dict[str, float], cap: float) -> Dict[str, float]:
+    """Normalize positive weights to sum to at most 1, each capped at `cap`.
+
+    Mirrors ``meanvar_long_only``'s iterative cap-and-redistribute loop, but
+    does NOT force full investment at the end: if every name is already at
+    the cap and the combined capacity (n * cap) is still under 1, the
+    shortfall is left uninvested (cash) rather than renormalized away —
+    that is the entire point of a per-position cap. Redistribution still
+    fills up to full investment whenever the picks' combined capacity
+    allows it, exactly like the meanvar loop.
+
+    Args:
+        raw: {key: positive raw weight}. Non-positive entries are dropped.
+        cap: Maximum share any single key may take, in (0, 1]. None/<=0
+            disables capping (pure proportional normalization).
+
+    Returns:
+        {key: weight}, weights summing to <= 1 (== 1 only when capacity
+        allows), each <= cap.
+    """
+    items = {k: v for k, v in raw.items() if v > 0}
+    if not items:
+        return {}
+    total = sum(items.values())
+    w = {k: v / total for k, v in items.items()}
+    if cap is None or cap <= 0:
+        return w
+    for _ in range(len(w) + 1):
+        over = {k: v for k, v in w.items() if v > cap}
+        if not over:
+            break
+        excess = sum(v - cap for v in over.values())
+        for k in over:
+            w[k] = cap
+        under = {k: v for k, v in w.items() if v < cap}
+        under_total = sum(under.values())
+        if under_total <= 0:
+            break  # every name already at the cap — no room to redistribute
+        for k in under:
+            w[k] += excess * (w[k] / under_total)
+    return w
+
+
+def _conf_vol_weights(picks: List[tuple], vols: Dict[str, float | None],
+                      max_pos: float) -> Dict[str, float]:
+    """Confidence/volatility-scaled weights for one day's picks, capped.
+
+    weight_i ∝ confidence_i / vol_i, normalized and capped via
+    ``_capped_normalized``. A ticker with no computable volatility (short
+    history) borrows that day's cross-sectional median among the other
+    picks; if not one pick has a usable volatility, the whole day falls
+    back to equal weighting rather than guessing.
+
+    Args:
+        picks: [(ticker, DailySignal, fwd_ret), ...] — the day's held names.
+        vols: {ticker: latest rolling daily-return std, or None/NaN}.
+        max_pos: Per-position cap passed to ``_capped_normalized``.
+    """
+    usable = [v for v in vols.values() if v is not None and pd.notna(v) and v > 0]
+    fallback_vol = float(np.median(usable)) if usable else None
+    if fallback_vol is None:
+        # No usable volatility anywhere today: fall back to equal raw shares,
+        # but still route through the cap — a missing risk estimate is not a
+        # reason to skip the risk control.
+        return _capped_normalized({t: 1.0 for t, _, _ in picks}, max_pos)
+
+    raw = {}
+    for t, sig, _ in picks:
+        conf = max(float(sig.confidence), _CONF_EPS)
+        v = vols.get(t)
+        if v is None or pd.isna(v) or v <= 0:
+            v = fallback_vol
+        raw[t] = conf / max(float(v), _VOL_FLOOR)
+    return _capped_normalized(raw, max_pos)
+
+
+def run_strategy_walkforward(strategy,
+                             data: Dict[str, pd.DataFrame],
+                             top_n: int = 5,
+                             capital: float = 100000.0,
+                             trade_cost_bps: float = 1.0,
+                             sizing: str = "equal",
+                             max_pos: float = 0.30,
+                             vol_window: int = 20,
+                             cost_model: CostModel | None = None,
+                             regime_series: pd.Series | None = None,
+                             target_vol: float = 0.15,
+                             vol_target_window: int = 20,
+                             atr_stop: float | None = None,
+                             atr_window: int = 14,
+                             cooldown_days: int = 5) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Backtest any DailyStrategy over pre-fetched daily OHLCV frames.
+
+    Generic counterpart to ``simulate_walkforward`` (which is GBM-specific):
+    on each date, every ticker's history up to and including that bar is
+    handed to ``strategy.generate_signal``; the ``top_n`` non-hold signals
+    ranked by confidence are held for one bar, realizing the next
+    close-to-close return (signed by position). Each ticker's final bar
+    produces no trade — its forward return does not exist yet.
+
+    Data is injected rather than fetched so tests stay offline and the
+    arena's live loop can reuse the same code path (backfill == backtest).
+
+    Args:
+        strategy: A ``strategies.daily.DailyStrategy`` instance.
+        data: ``{ticker: OHLCV DataFrame}`` as returned by ``fetch_history``.
+        top_n: Maximum concurrent positions per day.
+        capital: Starting equity.
+        trade_cost_bps: Flat cost applied on each day with any position.
+        sizing: "equal" (today's behavior — split evenly across picks),
+            "conf_vol" (confidence / rolling volatility, capped at
+            ``max_pos``, with any capacity the cap can't fill left in cash),
+            or "vol_target" (conf_vol relative weights, with GROSS exposure
+            additionally scaled by min(1, target_vol / realized ledger vol)
+            — de-levers in turbulence, never borrows).
+        target_vol: Annualized portfolio vol target for "vol_target".
+        vol_target_window: Trailing days of the ledger's own realized
+            returns used to estimate its volatility; fully invested until
+            that many days exist (documented warmup).
+        atr_stop: When set (e.g. 3.0), an ENGINE-level trailing stop
+            overlay: a continuously-held position exits when Close crosses
+            its running peak (long) / trough (short) by atr_stop × ATR,
+            and the ticker is suppressed from candidates for
+            ``cooldown_days`` bars. Volatility-sized by construction —
+            there is deliberately no flat-percentage variant. None (the
+            default) disables the overlay entirely.
+        atr_window: ATR lookback (Wilder smoothing).
+        cooldown_days: Bars a stopped ticker stays out of candidates.
+        max_pos: Per-position cap for "conf_vol" sizing. Ignored otherwise.
+        vol_window: Rolling window (days) for the "conf_vol" volatility
+            estimate. Ignored otherwise.
+        cost_model: A ``costs.CostModel``. Defaults to
+            ``CostModel(mode="flat", flat_bps=trade_cost_bps)`` — omitting
+            this argument reproduces the pre-cost-model behavior exactly.
+        regime_series: Optional date-indexed Series of regime labels (see
+            ``regime.py``), one per trading day, market-wide. On a day
+            whose label isn't in ``strategy.compatible_regimes``, the whole
+            day is gated to a hold for this strategy — no candidates are
+            even evaluated. Omitting this reproduces ungated behavior
+            exactly (regression-pinned).
+
+    Returns:
+        (equity_df, blotter_df): equity_df is indexed by date with columns
+        equity (net) / equity_gross / cost / n_picks / realized (every date
+        with data gets a row, so strategies are comparable on equal-length
+        series); blotter_df has one row per (date, ticker) position taken,
+        with its sized weight.
+    """
+    model = cost_model if cost_model is not None else CostModel(mode="flat", flat_bps=trade_cost_bps)
+    frames = {t: df.sort_index() for t, df in data.items()
+              if "Close" in df.columns and not df.empty}
+    fwd = {t: df["Close"].pct_change().shift(-1) for t, df in frames.items()}
+    vol = {}
+    if sizing in ("conf_vol", "vol_target"):
+        vol = {t: df["Close"].pct_change().rolling(vol_window, min_periods=max(2, vol_window // 2)).std()
+               for t, df in frames.items()}
+    adv = {}
+    if model.mode == "realistic":
+        adv = {t: adv_dollars(df) for t, df in frames.items()}
+    atr = {}
+    if atr_stop is not None:
+        for t, df in frames.items():
+            prev_close = df["Close"].shift(1)
+            true_range = pd.concat([
+                df["High"] - df["Low"],
+                (df["High"] - prev_close).abs(),
+                (df["Low"] - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            atr[t] = true_range.ewm(alpha=1.0 / atr_window,
+                                    min_periods=atr_window, adjust=False).mean()
+    all_dates = sorted(set().union(*[set(df.index) for df in frames.values()])) if frames else []
+
+    equity = capital
+    equity_gross = capital
+    prev_signed_weights: Dict[str, float] = {}
+    trail_state: Dict[str, dict] = {}   # ticker -> {"dir": ±1, "extreme": float}
+    suppressed: Dict[str, int] = {}     # ticker -> bars left in cooldown
+    daily = []
+    blotter_rows = []
+    for dt in all_dates:
+        if atr_stop is not None and suppressed:
+            suppressed = {t: n - 1 for t, n in suppressed.items() if n - 1 > 0}
+        candidates = []
+        gated = (regime_series is not None and dt in regime_series.index
+                and regime_series.loc[dt] not in strategy.compatible_regimes)
+        if not gated:
+            for t, df in frames.items():
+                if dt not in df.index:
+                    continue
+                if atr_stop is not None and suppressed.get(t, 0) > 0:
+                    continue  # cooling down after a trailing-stop exit
+                hist = df.loc[:dt]
+                if len(hist) < strategy.warmup_bars:
+                    continue
+                fwd_ret = fwd[t].loc[dt]
+                if pd.isna(fwd_ret):
+                    continue  # ticker's last bar: outcome unknown until the next bar
+                sig = strategy.generate_signal(hist)
+                if sig.position == 0:
+                    continue
+                candidates.append((t, sig, float(fwd_ret)))
+
+        picks = []
+        realized = 0.0
+        weights: Dict[str, float] = {}
+        if candidates:
+            candidates.sort(key=lambda c: c[1].confidence, reverse=True)
+            picks = candidates[:top_n]
+            if sizing in ("conf_vol", "vol_target"):
+                vols_today = {t: (vol[t].loc[dt] if dt in vol[t].index else None) for t, _, _ in picks}
+                weights = _conf_vol_weights(picks, vols_today, max_pos)
+            else:
+                weights = {t: 1.0 / len(picks) for t, _, _ in picks}
+            if sizing == "vol_target":
+                # De-lever toward cash when the ledger's own realized vol
+                # runs above target. min() means it never levers above 1.
+                recent = [d["realized"] for d in daily[-vol_target_window:]]
+                if len(recent) >= vol_target_window:
+                    realized_vol = float(np.std(recent, ddof=1)) * np.sqrt(252.0)
+                    if realized_vol > 0:
+                        mult = min(1.0, target_vol / realized_vol)
+                        weights = {t: w * mult for t, w in weights.items()}
+            realized = sum(weights.get(t, 0.0) * sig.position * fwd_ret for t, sig, fwd_ret in picks)
+
+            stopped_today = set()
+            if atr_stop is not None:
+                picked = {t: sig.position for t, sig, _ in picks}
+                # continuity broken (dropped or direction flip) -> state reset
+                for t in list(trail_state):
+                    if t not in picked or picked[t] != trail_state[t]["dir"]:
+                        del trail_state[t]
+                for t, direction in picked.items():
+                    close = float(frames[t]["Close"].loc[dt])
+                    st = trail_state.setdefault(t, {"dir": direction, "extreme": close})
+                    st["extreme"] = max(st["extreme"], close) if direction > 0 else min(st["extreme"], close)
+                    a = atr[t].loc[dt] if dt in atr[t].index else None
+                    if a is None or pd.isna(a):
+                        continue  # ATR not warmed up: no stop yet (documented)
+                    trail = st["extreme"] - atr_stop * float(a) if direction > 0 \
+                        else st["extreme"] + atr_stop * float(a)
+                    breached = close < trail if direction > 0 else close > trail
+                    if breached:
+                        # Breach bar's return stays realized (no intrabar fill
+                        # fantasy); the exit takes effect via suppression from
+                        # the NEXT bar, for cooldown_days bars.
+                        stopped_today.add(t)
+                        suppressed[t] = cooldown_days
+                        del trail_state[t]
+
+            for t, sig, fwd_ret in picks:
+                reason = sig.reason + (" |stopped" if t in stopped_today else "")
+                blotter_rows.append({"date": dt, "ticker": t, "position": sig.position,
+                                     "confidence": sig.confidence, "weight": weights.get(t, 0.0),
+                                     "fwd_ret": fwd_ret, "reason": reason,
+                                     "stopped": t in stopped_today})
+
+        equity_gross *= (1 + realized)
+
+        signed_weights = {t: weights[t] * sig.position for t, sig, _ in picks}
+        if model.mode == "flat":
+            equity_after_return = equity * (1 + realized)
+            c = day_cost(model, equity_after_return, {}, had_position=bool(picks))
+            equity = equity_after_return - c
+        elif model.mode == "none":
+            equity *= (1 + realized)
+            c = 0.0
+        else:  # realistic — turnover priced on the PRE-return equity basis.
+            # A no-pick day (a real HOLD, or simply a ticker's final bar with
+            # no forward return to evaluate) is "no rebalance today", not a
+            # forced exit: prev_signed_weights carries forward unchanged and
+            # nothing is charged. Known simplification — a HOLD gap followed
+            # by re-entry at the same weight is not charged a fresh entry,
+            # since this backtest has no intraday-exit mechanism to model
+            # what happens during the gap.
+            if picks:
+                all_tickers = set(prev_signed_weights) | set(signed_weights)
+                weight_changes = {
+                    t: (signed_weights.get(t, 0.0) - prev_signed_weights.get(t, 0.0),
+                        (adv[t].loc[dt] if t in adv and dt in adv[t].index else None))
+                    for t in all_tickers
+                }
+                c = day_cost(model, equity, weight_changes, had_position=True)
+                prev_signed_weights = signed_weights
+            else:
+                c = 0.0
+            equity = equity * (1 + realized) - c
+
+        daily.append({"date": dt, "equity": equity, "equity_gross": equity_gross,
+                      "cost": c, "n_picks": len(picks), "realized": realized})
+
+    if daily:
+        equity_df = pd.DataFrame(daily).set_index("date")
+    else:
+        equity_df = pd.DataFrame(columns=["equity", "equity_gross", "cost", "n_picks", "realized"])
+    return equity_df, pd.DataFrame(blotter_rows)
+
+
+def run_shock_tests(bundle_path_or_strategy,
+                    tickers: List[str],
+                    shocks: Dict[str, Tuple[str, str]],
+                    **sim_kwargs) -> pd.DataFrame:
+    """Replay a strategy (or GBM bundle) independently over each shock window.
+
+    Live paper-trading over a few months will almost never include a real
+    market shock — this replays the scenarios that matter most for risk,
+    one isolated simulation per historical window.
+
+    Args:
+        bundle_path_or_strategy: A ``str`` path to a joblib model bundle
+            (dispatches to ``simulate_walkforward``) or a ``DailyStrategy``
+            instance (dispatches to ``run_strategy_walkforward``).
+        tickers: Universe to simulate over.
+        shocks: name -> (start, end) windows, e.g. from ``shocks.load_shocks``.
+        **sim_kwargs: Forwarded to the underlying simulate function
+            (top_n, capital, cost_model, ... for the strategy path;
+            optimize, shrink, ... for the bundle path).
+
+    Returns:
+        One row per shock window: period, start, end, plus either metrics
+        (sharpe, cagr, maxdd, worst_day, n_days) or an ``error`` string —
+        a failed window (e.g. no data: tickers that IPO'd later) is reported,
+        never allowed to abort the remaining windows.
+    """
+    from analyze_equity import compute_metrics  # local: avoid import cycle at module load
+
+    rows = []
+    for name, (start, end) in shocks.items():
+        row = {"period": name, "start": start, "end": end}
+        try:
+            if isinstance(bundle_path_or_strategy, str):
+                eq, _ = simulate_walkforward(
+                    bundle_path=bundle_path_or_strategy, tickers=tickers,
+                    start=start, end=end,
+                    top_n=sim_kwargs.get("top_n", 5),
+                    optimize=sim_kwargs.get("optimize", "meanvar"),
+                    cov_lookback=sim_kwargs.get("cov_lookback", 90),
+                    shrink=sim_kwargs.get("shrink", 0.2),
+                    max_w=sim_kwargs.get("max_w", 0.3),
+                    capital=sim_kwargs.get("capital", 100000.0),
+                    trade_cost_bps=sim_kwargs.get("trade_cost_bps", 1.0),
+                )
+            else:
+                data = fetch_history(tickers, start, end)
+                eq, _ = run_strategy_walkforward(
+                    bundle_path_or_strategy, data,
+                    top_n=sim_kwargs.get("top_n", 5),
+                    capital=sim_kwargs.get("capital", 100000.0),
+                    trade_cost_bps=sim_kwargs.get("trade_cost_bps", 1.0),
+                    sizing=sim_kwargs.get("sizing", "equal"),
+                    cost_model=sim_kwargs.get("cost_model"),
+                )
+            if eq.empty:
+                row["error"] = "no bars in window"
+            else:
+                m = compute_metrics(eq["equity"])
+                if "error" in m:
+                    row["error"] = m["error"]
+                else:
+                    row.update({"sharpe": m["Sharpe"], "cagr": m["CAGR"],
+                                "maxdd": m["MaxDD"],
+                                "worst_day": float(eq["equity"].pct_change().min()),
+                                "n_days": int(len(eq))})
+        except Exception as exc:  # one bad window must not kill the stress report
+            row["error"] = repr(exc)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Walk-forward simulation using a saved model bundle and risk-aware allocation")
+    p.add_argument("--model", required=True, help="Path to model_bundle.joblib from paper_trading_sim")
+    p.add_argument("--tickers", type=str, default="AAPL,MSFT,GOOG,AMZN,NVDA")
+    p.add_argument("--tickers_file", type=str, default=None)
+    p.add_argument("--start", type=str, required=True)
+    p.add_argument("--end", type=str, required=True)
+    p.add_argument("--top_n", type=int, default=5)
+    p.add_argument("--optimize", type=str, default="meanvar", choices=["none", "meanvar"])
+    p.add_argument("--cov_lookback", type=int, default=90)
+    p.add_argument("--shrink", type=float, default=0.2)
+    p.add_argument("--max_w", type=float, default=0.3)
+    p.add_argument("--capital", type=float, default=100000.0)
+    p.add_argument("--trade_cost_bps", type=float, default=1.0)
+    p.add_argument("--use_news", action="store_true", help="Merge daily news features from CSV into inputs")
+    p.add_argument("--news_features_csv", type=str, default=None, help="CSV from news_features.py (columns: date,ticker,...) ")
+    p.add_argument("--rolling_retrain", action="store_true", help="Retrain model periodically using data up to each date")
+    p.add_argument("--retrain_freq", type=str, default="monthly", choices=["daily", "weekly", "monthly", "quarterly"], help="Retraining cadence")
+    p.add_argument("--train_window_days", type=int, default=756, help="Rolling lookback window for training")
+    p.add_argument("--min_train_days", type=int, default=252, help="Minimum samples to fit on retrain")
+    # Risk overlay options
+    p.add_argument("--risk_overlay", action="store_true", help="Enable market-stress overlay to scale exposure")
+    p.add_argument("--risk_vol_window", type=int, default=20)
+    p.add_argument("--risk_vol_threshold", type=float, default=0.025)
+    p.add_argument("--risk_dd_window", type=int, default=120)
+    p.add_argument("--risk_dd_threshold", type=float, default=-0.10)
+    p.add_argument("--risk_scale", type=float, default=0.5)
+    p.add_argument("--risk_shrink", type=float, default=None)
+    p.add_argument("--risk_max_w", type=float, default=None)
+    p.add_argument("--cusum_threshold", type=float, default=3.0)
+    p.add_argument("--hmm_states", type=int, default=2)
+    p.add_argument("--hmm_prob", type=float, default=0.6)
+    p.add_argument("--event_calendar_csv", type=str, default=None)
+    p.add_argument("--event_scale", type=float, default=0.5)
+    p.add_argument("--allow_short", action="store_true", help="Allow negative (short) weights in mean-variance allocation")
+    p.add_argument("--out_equity_csv", type=str, default="walkforward_equity.csv")
+    p.add_argument("--out_blotter_csv", type=str, default="walkforward_blotter.csv")
+    p.add_argument("--stress", action="store_true",
+                   help="additionally replay the model over known historical shock "
+                        "windows (COVID 2020, 2022 selloff, Q4 2018) and print a "
+                        "per-period metrics table")
+    p.add_argument("--shocks_json", type=str, default=None,
+                   help="optional JSON file of {name: [start, end]} shock windows "
+                        "merged over the built-in registry by name")
+    args = p.parse_args()
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    equity_df, blotter_df = simulate_walkforward(
+        bundle_path=args.model,
+        tickers=tickers,
+        start=args.start,
+        end=args.end,
+        top_n=args.top_n,
+        optimize=args.optimize,
+        cov_lookback=args.cov_lookback,
+        shrink=args.shrink,
+        max_w=args.max_w,
+        capital=args.capital,
+        trade_cost_bps=args.trade_cost_bps,
+        use_news=args.use_news,
+        news_features_csv=args.news_features_csv,
+        rolling_retrain=args.rolling_retrain,
+        retrain_freq=args.retrain_freq,
+        train_window_days=args.train_window_days,
+        min_train_days=args.min_train_days,
+        risk_overlay=args.risk_overlay,
+        risk_vol_window=args.risk_vol_window,
+        risk_vol_threshold=args.risk_vol_threshold,
+        risk_dd_window=args.risk_dd_window,
+        risk_dd_threshold=args.risk_dd_threshold,
+        risk_scale=args.risk_scale,
+        risk_shrink=args.risk_shrink,
+        risk_max_w=args.risk_max_w,
+        cusum_threshold=args.cusum_threshold,
+        hmm_states=args.hmm_states,
+        hmm_prob=args.hmm_prob,
+        event_calendar_csv=args.event_calendar_csv,
+        event_scale=args.event_scale,
+        allow_short=args.allow_short,
+    )
+
+    equity_df.to_csv(args.out_equity_csv)
+    blotter_df.to_csv(args.out_blotter_csv, index=False)
+    print(f"Saved equity to {args.out_equity_csv} and blotter to {args.out_blotter_csv}")
+
+    if args.stress:
+        from shocks import load_shocks
+
+        shock_windows = load_shocks(args.shocks_json)
+        print(f"\n=== Stress test: {len(shock_windows)} historical shock window(s) ===")
+        table = run_shock_tests(args.model, tickers, shock_windows,
+                                top_n=args.top_n, optimize=args.optimize,
+                                cov_lookback=args.cov_lookback, shrink=args.shrink,
+                                max_w=args.max_w, capital=args.capital,
+                                trade_cost_bps=args.trade_cost_bps)
+        with pd.option_context("display.width", 160, "display.max_columns", None):
+            print(table.to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()

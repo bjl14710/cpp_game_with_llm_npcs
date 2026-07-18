@@ -1,0 +1,49 @@
+# MR: feat(arena): Strategy Arena strategy layer — DailyStrategy interface + 4 implementations
+
+Branch: `feature/arena-strategy-layer` → `main` (base commit `5d8f3ae`)
+
+## Summary
+Adds the strategy layer of the Strategy Arena (`.claude/plans/strategy-arena.md`, steps 1–3): a daily-bar `DailyStrategy` interface plus four selectable implementations — an adapter over the existing intraday engulfing detector, a technical-indicator strategy (RSI + MACD + MA crossover), a z-score mean-reversion strategy with breakout override, and an adapter that puts the existing GBM model bundles behind the same contract. This is the prerequisite for backtesting heterogeneous strategies apples-to-apples and paper-trading the survivors side by side; the arena orchestrator itself (filter, SQLite state, live loop, report) is deliberately NOT in this MR.
+
+## Changes by File
+
+**`strategies/daily.py`** — added
+The contract everything else implements: `DailyStrategy` ABC (`generate_signal(df) -> DailySignal`, `warmup_bars`) and the `DailySignal` dataclass (`position` −1/0/+1, `confidence` for top-N ranking, human-readable `reason`). Kept separate from the intraday 2-bar `BaseStrategy` so ML models needing long feature windows and rule strategies share one daily interface without touching the intraday stack.
+
+**`strategies/candlestick_daily.py`** — added
+`DailyEngulfingStrategy`: a thin adapter that runs the existing `EngulfingStrategy` on the last two daily bars. Delegation only — zero pattern logic duplicated.
+
+**`strategies/technical.py`** — added
+`TechnicalStrategy`: long when fast MA > slow MA, MACD above its signal line, and RSI not overbought; mirrored short. Confidence is the price-normalized MACD histogram. RSI uses the same rolling-mean formula as `paper_trading_sim.build_features` so both code paths agree; pandas-only, no new dependencies.
+
+**`strategies/mean_reversion.py`** — added
+`MeanReversionStrategy`: fades z-score extremes (±2σ over 20 bars) unless the close breaks the 55-bar high/low channel, in which case the breakout direction wins. Channel excludes the current bar; near-zero rolling std returns hold instead of dividing by zero.
+
+**`strategies/gbm_adapter.py`** — added
+`GBMStrategy`: wraps a saved `{"model", "features"}` joblib bundle behind `DailyStrategy` — sign of predicted return → position, magnitude → confidence. The subtle part: `build_features` ends with `dropna()`, which always deletes the newest bar (its `fwd_ret_1d` target is NaN), so the adapter pads the frame with a copy of the last bar. The real bar then survives with a finite dummy target (never used as an input) and the copy is dropped instead. Features only look backward, so the pad cannot contaminate inputs — same-day features from the unmodified production pipeline.
+
+**`strategies/registry.py`** — added
+Name → constructor map (`engulfing`, `technical`, `meanrev`, `gbm`) so the upcoming `arena-run --strategies ...` CLI can select strategies by string. Unknown names raise a KeyError listing valid options.
+
+**`tests/test_daily_strategies.py`** — added
+15 tests: interface/registry contract, per-strategy signal cases (long/short/hold/insufficient-history), and GBM adapter tests that train a throwaway 5-tree model in-test (no shipped model file, no network). Two scaffolded fixtures were corrected during implementation because they were mathematically impossible: a monotonic uptrend pins RSI at 100 (correctly blocked as overbought) and a dip to 92 crosses the 55-bar low channel (correctly a breakout short, not a fade) — replaced with numerically verified series; docstrings explain both.
+
+**Minor / generated** — `.claude/plans/strategy-arena.md` (the plan this implements), `docs/learning/` (lesson 0035 + drill 0006 on feature contracts at inference, index/PROGRESS updates), `OVERNIGHT_REPORT.md`, `.claude/memory/checkpoint.md`, `.gitignore` (pycache/egg-info), `uv.lock` (locks the dev extra so `uv run pytest` works from a clean sync).
+
+## Why
+The repo has one validated ML strategy (~27% annualized backtest) and, since the intraday work, a growing set of rule-based ideas — but no way to compare them under identical methodology. The plan's answer is a shared contract screened by one backtest harness. Two design decisions worth reviewer attention: (1) a **new** daily interface beside the intraday one rather than unifying them — unification would have touched `intraday_sim`/`PaperEngine` and their tests for zero arena benefit; (2) the GBM padding trick rather than refactoring `build_features` — refactoring would have rippled into `walkforward_sim`/`predict_next`, which this MR deliberately leaves untouched. Trade-off accepted: the padding is subtle enough to need its comment block (and lesson 0035 documents it in depth).
+
+Related finding, NOT fixed here: `predict_next.py:136–144` predicts off the second-newest bar for the same dropna reason — a pre-existing one-day inference lag. Left as-is because changing it alters live trading behavior; suggested as its own follow-up issue.
+
+## Testing
+`uv run pytest tests/ -m "not exercise"` → **85 passed** (15 new). No live API calls anywhere; GBM tests build their model in-memory per test. The intraday stack's tests (`test_engulfing.py`, `test_intraday_sim.py`, `test_paper_trading.py`) pass unmodified — zero blast radius on existing behavior.
+
+## Risk and Rollback
+Additive only: no existing module is modified except `uv.lock`/`.gitignore`; nothing imports `strategies.daily` yet, so reverting the merge is a clean rollback with no data or behavioral implications. Real-money paths are untouched (`rh-exec` gating unchanged).
+
+## Checklist
+- [x] Tests pass locally (85 passed)
+- [x] No new dependencies (stdlib + existing pandas/sklearn/joblib)
+- [x] Every public function has a docstring; type hints throughout
+- [x] Intraday stack untouched and green
+- [ ] Reviewer: sanity-check the GBM padding trick (`strategies/gbm_adapter.py`)

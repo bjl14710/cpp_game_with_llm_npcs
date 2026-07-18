@@ -1,0 +1,25 @@
+# Plan: issue #23 — I2C addressing/frequency/NACK, WDT password, minimal interrupts
+Status: QUEUED (overnight 2026-07-15)
+Branch: feature/issue-23-i2c-wdt-interrupts (stacked on feature/issue-22-cpu-pmm-compliance)
+
+## Goal
+- I2C: 10-bit addressing (UCSLA10); frequency validated to standard modes
+  (-222 otherwise; remove the dead if/pass); TRANSFER routes by address to a
+  per-address rx/tx map, NACKs unknown addresses
+- WDT: 0x5A upper-byte password required — wrong password performs a PUC
+  (§24.2); HOLD/START via WDT:STATE. No timer-driven expiry (time does not
+  pass); password violation resets immediately only.
+- Interrupts: store GIE; INTERRUPT:VECTOR?/FLAG? reflect GPIO/timer flags
+  minimally (Table 9-4 vector addresses)
+
+## Touch points
+silmulator/devices/msp430.py: _i2c_*, _wdt_*, _int_*. Extend existing state
+dataclasses; no new modules. THREE commits: i2c / wdt / interrupts.
+
+## Acceptance
+1. Audit probes i2c_frequency_unvalidated / i2c_transfer_ignores_address /
+   i2c_write_always_acks / wdt_stub / interrupt_stub go STALE → rescore;
+   gate clean
+2. NEW doc-cited tests for each behavior in tests/test_msp430_edge_cases.py
+   (existing citation-comment pattern) — no xfails flip on this issue
+3. Full suite green

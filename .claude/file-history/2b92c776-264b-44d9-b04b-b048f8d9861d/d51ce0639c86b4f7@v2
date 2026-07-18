@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Milestone + tickets for the character-creator project (overnight)."""
+import os
+import time
+from pathlib import Path
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+USERNAME = "bjl14710"
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`feature/character-creator` (single stacked branch for the project; one PR closes all five)
+
+## Concept for learning materials
+{concept}
+"""
+
+COMMON = ("Plan: .claude/plans/character-creator.md. Branch stacks on the "
+          "city-polish chain tip. Persona and look stay fully independent "
+          "records. Sockets are authored per part in local space — no "
+          "per-pair offsets. The finished assembly obeys the 1.8-unit "
+          "character height contract (one Uniform scale for the whole "
+          "assembly). make -C tests test stays green.")
+
+SPECS = [
+    {"title": "feat(core): character part catalog with socket contracts",
+     "what": ("PartDef {id, category, styleTag, localSize, sockets} + the "
+              "built-in catalog (body/head/eyes/hair, two style families + "
+              "'any' parts), recursive socket assembly, pairwise style "
+              "compatibility, deterministic seeded randomizeLook, palette "
+              "presets."),
+     "where": "NEW src/core/CharacterParts.{hpp,cpp}; tests/test_character_parts.cpp.",
+     "verify": ("Tests: every compatible combination assembles with all "
+                "categories placed and height > 0; incompatible combos "
+                "rejected; randomize(seed) deterministic and always valid."),
+     "constraints": COMMON,
+     "economy": "Pure logic, no raylib includes — testable headless. Catalog is data rows, not classes.",
+     "concept": "Socket contracts: per-part attach points vs per-pair offsets"},
+    {"title": "feat(core): CharacterStore — independent persona/look records",
+     "what": ("SQLite store with two tables keyed by character_id: "
+              "character_persona (persona .persona-format text) and "
+              "character_look (small JSON). save/load/list; ok()-false and "
+              "corrupt-row degradation per ConversationStore's pattern. "
+              "renderPersonaText helper (inverse of parsePersonaText) in "
+              "PersonaLoader so the format stays in one file."),
+     "where": ("NEW src/core/CharacterStore.{hpp,cpp}, CharacterRecord.hpp; "
+               "src/core/PersonaLoader.{hpp,cpp} (+renderPersonaText); "
+               "tests/test_character_store.cpp."),
+     "verify": ("Round-trip tests by character_id; corrupt look JSON skipped "
+                "with note; persona text re-parses via parsePersonaText."),
+     "constraints": COMMON,
+     "economy": "Vendored sqlite3 already in-tree; copy ConversationStore's open/exec conventions exactly.",
+     "concept": "Independent records joined only at the use site"},
+    {"title": "feat(render): composite character renderer under the size contract",
+     "what": ("drawCompositeCharacter(look, pos, facingDeg, walking, phase): "
+              "part id -> primitive recipe (flat palette colors), assembly "
+              "transforms from the core, one uniform scale to the 1.8-unit "
+              "character height, procedural walk bob (no skeleton in v1)."),
+     "where": "src/app/RaylibRenderer.{hpp,cpp}.",
+     "verify": ("Screenshots of 3+ part/palette combinations: parts snapped "
+                "(nothing floating/embedded), same height as pack NPCs."),
+     "constraints": COMMON,
+     "economy": "Primitive recipes like drawFountain — no new assets, no shader work (fog applies via the existing batch path).",
+     "concept": "Assembling socketed parts in local space, scaling once"},
+    {"title": "feat(ui): creator menu page with live preview and randomize",
+     "what": ("Page::Creator in the pause menu: name/backstory/traits text "
+              "fields, a part cycler per category (style-filtered), palette "
+              "cycler, Randomize, Save & Spawn. CreatorHooks injected by "
+              "main; draft look exposed for the in-world preview render."),
+     "where": "src/app/Menu.{hpp,cpp}; src/app/main.cpp (preview draw).",
+     "verify": ("Screenshot: creator page with preview character in view; "
+                "randomize visibly changes the preview; empty name toasts."),
+     "constraints": COMMON,
+     "economy": "Reuse the joinAddress_ editing pattern for text fields and the existing Page/Hit/layout machinery — no new UI stack.",
+     "concept": "Injected hooks keep UI free of engine/storage types"},
+    {"title": "feat(game): spawn and persist created characters in the town",
+     "what": ("Save & Spawn: persist both records, spawn an Npc with the "
+              "authored persona (existing LLM pipeline, memory hooks work "
+              "by name), register the look for composite rendering, resize "
+              "per-NPC bookkeeping vectors, spawn-spot probing around the "
+              "plaza. Startup loads and spawns all stored characters."),
+     "where": "src/app/main.cpp; small accessor on World if needed.",
+     "verify": ("Create -> talk (LLM reply as the authored persona) -> quit "
+                "-> relaunch -> character re-spawns with same look/persona."),
+     "constraints": COMMON,
+     "economy": "No World/Npc core changes beyond what spawn-at-runtime strictly needs.",
+     "concept": "Player-authored content through the designer-content pipeline"},
+]
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+milestone = None
+for m in repo.get_milestones(state="open"):
+    if m.title.startswith("Character creator"):
+        milestone = m
+        break
+if milestone is None:
+    milestone = retry(lambda: repo.create_milestone(
+        title="Character creator: persona + socketed look",
+        description=("Player-authored characters: persona through the "
+                     "existing prompt pipeline, look through a socket-based "
+                     "3D part system under the size contract, SQLite "
+                     "persistence, creator UI in the pause menu. Plan: "
+                     ".claude/plans/character-creator.md")), "milestone")
+print(f"milestone #{milestone.number}: {milestone.title}")
+
+existing = {i.title.lower() for i in repo.get_issues(state="all") if not i.pull_request}
+created = []
+for spec in SPECS:
+    if spec["title"].lower() in existing:
+        print(f"exists: {spec['title']}")
+        continue
+    body = TEMPLATE.format(**spec)
+    issue = retry(lambda: repo.create_issue(
+        title=spec["title"], body=body, labels=["ai-in-progress"],
+        assignees=[USERNAME], milestone=milestone), spec["title"])
+    created.append(issue.number)
+    print(f"created #{issue.number}: {spec['title']}")
+
+Path("/private/tmp/claude-501/-Users-brandonlee-development-repos-products-cpp-games-cpp-game-with-llm-npcs/2b92c776-264b-44d9-b04b-b048f8d9861d/scratchpad/creator_issue_numbers.txt").write_text(
+    ",".join(str(n) for n in created))
+print("issue numbers saved")

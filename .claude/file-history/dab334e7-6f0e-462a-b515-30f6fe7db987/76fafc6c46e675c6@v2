@@ -1,0 +1,99 @@
+# Plan: Post-Earnings-Announcement Drift (PEAD) Strategy
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea (one paragraph)
+After earnings, prices keep drifting in the direction of the surprise for
+weeks — the PEAD anomaly. This strategy ranks names by standardized
+earnings surprise and goes long the big positive surprises for a fixed
+holding window (default 75 days, the 60–90 day literature range), filtered
+to liquid tickers because the research is explicit that PEAD's paper edge
+concentrates in small illiquid names where transaction costs eat it — the
+exact trap our cost model now measures.
+
+## Design Decisions
+- **Data: Alpha Vantage EARNINGS endpoint, free tier, cached** (user
+  decision): new `earnings_data.py` fetches per-ticker quarterly history
+  (reportedDate, reportedEPS, estimatedEPS), caches JSON per ticker under
+  `data/earnings/`, and a `refresh-earnings` CLI drip-fetches respecting a
+  `--budget` of calls per run (default 20, under the ~25/day free cap).
+  Earnings history is append-only in practice, so a quarterly refresh
+  suffices. Universe capped at ~100 liquid names (`--tickers_file` of the
+  top-ADV S&P names — universe_builder can emit it).
+- **Surprise metric**: `(reportedEPS − estimatedEPS) / max(|estimatedEPS|,
+  0.10)` — the denominator floor (10¢) tames the near-zero-estimate
+  explosion that plagues raw surprise percentages. Threshold entry
+  (surprise ≥ `min_surprise`, default +25%) rather than cross-sectional
+  decile ranking — keeps the per-ticker DailyStrategy contract intact.
+- **Holding window inside the signal**: emit +1 with confidence ∝ surprise
+  for `hold_days` (default 75) after the report date, then HOLD. The
+  one-bar-hold loop re-picks daily → continuous holding, free under
+  turnover costs. Deterministic given (df, cached earnings) — backfill-safe.
+- **Ticker identity**: `generate_signal(df)` has no ticker parameter; the
+  engine will set `df.attrs["ticker"]` before each call (one-line,
+  backward-compatible change to `run_strategy_walkforward` — my tests
+  already used this pattern). PEAD's constructor takes the earnings cache
+  dir and looks up by that attr; missing attr/tickers → HOLD.
+- **Liquidity filter in-strategy**: reuse `costs.adv_dollars`; ADV below
+  `--min_adv` (default $50M) → HOLD regardless of surprise. Belt to the
+  cost model's suspenders, per the idea's explicit instruction.
+- **Lookahead guard**: signals start the trading day AFTER reportedDate
+  (reports land pre-market/post-close; next-day entry is the conservative
+  choice and avoids assuming intraday timing we don't have).
+- compatible_regimes = all four (event-driven, not regime-driven).
+
+## Out of Scope
+- Short leg on negative surprises; SUE (analyst-dispersion-standardized)
+  surprise; paid data feeds; intraday entries; ranking across tickers.
+
+## Affected Areas
+- New: `earnings_data.py` (py-module + `refresh-earnings` entry point) —
+  fetch, cache, load; `surprises_for(ticker) -> DataFrame` from cache only
+  (strategies never hit the network).
+- New: `strategies/pead.py` — `PEADStrategy(DailyStrategy)`.
+- `walkforward_sim.py` — set `df.attrs["ticker"]` on the history slice
+  passed to generate_signal (regression-safe for all existing strategies).
+- `strategies/registry.py` — register `pead` (constructor kwarg
+  `earnings_dir`, like gbm's bundle_path).
+- Tests: `tests/test_earnings_data.py` (cache round-trip, budget respected,
+  malformed API payload skipped, mocked requests only),
+  PEAD cases in `tests/test_research_strategies.py` (long exactly
+  [report+1, report+hold_days]; below-threshold or illiquid → HOLD;
+  denominator floor; no-attr → HOLD).
+
+## Implementation Order
+1. `earnings_data.py` + cache + budgeted refresh CLI + tests (mocked).
+2. Engine `df.attrs["ticker"]` change + regression check.
+3. `PEADStrategy` + tests + registry.
+4. Docs: README_NEWS-style note on the drip-fetch workflow; universe file
+   recipe.
+
+## Acceptance Criteria
+- [ ] `refresh-earnings --tickers_file ... --budget 20` fetches at most 20
+      tickers, caches JSON, skips already-fresh entries
+- [ ] Surprise math: (0.55 actual, 0.40 est) → +37.5%; est 0.01 → floored
+      denominator (hand-pinned)
+- [ ] Signal is +1 from report+1 through report+hold_days inclusive, HOLD
+      outside; confidence increases with surprise size
+- [ ] ADV below min_adv → HOLD even at +100% surprise
+- [ ] Existing strategies byte-identical after the attrs change
+- [ ] No network in tests; strategies read cache only
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| No cached earnings for a ticker | HOLD + one logged notice (not per-bar spam) |
+| estimatedEPS null (AV gaps) | That quarter skipped — no surprise computable |
+| Two reports inside one hold window | Newer report resets the window/confidence |
+| Backtest window predates cache coverage | Those dates simply produce HOLD — backtest still runs, coverage noted in output |
+| AV rate-limit response mid-refresh | Stop the run, keep partial cache, report how many remain |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(data): earnings_data.py — AV EARNINGS cache + budgeted refresh-earnings CLI`
+2. `feat(engine): df.attrs ticker identity for aux-data strategies`
+3. `feat(strategies): PEADStrategy with liquidity filter and hold window`

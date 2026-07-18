@@ -1,0 +1,9 @@
+{
+  "id": "6",
+  "subject": "Learning materials + index + report",
+  "description": "Generate lesson/drill/terms per concept, rebuild index, write OVERNIGHT_REPORT.md",
+  "activeForm": "Generating learning materials and report",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

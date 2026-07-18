@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0004 — Linux Internal Networking</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Layered stack diagram */
+  .stack {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px; margin: 16px 0;
+  }
+  .stack-layer {
+    display: grid; grid-template-columns: 180px 1fr 90px; gap: 14px; align-items: center;
+    padding: 10px 12px; background: var(--panel-2); border-radius: 8px;
+    border-left: 3px solid var(--accent); margin: 6px 0;
+  }
+  .stack-layer .name { color: var(--accent); font-weight: 600; font-size: 14px; }
+  .stack-layer .desc { font-size: 13.5px; color: var(--ink); }
+  .stack-layer .lat { text-align: right; font-family: "JetBrains Mono", monospace; color: var(--accent-2); font-size: 13px; }
+  .arrow { text-align: center; color: var(--ink-dim); padding: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0004</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 The stack</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Sockets &amp; ports</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Namespaces &amp; Docker</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 In this project</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 HFT bypass</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Linux Internal Networking</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: your <code>docker-compose.yml</code>
+    quietly stands up a Linux network namespace with a virtual interface, a bridge, and
+    an iptables NAT rule — every time you type <code>docker compose up</code>. And every
+    HTTP request the FastAPI app handles traverses the Linux kernel network stack, which
+    is the exact stack the <code>fpga/README.md</code> roadmap wants to bypass.
+    Understanding both halves explains the difference between web-app latency (good
+    enough at 1 ms) and HFT latency (catastrophic at 1 ms).
+  </p>
+
+  <!-- ===================== §1 THE STACK ===================== -->
+  <h2>1. The Linux network stack, top to bottom</h2>
+  <p>
+    When <code>uvicorn webapp.main:app --host 0.0.0.0 --port 8000</code> accepts a request,
+    or when <code>yf.download()</code> in <code>predict_next.py</code> fetches a CSV, the
+    data crosses a fixed set of layers in a fixed order. Knowing this map tells you where
+    latency hides and what kernel bypass actually bypasses.
+  </p>
+
+  <div class="stack">
+    <div class="stack-layer"><span class="name">Application</span><span class="desc">Your Python (FastAPI, requests, yfinance). Calls <code>socket()</code>, <code>send()</code>, <code>recv()</code>.</span><span class="lat">your code</span></div>
+    <div class="arrow">▼  syscall  ▼</div>
+    <div class="stack-layer"><span class="name">Socket layer (kernel)</span><span class="desc">Validates the syscall, picks the right protocol, copies data from user memory into a kernel skb (socket buffer).</span><span class="lat">~1–5 µs</span></div>
+    <div class="arrow">▼</div>
+    <div class="stack-layer"><span class="name">TCP / UDP (L4)</span><span class="desc">Sequence numbers, retransmits, checksums, flow control. Adds an L4 header. This is the headline "TCP stack."</span><span class="lat">~1–3 µs</span></div>
+    <div class="arrow">▼</div>
+    <div class="stack-layer"><span class="name">IP (L3)</span><span class="desc">Routing table lookup, TTL, fragmentation. Adds an IP header. Picks which interface to send out.</span><span class="lat">~1 µs</span></div>
+    <div class="arrow">▼</div>
+    <div class="stack-layer"><span class="name">Netfilter / iptables</span><span class="desc">Firewall and NAT rules. This is where Docker's <code>ports: 8000:8000</code> rewrites destination addresses.</span><span class="lat">~1–10 µs</span></div>
+    <div class="arrow">▼</div>
+    <div class="stack-layer"><span class="name">Qdisc / Traffic Control</span><span class="desc">Queueing discipline. Picks the next packet to hand to the driver.</span><span class="lat">~1 µs</span></div>
+    <div class="arrow">▼</div>
+    <div class="stack-layer"><span class="name">NIC driver + DMA</span><span class="desc">DMA descriptor written; NIC fetches the packet from RAM and pushes it onto the wire.</span><span class="lat">~1–5 µs</span></div>
+    <div class="arrow">▼</div>
+    <div class="stack-layer"><span class="name">Wire (PHY → switch → exchange)</span><span class="desc">Physical layer. Latency dominated by distance and switch hops.</span><span class="lat">100 ns – ms</span></div>
+  </div>
+
+  <p>
+    Total round-trip <em>through this stack</em> on a busy Linux box: typically
+    <strong>~50–120 µs</strong> in the kernel alone, before the packet even reaches the
+    wire. Recent research benchmarks ping at ~120 µs over the kernel stack and ~18 µs
+    with busy-poll tuning. That's why HFT firms either go around this stack (kernel
+    bypass) or replace it entirely (FPGA NICs).
+  </p>
+
+  <!-- ===================== §2 SOCKETS & PORTS ===================== -->
+  <h2>2. Sockets, ports, and the three addresses you need to know</h2>
+
+  <p>
+    A <strong>socket</strong> is the kernel object that pairs an application process with
+    a transport-layer endpoint. Identified by the 5-tuple
+    <code>(proto, src_ip, src_port, dst_ip, dst_port)</code>. Your <code>uvicorn</code>
+    process owns one <em>listening socket</em>, and the kernel creates a fresh
+    <em>connected socket</em> for every accepted TCP connection.
+  </p>
+
+  <h3>The bind address — meaning the port number alone is half the story</h3>
+  <table>
+    <tr><th>Bind address</th><th>Listens on</th><th>Reachable from</th><th>When to use</th></tr>
+    <tr>
+      <td><code>127.0.0.1</code></td>
+      <td>Loopback interface only (<code>lo</code>)</td>
+      <td>Same host (or same network namespace)</td>
+      <td>Local-only dev, intra-container services.</td>
+    </tr>
+    <tr>
+      <td><code>0.0.0.0</code></td>
+      <td>Every interface on the host (or container)</td>
+      <td>Anywhere routable to those IPs</td>
+      <td>Servers exposed to other machines or to Docker's port mapping. <strong>This is what your Dockerfile uses.</strong></td>
+    </tr>
+    <tr>
+      <td><code>192.168.x.y</code> (specific)</td>
+      <td>Just that one interface</td>
+      <td>Anyone routable to that IP</td>
+      <td>Multi-homed hosts where you want to expose a service on one network only.</td>
+    </tr>
+  </table>
+
+  <h3>The <code>lo</code> (loopback) interface — special and important</h3>
+  <p>
+    <code>lo</code> (with IP <code>127.0.0.1</code>) is a virtual interface inside the
+    kernel. Packets sent to it never touch a NIC, never see the wire, and skip the
+    driver entirely. That's why
+    <code>python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"</code>
+    — the Dockerfile's <code>HEALTHCHECK</code> — is fast and reliable. The same loopback
+    inside one container is a <em>different</em> loopback than the host's. They share an
+    address (127.0.0.1) but live in different network namespaces.
+  </p>
+
+  <!-- ===================== §3 NAMESPACES & DOCKER ===================== -->
+  <h2>3. Network namespaces — how Docker isolates networking</h2>
+
+  <p>
+    A <strong>network namespace</strong> is a kernel object that gives a group of
+    processes their own private copy of the network stack: their own interfaces, their
+    own routing table, their own iptables rules, their own <code>lo</code>. This is the
+    Lego brick that makes containers possible.
+  </p>
+
+  <p>
+    When you run <code>docker compose up</code> on this repo, here's what happens:
+  </p>
+  <ol>
+    <li>Docker creates a new network namespace for the <code>hft_web</code> container.</li>
+    <li>It creates a <strong>veth pair</strong> — two virtual ethernet interfaces, like a network cable with both ends in software. One end (<code>eth0</code>) sits in the container's namespace; the other (<code>vethXXXX</code>) sits in the host's namespace.</li>
+    <li>The host-side veth is plugged into a Linux bridge (<code>docker0</code> by default, or a per-compose-project bridge).</li>
+    <li>The bridge gets a private subnet (e.g. <code>172.18.0.0/16</code>) and assigns the container an IP from it.</li>
+    <li><code>ports: "8000:8000"</code> installs an iptables DNAT rule (or starts <code>docker-proxy</code>) so that traffic hitting <code>host:8000</code> gets rewritten to <code>containerIP:8000</code>.</li>
+    <li>Egress from the container (e.g. yfinance fetching prices) hits an iptables MASQUERADE rule that rewrites the source to the host's IP — classic NAT.</li>
+  </ol>
+
+  <p>This is why the inside and outside of a container disagree about networking:</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Inside the container</h4>
+      <ul>
+        <li><code>eth0</code> with an IP like <code>172.18.0.2</code></li>
+        <li>Its own <code>lo</code> (127.0.0.1) — distinct from the host's</li>
+        <li>Default route → bridge IP → host</li>
+        <li>Sees <code>0.0.0.0:8000</code> as "all my interfaces"</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>On the host</h4>
+      <ul>
+        <li><code>docker0</code> (or per-project) bridge with the subnet</li>
+        <li><code>vethXXXX</code> dangling off the bridge</li>
+        <li>iptables: DNAT rule forwards <code>0.0.0.0:8000</code> → <code>172.18.0.2:8000</code></li>
+        <li>Host's <code>127.0.0.1:8000</code> works only because of that NAT rule</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>A minimal mental experiment</h3>
+<pre><span class="com"># Run on the host while the container is up:</span>
+$ ip netns list                          <span class="com"># list namespaces (Docker hides these from the default location)</span>
+$ docker exec hft_web ip addr            <span class="com"># show the container's interfaces</span>
+$ ip addr show docker0                   <span class="com"># show the bridge on the host</span>
+$ sudo iptables -t nat -L DOCKER -n      <span class="com"># show the DNAT rules Docker installed</span>
+$ ss -tlnp | grep :8000                  <span class="com"># who's listening on port 8000 from the host's POV?</span>
+</pre>
+
+  <!-- ===================== §4 IN THIS PROJECT ===================== -->
+  <h2>4. In this project</h2>
+
+  <span class="filepath">Dockerfile (line 64)</span>
+<pre>CMD [<span class="str">"/app/.venv/bin/uvicorn"</span>, <span class="str">"webapp.main:app"</span>, <span class="str">"--host"</span>, <span class="str">"0.0.0.0"</span>, <span class="str">"--port"</span>, <span class="str">"8000"</span>]</pre>
+
+  <p>
+    <code>--host 0.0.0.0</code> tells uvicorn to bind to <em>every</em> interface inside
+    the container's namespace. If this were <code>127.0.0.1</code>, only processes
+    <em>inside</em> the same container could reach it — port forwarding from the host
+    would fail because the DNAT target wouldn't have anything listening on its
+    <code>eth0</code> address. Common newbie mistake; harmless to fix.
+  </p>
+
+  <span class="filepath">docker-compose.yml (lines 23–24)</span>
+<pre>ports:
+  - <span class="str">"8000:8000"</span>     <span class="com"># host_port:container_port</span></pre>
+
+  <p>
+    The <code>host_port:container_port</code> form is a directive to install a DNAT
+    rule. Type <code>"8000"</code> alone (no colon) and Docker picks a random host port
+    — useful for parallel test environments where you don't want port collisions.
+  </p>
+
+  <span class="filepath">Dockerfile (lines 60–62) + docker-compose.yml (lines 34–45)</span>
+<pre>HEALTHCHECK ... CMD python -c <span class="str">"import urllib.request; urllib.request.urlopen('http://localhost:8000/')"</span></pre>
+
+  <p>
+    Healthcheck runs <em>inside</em> the container, so <code>localhost</code> here means
+    the container's own <code>lo</code> — same network namespace as uvicorn. This works
+    because uvicorn bound to <code>0.0.0.0</code>, which includes <code>127.0.0.1</code>.
+    If uvicorn had bound to a specific <code>eth0</code> IP only, the loopback healthcheck
+    would fail even though external HTTP would work. Yes, that is a fun debugging
+    afternoon.
+  </p>
+
+  <h3>And outbound traffic — yfinance, Alpha Vantage, Robinhood</h3>
+  <p>
+    When <code>news_fetch.py</code> hits Alpha Vantage, or <code>paper_trading_sim.py</code>
+    calls <code>yf.download()</code>, the packet path from inside the container is:
+  </p>
+  <p class="small">
+    Python <code>requests</code> → kernel socket inside container ns → container <code>eth0</code> → veth → host bridge (<code>docker0</code>) → iptables <code>MASQUERADE</code> rewrites source to host IP → host's real NIC → internet
+  </p>
+
+  <div class="callout">
+    <strong>This explains the <code>.env.docker</code> setup.</strong> The Docker container
+    has its own <code>resolv.conf</code> for DNS, its own routing table, its own iptables
+    rules. Credentials (<code>ALPHAVANTAGE_API_KEY</code>, <code>RH_*</code>) have to be
+    injected via env vars because the container otherwise has no idea how to fetch
+    them from your host's filesystem.
+  </div>
+
+  <!-- ===================== §5 HFT BYPASS ===================== -->
+  <h2>5. Why this all matters for the HFT roadmap</h2>
+
+  <p>
+    Look back at the latency table in §1. The Linux kernel network stack costs roughly
+    <strong>50–120 µs round-trip</strong>. <code>fpga/README.md</code>'s roadmap is
+    aiming for &lt;500 ns tick-to-trade — three orders of magnitude smaller than the
+    kernel's contribution alone. The only way to hit that budget is to refuse to use
+    the kernel network stack at all. Three techniques, in increasing order of
+    radicalness:
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Busy polling (the cheap win)</h4>
+      <p>
+        Tell the kernel to spin-wait on the NIC's RX queue (<code>SO_BUSY_POLL</code>,
+        <code>napi_busy_read</code>) instead of sleeping for an interrupt. Saves the
+        scheduling latency. Recent benchmarks show ping latency dropping from ~120 µs
+        to ~18 µs. Cheap, no new hardware, but still in the kernel.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Kernel bypass (DPDK, OpenOnload)</h4>
+      <p>
+        Map the NIC's DMA rings directly into userspace and skip the kernel for the
+        hot path. Solarflare/AMD OpenOnload achieves ~750–800 ns wire-to-wire on
+        commodity hardware (Lesson 0002). Trading firms use this on most non-FPGA paths.
+      </p>
+    </div>
+    <div class="card">
+      <h4>FPGA NIC (the nuclear option)</h4>
+      <p>
+        The NIC <em>is</em> the FPGA. Packets enter the PHY and are parsed in-fabric
+        by <code>linear_regression_predictor.vhd</code>-style logic; orders exit on
+        the same chip. ~100–500 ns total. Skips the kernel, skips PCIe (for the hot
+        path), skips userspace.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Where this repo lives today</h4>
+      <p>
+        The Python (webapp + scripts) uses the regular kernel stack. Fine — none of it
+        is latency-critical. The FPGA modules are <em>arithmetic ready</em> for the
+        nuclear option, but the network plumbing (10 GbE UDP parser, FIX decoder) is
+        on the roadmap, not built.
+      </p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> the only Python in this repo that talks to a real
+    exchange is <code>scripts/robinhood_executor.py</code>, and it uses ordinary HTTPS
+    over the kernel stack. That's correct for a retail brokerage — Robinhood's REST API
+    is comfortably above microsecond latencies. The kernel-bypass conversation only
+    becomes real if and when this repo gets a direct exchange feed.
+  </div>
+
+  <!-- ===================== §6 OFTEN CONFUSED WITH ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4><code>localhost</code> vs <code>0.0.0.0</code></h4>
+      <p>
+        <code>localhost</code> / <code>127.0.0.1</code> is an <em>address</em> — "I only
+        listen on the loopback interface." <code>0.0.0.0</code> is a <em>wildcard</em> —
+        "I listen on every interface in this namespace." They are not synonyms; binding
+        to one and connecting to the other has different reachability consequences.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Port vs Socket</h4>
+      <p>
+        A <strong>port</strong> is a 16-bit number that distinguishes endpoints on a
+        host. A <strong>socket</strong> is the kernel object that owns one end of a
+        connection, identified by the full 5-tuple. One listening socket can spawn
+        thousands of connected sockets, all bound to the same port.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Bridge vs Switch vs Router</h4>
+      <p>
+        A <strong>bridge</strong> (Docker's <code>docker0</code>) forwards Ethernet
+        frames within one broadcast domain — L2. A <strong>switch</strong> is the
+        hardware version of the same thing. A <strong>router</strong> moves packets
+        between L3 networks and rewrites L3 addresses (NAT). Docker uses all three
+        concepts at once.
+      </p>
+    </div>
+    <div class="card">
+      <h4>NAT vs Port Forwarding</h4>
+      <p>
+        <strong>NAT</strong> (specifically MASQUERADE / SNAT) rewrites the source IP of
+        outbound traffic so replies come back to the host. <strong>Port forwarding</strong>
+        (DNAT) rewrites the destination of inbound traffic so it lands on a specific
+        container. Docker installs both — and most "why can't I reach my container"
+        questions are about one of them being missing.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Container network ns vs Host network</h4>
+      <p>
+        <code>--network host</code> in Docker puts the container in the host's namespace
+        — no veth, no bridge, no NAT. Faster (no virtual hops) but breaks isolation.
+        HFT-style apps sometimes use this; web apps generally shouldn't.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Kernel stack vs Kernel bypass</h4>
+      <p>
+        <strong>Kernel stack</strong>: data goes through <code>socket()</code>,
+        <code>read()</code>, the TCP/IP code in the kernel. ~50–120 µs.
+        <strong>Kernel bypass</strong>: DMA rings mapped to userspace; the application
+        polls the NIC directly. ~1 µs. FPGAs go further still.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. Your Dockerfile starts uvicorn with <code>--host 127.0.0.1 --port 8000</code> by mistake, and your <code>docker-compose.yml</code> still has <code>ports: "8000:8000"</code>. What happens when you hit <code>http://localhost:8000</code> from your laptop?</p>
+    <ul class="options">
+      <li data-correct="true"  data-why="Correct. uvicorn is only listening on the container's loopback (its own private 127.0.0.1). The DNAT rule rewrites the destination to the container's eth0 IP (e.g. 172.18.0.2), which has no listener. Connection refused.">Connection refused. uvicorn is only listening on the container's loopback; the DNAT rule sends traffic to the container's eth0 IP, which has nothing on port 8000.</li>
+      <li data-correct="false" data-why="No — the host can route to the container's eth0 (that's what DNAT does). The problem is what's listening, not routing.">It works fine — host loopback and container loopback are the same interface.</li>
+      <li data-correct="false" data-why="There's no IP collision: the container has its own private namespace. The issue is the listening address, not address conflict.">It works, but slowly, because of an IP collision between host and container <code>127.0.0.1</code>.</li>
+      <li data-correct="false" data-why="The healthcheck runs INSIDE the container, where uvicorn IS listening on 127.0.0.1, so the healthcheck would pass — yet external requests would still fail.">The healthcheck would fail and Docker would mark the container unhealthy.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. The Dockerfile's HEALTHCHECK uses <code>urlopen('http://localhost:8000/')</code> and it succeeds. What does <code>localhost</code> resolve to in that context?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The host's lo lives in a different network namespace from the container's processes. They share the address 127.0.0.1 but they are not the same interface.">The host machine's loopback (127.0.0.1 on your laptop).</li>
+      <li data-correct="true"  data-why="Right. The healthcheck process runs inside the container's network namespace, so localhost is the container's own loopback interface — which uvicorn bound to via 0.0.0.0.">The container's own loopback interface (127.0.0.1 inside its private network namespace).</li>
+      <li data-correct="false" data-why="The bridge has its own private subnet address (e.g. 172.18.0.1). It is not loopback and not 127.0.0.1.">The docker0 bridge's IP.</li>
+      <li data-correct="false" data-why="localhost is a hostname that always resolves to a loopback address, never to a public IP — unless someone has done something very strange with their hosts file.">The host's public IP, via DNS resolution.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Why does <code>fpga/README.md</code>'s roadmap want a "10 GbE UDP stack" implemented directly on the FPGA instead of reusing the Linux kernel's UDP stack?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="UDP is fully supported in Linux. The issue is not absence of support, it's the per-packet latency cost of going through the kernel.">Because Linux doesn't support raw UDP sockets without root.</li>
+      <li data-correct="true"  data-why="Correct. The Linux kernel UDP stack costs ~50–120 µs per round-trip — orders of magnitude more than the entire FPGA tick-to-trade budget (~100–500 ns). An on-chip parser eliminates that overhead.">The Linux kernel UDP stack adds ~50–120 µs of latency per round-trip; the FPGA's entire tick-to-trade budget is ~100–500 ns, so any kernel involvement blows the budget by ~100×.</li>
+      <li data-correct="false" data-why="Reliability differences between Linux UDP and an FPGA UDP parser are negligible at the packet level. The reason is latency, not reliability.">Because the kernel's UDP implementation drops too many packets to be reliable.</li>
+      <li data-correct="false" data-why="Encrypted exchange traffic does exist (e.g. FIX over TLS) but it's not why FPGAs replace the kernel stack. The reason is per-packet latency.">Because exchange traffic is encrypted and the kernel can't decrypt it fast enough.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. You change <code>docker-compose.yml</code> from <code>ports: "8000:8000"</code> to <code>network_mode: host</code>. What's the most important consequence?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The container still has filesystem and process isolation. Only the network namespace is shared. It's not 'just a process'.">The container becomes just a process on the host with no isolation at all.</li>
+      <li data-correct="true"  data-why="Right. The container shares the host's network namespace — no veth, no bridge, no DNAT. uvicorn binds directly to the host's interfaces. Faster (no virtual hops) and simpler debugging, but you lose port-collision protection and network isolation between containers.">The container shares the host's network namespace — no veth, no bridge, no NAT rule. uvicorn binds directly to the host's interfaces. Lower latency, no isolation, no port-collision protection.</li>
+      <li data-correct="false" data-why="The application isn't slower in host mode — it's actually faster on the network path. Other host-mode tradeoffs exist (security, port collisions) but not slowness.">The application becomes slower because the host's network stack is busier.</li>
+      <li data-correct="false" data-why="Port 8000 still has to be free on the host. If something else is using it, uvicorn's bind will fail. host mode gives you direct access to host ports, not magic immunity.">Port 8000 becomes available to other applications because Docker stops claiming it.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. Inside the container, <code>news_fetch.py</code> calls Alpha Vantage. By the time the packet reaches Alpha Vantage's servers, what is its source IP?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's the container's private IP — internal to the docker0 subnet and not routable on the public internet. It would never reach Alpha Vantage as a source address.">The container's internal IP (e.g. 172.18.0.2).</li>
+      <li data-correct="false" data-why="docker0 is a bridge interface on the host, but its address is also private (e.g. 172.18.0.1). It isn't what shows up at Alpha Vantage either.">The docker0 bridge's IP.</li>
+      <li data-correct="true"  data-why="Correct. iptables MASQUERADE rewrites the source IP on outbound traffic to be the host's outbound interface IP, which is then NAT'd again by your home router or cloud provider before reaching the public internet. Alpha Vantage sees that final public IP.">The host's public-facing IP (via iptables MASQUERADE on egress, then any further NAT done by your router or cloud provider).</li>
+      <li data-correct="false" data-why="There's nothing in the stack that rewrites the source to 127.0.0.1 — and the public internet wouldn't route to 127.0.0.1 anyway.">127.0.0.1, because the container's loopback handles outbound traffic.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A teammate adds a Redis cache to <code>docker-compose.yml</code> and is confused that <code>webapp.main</code> can't reach it via <code>redis://127.0.0.1:6379</code>. How do you explain the fix?</summary>
+    <p>
+      Each service in <code>docker-compose.yml</code> gets its own network namespace.
+      Inside the <code>web</code> container, <code>127.0.0.1</code> is its own loopback —
+      Redis isn't there. Docker Compose, however, sets up DNS so each service is
+      reachable by its compose-name on the project's bridge. The fix is
+      <code>redis://redis:6379</code>: the hostname <code>redis</code> resolves to the
+      Redis container's eth0 IP on the shared bridge network. This is why
+      "<code>localhost</code> doesn't work between containers" is one of the most
+      common Docker confusions.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You suspect <code>news_fetch.py</code> is being rate-limited because the entire container's egress shares one source IP at Alpha Vantage's gateway. What single Docker change would prove or disprove this?</summary>
+    <p>
+      The cleanest test is to run two separate containers concurrently and watch
+      whether the rate limit is per-container or per-source-IP. By default they
+      both NAT through the same host IP, so the rate limiter would treat them as
+      one client. To prove the rate limit is per-source-IP rather than per-API-key,
+      you'd need to put the second container behind a different host IP — easiest
+      via a second host or a second cloud egress address. A configuration-only test
+      on one host can't fully disentangle it, but a quick proxy through a different
+      VPC interface usually does.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. You enable <code>SO_BUSY_POLL</code> on the FastAPI socket. Why might overall <em>system</em> throughput go down even though <em>per-request</em> latency goes down?</summary>
+    <p>
+      Busy polling burns a CPU core spinning instead of sleeping. The kernel can't
+      let that core run other work — your gradient boosting training thread, your
+      news-fetcher, your background equity curve renderer — so total throughput
+      drops. This is the universal latency-vs-throughput tradeoff and the reason
+      HFT firms dedicate <em>specific</em> cores to busy-polling and isolate them
+      from the scheduler (<code>isolcpus</code>, <code>nohz_full</code>). For a
+      web app where p99 latency is fine in the millisecond range, busy polling is
+      strictly a loss.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidates: <strong>(a) Walk-forward backtesting and look-ahead bias</strong>
+    grounded in <code>walkforward_sim.py</code>, or <strong>(b) Mean-variance portfolio
+    optimization</strong> grounded in <code>predict_next.py:meanvar_long_only</code>.
+    Both were teed up by Lesson 0003.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

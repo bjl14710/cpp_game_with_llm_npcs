@@ -1,0 +1,138 @@
+# Plan: CSGO-Style Overhaul
+Date: 2026-06-29
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea
+Transform the current open-arena wave shooter into a CSGO-inspired experience.
+The arena is replaced with a single corridor-and-room map (T-side / mid / bombsite
+layout). Textures go from flat checker/stripe to noise-based procedural concrete,
+brick, and metal. The player can toggle between first-person and third-person cameras
+with a keypress. Enemies no longer aim perfectly — each shot has a random spread
+cone so they can miss. An ammo system (magazine + reserve) is added, requiring the
+player to reload.
+
+## Goal
+A player can load the game, explore a CSGO-style map in first or third person,
+manage ammo, and fight enemies that miss shots at realistic rates.
+
+## Out of Scope (this version)
+- Loading image files from disk (all textures remain procedural/in-code)
+- Multiple maps or map selection
+- Bomb/defuse game mode
+- Buy menu or economy
+- Multiplayer
+- Shadows or dynamic lighting beyond the existing GL_LIGHT0
+- Weapon switching / multiple weapon types
+- Enemy pathfinding around walls (enemies will still move toward player;
+  wall avoidance is a future issue)
+
+## Affected Areas
+- `src/main.cpp` — all changes live here (single-file project)
+  - `TextureSet` / `buildTextures()` — new procedural textures
+  - `Player` struct — add `ammoInMag`, `ammoReserve`, `isReloading`, `reloadTimer`
+  - `InputState` struct — add `reload` bool, `toggleCamera` bool
+  - `GameState` struct — add `CameraMode` enum field
+  - `renderScene()` — branch on camera mode for eye/target calculation
+  - `drawArena()` — replaced by `drawMap()` with corridor geometry
+  - `spawnEnemyShot()` — add angular spread
+  - `spawnEnemy()` — replace random-anywhere with zone-based spawn points
+  - `updatePlayer()` — ammo deduction on fire, reload logic
+  - `renderHud()` — add ammo counter display
+  - `readInput()` — add R=reload, V=toggle camera
+  - New: `buildMapWalls()` returning `std::vector<MapWall>` defining the level
+  - New: `drawMapWalls()` iterating the wall list
+  - New: procedural texture generators: `makeNoiseTexture()`, `makeBrickTexture()`
+
+## Map Layout — "Dust" (one map, CSGO-inspired)
+All units match the existing coordinate scale (kArenaHalfSize = 80).
+
+```
++--T-Spawn--+---Mid---+--A-Site--+
+|           |         |          |
+|  T-start  | central |  A bomb  |
+|           |  open   |          |
++-----------+----+----+----------+
+                 |   B corridor
+            +----+----+
+            |  B-Site  |
+            +----------+
+```
+
+Concrete implementation: a list of axis-aligned box walls (MapWall structs) that
+`drawMap()` iterates and renders. No BSP or portal required at this scale.
+Spawn zones:
+- Player always starts at T-spawn centre (e.g. -60, 0, -60)
+- Enemies spawn in A-site or B-site zones, never within 30 units of player
+
+## Implementation Order
+
+1. **Enemy miss chance** — modify `spawnEnemyShot()` to deflect the aim direction
+   by a random angle drawn from a per-type spread cone. No other code changes.
+   Grunt: ±8°, Sprinter: ±14°, Tank: ±4°. Commit: `feat(ai): add per-type aim spread`
+
+2. **Ammo system** — add `ammoInMag`/`ammoReserve`/`isReloading`/`reloadTimer` to
+   `Player`. Add `reload` to `InputState`. Block firing when mag is empty.
+   Decrement on fire. Reload on R (1.8 s). Add ammo readout to HUD.
+   Commit: `feat(player): ammo and reload system`
+
+3. **Camera toggle** — add `enum class CameraMode { FirstPerson, ThirdPerson }` to
+   `GameState`. Add `toggleCamera` to `InputState` (key V). In `renderScene()`,
+   branch: first-person eye = `player.pos + (0, 5.2, 0)` looking along
+   `forwardFromAngles`; third-person keeps existing offset.
+   In first-person mode, skip `drawPlayer()`.
+   Commit: `feat(camera): toggleable first/third person`
+
+4. **Improved procedural textures** — add `makeNoiseTexture()` (hash-based value
+   noise for concrete) and `makeBrickTexture()` (row-offset brick pattern).
+   Replace `gTextures.wall`, `.ground`, `.crate` assignments in `buildTextures()`.
+   Commit: `feat(gfx): noise-based procedural textures`
+
+5. **Map geometry** — define `struct MapWall { Vec3 center; float hx,hy,hz; GLuint tex; }`.
+   Write `buildMapWalls()` returning the full wall list for the Dust layout.
+   Write `drawMap()` iterating the list. Replace `drawArena()` call.
+   Fix player start position in `startWave()` to T-spawn.
+   Commit: `feat(map): csgo-style corridor map`
+
+6. **Enemy spawn zones** — define two spawn rectangles (A-site, B-site).
+   Update `spawnEnemy()` to pick a random zone then a random point inside it,
+   rejecting if within 30 units of player.
+   Commit: `feat(ai): zone-based enemy spawning`
+
+## Acceptance Criteria
+
+- [ ] Pressing V toggles between first-person and third-person mid-game
+- [ ] In first-person: player body is not visible; aim follows mouse look correctly
+- [ ] In third-person: existing camera behaviour preserved
+- [ ] Player starts each wave with 30 rounds in mag, 90 in reserve
+- [ ] Firing when mag is empty does nothing; HUD shows 0/reserve
+- [ ] Pressing R starts a 1.8s reload; cannot fire during reload
+- [ ] After reload: mag refilled from reserve (or partially if reserve < 30)
+- [ ] Enemy shots visibly miss the player at range (spread is perceptible)
+- [ ] Map renders a T-spawn, mid, A-site, and B-corridor area with solid walls
+- [ ] Enemies never spawn inside a wall or within 30 units of the player
+- [ ] Procedural textures show concrete-like noise (not flat checkerboard) on walls
+- [ ] Game builds cleanly: `mkdir -p build && cd build && cmake .. && make -j4`
+
+## Edge Cases and Error Handling
+
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Shoot with 0 ammo in mag, 0 reserve | No shot fired, no crash |
+| Press R with full mag | No reload started (noop) |
+| Press R with 0 reserve | No reload started |
+| Toggle camera while dead/won | Camera still toggles (UI consistency) |
+| Enemy spawn rejection loops forever | Cap retries at 50; if exceeded, skip spawn that tick |
+| Wall count exceeds expected range | No runtime check needed — static list, always valid |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+
+1. `feat: enemy aim spread (miss chance)` — modify spawnEnemyShot with per-type cone
+2. `feat: ammo and reload system` — Player struct, input, HUD readout
+3. `feat: toggleable first/third person camera` — CameraMode enum + renderScene branch
+4. `feat: noise-based procedural textures` — concrete, brick, metal generators
+5. `feat: csgo-style corridor map geometry` — MapWall list, drawMap, player spawn fix
+6. `feat: zone-based enemy spawning` — A/B site zones, 30-unit exclusion radius

@@ -1,0 +1,205 @@
+"""Milestone + 7 issues for the mii-style-visual-overhaul plan."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+gh = Github(token)
+repo = gh.get_repo(full)
+username = gh.get_user().login
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+existing_titles = {i.title.lower() for i in retry(repo.get_issues, state="open")}
+
+milestone = retry(repo.create_milestone,
+    title="Mii-style visual overhaul & player avatar",
+    description=("Cartoony Mii/Tomodachi-style pass through the ONE shared parts "
+                 "pool: pack seam, proportions+palette, outlines, Mouth category, "
+                 "catalog expansion, player avatar, visual-QA playtest. Plan: "
+                 ".claude/plans/mii-style-visual-overhaul.md (Part A verdict: NO "
+                 "engine migration). Skill: .claude/skills/mii-style/SKILL.md. "
+                 "Branch: feature/mii-style-visual-overhaul (scaffolded, stacked "
+                 "on feature/punch-and-jump)."))
+print(f"Milestone #{milestone.number}: {milestone.title}")
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`feature/mii-style-visual-overhaul` (one atomic commit per issue, stacked on `feature/punch-and-jump`; scaffold + skill file already on the branch)
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    dict(
+        title="feat(parts): graphics-pack seam — pack tags + isolated recipe dispatch",
+        what=("Finish step 1: the `pack` field on PartDef/PartPalette is already scaffolded and "
+              "tested; move the per-part recipe branches out of drawCompositeCharacter's loop "
+              "into ONE dispatch function (e.g. drawPartRecipe(part, at, dim, colors)) with a "
+              "documented contract: a graphics pack = catalog rows + recipes + palettes, never "
+              "changes to assembly/picker/render-loop logic."),
+        where=("src/app/RaylibRenderer.cpp (TODO marker in place); "
+               "tests/test_style_pack.cpp pack-tag test already live"),
+        verify=("Game renders identically (screenshot before/after); no part-id string literals "
+                "outside the dispatch function and catalog (grep); make -C tests test green."),
+        constraints=("Pure extraction — zero visual change in this commit. The generic "
+                     "declared-box fallback stays the safety net inside the dispatch."),
+        economy=("One new static function in RaylibRenderer.cpp, no new files, no new types "
+                 "beyond a small Colors carrier if needed."),
+        concept="content-pack seams via tagged data and a single dispatch point",
+    ),
+    dict(
+        title="feat(style): Mii proportions and cohesive pastel palette rework",
+        what=("Rework existing catalog rows toward Mii/Tomodachi proportions: heads ~0.95-1.05u "
+              "over ~0.75-0.85u bodies (head reads ~40-45% of standing height), sockets "
+              "re-authored per part; shift/extend palettes to one cohesive bright-pastel set. "
+              "Refresh the ten personas' authored looks if any combination breaks."),
+        where=("src/core/CharacterParts.cpp (TODO markers in place); personas/*.persona only if "
+               "a look breaks; un-skip the proportions stub in tests/test_style_pack.cpp"),
+        verify=("Proportion stub un-skipped and green (head localSize.y / assembled height in "
+                "0.38-0.48 for every valid body+head pair); roster + combo tests green; "
+                "screenshot vs docs/qa/screenshots/shared-character-library/qa_shot_cop.png "
+                "shows a clearly bigger-headed, friendlier figure."),
+        constraints=("Data-only: localSize/sockets/palette rows. No assembly or renderer logic "
+                     "changes. The 1.8u height contract and style-tag gate stay untouched."),
+        economy=("Catalog row edits only. If a recipe looks wrong at new proportions, adjust "
+                 "the recipe's ratios, don't add shapes."),
+        concept="art direction as pure data under a socket contract",
+    ),
+    dict(
+        title="feat(render): inverted-hull cartoon outlines for composite characters",
+        what=("Wrap the recipe loop in an outline pass: re-issue the same part draws first at "
+              "~1.05 scale about each part's center, near-black, with front-face culling "
+              "(rlSetCullFace), then draw the color pass. Boxes are the known risk (corner "
+              "gaps): tune scale, then per-recipe outline opt-out, before any bigger idea."),
+        where=("src/app/RaylibRenderer.cpp drawCompositeCharacter (TODO marker in place); "
+               "conventions in .claude/skills/mii-style/SKILL.md"),
+        verify=("Screenshots of a sphere-family AND a box-family character show clean dark "
+                "outlines (close-up, --camera recipe); creator preview and NPCs both outlined; "
+                "suite green (outline is render-only, no core change)."),
+        constraints=("Group outline pass then color pass (rlgl state changes flush the batch — "
+                     "don't interleave per part). The death pose and emote billboard are "
+                     "unaffected (billboards get no outline)."),
+        economy=("One loop wrapped twice + a cull-face toggle. No shaders, no post-process, no "
+                 "new files this issue."),
+        concept="inverted-hull outlining in an immediate-mode renderer",
+    ),
+    dict(
+        title="feat(parts): Mouth as a fifth category, six-item look format",
+        what=("Land Mouth end-to-end in ONE commit: PartCategory::Mouth + count bump, "
+              "CategorySpec row Mouth->Head via 'mouth', 'mouth' sockets on all four heads, "
+              ">=4 mouth parts (smile, open smile, neutral, small-o) with recipes, Menu "
+              "categoryLabel case. Grow `look =` to six items (mouth before palette) with the "
+              "five-item form still parsing — mouth defaults via lookForPersona's deterministic "
+              "rule; renderPersonaText always emits six. Update the ten persona look lines."),
+        where=("src/core/CharacterParts.{hpp,cpp} (TODO with one-commit warning in place), "
+               "src/core/PersonaLoader.cpp, src/app/Menu.cpp, src/app/RaylibRenderer.cpp, "
+               "personas/*.persona; un-skip the two Mouth stubs in tests/test_style_pack.cpp"),
+        verify=("Both stubs un-skipped and green; exhaustive combo test absorbs the fifth axis; "
+                "five-item look line parses with deterministic mouth (test); roster test green "
+                "with six-item authored looks; screenshot shows mouths on townsfolk."),
+        constraints=("Stored looks predating Mouth demote to the deterministic fallback with a "
+                     "logged reason (never crash, never block spawn). CharacterLook::toJson/"
+                     "fromJson gain the mouth key with missing-key back-compat on read."),
+        economy=("Follow the CategorySpec extension path the system was designed for — no "
+                 "assembly-code changes; the drill for lesson 0020 documents the exact steps."),
+        concept="extending a category-spec system without touching assembly code",
+    ),
+    dict(
+        title="feat(parts): catalog expansion — hair, eyes, bodies, palettes",
+        what=("Grow the shared pool to the plan's floors: hair >=18, eyes >=10, bodies >=6, "
+              "mouths >=4 (from the Mouth issue), palettes >=12 — all pack 'core', style-tagged, "
+              "contract-conforming, each with a recipe (or the documented box fallback). "
+              "Re-author the ten persona looks to exploit the range: distinct, in-character."),
+        where=("src/core/CharacterParts.cpp, src/app/RaylibRenderer.cpp recipes, "
+               "personas/*.persona; un-skip the catalog-floors stub in tests/test_style_pack.cpp"),
+        verify=("Floors stub un-skipped and green; combo test green over the grown catalog; "
+                "roster test green (authored, valid, pairwise-distinct); screenshot sweep shows "
+                "visible new variety on the plaza."),
+        constraints=("Additive only — existing part ids keep their meaning (stored looks must "
+                     "not change appearance). Style families stay round/blocky/any."),
+        economy=("Data rows + recipe branches inside the step-1 dispatch function only — the "
+                 "#92/#97 pattern, no new systems."),
+        concept="scaling a constrained content catalog without combinatorial authoring",
+    ),
+    dict(
+        title="feat(avatar): player avatar customization via the shared creator",
+        what=("Give the player's own avatar the same look system NPCs have: a reserved "
+              "'player_avatar' row in the existing CharacterStore look table; an 'Edit My "
+              "Avatar' menu entry opening the SAME creator page in avatar mode (same picker/"
+              "Randomize/preview; Save writes the avatar row instead of spawning an NPC); "
+              "drawViewmodel tints the punch sleeve/fist and pistol hand from the avatar's "
+              "palette so the choice is visible in first person. Validate on load; stale look "
+              "demotes to a fixed-seed deterministic fallback, logged."),
+        where=("src/core/CharacterStore.{hpp,cpp} (only if a helper is needed — the look table "
+               "exists), src/app/Menu.{hpp,cpp} avatar mode, src/app/main.cpp load/persist/"
+               "viewmodel tint; un-skip the avatar stub in tests/test_style_pack.cpp (move into "
+               "test_character_store.cpp if its temp-dir fixtures fit better)."),
+        verify=("Avatar stub un-skipped and green (save/reopen/load round-trip under "
+                "'player_avatar'); manual: edit avatar, restart, punch — sleeve/fist colors "
+                "match the chosen palette; creator still spawns NPCs unchanged."),
+        constraints=("NO new storage system and NO second creator UI — one page, two write "
+                     "targets. Remote-player replication is OUT of scope (guests keep rigged "
+                     "meshes; log the seam in OVERNIGHT_REPORT.md)."),
+        economy=("Reuse CreatorHooks with an avatar-mode flag or a second hooks instance — "
+                 "whichever is fewer lines in Menu; no new files."),
+        concept="one UI surface writing to two data targets",
+    ),
+    dict(
+        title="chore(qa): visual consistency gate + free-play findings list",
+        what=("After the six issues above: (a) visual-qa subagent side-by-side set — creator "
+              "preview, roaming NPCs, avatar-tinted viewmodel — judged for one-art-source "
+              "consistency, outline quality, and Mii proportions; (b) a free-form playtest "
+              "sweep (walk the town at several hours, talk, fight, jump, create a character) "
+              "recording concrete visual/game-feel observations. Findings go to "
+              "OVERNIGHT_REPORT.md as an observations-only list — do NOT act on them."),
+        where=("visual-qa subagent + OVERNIGHT_REPORT.md (local-only, never committed); "
+               "screenshots to docs/qa/screenshots/mii-style/ (gitignored)"),
+        verify=("OVERNIGHT_REPORT.md contains the consistency verdict AND a findings list; "
+                "PR body links the verdict; no code changes from findings."),
+        constraints=("Findings are observations only. If the consistency gate FAILS, fix the "
+                     "inconsistency (it's this milestone's own acceptance) before the PR — "
+                     "that's the one permitted action."),
+        economy=("No code in this issue beyond fixes required by a failed gate."),
+        concept="self-directed playtesting as a verification stage",
+    ),
+]
+
+created = []
+for spec in SPECS:
+    if spec["title"].lower() in existing_titles:
+        print(f"Skipping (exists): {spec['title']}")
+        continue
+    body = TEMPLATE.format(**{k: spec[k] for k in
+                              ("what", "where", "verify", "constraints", "economy", "concept")})
+    issue = retry(repo.create_issue, title=spec["title"], body=body,
+                  labels=["ready-for-ai"], assignees=[username], milestone=milestone)
+    created.append((issue.number, spec["title"]))
+    print(f"  #{issue.number}: {spec['title']}")
+
+print("\n=== ready-for-ai queue ===")
+for i in retry(repo.get_issues, state="open", labels=["ready-for-ai"]):
+    print(f"  #{i.number:3} {i.title}")
+print("ISSUES:", [n for n, _ in created])

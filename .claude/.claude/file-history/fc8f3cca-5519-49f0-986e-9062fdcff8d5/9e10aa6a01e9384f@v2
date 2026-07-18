@@ -1,0 +1,49 @@
+"""Per-stage compute-cost tracking (the dashboard's cost panel c).
+
+A tiny timer that records wall-clock and rows processed for each pipeline stage,
+so the GUI can show where the time goes.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+
+
+@dataclass
+class StageMetric:
+    name: str
+    seconds: float
+    rows: int | None = None
+
+
+@dataclass
+class ComputeMetrics:
+    stages: list[StageMetric] = field(default_factory=list)
+
+    def record(self, name: str, seconds: float, rows: int | None = None) -> None:
+        self.stages.append(StageMetric(name, seconds, rows))
+
+    @property
+    def total_seconds(self) -> float:
+        return sum(s.seconds for s in self.stages)
+
+    def as_rows(self) -> list[dict]:
+        return [{"stage": s.name, "seconds": round(s.seconds, 4), "rows": s.rows} for s in self.stages]
+
+
+class StageTimer:
+    """Context manager: ``with StageTimer(metrics, "download") as t: ... t.rows = n``."""
+
+    def __init__(self, metrics: ComputeMetrics, name: str):
+        self.metrics = metrics
+        self.name = name
+        self.rows: int | None = None
+        self._start = 0.0
+
+    def __enter__(self) -> StageTimer:
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.metrics.record(self.name, time.perf_counter() - self._start, self.rows)

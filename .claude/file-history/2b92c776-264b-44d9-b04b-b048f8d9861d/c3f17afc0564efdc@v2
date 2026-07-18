@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0026 — Generate, Validate, Retry</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0026 · pairs with lesson 0026</div>
+<h1>Drill: Generate, Validate, Retry</h1>
+
+<div class="q"><h3>1. One artifact, two audiences</h3>
+<p>The validator's error strings serve two consumers. Name them and give
+the design consequence.</p>
+<details><summary>Answer</summary><div class="a">
+<p>The human (editor toast/CLI output) and the MODEL (retry feedback,
+verbatim). Consequence: errors must be specific and actionable —
+"unknown part: hair_dreads (nearest valid id: hair_braids)" — because a
+vague error wastes a retry exactly like it wastes a player's time.</p>
+</div></details></div>
+
+<div class="q"><h3>2. All three models failed identically. What did that prove?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>That the CONTRACT was at fault, not the models. Multi-line persona text
+inside JSON strings is awkward to emit; switching to one JSON object per
+character (converted server-side so the existing loaders stay the only
+loaders) cleared the failures across every model at once.</p>
+</div></details></div>
+
+<div class="q"><h3>3. The unsatisfiable instruction</h3>
+<p>"Keep looks style-consistent" kept failing until one vocabulary change.
+What was missing, and what's the general principle?</p>
+<details><summary>Answer</summary><div class="a">
+<p>The part list never said which family each id belonged to — the model
+couldn't comply even in principle. Annotating <code>body_round(round)</code>
+etc. took qwen3:8b to first-attempt validity. Principle: before repeating
+an instruction louder, check whether the prompt contains the INFORMATION
+the instruction requires.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Why is auto-repair banned even for obvious fixes?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>Nudging placements or substituting nearest ids hides model quality
+(poisoning the benchmark that picks the model), ships silent surprises,
+and removes the feedback pressure that makes retries improve. The one
+exception is wrapper normalization ("[grumpy]" → grumpy): packaging, not
+content.</p>
+</div></details></div>
+
+<div class="q"><h3>5. Repairable vs strict loads</h3>
+<p>Hand-made maps load repairably; LLM output loads strictly. Justify the
+asymmetry.</p>
+<details><summary>Answer</summary><div class="a">
+<p>A human editing their own file benefits from "open it anyway, drop the
+bad rows, show a toast" — they can fix it in place. A model gets feedback
+instead of forgiveness: strictness keeps validity measurable and pushes
+errors back into the retry loop where they can be corrected.</p>
+</div></details></div>
+
+<div class="q"><h3>6. Why does the Python bench shell out to the C++ CLI?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>So the bench and the game share ONE validation contract. A Python
+re-implementation would drift, and then the bench would measure compliance
+with rules the game doesn't actually enforce.</p>
+</div></details></div>
+
+<div class="q"><h3>7. Transfer it</h3>
+<p>You're adding "LLM writes SQL migrations" to a tool. Apply tonight's
+architecture in three bullets.</p>
+<details><summary>Answer</summary><div class="a">
+<p>(1) The model emits a constrained spec (schema-change JSON against the
+live schema as closed-world vocabulary), never raw SQL applied directly.
+(2) A validator with model-grade errors gates the ONE apply path; failures
+feed back verbatim, capped, no partial applies. (3) Model choice by
+measured spec-validity over a fixed corpus, validated by the same code
+that gates production.</p>
+</div></details></div>
+</div></body>
+</html>

@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0002 — std::vector vs. array</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  .game-tag {
+    display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: var(--panel-2); color: var(--ink-dim); margin-right: 6px;
+    border: 1px solid var(--line);
+  }
+  .game-tag.shooter { color: #ff9b8c; }
+  .game-tag.racing  { color: #9bd5ff; }
+  .game-tag.npcs    { color: #c4e08a; }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0002 &middot; cpp_games / docs / learning</div>
+  <h1>std::vector vs. array</h1>
+  <p class="why">Why this matters: all three of your games pick between a fixed-size and a dynamic-size container every few hundred lines. Pick wrong and you either pay for heap allocation you didn't need (slow) or get memory corruption when the count grows past the bound you assumed (crash). This lesson is the rule for getting it right reliably.</p>
+</header>
+
+<h2>1. The concept</h2>
+
+<p>C++ gives you three flavours of "a bunch of things in a row." They look similar in the source but differ enormously in <b>where the storage lives</b>, <b>whether the size can change</b>, and <b>what you can hand to a function</b>.</p>
+
+<table class="compare">
+  <thead><tr><th style="width:24%">Container</th><th>Size</th><th>Storage</th><th>Type carries size?</th></tr></thead>
+  <tbody>
+    <tr><td><b>C-style array</b><br><code class="inline">T arr[N]</code></td><td>Fixed, set at declaration</td><td>Wherever the variable lives (stack, static, member)</td><td>Yes &mdash; until it <em>decays</em> to a pointer.</td></tr>
+    <tr><td><b><code class="inline">std::array&lt;T, N&gt;</code></b></td><td>Fixed at compile time</td><td>Same as above &mdash; usually the stack</td><td>Yes, permanently. Doesn't decay.</td></tr>
+    <tr><td><b><code class="inline">std::vector&lt;T&gt;</code></b></td><td>Dynamic, grows and shrinks at runtime</td><td>Heap (the vector struct itself is on the stack; the data is heap-allocated)</td><td>No &mdash; size is a runtime value you call <code class="inline">.size()</code> for.</td></tr>
+  </tbody>
+</table>
+
+<p>The shortest possible decision rule:</p>
+
+<div class="callout">
+  <h3>Picking between them</h3>
+  <p><b>Do you know the count at compile time?</b> &rarr; <code class="inline">std::array&lt;T, N&gt;</code>.<br>
+  <b>Does the count change at runtime?</b> &rarr; <code class="inline">std::vector&lt;T&gt;</code>.<br>
+  <b>Are you interoperating with C, or writing a tiny throwaway literal list?</b> &rarr; C-style array is acceptable but not preferred.</p>
+</div>
+
+<p>The trap to know about: a C-style array <b>decays to a pointer</b> the moment you pass it to a function. <code class="inline">void f(int arr[10])</code> looks like it knows the array is 10 long; it doesn't. The parameter is silently rewritten to <code class="inline">int* arr</code> and <code class="inline">sizeof(arr)</code> inside <code class="inline">f</code> is the size of a pointer, not the array. <code class="inline">std::array</code> never decays; <code class="inline">std::array&lt;int, 10&gt;&amp;</code> stays exactly that.</p>
+
+<p>The other thing to know: <code class="inline">std::vector</code> looks small &mdash; just three pointers on the stack &mdash; but every push that exceeds capacity triggers a heap reallocation and a copy/move of every element. Reserve up front when you know the count: <code class="inline">v.reserve(1024)</code>. We'll see this in the shooter game shortly.</p>
+
+<h2>2. Minimal example &mdash; all three side by side</h2>
+
+<pre class="code"><span class="pp">#include</span> <span class="str">&lt;array&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;vector&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;cstdio&gt;</span>
+
+<span class="com">// Compile-time fixed size. Lives on the stack. Type loses size when passed.</span>
+<span class="kw">void</span> takesCArray(<span class="typ">int</span> arr[<span class="num">3</span>]) {
+    <span class="com">// printf("%zu", sizeof(arr) / sizeof(arr[0]));   // BUG: prints "2" on a 64-bit box.</span>
+    <span class="com">// arr decayed to int*; you have no way to ask "how many?".</span>
+}
+
+<span class="com">// Compile-time fixed size. Type carries N forever. Pass by ref to avoid copy.</span>
+<span class="kw">void</span> takesArray(<span class="kw">const</span> std::array&lt;<span class="typ">int</span>, <span class="num">3</span>&gt;&amp; arr) {
+    std::printf(<span class="str">"%zu\n"</span>, arr.size());  <span class="com">// always 3, known at compile time</span>
+}
+
+<span class="com">// Runtime size. Storage is heap; the vector struct itself is small.</span>
+<span class="kw">void</span> takesVector(<span class="kw">const</span> std::vector&lt;<span class="typ">int</span>&gt;&amp; v) {
+    std::printf(<span class="str">"%zu\n"</span>, v.size());  <span class="com">// whatever happens to be in there right now</span>
+}
+
+<span class="typ">int</span> main() {
+    <span class="typ">int</span>                  c[<span class="num">3</span>] = {<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>};   <span class="com">// stack, fixed, decays</span>
+    std::array&lt;<span class="typ">int</span>, <span class="num">3</span>&gt;   a   = {<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>};   <span class="com">// stack, fixed, doesn't decay</span>
+    std::vector&lt;<span class="typ">int</span>&gt;     v   = {<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>};   <span class="com">// heap, can grow</span>
+    v.push_back(<span class="num">4</span>);                          <span class="com">// fine; a and c cannot grow.</span>
+
+    takesCArray(c);
+    takesArray(a);
+    takesVector(v);
+}</pre>
+
+<p>The interesting line is the commented-out <code class="inline">sizeof(arr)</code> inside <code class="inline">takesCArray</code>. That's the classic C bug C++'s <code class="inline">std::array</code> exists to eliminate.</p>
+
+<h2>3. In your games &mdash; the real code</h2>
+
+<p>Your three games together touch all three flavours. Here's the actual code, identified by which game it came from.</p>
+
+<h3>Fixed and small: use <code class="inline">std::array</code></h3>
+
+<small class="path">cpp_racing_game/src/main.cpp:943</small>
+<pre class="code"><span class="com">// A quad is, by definition, exactly four corners. The type guarantees that.</span>
+<span class="kw">const</span> std::array&lt;sf::Vector2f, <span class="num">4</span>&gt; outerQuad = {
+    sf::Vector2f(kOuterX, kOuterY),
+    sf::Vector2f(kOuterX + kOuterW, kOuterY),
+    sf::Vector2f(kOuterX + kOuterW, kOuterY + kOuterH),
+    sf::Vector2f(kOuterX, kOuterY + kOuterH),
+};</pre>
+
+<small class="path">cpp_shooter_game/src/main.cpp:168 (and cpp_racing_game/src/main.cpp:597)</small>
+<pre class="code"><span class="com">// A 4x4 matrix is exactly 16 floats. Encoding that in the type</span>
+<span class="com">// stops you from ever accidentally building a 15-element "matrix".</span>
+<span class="kw">const</span> std::array&lt;<span class="typ">float</span>, <span class="num">16</span>&gt; matrix = { <span class="com">/* ... 16 entries ... */</span> };</pre>
+
+<small class="path">cpp_shooter_game/src/main.cpp:390</small>
+<pre class="code"><span class="com">// Three hardcoded font paths to try. Count is fixed; std::array advertises that.</span>
+<span class="kw">const</span> std::array&lt;<span class="kw">const</span> <span class="typ">char</span>*, <span class="num">3</span>&gt; candidates = {
+    <span class="str">"C:/Windows/Fonts/arial.ttf"</span>,
+    <span class="str">"C:/Windows/Fonts/segoeui.ttf"</span>,
+    <span class="str">"C:/Windows/Fonts/tahoma.ttf"</span>,
+};</pre>
+
+<h3>Unknown until runtime: use <code class="inline">std::vector</code></h3>
+
+<small class="path">cpp_shooter_game/src/main.cpp:320</small>
+<pre class="code"><span class="kw">struct</span> GameState {
+    Player player;
+    std::vector&lt;Projectile&gt; projectiles;  <span class="com">// fired and consumed every frame</span>
+    std::vector&lt;Enemy&gt;      enemies;      <span class="com">// waves spawn variable counts</span>
+    std::vector&lt;Pickup&gt;     pickups;      <span class="com">// drop randomly, get picked up</span>
+    std::vector&lt;ImpactEffect&gt; impacts;    <span class="com">// born on hit, expire by timer</span>
+    <span class="com">// ...</span>
+};</pre>
+
+<p>None of those counts can be known at compile time. Every frame the shooter adds and removes entries from each of these. <code class="inline">std::array</code> would be wrong here because <em>you cannot push or pop</em> &mdash; the size is baked into the type.</p>
+
+<small class="path">cpp_racing_game/src/main.cpp:262</small>
+<pre class="code"><span class="com">// The number of points depends on cornerSegments — a runtime parameter.</span>
+std::vector&lt;sf::Vector2f&gt; buildRoundedRectLoop(<span class="typ">float</span> x, <span class="typ">float</span> y, <span class="typ">float</span> w, <span class="typ">float</span> h,
+                                               <span class="typ">float</span> radius, <span class="typ">int</span> cornerSegments) {
+    std::vector&lt;sf::Vector2f&gt; pts;
+    <span class="com">// ... fill pts with up to ~4*cornerSegments points ...</span>
+    <span class="kw">return</span> pts;
+}</pre>
+
+<small class="path">cpp_shooter_game/src/main.cpp:110</small>
+<pre class="code"><span class="com">// Size depends on the runtime `size` argument. Heap allocation is unavoidable.</span>
+std::vector&lt;std::uint8_t&gt; pixels(size * size * <span class="num">4</span>, <span class="num">255</span>);</pre>
+
+<small class="path">cpp_game_with_llm_npcs/src/Npc.hpp</small>
+<pre class="code"><span class="kw">class</span> Npc {
+    <span class="com">// History grows turn by turn as the player chats. Cap is enforced</span>
+    <span class="com">// at runtime by trimHistory(), not by the type.</span>
+    std::vector&lt;ChatTurn&gt; history_;
+};</pre>
+
+<h3>The odd one out &mdash; a C-style array, in our newest code</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/main.cpp:72</small>
+<pre class="code"><span class="kw">const</span> <span class="typ">char</span>* candidates[] = {
+    <span class="str">"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"</span>,
+    <span class="str">"/usr/share/fonts/dejavu/DejaVuSans.ttf"</span>,
+    <span class="str">"C:/Windows/Fonts/segoeui.ttf"</span>,
+    <span class="com">/* ... */</span>
+};
+<span class="kw">for</span> (<span class="kw">const</span> <span class="typ">char</span>* c : candidates) { <span class="com">/* ... */</span> }</pre>
+
+<p>Compare with the shooter game's <code class="inline">std::array&lt;const char*, 3&gt;</code> candidates &mdash; same job, two different choices. Both compile. Both work. But:</p>
+<ul>
+  <li>The shooter version's type loudly states "there are exactly three of these." The new game's type doesn't &mdash; you'd have to count the lines.</li>
+  <li>If you ever pass the new game's array to a helper function, it'll decay to a pointer and the receiver loses the count.</li>
+  <li>Range-for (<code class="inline">for (auto c : candidates)</code>) works on both, which is why the C-style version doesn't bite us <em>here</em>.</li>
+</ul>
+
+<p>So the C-style array isn't <i>wrong</i> in that exact spot &mdash; but the shooter's version is better style and would survive refactoring better. Replacing it with <code class="inline">std::array&lt;const char*, 6&gt;</code> would be a one-line improvement.</p>
+
+<h2>4. Often confused with...</h2>
+
+<h3>C-style array vs. <code class="inline">std::array</code></h3>
+<p>Same storage (typically stack), same access syntax, same iteration. The difference is what survives travel:</p>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th><code class="inline">int arr[3]</code></th><th><code class="inline">std::array&lt;int, 3&gt;</code></th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">.size()</code></td><td>No method. Use <code class="inline">sizeof(arr)/sizeof(arr[0])</code> &mdash; brittle.</td><td><code class="inline">arr.size()</code>, always 3, <code class="inline">constexpr</code>.</td></tr>
+    <tr><td>Decay on function call</td><td>Yes &mdash; turns into <code class="inline">int*</code>, count is lost.</td><td>No &mdash; size travels with the type.</td></tr>
+    <tr><td>Copy assignment</td><td>Forbidden. <code class="inline">a = b</code> doesn't compile.</td><td>Works. <code class="inline">a = b</code> copies all elements.</td></tr>
+    <tr><td>Returned from a function</td><td>Forbidden directly.</td><td>Works.</td></tr>
+    <tr><td>Bounds-checked access</td><td>Never.</td><td><code class="inline">arr.at(i)</code> throws on out-of-range. <code class="inline">arr[i]</code> doesn't.</td></tr>
+  </tbody>
+</table>
+
+<h3><code class="inline">std::array</code> vs. <code class="inline">std::vector</code></h3>
+<p>The biggest single-word difference is <b>where</b>:</p>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th><code class="inline">std::array&lt;T, N&gt;</code></th><th><code class="inline">std::vector&lt;T&gt;</code></th></tr></thead>
+  <tbody>
+    <tr><td>Storage</td><td>Inline &mdash; same memory as the variable itself. Typically stack.</td><td>Heap &mdash; the vector holds 3 pointers and calls <code class="inline">new</code>/<code class="inline">delete</code> behind your back.</td></tr>
+    <tr><td>Size known when?</td><td>Compile time. Baked into the type.</td><td>Runtime. <code class="inline">.size()</code> is a counter.</td></tr>
+    <tr><td>Can grow?</td><td>No. The type forbids it.</td><td>Yes &mdash; <code class="inline">push_back</code>, <code class="inline">resize</code>, etc.</td></tr>
+    <tr><td>Allocation cost</td><td>Zero &mdash; comes with the stack frame.</td><td>At least one heap allocation; more on growth.</td></tr>
+    <tr><td>Best when</td><td>Quad corners, matrix entries, fixed lookup tables.</td><td>Enemies, projectiles, chat history, anything dynamic.</td></tr>
+  </tbody>
+</table>
+
+<h3><code class="inline">std::vector</code> vs. <code class="inline">std::list</code> (a trap worth naming)</h3>
+<p>Beginners reach for <code class="inline">std::list</code> when they hear "the middle of a vector is slow to delete from." It usually isn't, and <code class="inline">std::list</code> is almost always worse than a <code class="inline">std::vector</code> with <code class="inline">erase</code> &mdash; because vector's contiguous layout is so cache-friendly that even shifting elements often beats the pointer-chasing a linked list does. The shooter game's <code class="inline">std::vector&lt;Enemy&gt;</code> deletes mid-vector when enemies die; that's faster than the equivalent <code class="inline">std::list&lt;Enemy&gt;</code> would be on any modern CPU. Don't reach for <code class="inline">std::list</code> unless you've measured and have a specific reason.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">In the racing game, <code class="inline">outerQuad</code> is declared as <code class="inline">std::array&lt;sf::Vector2f, 4&gt;</code>. Why <em>not</em> <code class="inline">std::vector&lt;sf::Vector2f&gt;</code>?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Exactly. A quad has exactly four corners by definition. std::array bakes that into the type — you can't accidentally build a 3- or 5-corner 'quad'.">
+      A quad always has four corners; encoding that in the type prevents bugs and avoids a heap allocation.
+    </li>
+    <li data-correct="false" data-why="std::vector also supports range-for. That's not the reason.">
+      <code class="inline">std::vector</code> doesn't support range-for loops.
+    </li>
+    <li data-correct="false" data-why="They both allow it. Vector copy is just heavier because the data lives on the heap.">
+      <code class="inline">std::array</code> is the only one that can be copied between functions.
+    </li>
+    <li data-correct="false" data-why="Both work fine with SFML. SFML APIs take iterators or raw pointers from either.">
+      SFML's drawing functions only accept <code class="inline">std::array</code>.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A helper has the signature <code class="inline">void render(int arr[10])</code>. Inside it, what does <code class="inline">sizeof(arr) / sizeof(arr[0])</code> print on a 64-bit machine when <code class="inline">int</code> is 4 bytes?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Tempting, but no — that's what it would be if the array's size were preserved. It isn't.">
+      10 &mdash; the compiler keeps the count from the declaration.
+    </li>
+    <li data-correct="true" data-why="Right. The parameter has decayed to int*, sizeof(int*) is 8 on a 64-bit box, sizeof(int) is 4, so 8/4 = 2. This is the classic C bug.">
+      2 &mdash; the parameter decayed to <code class="inline">int*</code>, so you're computing <code class="inline">sizeof(int*) / sizeof(int)</code>.
+    </li>
+    <li data-correct="false" data-why="No — sizeof on a pointer is the pointer's own size, not the size of what it points to.">
+      40 &mdash; <code class="inline">sizeof</code> returns the total bytes of the underlying array.
+    </li>
+    <li data-correct="false" data-why="It compiles fine. The bug is silent at the language level; only the result is wrong.">
+      It won't compile.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">In the shooter game, <code class="inline">std::vector&lt;Projectile&gt; projectiles</code> grows whenever the player shoots. What hidden cost does <code class="inline">projectiles.push_back(...)</code> incur the moment the vector outgrows its current capacity?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="It's amortized constant time across many pushes. The single push that triggers a realloc is the expensive one — that's what the question is about.">
+      Nothing &mdash; <code class="inline">push_back</code> is always O(1).
+    </li>
+    <li data-correct="true" data-why="Right. New buffer allocated on the heap, all existing elements moved/copied across, old buffer freed. Calling reserve() ahead of time avoids it.">
+      A new heap buffer is allocated, every existing element is moved/copied into it, and the old buffer is freed.
+    </li>
+    <li data-correct="false" data-why="It compiles fine — that's the whole point of vector. It crashes only on truly out-of-memory situations.">
+      The program crashes &mdash; you must call <code class="inline">resize</code> first.
+    </li>
+    <li data-correct="false" data-why="Stack and heap aren't the same; vector data is always on the heap regardless of what's pushed.">
+      The element is silently moved to the stack instead of the heap.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Pick the right container for <em>each</em> use case in your new game's source.</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Trait count varies per persona — some have 2 traits, some 4. The whole point of vector is that you don't bake the count into the type.">
+      <code class="inline">Persona::traits</code> &rarr; <code class="inline">std::array&lt;std::string, 3&gt;</code>, history &rarr; <code class="inline">std::vector</code>, drained replies &rarr; <code class="inline">std::array</code>.
+    </li>
+    <li data-correct="true" data-why="Right. Trait count is per-persona (vector). Chat history grows turn by turn (vector). Drained replies is a one-shot snapshot whose size is whatever happens to be queued (vector).">
+      All three (traits, history, drained replies) &rarr; <code class="inline">std::vector</code>.
+    </li>
+    <li data-correct="false" data-why="Both replies and history have runtime size. Forcing a compile-time cap would crash or truncate at the boundary.">
+      All three &rarr; <code class="inline">std::array</code> with a generous fixed size like 256.
+    </li>
+    <li data-correct="false" data-why="C-style arrays here would mean you can't push_back to history at all, and the type would decay every time you pass it to a helper. Wrong tool.">
+      All three &rarr; C-style arrays for performance.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You are profiling the shooter game and find that <code class="inline">push_back</code> on <code class="inline">enemies</code> shows up hot during wave spawns. What is the single cheapest change to make first?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="std::list would make things worse here — every node is a separate heap allocation and you lose cache-friendly contiguous layout.">
+      Switch <code class="inline">enemies</code> from <code class="inline">std::vector&lt;Enemy&gt;</code> to <code class="inline">std::list&lt;Enemy&gt;</code>.
+    </li>
+    <li data-correct="false" data-why="A fixed std::array can't grow. You'd need a separate count, and you'd corrupt memory the moment a wave exceeded the cap.">
+      Switch to <code class="inline">std::array&lt;Enemy, 1024&gt;</code> so allocation never happens.
+    </li>
+    <li data-correct="true" data-why="Yes. enemies.reserve(maxThisWave) before the spawn loop pre-allocates one buffer big enough; no reallocation/copy storm. One line, no behavioural change.">
+      Call <code class="inline">enemies.reserve(maxEnemiesThisWave)</code> before the spawn loop.
+    </li>
+    <li data-correct="false" data-why="A custom allocator might help eventually, but it's an order of magnitude more work than just reserving capacity, and reserving is what fixes the obvious problem.">
+      Write a custom allocator that uses a static pool.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> You're adding a HUD that shows the four most recent chat replies from any NPC. Should the HUD's "recent replies" buffer be <code class="inline">std::array&lt;std::string, 4&gt;</code> or <code class="inline">std::vector&lt;std::string&gt;</code>? Defend your answer in one sentence.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> Look at <code class="inline">cpp_game_with_llm_npcs/src/main.cpp:72</code> &mdash; the C-style font candidates array. Write the one-line replacement that uses <code class="inline">std::array</code> instead. What does the new line tell future readers that the old one doesn't?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> In <code class="inline">LlmClient::drainReplies</code> we do <code class="inline">out.swap(replies_)</code> rather than copying. What property of <code class="inline">std::vector</code> makes <code class="inline">swap</code> cheap, and would the same trick work on a <code class="inline">std::array</code>? Why or why not?</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read sections 1&ndash;3 (concept, minimal example, in-project)</label></li>
+  <li><label><input type="checkbox"> Read section 4 (all three "often confused with" pairs)</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat and locked in the right answer</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/w/cpp/container/array">cppreference: std::array</a> &middot;
+    <a href="https://en.cppreference.com/w/cpp/container/vector">cppreference: std::vector</a> &middot;
+    <a href="https://en.cppreference.com/w/cpp/language/array">cppreference: C arrays &amp; decay</a>
+  </p>
+  <p>Lesson 0002 &middot; <code class="inline">docs/learning/lessons/0002-vector-vs-array.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+"""Tests for the signals_cpp bridge + committed ITCH fixture (scaffold — skipped).
+
+Acceptance criterion covered (plan: .claude/plans/microstructure-signals.md):
+given the filtered real ITCH fixture, the C++ layer emits OFI and microprice
+per book update. Uses the committed golden fixture
+``tests/fixtures/aapl-12302019-first8mb.itch`` (AAPL, 2019-12-30, 269,742
+messages spanning 04:00-09:58 ET) so CI never needs the multi-GB sample.
+
+TODO(micro-3): remove the skip marks once signals_cpp.events_from_file and
+load_micro_events are implemented.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from oil_alpha.microstructure.events import (
+    AAPL_GOLDEN_MAX_RAW,
+    AAPL_GOLDEN_MIN_RAW,
+    EVENT_COLUMNS,
+    load_micro_events,
+)
+
+FIXTURE = Path(__file__).parent / "fixtures" / "aapl-12302019-first8mb.itch"
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(micro-3)")
+def test_fixture_produces_event_stream() -> None:
+    """The golden fixture yields a non-empty frame with the documented columns."""
+    df = load_micro_events(str(FIXTURE), AAPL_GOLDEN_MIN_RAW, AAPL_GOLDEN_MAX_RAW)
+    assert tuple(df.columns) == EVENT_COLUMNS
+    assert len(df) > 0
+    # AAPL traded ~$289-293 on 2019-12-30: microprice must sit in the bounds.
+    assert df["microprice"].between(280.0, 300.0).all()
+    # Timestamps are ns-since-midnight and non-decreasing.
+    assert (df["timestamp_ns"].diff().dropna() >= 0).all()
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(micro-3)")
+def test_empty_stream_warns_not_crashes() -> None:
+    """A symbol with no book activity returns an empty frame (plan edge case)."""
+    # TODO(micro-3): craft a tiny fixture containing only 'S' system events
+    # (or filter a halted symbol) and assert: empty DataFrame, right columns,
+    # warning attached — never an exception.
+    raise AssertionError("write me alongside the implementation")

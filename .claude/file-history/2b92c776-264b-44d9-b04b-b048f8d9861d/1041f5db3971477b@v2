@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Milestones + tickets for gossip facts AND the player journal."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+USERNAME = "bjl14710"
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`{branch}`
+
+## Concept for learning materials
+{concept}
+"""
+
+GOSSIP_COMMON = ("Plan: .claude/plans/gossip-facts.md. Facts go through the "
+                 "WorldState bus only — no NPC-to-NPC message passing. LLM "
+                 "output is PROPOSED, validated, then committed; never "
+                 "written directly. Conservative spread (proximity + age + "
+                 "chance). make -C tests test stays green.")
+JOURNAL_COMMON = ("Plan: .claude/plans/player-journal.md. Pure READ path of "
+                  "the gossip fact store — no new store, no schema changes, "
+                  "no writes. make -C tests test stays green.")
+
+GOSSIP = [
+    {"title": "feat(core): structured facts + knowledge sets on the world bus",
+     "what": ("KnownFact {factId, subject, content, source, learnedAtSeconds} "
+              "storage on WorldState with per-agent knowledge sets "
+              "(grantKnowledge/knows/factsKnownBy); fact ids hash "
+              "subject+content so re-commits are idempotent."),
+     "where": "src/core/WorldState.{hpp,cpp}; tests/test_gossip.cpp.",
+     "verify": "Add/grant/query round-trips; duplicate commits are no-ops.",
+     "constraints": GOSSIP_COMMON, "branch": "feature/gossip-facts",
+     "economy": "Extend the existing WorldState — no new manager class.",
+     "concept": "Normalized fact records vs free-text knowledge"},
+    {"title": "feat(core): propose-validate-commit extraction + conservative propagation",
+     "what": ("validateProposedFacts parses the model's strict-JSON proposal "
+              "(0-2 facts, {subject, content, direction}), normalizes "
+              "subjects, rejects malformed input without side effects; "
+              "propagateGossip transfers at most one fact per nearby NPC "
+              "pair per tick, gated by 6-unit radius, 30-game-minute age, "
+              "and a 35% roll."),
+     "where": "NEW src/core/Gossip.{hpp,cpp}; tests/test_gossip.cpp.",
+     "verify": ("Validation accept/reject table; propagation radius/age/"
+                "chance/one-per-pair under a seeded rng."),
+     "constraints": GOSSIP_COMMON, "branch": "feature/gossip-facts",
+     "economy": "Pure functions; nlohmann non-throwing parse; no retry loops.",
+     "concept": "Propose-validate-commit: never trust LLM output as a write"},
+    {"title": "feat(core): FactStore persistence for facts and knowledge",
+     "what": ("saves/facts.sqlite3 with facts + knowledge tables, "
+              "ConversationStore's open/ok/degrade pattern; loadAll "
+              "rebuilds the WorldState fact section at startup."),
+     "where": "NEW src/core/FactStore.{hpp,cpp}; tests/test_fact_store.cpp.",
+     "verify": "Round-trip both tables; unopenable DB degrades to session-only.",
+     "constraints": GOSSIP_COMMON, "branch": "feature/gossip-facts",
+     "economy": "Third instance of the established store pattern — copy it exactly.",
+     "concept": "Write-through persistence for incremental shared state"},
+    {"title": "feat(game): wire fact extraction, propagation tick, prompt injection",
+     "what": ("Dialogue close fires a fact-extraction request (same hook as "
+              "memory summaries) routed via factRoutes; commits refresh the "
+              "hearing NPC's gossip prompt block "
+              "(renderSystemPrompt(memory, gossip)); a 15-real-second tick "
+              "runs propagateGossip over live NPC positions; FactStore "
+              "load/save wired."),
+     "where": ("src/core/Persona.hpp, src/core/Npc.{hpp,cpp}, "
+               "src/app/main.cpp; tests/test_persona.cpp."),
+     "verify": ("Prompt contains exactly the facts the NPC knows (empty = "
+                "identical prompt); live run: told fact appears in "
+                "saves/facts.sqlite3 with the right knower."),
+     "constraints": GOSSIP_COMMON, "branch": "feature/gossip-facts",
+     "economy": "Reuse the summaryRoutes pattern verbatim for factRoutes.",
+     "concept": "Injecting shared world knowledge into per-agent prompts"},
+]
+
+JOURNAL = [
+    {"title": "feat(core): journal read-path — player-visible facts + conflicts",
+     "what": ("journalEntries(state): facts the player knows whose source "
+              "isn't the player, grouped by subject, time-ordered; "
+              "conflictingFactIds flags same-subject differing-content "
+              "pairs (both sides)."),
+     "where": "NEW src/core/Journal.hpp; tests/test_journal.cpp.",
+     "verify": ("Filter excludes player-sourced and unheard facts; "
+                "same-subject same-content is NOT flagged; ordering stable."),
+     "constraints": JOURNAL_COMMON, "branch": "feature/player-journal",
+     "economy": "Header-only pure helpers; no caching.",
+     "concept": "Read models: deriving a player view from shared state"},
+    {"title": "feat(ui): journal menu page with grouping and conflict flags",
+     "what": ("Page::Journal (Main gains a Journal button): subject-grouped "
+              "entries with 'heard from X at HH:MM' attribution, conflict "
+              "rows marked, prev/next paging, empty-state line. Hook "
+              "injected by main so Menu stays free of WorldState."),
+     "where": "src/app/Menu.{hpp,cpp}; src/app/main.cpp.",
+     "verify": "Screenshot of the page with a planted conflict; suite green.",
+     "constraints": JOURNAL_COMMON, "branch": "feature/player-journal",
+     "economy": "Same Page/Hit/layout machinery as Creator — no new UI stack.",
+     "concept": "Menu pages as thin views over injected read hooks"},
+]
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+def ensure_milestone(prefix, title, description):
+    for m in repo.get_milestones(state="open"):
+        if m.title.startswith(prefix):
+            return m
+    return retry(lambda: repo.create_milestone(title=title, description=description),
+                 f"milestone {title}")
+
+
+existing = {i.title.lower() for i in repo.get_issues(state="all") if not i.pull_request}
+for specs, milestone in (
+    (GOSSIP, ensure_milestone("Gossip", "Gossip: facts on the world bus",
+                              "Plan: .claude/plans/gossip-facts.md")),
+    (JOURNAL, ensure_milestone("Journal", "Journal: player-facing fact reader",
+                               "Plan: .claude/plans/player-journal.md")),
+):
+    print(f"milestone #{milestone.number}: {milestone.title}")
+    for spec in specs:
+        if spec["title"].lower() in existing:
+            print(f"exists: {spec['title']}")
+            continue
+        issue = retry(lambda: repo.create_issue(
+            title=spec["title"], body=TEMPLATE.format(**spec),
+            labels=["ai-in-progress"], assignees=[USERNAME],
+            milestone=milestone), spec["title"])
+        print(f"created #{issue.number}: {spec['title']}")

@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SDR Driver Abstraction — readsb</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --surface: #1f2335;
+    --border: #2f3549;
+    --text: #c0caf5;
+    --muted: #565f89;
+    --accent: #7aa2f7;
+    --green: #9ece6a;
+    --red: #f7768e;
+    --yellow: #e0af68;
+    --cyan: #7dcfff;
+    --purple: #bb9af7;
+    --orange: #ff9e64;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', serif;
+    line-height: 1.75;
+    padding: 2rem 1rem;
+  }
+
+  .container {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 2rem;
+    color: var(--accent);
+    margin-bottom: 0.25rem;
+  }
+
+  .tagline {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 2.5rem;
+    font-style: italic;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+    color: var(--cyan);
+    margin: 2.5rem 0 0.75rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3rem;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    color: var(--yellow);
+    margin: 1.5rem 0 0.5rem;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  a { color: var(--accent); }
+
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 0.88em;
+    background: var(--border);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    color: var(--orange);
+  }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    overflow-x: auto;
+    margin: 1rem 0 1.5rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+
+  .filepath {
+    display: inline-block;
+    background: var(--border);
+    color: var(--purple);
+    font-family: 'Courier New', monospace;
+    font-size: 0.82rem;
+    padding: 0.15em 0.5em;
+    border-radius: 3px;
+    margin-bottom: 0.4rem;
+  }
+
+  /* syntax colours */
+  .kw { color: var(--purple); }
+  .ty { color: var(--cyan); }
+  .fn { color: var(--accent); }
+  .str { color: var(--green); }
+  .cm { color: var(--muted); font-style: italic; }
+  .num { color: var(--orange); }
+  .pp { color: var(--yellow); }
+
+  /* diagram */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.83rem;
+    line-height: 1.6;
+    color: var(--text);
+    margin: 1rem 0 1.5rem;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  /* callout box */
+  .callout {
+    background: #202d3d;
+    border-left: 3px solid var(--accent);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.93rem;
+  }
+  .callout.warning { border-color: var(--yellow); }
+  .callout.tip    { border-color: var(--green); }
+
+  /* section check */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .section-check {
+    width: 1.1rem;
+    height: 1.1rem;
+    accent-color: var(--green);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .section-label { font-size: 0.8rem; color: var(--muted); }
+
+  /* quiz */
+  .quiz-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 2rem 0;
+  }
+
+  .question {
+    margin-bottom: 1.75rem;
+  }
+
+  .question p {
+    font-weight: bold;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+  }
+
+  .options {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .options li {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.55rem 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    font-size: 0.92rem;
+  }
+
+  .options li:hover {
+    border-color: var(--accent);
+    background: #1e2540;
+  }
+
+  .options li.correct  { border-color: var(--green); background: #1c2d1c; color: var(--green); }
+  .options li.wrong    { border-color: var(--red);   background: #2d1c1c; color: var(--red);   }
+  .options li.disabled { pointer-events: none; }
+
+  .feedback {
+    margin-top: 0.6rem;
+    font-size: 0.88rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 4px;
+    background: var(--border);
+  }
+  .feedback.correct-fb { color: var(--green); }
+  .feedback.wrong-fb   { color: var(--red); }
+
+  .score-area {
+    text-align: center;
+    padding: 1rem;
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: var(--cyan);
+    border-top: 1px solid var(--border);
+    margin-top: 1rem;
+  }
+
+  /* progress bar */
+  #progress-bar-wrap {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 0.4rem 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+  }
+  #progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+  }
+  #progress-fill {
+    height: 100%;
+    background: var(--green);
+    border-radius: 2px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+  #progress-text {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-align: right;
+    margin-top: 0.2rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div id="progress-bar-wrap">
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+  <div id="progress-text">0 / 6 sections complete</div>
+</div>
+
+<h1>SDR Driver Abstraction</h1>
+<p class="tagline">How readsb talks to eight different radio hardware types through a single interface — and the C pattern that makes it work.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="1">
+    <span>1. Why This Matters for readsb</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>readsb can receive ADS-B signals from many different SDR (Software Defined Radio) devices: the cheap RTL-SDR USB dongle, a BladeRF, a HackRF, a PlutoSDR, or even a Beast receiver. Each device has its own library and API.</p>
+
+<p>Without an abstraction layer, the main program would be full of <code>if (using_rtlsdr) { ... } else if (using_bladerf) { ... }</code> branches — fragile, hard to extend, and mixed with business logic. The driver abstraction layer isolates all that hardware-specific code so the rest of the program just calls <code>sdrOpen()</code>, <code>sdrRun()</code>, and <code>sdrClose()</code> and never has to think about which device is attached.</p>
+
+<div class="callout">
+  <strong>Real files:</strong> <code>sdr.h</code> and <code>sdr.c</code> define the public interface and dispatch table. Each device lives in its own file pair: <code>sdr_rtlsdr.c</code>, <code>sdr_bladerf.c</code>, <code>sdr_hackrf.c</code>, and so on.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="2">
+    <span>2. The Core Concept: Function Pointers in C</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>In C++ you get virtual functions. In C you build the same mechanism by hand using <em>function pointers</em>. A function pointer is a variable that holds the address of a function. You can call it just like a normal function.</p>
+
+<pre><span class="kw">int</span> <span class="fn">add</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) { <span class="kw">return</span> a + b; }
+<span class="kw">int</span> <span class="fn">mul</span>(<span class="kw">int</span> a, <span class="kw">int</span> b) { <span class="kw">return</span> a * b; }
+
+<span class="cm">// Declare a pointer to a function that takes two ints and returns int</span>
+<span class="kw">int</span> (*<span class="fn">op</span>)(<span class="kw">int</span>, <span class="kw">int</span>);
+
+op = add;           <span class="cm">// point at add()</span>
+op(<span class="num">3</span>, <span class="num">4</span>);           <span class="cm">// calls add(3, 4) → 7</span>
+
+op = mul;           <span class="cm">// now point at mul()</span>
+op(<span class="num">3</span>, <span class="num">4</span>);           <span class="cm">// calls mul(3, 4) → 12</span></pre>
+
+<p>Put several function pointers inside a struct and you have a <em>vtable</em> — the C version of a class with virtual methods.</p>
+
+<pre><span class="kw">typedef struct</span> {
+    <span class="kw">void</span> (*<span class="fn">open</span>)();
+    <span class="kw">void</span> (*<span class="fn">run</span>)();
+    <span class="kw">void</span> (*<span class="fn">close</span>)();
+} <span class="ty">Device</span>;
+
+<span class="kw">void</span> <span class="fn">rtl_open</span>()  { <span class="cm">/* open an RTL-SDR dongle */</span> }
+<span class="kw">void</span> <span class="fn">rtl_run</span>()   { <span class="cm">/* start async reads */</span>       }
+<span class="kw">void</span> <span class="fn">rtl_close</span>() { <span class="cm">/* clean up */</span>               }
+
+<span class="ty">Device</span> <span class="fn">rtlsdr</span> = { rtl_open, rtl_run, rtl_close };
+
+<span class="cm">// Anywhere in the program:</span>
+rtlsdr.open();    <span class="cm">// dispatches to rtl_open()</span>
+rtlsdr.run();     <span class="cm">// dispatches to rtl_run()</span></pre>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="3">
+    <span>3. In This Project — sdr_handler and the Dispatch Table</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>readsb uses exactly this pattern. Here is the actual struct from <span class="filepath">sdr.c:49</span>:</p>
+
+<pre><span class="kw">typedef struct</span> {
+    <span class="kw">void</span>  (*<span class="fn">initConfig</span>)();
+    <span class="kw">bool</span>  (*<span class="fn">handleOption</span>)(<span class="kw">int</span>, <span class="kw">char</span>*);
+    <span class="kw">bool</span>  (*<span class="fn">open</span>)();
+    <span class="kw">void</span>  (*<span class="fn">run</span>)();
+    <span class="kw">void</span>  (*<span class="fn">cancel</span>)();
+    <span class="kw">void</span>  (*<span class="fn">close</span>)();
+    <span class="kw">const char</span> *name;        <span class="cm">// "rtlsdr", "hackrf", etc.</span>
+    <span class="ty">sdr_type_t</span> sdr_type;    <span class="cm">// enum value</span>
+    <span class="ty">pthread_t</span>  manageThread;
+    <span class="kw">void</span>  (*<span class="fn">setGain</span>)(<span class="kw">char</span> *reason);
+} <span class="ty">sdr_handler</span>;</pre>
+
+<p>Then all the drivers are registered in one static array — the <strong>dispatch table</strong> — at <span class="filepath">sdr.c:94</span>:</p>
+
+<pre><span class="kw">static</span> <span class="ty">sdr_handler</span> sdr_handlers[] = {
+
+<span class="pp">#ifdef ENABLE_RTLSDR</span>
+    { rtlsdrInitConfig, rtlsdrHandleOption, rtlsdrOpen,
+      rtlsdrRun, rtlsdrCancel, rtlsdrClose,
+      <span class="str">"rtlsdr"</span>, SDR_RTLSDR, <span class="num">0</span>, rtlsdrSetGain },
+<span class="pp">#endif</span>
+
+<span class="pp">#ifdef ENABLE_HACKRF</span>
+    { hackRFInitConfig, hackRFHandleOption, hackRFOpen,
+      hackRFRun, noCancel, hackRFClose,
+      <span class="str">"hackrf"</span>, SDR_HACKRF, <span class="num">0</span>, noSetGain },
+<span class="pp">#endif</span>
+
+    <span class="cm">/* ... more drivers ... */</span>
+
+    { noInitConfig, noHandleOption, noOpen, noRun, noCancel, noClose,
+      <span class="str">"none"</span>, SDR_NONE, <span class="num">0</span>, noSetGain },
+
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, SDR_NONE, <span class="num">0</span>, NULL }
+    <span class="cm">/* sentinel: marks end of array */</span>
+};</pre>
+
+<div class="callout tip">
+  <strong>The sentinel pattern:</strong> The last entry has all <code>NULL</code> pointers. Loops can iterate until they find a NULL name instead of needing a separate length variable. You'll see this throughout C code that deals with lists of things.
+</div>
+
+<h3>How the right driver is selected at runtime</h3>
+<p><span class="filepath">sdr.c:160</span> — <code>current_handler()</code> just walks the array comparing <code>sdr_type</code>:</p>
+
+<pre><span class="kw">static</span> <span class="ty">sdr_handler</span> *<span class="fn">current_handler</span>() {
+    <span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; sdr_handlers[i].name; ++i) {
+        <span class="kw">if</span> (Modes.sdr_type == sdr_handlers[i].sdr_type) {
+            <span class="kw">return</span> &amp;sdr_handlers[i];
+        }
+    }
+    <span class="kw">return</span> &amp;unsupported_handler;  <span class="cm">// graceful fallback</span>
+}
+
+<span class="cm">// Then sdrOpen() is simply:</span>
+<span class="kw">bool</span> <span class="fn">sdrOpen</span>() {
+    <span class="kw">return</span> <span class="fn">current_handler</span>()-&gt;open();  <span class="cm">// calls rtlsdrOpen, hackRFOpen, etc.</span>
+}</pre>
+
+<div class="callout">
+  <strong>Key insight:</strong> The entire rest of the program calls <code>sdrOpen()</code>. It never calls <code>rtlsdrOpen()</code> directly. The dispatch table is the only place that knows which function to call.
+</div>
+
+<h3>Architecture at a glance</h3>
+<div class="diagram">  ┌─────────────────────────────────────────────────┐
+  │                readsb.c (main)                  │
+  │         sdrOpen() / sdrRun() / sdrClose()       │
+  └──────────────────┬──────────────────────────────┘
+                     │ calls
+  ┌──────────────────▼──────────────────────────────┐
+  │                  sdr.c                          │
+  │  current_handler() → looks up sdr_handlers[]   │
+  │       dispatches to the right function ptr      │
+  └──┬───────┬──────┬──────┬───────┬───────┬───────┘
+     │       │      │      │       │       │
+  rtlsdr  bladerf hackrf plutosdr beast  ifile
+  .c/.h   .c/.h  .c/.h  .c/.h  .c/.h  .c/.h</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="4">
+    <span>4. The Null-Object Pattern — no* Functions</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>Not every driver supports every operation. The Beast receiver has no <code>run()</code> loop (it uses a different data path), and most drivers don't implement <code>cancel()</code>. Rather than putting <code>NULL</code> function pointers in the table (which would crash on dereference), readsb uses <em>no-op stub functions</em> — <span class="filepath">sdr.c:62</span>:</p>
+
+<pre><span class="kw">static void</span> <span class="fn">noRun</span>()   { }          <span class="cm">// do nothing, safely</span>
+<span class="kw">static void</span> <span class="fn">noCancel</span>() { }
+<span class="kw">static void</span> <span class="fn">noClose</span>() { }
+<span class="kw">static void</span> <span class="fn">noSetGain</span>() { }</pre>
+
+<p>In the dispatch table, Beast uses <code>noRun</code> and <code>noCancel</code> because it has no async read loop:</p>
+
+<pre>{ beastInitConfig, beastHandleOption, beastOpen,
+  <span class="fn">noRun</span>, <span class="fn">noCancel</span>, <span class="fn">noClose</span>,
+  <span class="str">"modesbeast"</span>, SDR_MODESBEAST, <span class="num">0</span>, noSetGain },</pre>
+
+<p>This is the <strong>Null Object pattern</strong>: instead of checking for <code>NULL</code> before every call, you provide an object that implements the interface by doing nothing. The caller never needs an <code>if</code> guard.</p>
+
+<div class="callout warning">
+  <strong>Compare:</strong> There is also <code>noOpen()</code> (prints "No SDR device selected") and <code>unsupportedOpen()</code> (prints "Support for this SDR type was not enabled in this build"). These are <em>not</em> silent — they report meaningful error messages. Not all no-ops are silent; some carry intent.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="5">
+    <span>5. Often Confused With: Plugins / Dynamic Loading</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<table style="width:100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.9rem;">
+  <thead>
+    <tr style="background: var(--border); text-align: left;">
+      <th style="padding: 0.5rem 0.75rem; color: var(--cyan);">Aspect</th>
+      <th style="padding: 0.5rem 0.75rem; color: var(--accent);">readsb's approach (static dispatch table)</th>
+      <th style="padding: 0.5rem 0.75rem; color: var(--yellow);">Plugin / dlopen approach</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="border-top: 1px solid var(--border);">
+      <td style="padding: 0.5rem 0.75rem;">Drivers available</td>
+      <td style="padding: 0.5rem 0.75rem;">Fixed at compile time (<code>#ifdef</code>)</td>
+      <td style="padding: 0.5rem 0.75rem;">Discovered at runtime from .so files</td>
+    </tr>
+    <tr style="border-top: 1px solid var(--border); background: var(--surface);">
+      <td style="padding: 0.5rem 0.75rem;">Adding a new driver</td>
+      <td style="padding: 0.5rem 0.75rem;">Add a row to <code>sdr_handlers[]</code>, recompile</td>
+      <td style="padding: 0.5rem 0.75rem;">Drop a .so in a directory, no recompile</td>
+    </tr>
+    <tr style="border-top: 1px solid var(--border);">
+      <td style="padding: 0.5rem 0.75rem;">Complexity</td>
+      <td style="padding: 0.5rem 0.75rem;">Simple — plain C structs and arrays</td>
+      <td style="padding: 0.5rem 0.75rem;">Complex — linker, symbol resolution, versioning</td>
+    </tr>
+    <tr style="border-top: 1px solid var(--border); background: var(--surface);">
+      <td style="padding: 0.5rem 0.75rem;">Portability</td>
+      <td style="padding: 0.5rem 0.75rem;">Works everywhere</td>
+      <td style="padding: 0.5rem 0.75rem;">Needs platform support for dynamic linking</td>
+    </tr>
+    <tr style="border-top: 1px solid var(--border);">
+      <td style="padding: 0.5rem 0.75rem;">Security</td>
+      <td style="padding: 0.5rem 0.75rem;">All code is audited at build time</td>
+      <td style="padding: 0.5rem 0.75rem;">Arbitrary code can be loaded at runtime</td>
+    </tr>
+    <tr style="border-top: 1px solid var(--border); background: var(--surface);">
+      <td style="padding: 0.5rem 0.75rem;">Right when</td>
+      <td style="padding: 0.5rem 0.75rem;">Small, known set of hardware types</td>
+      <td style="padding: 0.5rem 0.75rem;">Ecosystem with many third-party drivers</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>readsb's static table is the right call: there's a small, stable set of SDR hardware. The compile-time <code>#ifdef</code> flags let packagers include only what they have libraries for.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="6">
+    <span>6. Interactive Quiz</span>
+    <span class="section-label">(practice)</span>
+  </label>
+</h2>
+
+<div class="quiz-block">
+
+  <!-- Q1 -->
+  <div class="question" data-question="1">
+    <p>Q1. What type is stored in the <code>open</code> field of <code>sdr_handler</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="A void pointer can hold any address but has no type information about what arguments to pass, so you can't call it safely. The field uses a typed function pointer.">void* (generic pointer)</li>
+      <li data-correct="false" data-why="This is the return type of open(), not the type of the field itself. The field is a pointer to a function that returns bool.">bool (return value)</li>
+      <li data-correct="true"  data-why="Correct. bool (*open)() is a pointer to a function that takes no arguments and returns bool. The -> operator on the struct dereferences this to call it.">A pointer to a function returning bool</li>
+      <li data-correct="false" data-why="sdr_type_t is the enum for identifying which driver is active. It's a separate field, not the function pointer.">sdr_type_t (enum)</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- Q2 -->
+  <div class="question" data-question="2">
+    <p>Q2. If HackRF support is not compiled in (<code>ENABLE_HACKRF</code> not defined), what happens when the user passes <code>--device-type hackrf</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="current_handler() returns unsupported_handler when no matching sdr_type is found — it doesn't crash, it falls back gracefully.">The program crashes with a null pointer dereference</li>
+      <li data-correct="false" data-why="HackRF is not in the dispatch table at all when ENABLE_HACKRF is undefined. sdrHandleOption won't match it.">HackRF's initConfig runs but open() does nothing</li>
+      <li data-correct="true"  data-why="Exactly right. When ENABLE_HACKRF is not defined, the hackrf row is absent from sdr_handlers[]. sdrHandleOption() prints the list of recognised types and returns false. Later, current_handler() falls back to unsupported_handler, which prints 'Support for this SDR type was not enabled in this build.'">sdrHandleOption prints the list of supported types and fails; later calls fall back to unsupported_handler</li>
+      <li data-correct="false" data-why="There's no default fallback to rtlsdr. Each handler is distinct and selected explicitly.">It silently falls back to the rtlsdr driver</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- Q3 -->
+  <div class="question" data-question="3">
+    <p>Q3. The Beast receiver entry uses <code>noRun</code> in the dispatch table. What does <code>noRun()</code> do?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="noRun is a real function — it just has an empty body. It's not NULL, so calling it is safe.">It is NULL; calling it would segfault</li>
+      <li data-correct="true"  data-why="Correct. noRun is defined as 'static void noRun() {}' — an empty function. The caller can safely call it without any if-guard. This is the Null Object pattern.">It has an empty body and returns immediately, doing nothing</li>
+      <li data-correct="false" data-why="noRun doesn't print anything. noOpen() does ('No SDR device or file selected'), but noRun is truly silent.">It prints a warning to stderr</li>
+      <li data-correct="false" data-why="noRun does not call rtlsdrRun or any other run function. It's truly a no-op.">It delegates to the rtlsdr run function as a fallback</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- Q4 -->
+  <div class="question" data-question="4">
+    <p>Q4. Why does the <code>sdr_handlers[]</code> array end with a <code>{ NULL, NULL, …, NULL }</code> entry?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="C doesn't require array terminators. You could store the count separately — but a sentinel is often cleaner.">C arrays require a terminator or they overflow</li>
+      <li data-correct="true"  data-why="Correct. Both sdrInitConfig() and current_handler() loop with 'while (sdr_handlers[i].name)'. When name is NULL the loop stops. This is called the sentinel pattern — no need for a separate length variable.">Loop code checks name != NULL to know when to stop, avoiding a separate length variable</li>
+      <li data-correct="false" data-why="The sentinel entry is always the last thing in the array. It doesn't represent a real device.">It represents the 'none' device type</li>
+      <li data-correct="false" data-why="The NULL entry isn't for error recovery. It's simply an end-of-list marker.">It's used as a fallback when an unsupported device is requested</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- Q5 -->
+  <div class="question" data-question="5">
+    <p>Q5. <code>sdrOpen()</code> acquires a mutex before calling <code>current_handler()-&gt;open()</code>. Which mutex is it, and why does that matter?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="reader.mutex is used by lockReader()/unlockReader() to protect mag_buffer access. The open/cancel/close calls use a separate mutex.">Threads.reader.mutex — the same one used for the sample ring buffer</li>
+      <li data-correct="false" data-why="There is no global Modes.mutex. Global state uses specific purpose-built mutexes.">Modes.mutex — the global state lock</li>
+      <li data-correct="true"  data-why="Correct. Modes.sdrControlMutex is acquired around open, cancel, and close. The comment in sdr.c explains why: rtlsdr_cancel_async() and rtlsdr_close() can sometimes never return, so all control operations are serialized through this mutex to prevent concurrent calls that might deadlock.">Modes.sdrControlMutex — it serializes open/cancel/close because rtlsdr library calls can hang</li>
+      <li data-correct="false" data-why="pthread_mutex_t is the type, not the name of a specific mutex in the codebase.">pthread_mutex_t — the POSIX default mutex for all threading</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="score-area" id="score-area" hidden>Score: <span id="score-val">0</span> / 5</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>Check Your Understanding (Scenario Questions)</h2>
+
+<div class="callout">
+<strong>Scenario A:</strong> You want to add a new SDR type — a hypothetical "FooSDR". List the files you'd create/modify and the minimum changes required.
+<br><br>
+<em>Think it through, then expand:</em> <a href="#" id="toggleA" style="color:var(--cyan)">show answer</a>
+<div id="ansA" hidden style="margin-top:0.75rem; color:var(--green)">
+1. Create <code>sdr_foosdr.c</code> and <code>sdr_foosdr.h</code> implementing <code>foosdrInitConfig</code>, <code>foosdrHandleOption</code>, <code>foosdrOpen</code>, <code>foosdrRun</code>, <code>foosdrClose</code>.<br>
+2. Add <code>SDR_FOOSDR</code> to the <code>sdr_type_t</code> enum in <code>readsb.h</code>.<br>
+3. Add a row to <code>sdr_handlers[]</code> in <code>sdr.c</code>, guarded by <code>#ifdef ENABLE_FOOSDR</code>.<br>
+4. Add <code>#ifdef ENABLE_FOOSDR / #include "sdr_foosdr.h" / #endif</code> at the top of <code>sdr.c</code>.<br>
+5. Update the build system (Makefile) to compile <code>sdr_foosdr.c</code> when <code>ENABLE_FOOSDR=yes</code>.
+</div>
+</div>
+
+<div class="callout" style="margin-top:1rem;">
+<strong>Scenario B:</strong> A colleague suggests replacing the <code>sdr_handler</code> struct with a simple switch/case in each of <code>sdrOpen()</code>, <code>sdrRun()</code>, etc. What's the problem with that?
+<br><br>
+<em>Think it through, then expand:</em> <a href="#" id="toggleB" style="color:var(--cyan)">show answer</a>
+<div id="ansB" hidden style="margin-top:0.75rem; color:var(--green)">
+Every new SDR type requires changes in every function (<code>sdrOpen</code>, <code>sdrRun</code>, <code>sdrClose</code>, <code>sdrSetGain</code>, <code>sdrCancel</code>, <code>sdrHandleOption</code>, <code>sdrInitConfig</code>) — seven places instead of one row in the dispatch table. You also scatter device-specific logic into <code>sdr.c</code> instead of keeping it in the device's own file. The dispatch-table approach is the <em>Open/Closed Principle</em> in C: open for extension (add a row), closed for modification (don't touch existing code).
+</div>
+</div>
+
+<br><br>
+<p style="color:var(--muted); font-size:0.85rem; text-align:center;">
+  readsb · sdr.c, sdr_rtlsdr.c · lesson 0001
+</p>
+<br>
+
+</div><!-- /container -->
+
+<script>
+// ── Section progress ──────────────────────────────────────────
+const checks = document.querySelectorAll('.section-check');
+const totalSections = checks.length;
+
+function updateProgress() {
+  const done = [...checks].filter(c => c.checked).length;
+  document.getElementById('progress-fill').style.width = (done / totalSections * 100) + '%';
+  document.getElementById('progress-text').textContent = done + ' / ' + totalSections + ' sections complete';
+}
+
+checks.forEach(c => c.addEventListener('change', updateProgress));
+updateProgress();
+
+// ── Quiz shuffle & logic ──────────────────────────────────────
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+let correct = 0;
+let answered = 0;
+const totalQ = 5;
+
+document.querySelectorAll('[data-question]').forEach(block => {
+  const list = block.querySelector('.options');
+  const items = [...list.children];
+  shuffle(items).forEach(li => list.appendChild(li)); // randomize DOM order
+
+  const feedback = block.querySelector('.feedback');
+
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (block.dataset.done) return; // already answered
+      block.dataset.done = 'true';
+      answered++;
+
+      const isCorrect = li.dataset.correct === 'true';
+      if (isCorrect) correct++;
+
+      // mark all options
+      list.querySelectorAll('li').forEach(opt => {
+        opt.classList.add('disabled');
+        if (opt.dataset.correct === 'true') opt.classList.add('correct');
+        else opt.classList.add('wrong');
+      });
+
+      feedback.hidden = false;
+      feedback.textContent = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.className = 'feedback ' + (isCorrect ? 'correct-fb' : 'wrong-fb');
+
+      if (answered === totalQ) {
+        const sa = document.getElementById('score-area');
+        sa.hidden = false;
+        document.getElementById('score-val').textContent = correct;
+        sa.style.color = correct >= 4 ? 'var(--green)' : correct >= 2 ? 'var(--yellow)' : 'var(--red)';
+      }
+    });
+  });
+});
+
+// ── Scenario toggles ──────────────────────────────────────────
+document.getElementById('toggleA').addEventListener('click', e => {
+  e.preventDefault();
+  const el = document.getElementById('ansA');
+  el.hidden = !el.hidden;
+});
+document.getElementById('toggleB').addEventListener('click', e => {
+  e.preventDefault();
+  const el = document.getElementById('ansB');
+  el.hidden = !el.hidden;
+});
+</script>
+</body>
+</html>

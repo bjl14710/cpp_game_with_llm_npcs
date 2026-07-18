@@ -1,0 +1,140 @@
+# Plan: Law fix, weapons, money & shops, and car↔pedestrian physics
+
+## Context
+
+Four interlocking requests after the "bigger, livelier city" work shipped:
+
+1. **BUG — cops re-arrest forever.** After an arrest + release, police keep hunting
+   the player. Cause: armed-violence (and `call_police`) triggers a **manhunt**
+   that mobilizes *every* officer via `commandArrest()`, but on capture only the
+   *catching* officer stands down (`commandReturnHome()`); the rest stay in
+   `Arrest` and immediately re-catch the player at the release spot.
+2. **Weapons** the player can carry and use on NPCs.
+3. **Cars must affect NPCs** — pedestrians shouldn't obliviously walk in front of
+   (or through) cars; treat them like real people.
+4. **Money + a bank + shops** — withdraw infinite cash at a bank, see money in the
+   HUD, buy things from shopkeepers.
+
+These connect: the bank gives money → money buys weapons from shops → weapons used
+on NPCs knock them down and trip the existing law system → cars and weapons share
+one "knocked-down" state.
+
+**Locked decisions (from Q&A):**
+- Weapons: **fists + bat + pistol.** Number keys 1/2/3 select (only if owned),
+  left-click attacks. Fists/bat = short frontal melee; pistol = hitscan along the
+  camera ray. Infinite ammo for now.
+- On attack (weapon **or** car): NPC is **knocked down and stays down** — an
+  incapacitated body that stops wandering/talking but is **never deleted**. This is
+  critical: deletion would shift the `world.npcs()` indices that `pendingRoutes`,
+  `wasCaught`, and `session.npcIndex()` depend on. A downed flag keeps indices stable.
+
+**Constraints (CLAUDE.md):** all new logic is SFML-free core with doctest tests;
+renderer is eyeballed. Feature branch `7-weapons-money-and-mayhem`, incremental
+`type(scope): description` commits, build + `make -C tests test` green after each,
+inline review before each commit. No push (user's call).
+
+---
+
+## Phase 1 — Fix re-arrest after release  `fix(law): stand down all police on arrest`
+
+In the capture handler in `src/app/main.cpp` (the `caughtNow && !wasCaught[i] &&
+npc.persona().police` branch): instead of only the catcher's
+`npc.commandReturnHome()`, loop **every** police officer and `commandReturnHome()`
+them, and set `manhuntActive = false`. The crime is answered the instant they catch
+you, so the whole pursuit stands down; `commandReturnHome()` also clears each cop's
+`caughtPlayer_` latch, which prevents a same-frame double-trigger. The release reset
+(`playerCharge = None`, `manhuntActive = false`) stays.
+
+Files: `src/app/main.cpp`. Verified by play (main-loop wiring; `commandReturnHome`
+itself is already unit-tested).
+
+## Phase 2 — Money, a bank, and shops  `feat(economy): money, a bank, and buying from shops`
+
+- **New core `PlayerState.hpp/.cpp`** (SFML-free, tested): `int money`, the set of
+  owned weapons + current selection, and a `WeaponKind { Fists, Bat, Pistol }` enum.
+  Methods: `withdraw(int)`, `bool buy(const ShopItem&)` (deduct + mark owned only
+  when affordable and not already owned), `owns(WeaponKind)`, `select(WeaponKind)`.
+  A small static catalog (`{id, label, price, WeaponKind}`): Bat, Pistol.
+- **`City` gets a bank** (`makeDowntown`): a small solid "City Bank" landmark near
+  the plaza spawn; proximity uses its footprint center. Tag which shop sells the
+  weapon catalog — the **hardware store** (`Jensen Hardware`) sells bat + pistol.
+- **`Action::Interact`** (default `"E"`): add to `KeyBindings` enum + the
+  positional name/label/default arrays. Context-sensitive in `main.cpp`: near the
+  bank → `withdraw(+500)`; near a catalog shopkeeper → toggle a **shop overlay**
+  (a simple HUD list of items/prices drawn like `drawCenteredHudText`; number keys
+  buy, shows "owned"/"can't afford"). HUD always shows `$<money>`.
+- Tests: `tests/test_player_state.cpp` (withdraw adds; buy deducts only when
+  affordable; no double-own; selection requires ownership).
+
+Files: new `src/core/PlayerState.{hpp,cpp}`; `src/core/City.cpp`;
+`src/core/KeyBindings.{hpp,cpp}`; `src/app/main.cpp`; `CMakeLists.txt`.
+
+## Phase 3 — Weapons & the knocked-down state  `feat(combat): carry and use weapons; NPCs can be knocked down`
+
+- **Downed state on `Npc`** (shared infra): `bool downed_`, `void knockDown()`,
+  `bool isDowned()`. `update()` early-returns when downed (no wander/turn/behavior).
+  Talk targeting skips downed NPCs. The renderer draws a downed figure collapsed
+  (rotate flat / drop to the ground) instead of standing.
+- **Firing** (`main.cpp`, Playing mode): left-click (`MouseButtonPressed`, Left)
+  uses the current weapon; `1/2/3` select an owned weapon. Melee (fists/bat) downs
+  the nearest NPC within a short range + frontal cone; pistol is a hitscan that
+  downs the nearest NPC near the camera ray within range. On a hit:
+  `npc.knockDown()` **and** `escalateCharge(...)` — bat/fists → `Assault`, pistol →
+  `ArmedViolence` (reuses the existing charge/manhunt system, so a gunshot
+  deterministically triggers the manhunt). This makes weapons a real in-world way
+  to commit the crimes the law already understands.
+- **Target selection is logic** → extract `pickTargetInCone(eye, yawDeg, range,
+  coneDeg, positions)` into core (`Combat.hpp`) and unit-test it; reuse for melee
+  and (narrow cone) the pistol.
+- **Feedback**: HUD shows the equipped weapon (`[3] Pistol`); a brief muzzle/hit
+  flash on fire; a simple 2D corner viewmodel (overlay pass) so the player sees what
+  they hold. Infinite ammo.
+- Tests: `tests/test_combat.cpp` (cone/range target picking); knock-down behavior in
+  `tests/test_npc_behavior.cpp` (downed NPC stops moving and isn't a talk target).
+
+Files: `src/core/Npc.{hpp,cpp}`, new `src/core/Combat.hpp` (+`.cpp` if needed),
+`src/app/main.cpp`, `src/app/Renderer3D.cpp` (downed pose + viewmodel),
+`CMakeLists.txt`.
+
+## Phase 4 — Cars affect pedestrians  `feat(traffic): cars yield to and can knock down pedestrians`
+
+- **`Traffic::update` gains pedestrian positions**: `update(dt, playerPos, const
+  std::vector<Vec3>& people)` — cars brake for people with the same forward
+  look-ahead they already use for the player, so they **stop for pedestrians**
+  instead of plowing through (the "treat like real people" part).
+- **`main.cpp`**: build the people list each frame; after each `npc.update`, if a
+  **moving** car overlaps the NPC (`circleHitsVehicle` + a speed threshold) →
+  `npc.knockDown()` (reuses Phase-3 state); if a **stopped** car overlaps them,
+  block that NPC's step (revert to the pre-update position via a small guarded
+  `Npc` setter) so they don't walk through a parked car.
+- Tests: extend `tests/test_traffic.cpp` — a car brakes for a person ahead in its
+  lane (people-list variant of the existing player-brake test).
+
+Files: `src/core/Traffic.{hpp,cpp}`, `src/app/main.cpp`, `tests/test_traffic.cpp`.
+
+---
+
+## Out of scope
+No ammo economy/reloading, no player health/damage (NPCs can't hurt the player
+yet), no NPC path-planning around cars (cars yielding + contact-knockdown covers
+it), no selling/looting, no persistent save. Money is intentionally infinite via the
+bank.
+
+## Risks / notes
+- The fixed `world.npcs()` index invariant is load-bearing — the downed state is a
+  flag precisely to avoid deletion. Verify arrest/jail still works after NPCs are
+  downed.
+- `pickTargetInCone` aim feel (range/cone, pistol angular threshold) is tuned in
+  named constants; I can't screenshot the GL window, so you verify aim/feedback and
+  I tune.
+
+## Verification (each phase)
+- `cmake --build build -j` clean; `make -C tests test` green (suite grows with
+  test_player_state, test_combat, traffic additions).
+- Play-test: get arrested for `*shoots*`/gunfire, serve time, confirm cops **stand
+  down** and don't re-arrest at the door; withdraw at the bank and watch `$` rise;
+  buy the bat + pistol at the hardware store; punch/shoot a pedestrian and see them
+  drop + the law respond (assault vs. armed-violence manhunt); walk a pedestrian
+  toward traffic and confirm cars brake, and that a moving car knocks a pedestrian
+  down rather than passing through.
+- Inline review before each commit; offer `/code-review` at the end.

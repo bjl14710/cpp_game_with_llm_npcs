@@ -1,0 +1,55 @@
+"""Cleaning guards: the Apr-2020 negative-price trap and roll-day flagging."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from oil_alpha.clean import (
+    NegativePriceError,
+    build_returns_frame,
+    flag_roll_days,
+    to_returns,
+)
+
+
+def _dates(n, start="2020-04-10"):
+    return pd.date_range(start, periods=n, freq="D")
+
+
+def test_log_returns_reject_negative_prices():
+    # CL=F crossing below zero (the -$37.63 event) must refuse log returns.
+    prices = pd.Series([20.0, 17.73, -37.63, 10.0], index=_dates(4), name="wti_fut")
+    with pytest.raises(NegativePriceError):
+        to_returns(prices, kind="log")
+
+
+def test_simple_returns_survive_when_prev_price_positive():
+    prices = pd.Series([20.0, 10.0, 5.0], index=_dates(3), name="wti_fut")
+    out = to_returns(prices, kind="simple")
+    assert np.isfinite(out.to_numpy()).all()
+    assert out.iloc[0] == pytest.approx(-0.5)
+
+
+def test_flag_roll_days_catches_big_jump():
+    # A 30% one-day jump is a roll discontinuity, not a real return.
+    prices = pd.Series([50, 50.2, 50.1, 65, 65.1], index=_dates(5), name="wti_fut")
+    mask = flag_roll_days(prices, threshold=0.10)
+    assert mask.iloc[3]
+    assert not mask.iloc[1]
+
+
+def test_build_returns_frame_falls_back_for_negative_column():
+    # When a log run hits a non-positive column, that column falls back to simple
+    # returns and the whole frame stays finite (paper handling (b)).
+    idx = _dates(6)
+    prices = pd.DataFrame(
+        {
+            "wti_fut": [20.0, 17.73, -37.63, 10.0, 12.0, 13.0],
+            "energy_etf": [60.0, 61.0, 59.0, 60.5, 61.5, 62.0],
+        },
+        index=idx,
+    )
+    returns, flags = build_returns_frame(prices, kind="log", drop_roll_days=False)
+    assert np.isfinite(returns.to_numpy()).all()
+    assert bool(flags["log_fallback_to_simple"].any())
+    assert "negative_window" in flags.columns

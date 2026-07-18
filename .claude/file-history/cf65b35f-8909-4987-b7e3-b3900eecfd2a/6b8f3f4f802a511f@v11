@@ -1,0 +1,79 @@
+# Learning Progress
+
+Tracks which concepts have been covered with lesson, drill, and vocab files.
+
+---
+
+## Covered
+
+### 0001 — pybind11 + CMake FetchContent: Compiling a C++ Extension Importable from Python
+
+**Date added:** 2026-06-28
+**Status:** Complete
+
+**Context:** Added after the repo received its first C++ build layer — the `oil_volume_cpp` extension exposing `rolling_mean(values, window)` via pybind11 + scikit-build-core.
+
+**Files:**
+- Lesson: [lessons/0001-pybind11-cmake-extension.html](lessons/0001-pybind11-cmake-extension.html)
+- Drill: [drills/0001-pybind11-cmake-extension.html](drills/0001-pybind11-cmake-extension.html)
+- Vocab: [vocab/0001-pybind11-cmake-extension.html](vocab/0001-pybind11-cmake-extension.html)
+
+**Key concepts covered:**
+- Why C++ extensions in a Python trading system (performance, memory layout, SIMD, GIL release)
+- How pybind11 works: PYBIND11_MODULE macro, type casters, py::arg, return_value_policy
+- CMake structure: root CMakeLists.txt + subdirectory, pybind11_add_module
+- PYBIND11_FINDPYTHON=ON vs legacy FindPythonLibs
+- FetchContent vs find_package hybrid strategy
+- scikit-build-core as the pyproject.toml build backend
+- The editable install flow and its limitations for C++ code
+- The parity test pattern: C++ result vs NumPy reference within 1e-9
+- ABI tags and why upgrading Python requires a recompile
+
+**Source files studied:**
+- `cpp/oil_volume/bindings.cpp`
+- `cpp/oil_volume/CMakeLists.txt`
+- `CMakeLists.txt` (root)
+- `pyproject.toml`
+- `scripts/build_cpp.sh`
+- `tests/test_cpp_bridge.py`
+
+### 0008 — Streamlit's Rerun Model: How app/dashboard.py Actually Works
+
+**Date added:** 2026-07-15
+**Status:** Lesson generated on request ("this is genuinely amazing! ... /teach how to use the tool
+and what it can do") immediately after a live, hands-on run of the dashboard (pipeline from cache,
+Oil Volume offline demo, and the microstructure panel's known import bug, all observed directly).
+
+**Context:** Two prior orientation lessons already exist in this repo's history — 0002
+(`docs/learning-0002-and-microstructure-plan` branch, "system map & usage") and 0006
+(`feature/vhdl-flat-book` branch, "Driving the HFT Lab") — both at the whole-repo, architecture
+level. Neither goes deep on the Streamlit dashboard specifically. This lesson fills that gap: it
+teaches Streamlit's core non-obvious mechanic (full-script rerun on every interaction, no partial
+callbacks) and walks three real `session_state` guards in `app/dashboard.py` that exist *because*
+of that mechanic — the pipeline-result cache, the sticky Oil-Volume-loaded flag, and the
+ITCH-parse cache in the microstructure panel. It also turns the live-observed
+"signals_cpp extension not built" warning into a grounded teaching moment (bare `import
+signals_cpp` in `events.py` vs. the try/fallback pattern already used in `mm_analysis.py`).
+
+**Files:** [lessons/0008-streamlit-dashboard-tour.html](lessons/0008-streamlit-dashboard-tour.html)
+(drill/vocab not yet generated — `/drill-me streamlit-dashboard-tour` next).
+
+**Key concepts covered:** Streamlit's full-script-rerun model vs. traditional event-callback GUIs
+(Tkinter/PyQt); `st.session_state` as the only thing that survives a rerun; three concrete
+session_state guards in this repo's own dashboard and why each exists; the bare-import vs.
+try/fallback contrast for a compiled pybind11 extension across an editable install.
+
+**Source files studied:** `app/dashboard.py` (in full), `src/oil_alpha/microstructure/events.py`,
+`src/oil_alpha/microstructure/mm_analysis.py`.
+
+**Note on numbering:** lesson numbers 0002-0007 are in use or reserved across other unmerged
+branches (0002, 0003-0006 as real files; 0007 reserved on `feature/vhdl-flat-book`'s PROGRESS.md
+for a not-yet-written constant-cycle-hardware lesson). This lesson uses 0008 to avoid colliding
+with any of them. **The learning-material numbering across branches will need reconciling once
+these branches merge** — several branches have diverged PROGRESS.md histories.
+
+---
+
+## Backlog
+
+_(Add future concepts here as the repo grows)_

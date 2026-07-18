@@ -1,0 +1,84 @@
+# Silmulator — Learning Progress
+
+## Learner Profile
+- Builder/developer of the Silmulator project itself
+- Experienced enough to be writing/fixing Python + Qt code
+- Learning goal: understand how to USE Silmulator as an end-user (the HIL/SIL workflow)
+
+## Sessions
+
+### Session 1 (2026-06-20)
+**Lesson:** [0001 — How to Use Silmulator](lessons/0001-how-to-use-silmulator.html)
+**Covered:**
+- What SIL/HIL/CIL means and why Silmulator exists
+- The three-step workflow: Place → Connect → Drive
+- Adding hardware blocks to the canvas
+- Drawing wires between ports
+- Sending SCPI commands via the console
+- Loading source code (snippet + project folder modes)
+- Saving and reloading layouts
+
+**Engagement:** First lesson — baseline not yet measured.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Session 2 (2026-06-20)
+**Lesson:** [0002 — Connections &amp; Documentation](lessons/0002-connections-and-documentation.html)
+**Covered:**
+- ConnectionPort internals: port_id, parent_block, connected_to, fractional x/y positioning
+- WireItem: ZValue=-1, update_position(), connect_ports() guards, remove_block() wire cleanup
+- disconnect() contract — both sides must be nulled or ghost state occurs
+- Reading real _setup_ports() patterns across Oscilloscope, MSP430
+- How to_dict()/from_dict() serialize and restore connections via port_map
+- hardware_docs/ folder purpose, layout, and workflow loop to custom blocks
+- Custom block JSON spec: ports, commands (literal / empty / template), discovery at startup
+- Contrasting Port vs Wire vs Qt Signal
+
+**Engagement:** Second lesson — quiz results pending.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Drill 1 (2026-06-20)
+**Drill:** [0001 — How to Use Silmulator](drills/0001-how-to-use-silmulator.html)
+**Channels drilled:** workflow · SCPI code path · SIL/HIL/CIL · real-code · bugs
+**Questions:** 20 (12 MC + 8 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+<<<<<<< HEAD
+### Session 3 (2026-07-15, overnight — issue #18)
+**Lesson:** [0009 — ADC Transfer Functions: the Reference as the Unit of Measure](lessons/0009-adc-reference-transfer-functions.html)
+**Concept taught:** an ADC code is a ratio, not a voltage — NADC = FS × (Vin − VR−)/(VR+ − VR−) (SLAU367P §34.2.1 Eq. 13); the reference IS the conversion's unit of measure. Grounded in commit 58b7e2d (reference-aware ADC conversion, VR+/VR− scaling, -224 validation).
+**Covered:**
+- Same input → different codes under different references (1.2 V @ VREF → 4095 vs @ AVCC 3.3 → 1489)
+- The transfer function with worked examples, truncation (int() vs rounding), and the inverse (code → volts)
+- The real diff: hardcoded 3.3 → `_adc_reference_voltage()`, `ADC_INTERNAL_REF_V`, `VALID_ADC_REFERENCES`, `_veref_v` (+*RST reset)
+- Why references are a fixed hardware set: ADC12VRSEL encodings, REF_A's 1.2/2.0/2.5-V REFVSEL outputs, AVCC (live `clock.vcc`), external VeREF+ (`ADC:REFERENCE VEREF,<v>`)
+- SCPI -224 for illegal reference tokens vs -104 for a malformed VEREF voltage
+- Full-scale/clipping (clamp to [0, max_code]), LSB voltage vs reference, ratiometric vs absolute measurement
+- Why it matters for SIL: the cancelling-errors failure mode — simulator and buggy firmware both wrong by 3.3 → tests passed on mis-scaled conversions
+**Files created:**
+- lessons/0009-adc-reference-transfer-functions.html (lesson: 9 sections, 5-question quiz, 3 scenarios)
+- drills/0009-adc-reference-transfer-functions.html (drill: 24 questions across 5 channels — transfer math, reference set, 58b7e2d code, clipping/LSB, SIL bug-hunting)
+- vocab/0009-adc-reference-transfer-functions.html (8 terms: reference voltage, full-scale code, transfer function, LSB voltage, ADC12VRSEL, REF_A, VeREF+, ratiometric measurement)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; quiz/drill scores pending user run.
+**Noted gaps:** pending
+=======
+### Session 3 (2026-06-28, overnight)
+**Lesson:** [0008 — Visual Regression Testing](lessons/0008-visual-regression-testing.html)
+**Drill:** [0008 — Visual Regression Testing](drills/0008-visual-regression-testing.html)
+**Covered (from the visual-testing epic, issues #2–#6):**
+- Golden-image comparison: capture → convert → RMS diff → threshold; auto-create golden on first run
+- `compare_screenshot` capturing both `QWidget` (`.grab()`) and `QGraphicsItem` blocks (`QGraphicsScene.render()`)
+- Determinism: threshold=5 not 0; freezing the multimeter's random reading; fixed window size; `fit_all()` for off-screen blocks
+- Update-golden workflow (`UPDATE_GOLDEN=1` / delete+rerun); goldens committed, diffs gitignored
+- Headless execution via `QT_QPA_PLATFORM=offscreen` + pytest-xvfb (no DISPLAY)
+
+**Engagement:** Generated overnight — quiz/drill results pending user run.
+>>>>>>> origin/master
+
+## Suggested Next Lessons
+1. **SCPI command structure** — the IEEE 488.2 tree syntax that every instrument in Silmulator uses; grounded in `silmulator/scpi/parser.py` and the device command handlers
+2. **Writing a complete SIL test** — paste real embedded C code into the Code Input block, wire it to simulated hardware, and interpret the responses
+3. **Custom blocks** — create a JSON spec for a device that isn't in the library yet (grounded in `silmulator/gui/blocks/custom_block.py`)
+4. **Reading the waveform** — inject a sine wave into the oscilloscope and interpret the CURVE? data transfer

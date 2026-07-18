@@ -1,0 +1,36 @@
+/idea
+
+Goal: A sandbox mode where the player builds maps from predefined pieces
+(tiles/props/buildings) and places NPCs into them — both premade NPCs and
+ones created in the character creator.
+
+Context: Builds on existing systems — placed pieces must honor the existing
+size/collision contracts (a placed building blocks movement like a native
+one), and placeable NPCs draw from the same shared parts/persona pools as
+the character creator and roaming NPCs. This is composition of existing
+systems into an editor, not new core systems.
+
+Scope:
+1. A piece palette — predefined map pieces registered as data (piece id,
+   footprint, collision shape, style tag), placeable on the tile grid with
+   snapping. Adding new pieces later should be a data entry, not code.
+2. Place/move/delete flow with a simple editor UI built on the existing
+   menu system.
+3. NPC placement — pick any saved character (premade or player-created) and
+   place them; they use their stored persona/look exactly as in the town.
+4. Save/load maps as data files (same storage approach as character
+   records), listable and loadable from a sandbox menu.
+5. Play mode toggle — walk around the built map with placed NPCs fully
+   functional (dialogue, schedules if applicable).
+
+Autonomy instructions — unattended run:
+- No clarifying questions or /grill-me-style interrogation; pick the most
+  defensible option, log reasoning in OVERNIGHT_REPORT.md, keep going.
+- Map file format: prefer a structured, human-readable format (JSON) so the
+  future LLM-generated-map feature can emit the same format directly.
+- Before the draft PR, run the visual-qa subagent: build a small test map,
+  place two NPCs, screenshot, confirm pieces and NPCs render with correct
+  collision/scale. Include the report.
+- Follow existing CLAUDE.md agent routing. Draft PR only, no merge,
+  no main. docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay
+  gitignored.

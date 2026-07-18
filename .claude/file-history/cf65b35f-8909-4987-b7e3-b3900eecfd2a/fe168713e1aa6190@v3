@@ -1,0 +1,29 @@
+cmake_minimum_required(VERSION 3.21)
+project(oil_volume_cpp LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+
+# Use FindPython3 (not the legacy FindPythonLibs) so headers are resolved from
+# whatever interpreter scikit-build-core / the user pointed us at.
+set(PYBIND11_FINDPYTHON ON)
+
+# Try to find pybind11 from pip-installed package first (avoids FetchContent network calls
+# and works when Python dev headers are in a non-standard location).
+# Fall back to FetchContent if not found.
+find_package(pybind11 CONFIG QUIET)
+if(NOT pybind11_FOUND)
+    FetchContent_Declare(
+        pybind11
+        GIT_REPOSITORY https://github.com/pybind/pybind11.git
+        GIT_TAG        v2.13.6
+    )
+    FetchContent_MakeAvailable(pybind11)
+endif()
+
+add_subdirectory(cpp/oil_volume)
+add_subdirectory(cpp/itch)
+enable_testing()
+add_subdirectory(cpp/tests)

@@ -1,0 +1,111 @@
+"""Transaction cost & slippage model shared by all three backtest loops.
+
+Three modes, selected via ``CostModel.mode``:
+  - "none"       — zero cost. ``equity == equity_gross`` always.
+  - "flat"       — today's legacy behavior: a flat per-day haircut applied
+                   whenever the portfolio holds any position, independent of
+                   how much actually turned over. Kept so every existing
+                   backtest result stays reproducible bit-for-bit; this is
+                   the default mode everywhere.
+  - "realistic"  — commission + half bid-ask spread + square-root market
+                   impact, charged on TURNOVER (|Δweight| × equity), not a
+                   flat per-day tax. Holding a position is free; churning
+                   it is not.
+
+See .claude/plans/transaction-costs.md for the full design.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import pandas as pd
+
+
+@dataclass
+class CostModel:
+    """Configuration for one backtest's cost accounting.
+
+    Attributes:
+        mode: "none" | "flat" | "realistic".
+        flat_bps: Legacy flat per-day haircut used by mode="flat" — this is
+            exactly the pre-existing ``trade_cost_bps`` knob.
+        commission_bps: Flat commission per trade, in bps of notional.
+            Defaults to 0 (Robinhood-style commission-free execution).
+        half_spread_bps: Flat bid-ask spread cost per trade (one-way), bps.
+        impact_coeff_bps: Square-root market-impact coefficient, bps.
+        fallback_adv: Dollar volume assumed when a ticker's average dollar
+            volume is unavailable (missing/zero Volume data) — conservative
+            (small), so a missing liquidity estimate never understates cost.
+    """
+
+    mode: str = "flat"
+    flat_bps: float = 1.0
+    commission_bps: float = 0.0
+    half_spread_bps: float = 2.5
+    impact_coeff_bps: float = 30.0
+    fallback_adv: float = 1_000_000.0
+
+
+def adv_dollars(df: pd.DataFrame, window: int = 20) -> pd.Series:
+    """Rolling average dollar volume (Volume × Close), min_periods=5.
+
+    Returns an all-NaN series (same index) if the frame has no Volume
+    column — callers fall back to ``CostModel.fallback_adv`` per-value.
+    """
+    if "Volume" not in df.columns:
+        return pd.Series(index=df.index, dtype=float)
+    dollar_vol = df["Volume"].astype(float) * df["Close"].astype(float)
+    return dollar_vol.rolling(window, min_periods=5).mean()
+
+
+def one_way_cost_bps(model: CostModel, trade_notional: float, adv: float | None) -> float:
+    """Commission + half-spread + square-root market-impact, in bps of notional.
+
+    A zero-size trade still pays commission + spread (the fixed cost of
+    crossing the market at all) but no impact term. Impact scales with the
+    square root of participation (trade notional / average dollar volume) —
+    doubling size costs ~41% more, not 100% more, matching observed market
+    behavior (Almgren et al.).
+    """
+    base = model.commission_bps + model.half_spread_bps
+    if trade_notional <= 0:
+        return base
+    a = adv if (adv is not None and adv > 0) else model.fallback_adv
+    participation = trade_notional / a
+    impact = model.impact_coeff_bps * math.sqrt(max(participation, 0.0))
+    return base + impact
+
+
+def day_cost(model: CostModel, equity: float, weight_changes: dict,
+            had_position: bool) -> float:
+    """Total dollar cost for one day, dispatching on ``model.mode``.
+
+    Args:
+        model: The active cost model.
+        equity: Equity basis for sizing trade notional. Callers pass the
+            PRE-return equity for "realistic" (you trade before knowing the
+            day's return) and the POST-return equity for "flat" (matches
+            the exact legacy formula ``equity *= (1+ret); equity *= (1-cost)``).
+        weight_changes: {ticker: (delta_weight, adv_dollars_or_None)} — the
+            signed target-weight change for each ticker touched today
+            (entries, exits, and direction flips all show up here).
+            Ignored for "none" and "flat".
+        had_position: Whether the portfolio held anything today. Ignored
+            for "none" and "realistic" (which key off actual weight deltas).
+
+    Returns:
+        Non-negative dollar cost.
+    """
+    if model.mode == "none":
+        return 0.0
+    if model.mode == "flat":
+        return equity * (model.flat_bps / 10000.0) if had_position else 0.0
+    total = 0.0
+    for dw, adv in weight_changes.values():
+        notional = abs(dw) * equity
+        if notional <= 0:
+            continue
+        bps = one_way_cost_bps(model, notional, adv)
+        total += notional * (bps / 10000.0)
+    return total

@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Milestone + 2 issues for the NPC memory/model project (mostly implemented
+tonight — labels reflect reality: memory done, bench in progress)."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/npc-memory-and-model`
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    {
+        "title": "feat(memory): NPCs remember players across sessions (SQLite summaries)",
+        "label": "ai-completed",
+        "what": ("Per-NPC persistent memory: a first-person summary written by the "
+                 "NPC's own model when a conversation closes, stored with the "
+                 "transcript in saves/conversations.sqlite3, and injected into the "
+                 "system prompt on the next launch. Survives restart; store failures "
+                 "degrade to a memoryless session."),
+        "where": ("src/core/ConversationStore.{hpp,cpp} (new), vendored "
+                  "external/sqlite3.{c,h} (3.50.2 amalgamation), "
+                  "Persona::renderSystemPrompt(memory), Npc::setMemory, main.cpp "
+                  "hooks (load at start, summarize+save on close, transcript on quit)."),
+        "verify": ("make -C tests test — 7 new cases (round-trip, restart survival, "
+                   "upsert, unknown NPC, unusable path, corrupt row, prompt "
+                   "injection). In-game end-to-end demo lands with the dialogue UI "
+                   "port (#40)."),
+        "constraints": ("C++ render-side contract unchanged. Transcript persistence "
+                        "bounded to the 10-turn history window until #40 exposes "
+                        "turns to the app layer."),
+        "economy_note": ("Single table + JSON payload (user's stated pattern); "
+                         "vendored amalgamation, no package manager; memory woven "
+                         "into the existing prompt renderer, no new prompt system."),
+        "concept": "Prompt-injected long-term memory: summaries as compressed state",
+    },
+    {
+        "title": "chore(bench): local model benchmark vs the directive contract + swap",
+        "label": "ai-in-progress",
+        "what": ("Benchmark qwen2.5:3b (baseline), qwen3:8b, gemma3:4b, "
+                 "mistral:7b-instruct against the game's real reply contract: "
+                 "directive-compliance rate, 20-turn persona-consistency proxies, "
+                 "TTFT/total latency. Write bench/REPORT.md with numbers and set "
+                 "config/llm.cfg to the winner (qwen3:8b if close, per run "
+                 "instructions)."),
+        "where": ("tools/bench_npc_models.py (stdlib-only), tools/persona_prompt.cpp "
+                  "(prints the exact game prompt), bench/README.md; results in "
+                  "bench/out/ (gitignored), verdict committed as bench/REPORT.md."),
+        "verify": ("bench/REPORT.md states per-model compliance % (with N), "
+                   "consistency counters, and latency medians; config/llm.cfg names "
+                   "the winner; game runs with it."),
+        "constraints": ("Fully local. NOTE (decision log): the original brief said "
+                        "Gemma + format:json — the repo actually runs qwen2.5:3b "
+                        "with [MOOD:]/[ACTION:] tags, so the bench measures the tag "
+                        "contract. Mistral Small (24B) exceeds 16 GB RAM — "
+                        "mistral:7b-instruct substitutes."),
+        "economy_note": ("urllib + re only, no pip installs; consistency is "
+                         "proxy-scored (no cloud judges)."),
+        "concept": "Benchmarking LLMs against an output contract: compliance, consistency, latency",
+    },
+]
+
+
+def retry(fn, what):
+    for attempt in range(3):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+milestone = None
+for m in repo.get_milestones(state="open"):
+    if m.title.startswith("NPC memory"):
+        milestone = m
+        break
+if milestone is None:
+    milestone = retry(lambda: repo.create_milestone(
+        title="NPC memory and model selection",
+        description=("Persistent per-NPC conversation memory (SQLite summaries "
+                     "injected into prompts) and a measured local-model swap. "
+                     "Plan: .claude/plans/npc-memory-and-model.md")), "milestone")
+print(f"milestone #{milestone.number}: {milestone.title}")
+
+existing = {i.title.lower() for i in repo.get_issues(state="all") if not i.pull_request}
+for spec in SPECS:
+    if spec["title"].lower() in existing:
+        print(f"exists: {spec['title']}")
+        continue
+    body = TEMPLATE.format(**{k: spec[k] for k in
+                              ("what", "where", "verify", "constraints",
+                               "economy_note", "concept")})
+    issue = retry(lambda: repo.create_issue(
+        title=spec["title"], body=body, labels=[spec["label"]],
+        assignees=["bjl14710"], milestone=milestone), spec["title"])
+    print(f"created #{issue.number} [{spec['label']}]: {spec['title']}")

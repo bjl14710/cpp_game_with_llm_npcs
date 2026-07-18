@@ -1,0 +1,84 @@
+# cpp_game_with_llm_npcs
+
+Milestone 1 of a small game where NPCs hold conversations powered by a single
+local LLM. This first slice is just a chat window with one companion NPC named
+**Wren**. No world, no movement, no combat — just dialogue. Later NPCs reuse
+the same `LlmClient` by design.
+
+## Architecture at a glance
+
+- **One `LlmClient`** owns the only thread that talks to the LLM. Every NPC
+  submits requests to it and gets replies back through a thread-safe queue
+  drained on the main thread.
+- **`Npc`** holds a `Persona` and a bounded conversation history. The history
+  is capped at 10 round-trip turns so token usage stays predictable.
+- **`Persona`** is a small struct rendered into a system prompt. "Jim the
+  pharmacist" and "Jane the random pedestrian #47" are two `Persona` instances,
+  not two classes.
+- **Ollama** runs as a sidecar HTTP service. The C++ side just POSTs JSON to
+  `localhost:11434/api/chat`. Vendored header-only deps (`cpp-httplib`,
+  `nlohmann/json`) live in `external/`.
+
+## One-time setup
+
+### 1. Install Ollama
+
+- **Linux:** `curl -fsSL https://ollama.com/install.sh | sh`
+- **Windows:** installer from <https://ollama.com>
+
+### 2. Pull a model
+
+```
+ollama pull qwen2.5:3b-instruct
+```
+
+About 2 GB. Runs comfortably on any 6 GB+ NVIDIA GPU. Swap to a different tag
+later by editing `config/llm.cfg` — no rebuild needed. Suggested alternates:
+
+- `llama3.2:3b-instruct` — comparable size, different voice.
+- `hermes3:8b` — bigger, much better roleplay; needs ~5 GB VRAM at Q4_K_M.
+
+### 3. Install SFML 2.6
+
+- **Linux (Debian/Ubuntu):** `sudo apt install libsfml-dev`
+- **Linux (Arch):** `sudo pacman -S sfml`
+- **Windows:** MSYS2 UCRT64 — `pacman -S mingw-w64-ucrt-x86_64-sfml`
+
+## Build & run
+
+Make sure `ollama serve` is running, then:
+
+```
+./run.sh         # Linux / macOS
+./run.ps1        # Windows (PowerShell, MSYS2 UCRT64)
+```
+
+Either script verifies Ollama is reachable, configures CMake, builds, and
+launches the game.
+
+Or manually:
+
+```
+cmake -S . -B build
+cmake --build build -j
+./build/cpp_game_with_llm_npcs
+```
+
+## Talking to Wren
+
+Type a line, press Enter. The input box dims while Wren is thinking; it
+re-enables once the reply lands. Press Esc (or close the window) to quit.
+
+## Where to look next
+
+- `src/Persona.hpp` — add traits, change voice, or define new NPCs.
+- `personas/companion.txt` — extra system-prompt directives, hot-reloaded on
+  every launch (no rebuild).
+- `config/llm.cfg` — host, port, model tag, temperature.
+
+## Future milestones
+
+- Multiple NPCs in one scene (architecture already supports it).
+- Streaming token-by-token replies for a snappier feel.
+- Persistent per-NPC memory across sessions.
+- Embed `llama.cpp` directly to drop the Ollama dependency.

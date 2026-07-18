@@ -1,0 +1,202 @@
+# Plan: A bigger, livelier city — better characters, traffic, crowds, real punishments
+
+## Context
+
+The player wants the world to feel less blocky and more alive. Five asks,
+scoped against the engine's hard ceiling (legacy **OpenGL 2.1 fixed-function**,
+100% procedural geometry, no asset/shader pipeline — so literal Fortnite/GTA
+fidelity is out; the agreed target is a strong *stylized procedural* step up):
+
+1. **Better characters** — push procedural humanoids hard (no new deps).
+2. **Graduated punishments** — `*shoots someone*` must be punished harder than
+   "disturbing the peace"; several tiers, not one flat 10s jail.
+3. **Bigger map + more buildings** and **cars**.
+4. **More people** — a larger crowd that wanders (chosen over streaming
+   spawn/despawn, so NPC lifetimes stay stable and simple).
+5. **Cars** — **full driving traffic** (chosen): cars follow the street grid,
+   stop/turn, and the player collides with them.
+
+Locked decisions (from clarifying Q&A):
+- Characters: **procedural overhaul, no new dependencies.**
+- Crowd: **fixed larger wandering crowd at startup** (not streaming).
+- Cars: **full driving traffic** (lane-following + intersection stops +
+  look-ahead braking + player collision — not free-form A* pathfinding).
+
+Constraints (CLAUDE.md): no placeholders/TODOs; comment every public function;
+match naming; **tests required for new business logic** (all new core logic is
+SFML-free and unit-tested with doctest; the renderer stays untested as before).
+Work on a feature branch, incremental `type(scope): description` commits, build
++ `make -C tests test` green after each, inline review before each commit. No
+push (user handles pushes).
+
+Suggested branch: `6-bigger-livelier-city` (current branch `5-detail-the-town`
+holds the finished visual pass).
+
+---
+
+## Phase 1 — Procedural character overhaul  `feat(render): articulated characters with per-NPC variety`
+
+Goal: replace today's capsule figure (`Renderer3D::drawNpc`, src/app/Renderer3D.cpp:747)
+with an articulated, varied humanoid.
+
+- **Per-NPC appearance.** Add a small `NpcAppearance` struct (skin tone, hair
+  color/style id, shirt + pants colors, height/build scale) to
+  `Renderer3D.hpp`'s `NpcVisual`. Derive it deterministically from a per-NPC
+  seed so a given NPC always looks the same. Source the seed from the NPC
+  (add `std::uint32_t appearanceSeed()` to `Npc`, set at construction); the
+  fixed shopkeeper palettes (`kNpcPalettes`) remain available so police read
+  blue and named shops keep recognizable colors.
+- **Articulated body in `drawNpc`.** Rebuild from smooth parts: pelvis, two
+  upper+lower legs with a knee bend and simple **shoes**, a tapered torso,
+  chest/collar accent, neck, sphere head + varied hair cap, and arms rebuilt in
+  `drawArm` as upper arm + forearm (elbow) + a small **hand**. Reuse existing
+  `drawSphere`/`drawTaperedCylinder`/`drawBlobShadow` (Renderer3D.cpp:182-260).
+- **Walk cycle.** Add an optional `locomotionPhase` to `NpcVisual`; swing
+  legs/arms when the NPC is moving. Feed it from a phase the `Npc` accumulates
+  while its position changes (so wanderers and followers visibly walk). Keep
+  the existing raise/wave pose logic.
+- **LOD + culling** (also serves Phases 4-5): skip `drawNpc` beyond a cull
+  radius, and drop sphere/cylinder segment counts for distant NPCs so a crowd
+  stays cheap. Add the cull check in the render loop (main.cpp:458).
+
+Files: `src/app/Renderer3D.cpp`, `src/app/Renderer3D.hpp`, `src/app/main.cpp`,
+`src/core/Npc.hpp/.cpp` (seed + locomotion phase accessor).
+Tests: none for geometry (renderer is untested by design); the seed/phase
+accessors are trivial.
+
+## Phase 2 — Graduated punishments  `feat(law): offense severity tiers and sentences`
+
+Goal: the punishment scales with the crime; `*shoots*` ≫ shouting.
+
+- **New core `Offense.hpp/.cpp`** (SFML-free, unit-tested): a `Charge` enum
+  (e.g. `None, DisturbingPeace, Theft, Assault, ArmedViolence`), a table mapping
+  each to a sentence (jail seconds + HUD label + whether it triggers a
+  city-wide manhunt), and `classifyPlayerAction(const std::string& text)` that
+  scans the player's line/`*action*` for keywords (gun/shoot/kill → ArmedViolence;
+  hit/punch/stab/attack → Assault; steal/rob/loot → Theft; shout/threaten/curse
+  → DisturbingPeace; else None). This is the deterministic floor.
+- **LLM may escalate, never invent silently.** Officers already decide arrests
+  in-character via `[[ACTION: arrest]]`. Add an optional `[[CHARGE: x]]` tag the
+  officer can emit, parsed in `parseDirectives` (NpcAction.hpp) into
+  `Directives.charge`. Final charge = max(classifier floor, LLM charge) — same
+  defense-in-depth shape as the existing civilian-arrest→call_police guard
+  (Npc.cpp:69). Update `Persona::renderActionProtocol` to mention serious crimes
+  warrant immediate arrest + a charge.
+- **Wire into main.cpp.** Track the player's current charge (max severity since
+  last release), updated when they submit a line. On catch (`hasCaughtPlayer`,
+  main.cpp:388), set `jailSecondsLeft` from the charge's sentence and show the
+  charge-specific HUD message (replaces the hardcoded "disturbing the peace",
+  main.cpp:494). ArmedViolence → **manhunt**: every officer `commandArrest()`s
+  (reuse main.cpp:441-444), and a longer sentence.
+- **Punishment variety:** warning (no detention) for None; escalating jail by
+  tier; manhunt for the top tier.
+
+Files: new `src/core/Offense.hpp/.cpp`, `src/core/NpcAction.hpp` (charge tag),
+`src/core/Persona.hpp`, `src/app/main.cpp`, `CMakeLists.txt` + `tests/Makefile`
+pick up the new core file automatically (globbed).
+Tests: new `tests/test_offense.cpp` — classifier keywords, max-severity merge,
+sentence table, manhunt flag.
+
+## Phase 3 — Bigger map + more buildings  `feat(city): larger downtown grid with more blocks`
+
+Goal: more world, denser detail, and the lane skeleton traffic needs.
+
+- Grow `City::makeDowntown` (src/core/City.cpp:69) from 3×3 to ~**5×5 blocks**
+  on the same 64-unit pitch; raise `halfSize_` accordingly (~170-200). Keep the
+  plaza center and park; add residential/office/mixed filler with varied
+  heights and a few new enterable shops if cheap, plus more street props
+  (lamps/trees/benches/parked cars as scenery).
+- Record the **street grid** (the 16-unit gaps between blocks) as data the
+  traffic system reads in Phase 5 — expose lane centerlines from the block
+  pitch rather than hand-listing them.
+- Keep collision correct: `rebuildCollision` already handles solid vs. hollow.
+
+Files: `src/core/City.cpp`, possibly `src/core/City.hpp` (a helper exposing the
+block grid / street centerlines).
+Tests: extend `tests/test_city.cpp` — new bounds, shops still enterable/hollow,
+holding cell intact, world-bounds invariant for the larger map.
+
+## Phase 4 — Wandering crowd  `feat(npc): procedural pedestrians that wander`
+
+Goal: many more talkable people, some of them arrestable cops.
+
+- **New core `PersonaFactory.hpp/.cpp`** (SFML-free, unit-tested): builds a
+  `Persona` from seeded pools (first/last name, role like jogger/tourist/student/
+  commuter, 2-3 traits, speaking style, knowledge boundary) with a configurable
+  probability of `police = true`. Returns the same `Persona` struct the loader
+  produces, so `Npc` is unchanged.
+- **Wander behavior.** Add `NpcAction::Wander` (not LLM-emittable; an ambient
+  default). In `Npc::update` (Npc.cpp:109): pick a random nearby reachable goal,
+  walk via `city.resolveMovement`, pause, repeat; turn to face travel. Talking/
+  instructing overrides it (Follow/Stop/Face/Arrest); reuse existing routing.
+- **Spawn at startup** in main.cpp after the file roster (main.cpp:224-231):
+  generate N pedestrians (start ~25-40, tunable) at valid non-colliding
+  positions spread across the bigger map, `behavior_ = Wander`. They share the
+  one `LlmClient` (LLM only fires when talked to). Crowd count is fixed → NPC
+  indices stay stable, so `pendingRoutes`/`wasCaught`/`session.npcIndex()` keep
+  working unchanged.
+- Relies on Phase 1 culling/LOD for framerate.
+
+Files: new `src/core/PersonaFactory.hpp/.cpp`, `src/core/NpcAction.hpp`
+(Wander), `src/core/Npc.cpp` (wander update), `src/app/main.cpp` (spawn loop).
+Tests: new `tests/test_persona_factory.cpp` (determinism, police probability
+bounds, required fields); extend `tests/test_npc_behavior.cpp` (wander stays in
+bounds, avoids obstacles, instructions override and the NPC doesn't auto-resume
+into walls).
+
+## Phase 5 — Driving traffic  `feat(traffic): cars that drive the street grid`
+
+Goal: cars that actually drive, stop, turn, and block the player.
+
+- **New core `Traffic.hpp/.cpp`** (SFML-free, unit-tested): a road network of
+  lane centerlines built from the Phase-3 block grid; `Vehicle{pos, headingDeg,
+  speed, lane, t}`; `Traffic::update(dt, playerPos)` advances each car along its
+  lane, **brakes** when a player/another car is within a look-ahead box,
+  **stops** at intersections to avoid cross-traffic, and **turns** by choosing a
+  connected lane at the end of a segment. Deterministic, seedable.
+- **Player ↔ car collision** in main.cpp: after the static-city movement
+  resolve, reject the step if it lands in a car footprint (cars are solid moving
+  obstacles); cars brake for the player rather than shoving them. Keep simple
+  and safe (no ragdoll/damage).
+- **Render** `drawCar` in Renderer3D (rounded body, cabin, wheels, headlights/
+  taillights, blob shadow) and a render+update call in the main loop. A few
+  parked cars from Phase 3 stay as static scenery.
+
+Files: new `src/core/Traffic.hpp/.cpp`, `src/app/Renderer3D.cpp/.hpp`
+(`drawCar`), `src/app/main.cpp` (update + render + player collision).
+Tests: new `tests/test_traffic.cpp` — cars stay on lanes/in bounds, brake when
+something is ahead, stop at intersections, don't overlap the player.
+
+---
+
+## Performance
+Immediate-mode draw cost scales with NPC + car count. Mitigations: distance
+cull + segment-count LOD for NPCs (Phase 1), cap crowd/car counts (tunable
+constants), and keep per-frame core updates O(n) with small n. Target: smooth
+on the bigger map with the full crowd + traffic.
+
+## Risks / honest notes
+- **Look ceiling:** this is stylized-procedural, a clear step up from capsules —
+  not Fortnite-quality authored characters. Stated up front.
+- **Traffic is the riskiest piece** (most moving parts, easiest to look buggy);
+  kept tractable as lane-follow + look-ahead brake + intersection stop, not full
+  pathfinding. Built core-first and unit-tested so behavior is verifiable
+  headlessly before it's ever rendered.
+- All new logic is SFML-free core → unit-tested; only geometry/rendering is
+  eyeballed (as today — I can't screenshot the GL window here, so you verify
+  visuals and I tune the named constants).
+
+## Out of scope
+No shaders/asset pipeline/authored models; no streaming chunk spawn/despawn
+(fixed crowd chosen); no vehicle damage/driving-by-player; no new third-party
+dependencies.
+
+## Verification (each phase)
+- `cmake --build build -j` clean; `make -C tests test` green (suite grows with
+  the new core tests).
+- Launch and check that phase live: articulated varied people who walk;
+  `*shoots a civilian*` → manhunt + a long, correctly-labeled sentence while a
+  `*shouts*` → short/none; a visibly bigger city; a wandering crowd you can walk
+  up to and talk to (some are cops who can arrest you); cars driving the grid,
+  stopping/turning, and blocking you.
+- Inline syntax/perf review before each commit; `/code-review` at the end.

@@ -1,0 +1,147 @@
+# Plan: Per-Ticker Spread Costs & Cost-Fragility Flagging
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Builds on the existing cost model (`costs.py`, issue #55): commission is
+already $0-default and impact already scales with position size vs average
+dollar volume. This plan adds the two missing pieces plus one deferred one:
+(1) the spread term becomes per-ticker, estimated from each ticker's own
+OHLC data via the Corwin–Schultz high-low estimator instead of one flat
+bps number for the whole universe; (2) a strategy whose edge exists gross
+but dies net-of-costs gets an explicit COST-FRAGILE flag in the screen
+output and report — not just a quietly lower rank; (3) the realistic cost
+model finally reaches the GBM `simulate_walkforward` and
+`paper_trading_sim.simulate` loops, closing #55's recorded deferral.
+
+## Goal
+Screening output answers "which strategies only look profitable because the
+backtest ignored what THIS ticker actually costs to trade" — explicitly,
+per strategy, with the spread cost grounded in each ticker's own data.
+
+## Relationship to Existing Work (read first)
+`costs.py` (PR #63) already provides: `CostModel` (none/flat/realistic),
+commission_bps=0 default, flat half_spread_bps=2.5, sqrt-impact on
+participation (notional / 20-day Volume×Close), turnover-based charging,
+dual-track `equity`/`equity_gross`/`cost` columns in
+`run_strategy_walkforward`, arena CLI flags. This plan EXTENDS that module —
+it must not fork a second cost model.
+
+## Design Decisions (documented, none blocking)
+- **Spread estimator: Corwin–Schultz (2012)** — uses only High/Low columns
+  already in every fetched frame; no new data source, no new dependency.
+  Per-ticker daily estimates are noisy, so the usable number is a rolling
+  60-day median, floored at 1 bps and capped at 200 bps (sanity bounds),
+  negative daily estimates floored at 0 per the paper's convention.
+  Fallback chain: estimate unavailable/degenerate → the existing flat
+  `half_spread_bps` → never zero. `CostModel` gains
+  `spread_mode: "flat" | "estimated"` (default "flat" — no silent change
+  to existing results; "estimated" is opt-in like "realistic" was).
+- **Cost-fragile definition**: run the promotion gate twice per strategy at
+  screen time — once on gross metrics, once on net. `cost_fragile = True`
+  when gross passes but net fails. Implemented against the gate FUNCTION,
+  not hardcoded thresholds, so it composes unchanged with the planned
+  two-tier t-stat gate (statistical-rigor plan). Also computed:
+  `cost_drag = gross_CAGR − net_CAGR`, shown always. Fragile strategies
+  keep their net-based status (usually EXCLUDED) — the flag explains WHY,
+  loudly, in both the screen printout and a `cost_fragile` report column.
+- **GBM/paper_trading_sim wiring** mirrors `run_strategy_walkforward`'s
+  pattern exactly: turnover from |Δweight| per ticker (meanvar weights in
+  simulate_walkforward; equal-weight pick-set changes in
+  paper_trading_sim), same provisional-day conventions, same dual-track
+  columns, `--cost_model` flags on both CLIs, default `flat` (legacy
+  behavior regression-pinned, same discipline as #55).
+
+## Out of Scope (this version)
+- Quote-based (NBBO) spreads — needs a paid feed; the injectable design
+  leaves room for a later adapter
+- Intraday PaperEngine costs (still its own world)
+- Time-varying spread within a day; one estimate per ticker per day
+- Changing the DEFAULT spread_mode to "estimated" (flip later, deliberately,
+  after comparing outputs)
+- Half-spread vs full-spread execution modeling nuances (we charge the
+  half-spread per side, as now — only its VALUE becomes per-ticker)
+
+## Affected Areas
+- `costs.py` — `estimate_spread_bps(df, window=60) -> pd.Series`
+  (Corwin–Schultz with the smoothing/floor/cap above);
+  `CostModel.spread_mode` field; `one_way_cost_bps` gains an optional
+  `half_spread_bps_override` (per-ticker value threaded per trade, falling
+  back to the model's flat value).
+- `walkforward_sim.py` — `run_strategy_walkforward`: when
+  `spread_mode == "estimated"`, precompute per-ticker spread series next to
+  the existing `adv` dict and pass the day's value into `day_cost`'s
+  weight_changes tuples (extends the `(dw, adv)` tuple to
+  `(dw, adv, spread_bps)`); `simulate_walkforward` gains `cost_model`
+  wiring with per-date weight tracking mirroring the generic loop.
+- `paper_trading_sim.py` — `simulate` gains `cost_model` on
+  `BacktestConfig`, turnover from pick-set changes, dual-track columns,
+  `--cost_model` CLI flag.
+- `strategy_arena.py` — `cmd_backtest`: gross-vs-net double gate evaluation,
+  `cost_fragile` + `cost_drag` persisted on the strategies row (two new
+  guarded ALTER columns), loud printout for fragile strategies;
+  `--spread_mode` CLI flag threaded through.
+- `analyze_equity.py` — `compare_strategies`: `cost_fragile`, `cost_drag`
+  columns.
+- New tests: `tests/test_spread_estimate.py` (CS formula pinned against a
+  hand-computed two-day case; floor/cap/fallback chain; wide-spread
+  synthetic ticker estimates higher than tight-spread one),
+  cost-fragility cases in `tests/test_strategy_arena.py` (gross-pass/
+  net-fail flips the flag; gross-fail never flags; flag composes with the
+  gate function), regression pins for the two newly-wired loops
+  (`--cost_model flat` byte-identical to current output).
+
+## Implementation Order
+1. `estimate_spread_bps` in costs.py + unit tests — pure math, nothing
+   consumes it yet.
+2. Per-ticker spread threading in `run_strategy_walkforward`
+   (`spread_mode="estimated"`) + tests (tight vs wide synthetic tickers pay
+   visibly different costs; flat mode regression-pinned).
+3. Cost-fragility double-gate in `cmd_backtest` + report columns + schema
+   migration + tests.
+4. Deferred wiring: `simulate_walkforward` + `paper_trading_sim.simulate`
+   cost model support with flat-mode regression pins.
+5. Docs: CLAUDE.md conventions note; PROGRESS.md lesson suggestion
+   ("estimating what you can't observe: spreads from OHLC").
+
+## Acceptance Criteria
+- [ ] Corwin–Schultz on a hand-computed 2-day High/Low case matches the
+      paper's formula to 1e-9; negative daily estimates floor at 0
+- [ ] A synthetic wide-range ticker's estimated spread exceeds a
+      tight-range ticker's, and both respect the [1, 200] bps bounds
+- [ ] Missing High/Low columns → fallback to flat half_spread_bps with one
+      logged notice, never zero spread and never a crash
+- [ ] `spread_mode="flat"` (default) reproduces current realistic-mode
+      equity exactly (regression-pinned)
+- [ ] Under `spread_mode="estimated"`, identical trades in a wide-spread
+      ticker cost more than in a tight-spread one (integration test)
+- [ ] A strategy engineered to pass on gross metrics and fail on net shows
+      `cost_fragile=True`, prints a loud verdict at screen time, and
+      appears flagged in `arena-run report`; a strategy failing on gross
+      too shows `cost_fragile=False`
+- [ ] `simulate_walkforward` and `paper_trading_sim.simulate` accept a
+      CostModel; `--cost_model flat` is byte-identical to today for both
+      (regression-pinned); `realistic` produces equity/equity_gross/cost
+      columns
+- [ ] Pre-existing arena DBs migrate in place (two new columns)
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Fewer than ~3 bars of High/Low (estimator undefined) | Fallback to flat half_spread_bps for that ticker/day |
+| High == Low for a stretch (halted/illiquid ticker) | CS estimate degenerates to 0 → floored to 1 bps minimum, not free trading |
+| Adjusted data where Low > High (bad row) | Row skipped in estimation window; fallback if window becomes empty |
+| Gate is later replaced by the two-tier t-stat gate | Fragility calls the gate function with gross vs net inputs — no code change needed here |
+| Strategy passes net but cost_drag is huge (edge survives, barely) | Not flagged fragile (it survived) — but cost_drag column makes the margin visible |
+| spread_mode="estimated" with a ticker missing Volume (no ADV) | Spread estimation is independent of Volume; impact term falls back to fallback_adv as today |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(costs): Corwin–Schultz per-ticker spread estimation` — estimate_spread_bps + bounds/fallback chain + pinned tests
+2. `feat(costs): spread_mode=estimated threading in run_strategy_walkforward` — per-ticker spread in day_cost, regression pins
+3. `feat(arena): cost-fragility double gate + cost_drag reporting` — gross-vs-net verdicts, schema migration, loud flagging
+4. `feat(costs): wire CostModel into simulate_walkforward and paper_trading_sim (closes #55's deferral)` — flat-mode regression pins

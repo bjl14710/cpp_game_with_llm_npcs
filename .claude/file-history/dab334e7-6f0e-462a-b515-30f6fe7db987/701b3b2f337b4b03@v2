@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Pairs trading / stat-arb research module — scaffold.
+
+Spec: .claude/plans/pairs-stat-arb.md. Entry points `pairs-scan` and
+`pairs-backtest`. RESEARCH-tier by design: fully backtestable, registered
+in the arena report, hard-gated from live paper trading until a margin
+account (~$2,000 min) and shorting capability exist — the
+`--i_have_margin` acknowledgment is the only unlock.
+
+No new dependencies: Engle–Granger two-step with numpy OLS for the hedge
+ratio and a hand-rolled Dickey–Fuller test against hardcoded MacKinnon
+critical values (published constants).
+"""
+from __future__ import annotations
+
+from typing import Dict, List, Tuple
+
+import pandas as pd
+
+#: MacKinnon (2010) approximate critical values for the no-trend
+#: Engle-Granger cointegration DF test, 2 variables. Filled by the
+#: implementing commit alongside the test that pins them.
+DF_CRITICAL_VALUES: Dict[str, float] = {}
+
+
+def hedge_ratio(a: pd.Series, b: pd.Series) -> float:
+    """OLS slope of a on b (numpy lstsq, no statsmodels).
+
+    TODO(implement): per the plan; reject (raise ValueError) when the
+    series are identical (dual-listing guard).
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/pairs-stat-arb.md")
+
+
+def engle_granger(a: pd.Series, b: pd.Series) -> Tuple[float, float, bool]:
+    """(hedge_ratio, df_stat, cointegrated_at_5pct).
+
+    TODO(implement): residual = a - beta*b; DF regression on the residual's
+    first differences; compare the t-stat to DF_CRITICAL_VALUES["5%"].
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/pairs-stat-arb.md")
+
+
+def backtest_pair(a: pd.Series, b: pd.Series, formation: int = 252,
+                  z_window: int = 60, entry_z: float = 2.0,
+                  exit_z: float = 0.5, stop_z: float = 4.0) -> pd.DataFrame:
+    """Spread z-score walk-forward for one pair, dollar-neutral legs.
+
+    TODO(implement): per the plan — enter at |z|>entry, exit at |z|<exit,
+    HARD STOP at |z|>stop (cointegration broke: the classic pairs blow-up),
+    both legs charged through the CostModel; returns the dual-track
+    equity/equity_gross/cost frame like every other backtest here.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/pairs-stat-arb.md")
+
+
+def main_scan() -> None:
+    """CLI pairs-scan: correlation pre-filter (>0.8) then Engle-Granger over
+    a universe file; ranked CSV out; --max_pairs cap with dropped-count
+    reported. TODO(implement)."""
+    raise NotImplementedError("scaffold: see .claude/plans/pairs-stat-arb.md")
+
+
+def main_backtest() -> None:
+    """CLI pairs-backtest: run backtest_pair per scanned pair; register
+    metrics in arena.db under RESEARCH status. TODO(implement)."""
+    raise NotImplementedError("scaffold: see .claude/plans/pairs-stat-arb.md")

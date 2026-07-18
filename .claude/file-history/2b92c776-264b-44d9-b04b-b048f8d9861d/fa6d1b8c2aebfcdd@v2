@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Draft PR for issue #67 + issue bookkeeping."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+body = (
+    "Closes #67. Final PR of the city-polish milestone; stacks on #70 "
+    "(base = `feature/issue-66-street-dressing`), one commit.\n\n"
+    "## What changed\n"
+    "- One GLSL 330 shader pair (inline strings — no new asset files) with "
+    "exactly the two budgeted uniforms (`fogColor`, `fogDensity`) plus a "
+    "per-frame `cameraPos`: squared-exponential distance fog toward the sky "
+    "clear color (density 0.006 — plaza stays crisp, the far city edge "
+    "visibly hazes) and a subtle warm tint (1.06/1.00/0.92) applied before "
+    "fogging.\n"
+    "- **Two draw paths, one shader**: model materials adopt it at load in "
+    "Assets (buildings, roads, cars, characters), and the renderer wraps "
+    "the 3D pass in `BeginShaderMode` so rlgl batch primitives (grass "
+    "plane, slabs, the #64 fountain, the viewmodel) haze consistently — "
+    "without this the grass would stay saturated to the horizon while "
+    "buildings faded. The vertex stage reads world position via `matModel` "
+    "(identity for batch vertices), correct for both paths.\n"
+    "- **Skinning check from the issue constraint**: raylib 5.5 CPU "
+    "skinning writes animated vertices before drawing and the shader "
+    "consumes only standard attributes — plaza screenshot confirms "
+    "characters render/animate normally under the custom shader.\n"
+    "- Shader compile failure degrades to the plain look; `UnloadModel` "
+    "treats material shaders as user-owned (raylib's shared-shader "
+    "contract), so Assets unloads the shared shader exactly once.\n\n"
+    "## Verification\n"
+    "- Down-street shot: distant buildings and road melt into the sky at "
+    "the far junction; near objects unchanged.\n"
+    "- Plaza shot: characters skinned correctly, subtle warm cast, far "
+    "street edges haze.\n"
+    "- Suite green: 128 cases / 886 assertions.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+pr = retry(lambda: repo.create_pull(
+    title="feat(render): distance fog and warm directional tint (#67)",
+    body=body,
+    head="feature/issue-67-atmosphere-pass",
+    base="feature/issue-66-street-dressing",
+    draft=True), "create pr")
+print(f"PR #{pr.number}: {pr.html_url}")
+
+issue = retry(lambda: repo.get_issue(67), "issue")
+retry(lambda: issue.add_to_labels("ai-completed"), "label")
+try:
+    issue.remove_from_labels("ai-in-progress")
+except GithubException:
+    pass
+retry(lambda: issue.create_comment(
+    f"Implemented in draft PR #{pr.number} (stacked on #70). Fog + warm "
+    "tint verified from street and plaza vantages; character skinning "
+    "confirmed intact under the custom shader; suite 128 cases / 886 "
+    "assertions."), "comment")
+retry(lambda: issue.edit(state="closed"), "close")
+print("issue #67 closed")

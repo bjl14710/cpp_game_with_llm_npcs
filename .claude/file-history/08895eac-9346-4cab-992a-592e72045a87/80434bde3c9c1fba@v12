@@ -1,0 +1,34 @@
+"""VHDL flat-book parity tests (scaffold — all skipped).
+
+Skips when ghdl is absent (install: scripts/setup-vhdl.sh); the sim's exit
+code is the assertion (plan: .claude/plans/vhdl-flat-book.md).
+TODO(vhdl-2/3): un-skip as implemented.
+"""
+
+from __future__ import annotations
+
+import shutil
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("ghdl") is None,
+    reason="ghdl not installed — run scripts/setup-vhdl.sh",
+)
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(vhdl-2)")
+def test_edge_case_vectors_match_cpp_oracle() -> None:
+    """Clamp-at-zero, best-level removal, side emptying, boundary indexes:
+    regenerate vectors via golden_vectors, run the sim, assert exit 0."""
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(vhdl-2)")
+def test_random_10k_op_vectors_match_cpp_oracle() -> None:
+    """Seeded pseudo-random sequence: full parity (exit 0)."""
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(vhdl-3)")
+def test_cycles_per_op_constant_across_depth_sweep() -> None:
+    """DEPTH=1024 and DEPTH=4096 report identical cycles-per-op — the
+    range-independence claim, demonstrated not asserted."""

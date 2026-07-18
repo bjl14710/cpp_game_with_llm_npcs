@@ -1,0 +1,75 @@
+"""Reference solution — Exercise 03 (part 1): pairs-trading utilities.
+
+Numpy-only (no statsmodels): OLS hedge ratio, spread, z-score, a lag-0
+Dickey-Fuller t-statistic, and an AR(1) half-life.
+
+Peek policy: attempt exercises/03_stat_arb_risk/pairs.py first.
+"""
+import numpy as np
+
+
+def _ols(y: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """OLS of y on X (X already includes any intercept column).
+
+    Returns (coefficients, standard errors).
+    """
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    resid = y - X @ beta
+    dof = len(y) - X.shape[1]
+    sigma2 = float(resid @ resid) / dof
+    cov = sigma2 * np.linalg.inv(X.T @ X)
+    return beta, np.sqrt(np.diag(cov))
+
+
+def hedge_ratio(y, x) -> float:
+    """OLS slope of y on x (with intercept): how many units of x hedge one
+    unit of y."""
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    X = np.column_stack([np.ones(len(x)), x])
+    beta, _ = _ols(y, X)
+    return float(beta[1])
+
+
+def spread_series(y, x, beta: float) -> np.ndarray:
+    """Residual spread e_t = y_t - beta * x_t."""
+    return np.asarray(y, dtype=float) - beta * np.asarray(x, dtype=float)
+
+
+def zscore(spread) -> np.ndarray:
+    """Standardized spread: (e - mean(e)) / std(e), sample std (ddof=1)."""
+    e = np.asarray(spread, dtype=float)
+    return (e - e.mean()) / e.std(ddof=1)
+
+
+def dickey_fuller_stat(e) -> float:
+    """Lag-0 Dickey-Fuller t-statistic (with constant).
+
+    Regress de_t = alpha + delta * e_{t-1} + eps and return t = delta / se.
+    Strongly negative values reject the unit root (the spread mean-reverts);
+    the 5% critical value with a constant is about -2.86.
+    """
+    e = np.asarray(e, dtype=float)
+    de = np.diff(e)
+    lag = e[:-1]
+    X = np.column_stack([np.ones(len(lag)), lag])
+    beta, se = _ols(de, X)
+    return float(beta[1] / se[1])
+
+
+def half_life(e) -> float:
+    """Mean-reversion half-life from an AR(1) fit.
+
+    de_t = alpha + delta * e_{t-1} implies rho = 1 + delta and
+    half_life = -ln(2) / ln(rho). Returns inf when the series does not
+    mean-revert (delta >= 0).
+    """
+    e = np.asarray(e, dtype=float)
+    de = np.diff(e)
+    lag = e[:-1]
+    X = np.column_stack([np.ones(len(lag)), lag])
+    beta, _ = _ols(de, X)
+    delta = float(beta[1])
+    if delta >= 0:
+        return float("inf")
+    return float(-np.log(2.0) / np.log(1.0 + delta))

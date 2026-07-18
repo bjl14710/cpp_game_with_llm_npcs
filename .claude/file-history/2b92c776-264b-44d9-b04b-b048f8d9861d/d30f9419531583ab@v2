@@ -1,0 +1,53 @@
+// Scaffolded stubs for the stylized character assets plan
+// (.claude/plans/stylized-character-assets.md). Un-skip each in the commit
+// that implements its step. Shader/material routing and the no-uncanny
+// judgment are screenshot/visual-qa verified, not unit-tested.
+#include <string>
+
+#include "CharacterParts.hpp"
+#include "doctest.h"
+
+using namespace llm_npc;
+
+TEST_CASE("mesh field is structural: empty everywhere in core") {
+    // Step 3 seam, live from the scaffold (the pack-field pattern): every
+    // existing part is a primitive recipe, so meshName is empty until the
+    // quaternius family lands.
+    for (const PartDef& part : partCatalog()) {
+        CAPTURE(part.id);
+        CHECK(part.meshName.empty());
+        CHECK(part.pack == "core");
+    }
+}
+
+TEST_CASE("quaternius family: mesh parts are well-formed" * doctest::skip()) {
+    // Step 3. TODO(stylized): every quaternius part declares a non-empty
+    // meshName, MEASURED localSize bounds (>0), the sockets its category's
+    // children need, styleTag "quaternius" (one new family — no mixing
+    // with core round/blocky by the existing gate); the exhaustive combo
+    // test in test_character_parts.cpp absorbs the family automatically.
+}
+
+TEST_CASE("default pool switches to quaternius; core stays loadable" *
+          doctest::skip()) {
+    // Step 3/5. TODO(stylized): randomizeLook and lookForPersona's
+    // fallback produce quaternius-family looks; a stored core look still
+    // passes lookIsValid and assembles (defaults change, nothing breaks).
+}
+
+TEST_CASE("proportion window holds for the mesh family (or new values logged)" *
+          doctest::skip()) {
+    // Step 3. TODO(stylized): head.y/(headSocket.y+head.y) window for
+    // quaternius body+head pairs — reuse the test_style_pack metric; if
+    // the pack's proportions need a different window, change it HERE with
+    // the reasoning in the commit (deliberate size-spec adjustment, never
+    // ad-hoc mesh scaling).
+}
+
+TEST_CASE("stylized face set: creator-pickable textures per face id" *
+          doctest::skip()) {
+    // Step 4. TODO(stylized): FaceTexture's stylized set exposes >=8 face
+    // ids, each generating a texture; mood variants exist per face
+    // (happy/angry/sad/embarrassed/surprised) so the new family shows
+    // moods ON the face, not as a floating billboard.
+}

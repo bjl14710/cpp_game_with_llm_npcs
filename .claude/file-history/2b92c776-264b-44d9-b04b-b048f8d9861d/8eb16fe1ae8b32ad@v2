@@ -1,0 +1,44 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include "SandboxMap.hpp"
+
+namespace llm_npc {
+
+// Validation layer for LLM-generated content (plan: llm-world-generation).
+// THE deliverable of that feature: nothing generated may load except
+// through these checks, and their error strings are fed back to the model
+// verbatim on retry (cap 3) — specific, actionable, never auto-repaired.
+// Map validation REUSES validateMap from SandboxMap.hpp; this header adds
+// the cast side and the retry-feedback envelope.
+
+// One generated character: persona text in the EXISTING .persona format
+// (parsePersonaText is the validator), plus the look/trait ids it names —
+// closed-world: the catalogs are the model's entire vocabulary.
+struct GeneratedCharacter {
+    std::string personaText;
+};
+
+struct CastError {
+    std::string where;   // "characters[1]"
+    std::string reason;  // "unknown part id 'hair_dreads' (nearest: hair_braids)"
+};
+
+// TODO(worldgen step 1): validate a generated cast — persona parses, look
+// validates via lookIsValid, trait ids exist (once traits merge; field
+// omitted from the schema until then), names non-empty and unique in the
+// batch. Returns EVERY problem.
+std::vector<CastError> validateCast(const std::vector<GeneratedCharacter>& cast);
+
+// TODO(worldgen step 2): extract the first balanced JSON object from raw
+// model output (models wrap JSON in fences/prose — tolerated, tested).
+bool extractJsonObject(const std::string& raw, std::string& jsonOut);
+
+// TODO(worldgen step 2): render a MapError/CastError list as the retry
+// feedback block appended to the next generation prompt.
+std::string renderRetryFeedback(const std::vector<MapError>& mapErrors,
+                                const std::vector<CastError>& castErrors);
+
+}  // namespace llm_npc

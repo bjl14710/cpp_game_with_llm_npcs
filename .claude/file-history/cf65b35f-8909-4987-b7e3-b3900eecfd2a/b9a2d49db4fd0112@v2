@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""Bench latency history: performance as a time series (scaffold).
+
+Plan: .claude/plans/bench-latency-history.md. Runs bench_main and
+bench_main_flat K times each, parses their existing latency line, appends
+one row per bench to docs/perf/history.csv, and flags regressions against
+recent SAME-HOST history. Stdlib only — no new dependencies.
+
+Design decisions already fixed by the plan (do not re-litigate):
+- host fingerprint = <hostname>-<arch>-<os>; comparisons never cross hosts
+- regression rule uses MEAN only (macOS timer granularity quantizes
+  percentiles: observed p50=0 at mean=30.9 ns), threshold vs the median of
+  the last N matching rows
+- best-of-K row is recorded; all K means kept in runs_json for forensics
+- rows are appended even when flagged (history keeps bad days), with the
+  `flagged` column set; dirty worktrees record "<hash>-dirty"
+
+Exit codes: 0 ok / insufficient history, 1 regression, 2 build/parse error.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+#: The exact line the benches print today. If this ever fails to match,
+#: fail LOUDLY (exit 2) — never record garbage (plan decision 7).
+LATENCY_RE = re.compile(
+    r"Latency \(ns\):\s+p50=(\d+)\s+p99=(\d+)\s+p99\.9=(\d+)\s+"
+    r"mean=([\d.]+)\s+max=(\d+)"
+)
+
+CSV_SCHEMA = (
+    "schema=1,commit,date_utc,host_id,bench,messages,"
+    "p50_ns,p99_ns,p999_ns,mean_ns,max_ns,runs_json,flagged"
+)
+
+DEFAULT_RUNS = 5
+DEFAULT_THRESHOLD = 0.20
+DEFAULT_HISTORY_N = 5
+
+
+@dataclass(frozen=True)
+class BenchRow:
+    """One recorded benchmark observation (one CSV row)."""
+
+    commit: str
+    date_utc: str
+    host_id: str
+    bench: str
+    messages: int
+    p50_ns: int
+    p99_ns: int
+    p999_ns: int
+    mean_ns: float
+    max_ns: int
+    runs_json: str
+    flagged: bool
+
+
+def parse_latency_line(output: str) -> dict[str, float]:
+    """Extract p50/p99/p99.9/mean/max from bench stdout; raise on drift.
+
+    TODO(bench-1): apply LATENCY_RE; on no-match raise ValueError quoting
+    the output tail so format drift is unmissable.
+    """
+    raise NotImplementedError("TODO(bench-1): parser")
+
+
+def regression_verdict(
+    new_mean: float,
+    history_means: list[float],
+    threshold: float = DEFAULT_THRESHOLD,
+    n: int = DEFAULT_HISTORY_N,
+) -> tuple[bool, str]:
+    """(flagged, human message) for a new mean vs recent same-host history.
+
+    TODO(bench-1): fewer than n prior rows -> (False, "insufficient
+    history — recorded, not judged"); else flagged iff
+    new_mean > (1 + threshold) * median(last n means).
+    """
+    raise NotImplementedError("TODO(bench-1): regression rule")
+
+
+def host_id() -> str:
+    """<hostname>-<arch>-<os>, e.g. brandons-mbp-arm64-darwin.
+
+    TODO(bench-2): platform.node()/machine()/system(), lowercased,
+    spaces stripped.
+    """
+    raise NotImplementedError("TODO(bench-2)")
+
+
+def main() -> int:
+    """Run benches, append rows, print verdicts.
+
+    TODO(bench-2): argparse (--check-only, --threshold, --runs, --history);
+    build benches if missing (cmake pattern from build_cpp.sh); run each
+    bench --runs times, keep best-of-K by mean; append to history CSV
+    (create with CSV_SCHEMA header if missing; exit 2 on header mismatch);
+    exit 1 if any bench flags, naming which and by how much.
+    """
+    raise NotImplementedError("TODO(bench-2): runner")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,113 @@
+#pragma once
+/**
+ * @file latency.hpp  (exercises/08_latency_bench)
+ * @brief Exercise 08 — rdtsc cycle counter + logarithmic latency histogram.
+ *
+ * After completing exercises 06 and 07 (C++ order book and feed handler),
+ * this exercise builds the measurement tooling that turns raw cycle counts
+ * into p50/p99/p99.9 latency tables — the artifact you talk through in a
+ * low-latency engineering interview.
+ *
+ * Two implementations to fill in:
+ *   1. Histogram::record(cycles) — bucket and count one observation
+ *   2. Histogram::percentile(p)  — cumulative bucket scan
+ *
+ * rdtsc() is pre-filled (it's one line / a compiler intrinsic).
+ * Histogram::print() is pre-filled (it calls your percentile).
+ *
+ * Background — why percentiles beat averages:
+ *   A 0.001% tail at 1 ms shifts the average by 1 µs — invisible.
+ *   p99.9 = 1 ms means one in a thousand orders takes 10× longer.
+ *   Traders and exchange SLAs quote p99+, never averages.
+ *
+ * Grading: uv run pytest tests/exercises/test_08_latency.py -v
+ * Peek:    see solutions/08_latency_bench/latency.hpp after attempting.
+ *
+ * -----------------------------------------------------------------------
+ * How the histogram works:
+ *   64 buckets.  Bucket i covers [2^i, 2^(i+1)) cycles.
+ *   record(cycles):  find bucket = floor(log2(cycles)) = 63 − clz(cycles)
+ *                    where clz = count of leading zeros.
+ *   percentile(p):   scan buckets left-to-right, accumulating counts until
+ *                    the cumulative exceeds p × total.  Return 2^bucket.
+ *
+ * Example: record 1000 cycles.
+ *   1000 in binary ≈ 1111101000 → 10 bits → MSB at position 9.
+ *   __builtin_clzll(1000) = 54 on 64-bit → bucket = 63 − 54 = 9.
+ *   Bucket 9 covers [512, 1024) cycles.  Lower bound returned: 2^9 = 512.
+ * -----------------------------------------------------------------------
+ */
+#include <cstdint>
+#include <cstdio>
+#include <stdexcept>
+
+// ---------------------------------------------------------------------------
+// rdtsc — pre-filled.  Returns CPU cycle count (or nanoseconds on non-x86).
+// ---------------------------------------------------------------------------
+#if defined(__x86_64__) || defined(_M_X64)
+#  include <immintrin.h>
+inline uint64_t rdtsc() noexcept { return __rdtsc(); }
+#else
+#  include <ctime>
+inline uint64_t rdtsc() noexcept {
+    struct timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL
+           + static_cast<uint64_t>(ts.tv_nsec);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Histogram — implement record() and percentile().
+// ---------------------------------------------------------------------------
+class Histogram {
+public:
+    static constexpr int BUCKETS = 64;  // bucket i: [2^i, 2^(i+1)) cycles
+
+    // -----------------------------------------------------------------------
+    // TODO 1 — record(cycles)
+    //
+    // Find the bucket for `cycles` and increment its counter.
+    //
+    // Bucket = floor(log2(cycles)) = 63 − __builtin_clzll(cycles)
+    //   (clzll = count leading zeros of a 64-bit value)
+    // Special case: cycles == 0 → bucket 0.
+    // Clamp bucket to [0, BUCKETS-1].
+    // -----------------------------------------------------------------------
+    void record(uint64_t cycles) {
+        (void)cycles;
+        throw std::logic_error("not implemented");
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 2 — percentile(p)
+    //
+    // Return the lower bound of the bucket at the p-th percentile.
+    // Algorithm:
+    //   1. Sum all counts → total.  Return 0 if total == 0.
+    //   2. target = (uint64_t)(p * total).
+    //   3. Walk buckets 0..BUCKETS-1, accumulating counts.
+    //      The first bucket where cumulative > target is the answer.
+    //      Return 1ULL << bucket  (lower bound of that bucket).
+    //      For bucket 0, return 1 (2^0 = 1, not 0).
+    // -----------------------------------------------------------------------
+    uint64_t percentile(double p) const noexcept {
+        (void)p;
+        return 0;  // replace with real implementation
+    }
+
+    // -----------------------------------------------------------------------
+    // print() — pre-filled.  Calls your percentile() to convert cycles → ns.
+    // -----------------------------------------------------------------------
+    void print(double mhz = 3000.0) const {
+        auto to_ns = [&](uint64_t cycles) -> double {
+            return static_cast<double>(cycles) / (mhz / 1000.0);
+        };
+        std::printf("  p50:   %8.0f ns\n", to_ns(percentile(0.50)));
+        std::printf("  p99:   %8.0f ns\n", to_ns(percentile(0.99)));
+        std::printf("  p99.9: %8.0f ns\n", to_ns(percentile(0.999)));
+    }
+
+private:
+    uint64_t counts_[BUCKETS]{};
+};

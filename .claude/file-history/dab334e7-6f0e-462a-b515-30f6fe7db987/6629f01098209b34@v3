@@ -1,0 +1,46 @@
+"""Fractional Kelly sizing from realized trade history.
+
+Continuous Kelly f* = mu / sigma^2 on per-trade signed returns (the
+blotter records position × forward return per pick), scaled by a user
+fraction lambda hard-limited to [0.25, 0.5] — quarter- to half-Kelly,
+full Kelly deliberately not offered because the edge estimate is itself
+noisy. Clamped to [0, 1]: long-only, never levered, and a negative
+estimated edge sizes to zero (a loud fact the arena report surfaces).
+
+Composes multiplicatively with the vol-target multiplier; both are <= 1,
+so the combined gross exposure stays capped at 1.0.
+See .claude/plans/fractional-kelly.md.
+"""
+from __future__ import annotations
+
+from typing import Sequence
+
+LAMBDA_MIN = 0.25
+LAMBDA_MAX = 0.50
+
+
+def kelly_fraction(trade_returns: Sequence[float], lam: float = 0.25,
+                   min_trades: int = 30) -> float:
+    """Gross-exposure multiplier in [0, 1] from realized trade returns.
+
+    Fewer than ``min_trades`` observations → 1.0 (bootstrap: sizing is
+    unchanged until enough evidence exists — the same all-or-nothing
+    philosophy as ensemble weights). Deterministic: identical histories
+    give identical multipliers in backtest and live replay.
+
+    Raises:
+        ValueError: lam outside [LAMBDA_MIN, LAMBDA_MAX].
+    """
+    if not (LAMBDA_MIN <= lam <= LAMBDA_MAX):
+        raise ValueError(f"kelly lambda must be in [{LAMBDA_MIN}, {LAMBDA_MAX}], got {lam}")
+    n = len(trade_returns)
+    if n < min_trades:
+        return 1.0
+    mean = sum(trade_returns) / n
+    var = sum((r - mean) ** 2 for r in trade_returns) / (n - 1)
+    if var <= 1e-12:
+        # Degenerate history (identical returns): a positive edge saturates
+        # the clamp, a non-positive one sizes to zero — never a division blowup.
+        return 1.0 if mean > 0 else 0.0
+    f_star = mean / var
+    return min(max(lam * f_star, 0.0), 1.0)

@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0008 · The Dashboard You Just Ran — How app/dashboard.py Actually Works</title>
+<style>
+  :root{
+    --bg:#0a0d13; --panel:#121826; --panel2:#0e1420; --line:#222c40;
+    --ink:#e7eef7; --muted:#94a3b8; --faint:#5b6678;
+    --teal:#2fd4c4; --teal-dim:#1c8a80; --indigo:#8b8bff; --amber:#f0b000;
+    --green:#33c06a; --red:#f0556b;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;
+    background-image:radial-gradient(1200px 620px at 82% -12%,#14203a66,transparent 60%),
+                     radial-gradient(900px 500px at 5% 8%,#0f1c2e55,transparent 55%);}
+  .wrap{max-width:860px;margin:0 auto;padding:44px 22px 140px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--teal);display:flex;align-items:center;gap:10px;margin:0 0 14px}
+  .eyebrow .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);
+    box-shadow:0 0 0 4px color-mix(in srgb,var(--teal) 18%,transparent)}
+  h1{font-size:clamp(27px,4.2vw,40px);line-height:1.12;margin:0 0 10px;letter-spacing:-.01em}
+  .why{color:var(--muted);font-size:17px;margin:0 0 6px;max-width:64ch}
+  .why b{color:var(--ink)}
+  .bus{height:3px;border-radius:3px;margin:24px 0 8px;position:relative;overflow:hidden;
+    background:linear-gradient(90deg,#1b2334,#27324a,#1b2334)}
+  .bus::after{content:"";position:absolute;top:0;left:-30%;width:30%;height:100%;
+    background:linear-gradient(90deg,transparent,var(--teal),transparent);animation:pulse 3.4s linear infinite}
+  @keyframes pulse{to{left:130%}}
+  h2{font-family:var(--mono);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--teal);margin:46px 0 14px;display:flex;align-items:center;gap:12px}
+  h2 .n{color:var(--faint);font-size:11px;border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+  h3{font-size:18px;margin:26px 0 8px;letter-spacing:-.01em}
+  p{margin:12px 0}
+  a{color:var(--teal)}
+  code{font-family:var(--mono);font-size:.92em;background:#0d1420;border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px;color:#d7e3f0}
+  .lead{font-size:16.5px;color:#cdd8e6}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin:16px 0}
+  .card.tight{padding:14px 18px}
+  .muted{color:var(--muted)}
+  .faint{color:var(--faint)}
+  pre{background:#0c111b;border:1px solid var(--line);border-left:3px solid var(--teal-dim);
+    border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;
+    line-height:1.6;margin:14px 0}
+  pre .c{color:#5f7288;font-style:italic}
+  pre .k{color:#7aa2ff}
+  pre .s{color:#8fd98f}
+  pre .f{color:var(--teal)}
+  pre .n{color:#e6b673}
+  pre .d{color:var(--indigo)}
+  pre .m{color:#5f7288}
+  /* fake browser chrome for "in the app" illustrations */
+  .app-frame{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:16px 0;background:var(--panel2)}
+  .app-frame .bar{display:flex;gap:6px;padding:9px 12px;background:#0c111b;border-bottom:1px solid var(--line)}
+  .app-frame .bar span{width:9px;height:9px;border-radius:50%;background:#33404f}
+  .app-frame .body{padding:16px 18px;font-size:13.5px;color:#cdd8e6}
+  .widget-row{display:flex;align-items:center;gap:10px;margin:8px 0;font-family:var(--mono);font-size:12.5px}
+  .widget-row .lbl{color:var(--faint);min-width:150px}
+  .fakebtn{display:inline-block;background:#ff4b4b;color:#fff;border-radius:7px;padding:4px 12px;font-size:12px;font-family:var(--mono)}
+  /* two-column runtime diagram */
+  .runtime{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:18px 0}
+  .runtime .col{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--panel2)}
+  .runtime .col h4{margin:0 0 8px;font-size:14px;font-family:var(--mono);letter-spacing:.04em}
+  .runtime .col.trad h4{color:var(--amber)}
+  .runtime .col.st h4{color:var(--teal)}
+  .runtime ol{margin:8px 0 0;padding-left:18px;font-size:13px;color:#cdd8e6}
+  .runtime li{margin:6px 0}
+  /* table */
+  .tblwrap{overflow-x:auto;margin:16px 0}
+  table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal);font-weight:600}
+  td code{white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  /* callouts */
+  .note{border-left:3px solid var(--indigo);background:#14142a44;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .note b{color:var(--indigo)}
+  .warnbox{border-left:3px solid var(--amber);background:#2a220833;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .warnbox b{color:var(--amber)}
+  .goodbox{border-left:3px solid var(--green);background:#0d241733;border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .goodbox b{color:var(--green)}
+  /* confused-with */
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  .vs .col{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--panel)}
+  .vs .col h4{margin:0 0 8px;font-size:15px}
+  .vs .col.a h4{color:var(--amber)} .vs .col.b h4{color:var(--teal)}
+  .vs ul{margin:8px 0 0;padding-left:18px} .vs li{margin:6px 0;font-size:13.5px;color:#cdd8e6}
+  /* quiz */
+  .question{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  .question > p{margin:0 0 12px;font-weight:600}
+  .options{list-style:none;margin:0;padding:0}
+  .options li{border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin:8px 0;cursor:pointer;
+    transition:border-color .15s,background .15s;font-size:14.5px}
+  .options li:hover{border-color:var(--teal-dim);background:#0e1a1a}
+  .options li.picked{border-width:1.5px}
+  .options li.correct{border-color:var(--green);background:#0d2417}
+  .options li.wrong{border-color:var(--red);background:#26121a}
+  .feedback{margin:10px 0 0;font-size:13.5px;line-height:1.5}
+  .qtag{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.1em;text-transform:uppercase}
+  .scorebar{position:sticky;bottom:0;margin-top:20px;background:#0c111bee;border:1px solid var(--line);
+    border-radius:12px;padding:12px 16px;font-family:var(--mono);font-size:13px;display:flex;
+    justify-content:space-between;align-items:center;backdrop-filter:blur(6px)}
+  .scorebar b{color:var(--teal)}
+  .cyq{border:1px dashed var(--line);border-radius:12px;padding:14px 18px;margin:12px 0;background:#0d1420}
+  .cyq summary{cursor:pointer;font-weight:600;color:var(--ink)}
+  .cyq summary::marker{color:var(--teal)}
+  .cyq p{color:var(--muted);font-size:14px;margin:10px 0 0}
+  .progress-controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+  .mark{font-family:var(--mono);font-size:11px;border:1px solid var(--line);background:#0d1420;color:var(--muted);
+    border-radius:8px;padding:6px 11px;cursor:pointer}
+  .mark.done{color:var(--green);border-color:var(--green)}
+  footer{margin-top:52px;color:var(--faint);font-family:var(--mono);font-size:11.5px;border-top:1px solid var(--line);padding-top:16px}
+  :focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+  @media(max-width:620px){.vs{grid-template-columns:1fr} .runtime{grid-template-columns:1fr}}
+  @media(prefers-reduced-motion:reduce){.bus::after{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow"><span class="dot"></span> Lesson 0008 · The Dashboard Tool</p>
+  <h1>The Dashboard You Just Ran</h1>
+  <p class="why"><b>Why this matters:</b> you drove <code>app/dashboard.py</code> live — clicked
+  <b>Run pipeline</b>, loaded the volume panel, watched the microstructure expander warn about a missing
+  build. Every one of those behaviors comes from <b>one Streamlit mechanic</b> you haven't been taught yet:
+  the whole script <em>re-runs top to bottom on every click</em>. Understand that, and the dashboard's design
+  stops looking clever-but-mysterious and starts looking obvious.</p>
+
+  <div class="bus"></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">01</span> The concept: Streamlit has no callbacks — it has reruns</h2>
+
+  <p class="lead">A traditional GUI toolkit (Tkinter, PyQt, a browser SPA) builds a <b>persistent object
+  graph</b> once, then calls a small callback function when you click a button — everything else on screen
+  stays exactly as it was. Streamlit does something stranger: <b>every single interaction — every click,
+  every slider drag, every text entry — throws away the whole page and re-executes your entire Python script
+  from line 1</b>, top to bottom, as a fresh script run.</p>
+
+  <div class="runtime">
+    <div class="col trad">
+      <h4>Traditional GUI (event callbacks)</h4>
+      <ol>
+        <li>Build the window + widgets <b>once</b>, at startup.</li>
+        <li>Register a callback function per button.</li>
+        <li>User clicks → <b>only that callback runs</b>.</li>
+        <li>Everything else on screen is untouched — it was never re-created.</li>
+      </ol>
+    </div>
+    <div class="col st">
+      <h4>Streamlit (script reruns)</h4>
+      <ol>
+        <li>User clicks / drags / types <b>anything</b>, anywhere on the page.</li>
+        <li>Streamlit re-executes <code>dashboard.py</code> <b>from the top</b>, in full.</li>
+        <li>Every widget call (<code>st.button</code>, <code>st.slider</code>…) runs again and repaints itself.</li>
+        <li>Only <code>st.session_state</code> survives from the <em>previous</em> run — everything else is rebuilt fresh.</li>
+      </ol>
+    </div>
+  </div>
+
+  <p>This single fact explains nearly everything non-obvious in <code>dashboard.py</code>: why results are
+  stashed in <code>st.session_state</code> instead of a plain variable, why the Oil Volume panel stays open
+  after you click other widgets, and why the microstructure panel doesn't re-parse a million-tick file every
+  time you change the λ-window dropdown. Those aren't extra features — they're <b>workarounds for the rerun
+  model</b>, and once you see the pattern you'll recognize it everywhere in Streamlit code.</p>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">02</span> Minimal example: the trap, and the fix</h2>
+  <p>Here's the mistake every Streamlit beginner makes first, stripped to five lines — followed by the fix
+  <code>dashboard.py</code> actually uses.</p>
+
+<pre><span class="c"># BROKEN: looks like a counter, but never counts past 1.</span>
+<span class="k">import</span> streamlit <span class="k">as</span> st
+
+count = <span class="n">0</span>                              <span class="c"># plain local variable</span>
+<span class="k">if</span> st.button(<span class="s">"+1"</span>):                    <span class="c"># clicking reruns the WHOLE script</span>
+    count += <span class="n">1</span>                          <span class="c"># count is reset to 0 above, THEN incremented -> always 1</span>
+st.write(count)
+
+<span class="c"># FIXED: state that must outlive a rerun goes in st.session_state.</span>
+<span class="k">if</span> <span class="s">"count"</span> <span class="k">not in</span> st.session_state:
+    st.session_state[<span class="s">"count"</span>] = <span class="n">0</span>          <span class="c"># only runs on the very first load</span>
+<span class="k">if</span> st.button(<span class="s">"+1"</span>):
+    st.session_state[<span class="s">"count"</span>] += <span class="n">1</span>          <span class="c"># survives every future rerun</span>
+st.write(st.session_state[<span class="s">"count"</span>])</pre>
+
+  <p class="muted">Every "why is this cached in <code>session_state</code>?" question below has the exact
+  same answer as this five-line example — just applied to a 2-second EIA fetch or a 3-second ITCH parse
+  instead of an integer.</p>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">03</span> In this project: three real reruns, walked through</h2>
+
+  <h3>3.1 — Why the pipeline result doesn't vanish when you touch another widget</h3>
+  <p>The <b>▶ Run pipeline</b> button only drives one small block near the bottom of the file
+  (<code>app/dashboard.py:318-324</code>):</p>
+<pre><span class="k">if</span> run:
+    cfg = RunConfig(start=start, end=end, return_kind=return_kind, max_lag=max_lag, …)
+    _run(cfg)   <span class="c"># drains run_pipeline(cfg) and writes the final PipelineResult into session_state</span></pre>
+  <p>Inside <code>_run</code> (<code>dashboard.py:303-315</code>), the last line is the one that matters:</p>
+<pre>st.session_state[<span class="s">"result"</span>] = final   <span class="c"># dashboard.py:315 — NOT a local variable</span></pre>
+  <p>Then, unconditionally, <b>every single rerun</b> — whether triggered by the Run button or by you idly
+  dragging the "Rolling window" slider — reads it back (<code>dashboard.py:326</code>):</p>
+<pre>result = st.session_state.get(<span class="s">"result"</span>)
+<span class="k">if</span> result <span class="k">is not</span> <span class="k">None</span> <span class="k">and</span> result.leadlag <span class="k">is not</span> <span class="k">None</span>:
+    _render_results(result)   <span class="c"># repaints the SAME cached result on every rerun until you click Run again</span></pre>
+  <p>That's why, when you ran the pipeline from cache and then (hypothetically) nudged another control, the
+  Results section wouldn't blank out — it isn't "live," it's a snapshot sitting in <code>session_state</code>
+  that every rerun faithfully redraws until a new <b>Run pipeline</b> click overwrites it.</p>
+
+  <h3>3.2 — The panel that stays open after its own button "disappears"</h3>
+  <p>The Oil Size / Volume panel has the same trick, one line different (<code>dashboard.py:337-340</code>):</p>
+<pre><span class="k">if</span> run_volume <span class="k">or</span> st.session_state.get(<span class="s">"volume_loaded"</span>):
+    st.session_state[<span class="s">"volume_loaded"</span>] = <span class="k">True</span>
+    st.divider()
+    _render_oil_volume(eia_key=eia_key, start=start, end=end)</pre>
+  <p><code>run_volume</code> is <code>True</code> for exactly <b>one rerun</b> — the one triggered by the click
+  itself; on the next rerun it's back to <code>False</code> (Streamlit re-evaluates <code>st.button(...)</code>
+  fresh every time). Without the <code>or st.session_state.get("volume_loaded")</code> half, the panel would
+  flicker open for one instant and vanish the moment you touched anything else. The flag is what makes "loaded"
+  sticky.</p>
+
+  <h3>3.3 — Not re-parsing 1.5 million ticks because you changed a dropdown</h3>
+  <p>The microstructure expander is the most expensive path in the app — parsing an ITCH day through the C++
+  engine takes real seconds. Naively, changing the "Kyle's λ window" selectbox would rerun the whole script and
+  re-parse the file just to recompute λ. The guard (<code>dashboard.py:370-375</code>) stops that:</p>
+<pre><span class="k">if</span> st.session_state.get(<span class="s">"micro_path"</span>) != path:
+    <span class="k">with</span> st.spinner(<span class="s">f"Parsing {os.path.basename(path)} (C++ engine)…"</span>):
+        events = load_micro_events(path, AAPL_GOLDEN_MIN_RAW, AAPL_GOLDEN_MAX_RAW)  <span class="c"># slow: full C++ parse</span>
+    st.session_state[<span class="s">"micro_path"</span>] = path
+    st.session_state[<span class="s">"micro_events"</span>] = events
+events = st.session_state[<span class="s">"micro_events"</span>]  <span class="c"># cheap: dict lookup, every rerun after the first</span></pre>
+  <p>The λ-window selectbox change still reruns the <em>entire script</em> — that part never stops — but the
+  <code>if</code> guard means the expensive C++ parse only executes once per file path; every subsequent rerun
+  (window changed, unrelated sidebar slider touched, anything) just reads the cached DataFrame back out.</p>
+
+  <div class="warnbox"><b>A bug you watched happen live.</b> When you ran the app, the microstructure expander
+  showed <em>"signals_cpp extension not built"</em> — even though the extension <b>is</b> compiled. The cause
+  has nothing to do with Streamlit's rerun model; it's a plain import-path bug in
+  <code>src/oil_alpha/microstructure/events.py</code>:
+  <pre><span class="k">try</span>:
+    <span class="k">import</span> signals_cpp <span class="k">as</span> _cpp     <span class="c"># bare import — only works if the .so is directly importable</span>
+    USING_CPP = <span class="k">True</span>
+<span class="k">except</span> ImportError:
+    USING_CPP = <span class="k">False</span>              <span class="c"># silently "not built", even when it is</span></pre>
+  Compare <code>src/oil_alpha/microstructure/mm_analysis.py</code>, which tries the bare import <em>then</em>
+  falls back to <code>from oil_alpha import signals_cpp</code> — the layout this editable install actually
+  uses. That's why the MM-sim analysis path works and this one doesn't: one file has the fallback, the other
+  doesn't. Same lesson as 0001's ABI-tag discussion — a compiled extension being importable depends entirely on
+  <em>how</em> you import it, not just whether it was built.</div>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">04</span> What each control actually does</h2>
+  <div class="tblwrap">
+  <table>
+    <thead><tr><th>Control</th><th>Line</th><th>What happens on rerun</th></tr></thead>
+    <tbody>
+      <tr><td><code>▶ Run pipeline</code></td><td>53, 318</td><td>Runs <code>run_pipeline(cfg)</code> to completion this rerun only; writes the terminal result into <code>session_state["result"]</code>.</td></tr>
+      <tr><td>Start / End date, sliders, checkboxes</td><td>45-52</td><td>Just build the next <code>RunConfig</code> — inert until <code>Run pipeline</code> is clicked; changing them alone does <b>not</b> re-trigger the pipeline.</td></tr>
+      <tr><td><code>▶ Load oil-volume data</code></td><td>64, 337</td><td>Sets the sticky <code>volume_loaded</code> flag; panel then renders on every future rerun.</td></tr>
+      <tr><td>EIA API key field</td><td>62</td><td>Read fresh every rerun; blank ⇒ synthetic demo data (<code>_demo_volume_data</code>), no network required.</td></tr>
+      <tr><td>Kyle's λ window selectbox</td><td>380</td><td>Reruns the whole script, but the <code>micro_path</code> guard skips re-parsing; only <code>estimate_kyles_lambda</code> recomputes.</td></tr>
+      <tr><td>🔬 Microstructure expander</td><td>405</td><td>Purely visual (open/closed); does not gate whether the parse happens.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">05</span> Often confused with</h2>
+  <div class="vs">
+    <div class="col a">
+      <h4>Event-callback GUIs (Tkinter, PyQt, Qt block builder)</h4>
+      <ul>
+        <li>Widgets and their state are built <b>once</b> and live for the whole session.</li>
+        <li>A click runs <b>only its own callback</b>; unrelated UI is provably untouched.</li>
+        <li>State lives in ordinary object attributes — no special "surviving" container needed.</li>
+        <li>Caching an expensive result is the <em>default</em>, not something you have to opt into.</li>
+      </ul>
+    </div>
+    <div class="col b">
+      <h4>Streamlit's rerun model</h4>
+      <ul>
+        <li>The <b>entire script</b> re-executes top to bottom on every interaction, no exceptions.</li>
+        <li>There is no "only this callback ran" — everything on the page re-evaluates.</li>
+        <li>Only <code>st.session_state</code> (a dict) survives between runs; plain variables reset.</li>
+        <li>Caching (session_state guards, or <code>@st.cache_data</code>) is something <b>you</b> add, or you re-do expensive work on every click.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="muted">They <b>share</b> the goal — react to user input and update the screen. They <b>diverge</b>
+  on the unit of re-execution: a callback runs a few lines; a Streamlit rerun re-runs the whole program. Once
+  you expect that, the <code>session_state</code> guards scattered through <code>dashboard.py</code> stop
+  looking like defensive clutter and start looking like the one thing standing between you and re-parsing a
+  1.5-million-row file on every keystroke.</p>
+
+  <div class="progress-controls"><button class="mark" data-mark>◻ mark section read</button></div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">06</span> Practice — click an answer</h2>
+  <p class="muted">Options shuffle on every load; there is no "always the first one." Each choice explains itself.</p>
+
+  <div id="quiz">
+    <div class="question" data-question>
+      <span class="qtag">Q1 · rerun model</span>
+      <p>You click the "Rolling window" slider (no pipeline click). What runs?</p>
+      <ul class="options">
+        <li data-correct="true" data-why="Correct — Streamlit has no partial reruns. The whole script executes again; it's just that `run` (from st.button) is False this time, so the `if run:` block is skipped and the OLD session_state result is redrawn.">The entire <code>dashboard.py</code> script top to bottom — but since <code>run</code> is False this time, the pipeline itself doesn't re-execute.</li>
+        <li data-correct="false" data-why="Streamlit has no mechanism to run 'just the widget that changed' — there is no such partial-callback model here.">Only the code near the slider — the rest of the script is left alone.</li>
+        <li data-correct="false" data-why="run_pipeline only runs inside the `if run:` block, which is gated on the button's own click, not on any other widget changing.">The pipeline reruns automatically because any widget change re-triggers `run_pipeline`.</li>
+        <li data-correct="false" data-why="Nothing executes at all only if Streamlit weren't listening to widget events — but every widget interaction does trigger a script rerun.">Nothing — sliders don't trigger reruns, only buttons do.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q2 · session_state</span>
+      <p>What would break if <code>dashboard.py:315</code>'s <code>st.session_state["result"] = final</code> were changed to a plain local variable <code>result = final</code>?</p>
+      <ul class="options">
+        <li data-correct="true" data-why="Right — a plain local variable is recreated fresh (as None/undefined) on every rerun. The Results section would vanish the instant you touched any other widget, since nothing would remember the last pipeline output." >The Results section would disappear the moment you touched any other widget, since a local variable doesn't survive the next rerun.</li>
+        <li data-correct="false" data-why="The pipeline's own internal logic (run_pipeline, RunConfig) is unaffected by how the dashboard stores its output afterward.">The pipeline would compute the wrong lead-lag statistics.</li>
+        <li data-correct="false" data-why="Nothing about session_state usage changes plotting behavior itself — the figures are built from `result`, whichever way it's stored, during the SAME rerun the pipeline just ran in.">The Plotly charts would fail to render entirely.</li>
+        <li data-correct="false" data-why="Nothing would actually improve — losing session_state here only removes the ability to persist output across reruns.">Nothing — session_state and a local variable behave identically here.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q3 · caching pattern</span>
+      <p>Why does <code>_render_microstructure</code> check <code>if st.session_state.get("micro_path") != path:</code> before parsing?</p>
+      <ul class="options">
+        <li data-correct="true" data-why="Exactly — the C++ ITCH parse is the most expensive operation in the app. Without the guard, changing the unrelated λ-window selectbox would re-trigger a full script rerun and re-parse the file from scratch every time.">To avoid re-running the expensive C++ ITCH parse on every rerun triggered by unrelated widgets, like the λ-window selectbox.</li>
+        <li data-correct="false" data-why="signals_cpp is a compiled module cached by Python's import system regardless of this check; the guard is about not re-parsing DATA, not re-importing code.">To avoid re-importing the <code>signals_cpp</code> module, which is expensive to import.</li>
+        <li data-correct="false" data-why="The guard doesn't change correctness of the OFI/microprice math — it only avoids redundant, identical recomputation of the same parse.">To ensure the OFI and microprice values stay mathematically correct across reruns.</li>
+        <li data-correct="false" data-why="File existence is checked separately (os.path.exists) earlier in the function; this particular guard is purely a performance cache keyed on the path.">To check whether the ITCH file exists on disk before attempting to open it.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q4 · the bug you saw</span>
+      <p>Why did the Microstructure panel warn "extension not built" during your live run, even though <code>signals_cpp</code> was compiled?</p>
+      <ul class="options">
+        <li data-correct="true" data-why="Correct — events.py does a bare `import signals_cpp`, which only succeeds if the .so is directly on the import path. In this editable-install layout it lives under oil_alpha/, so only `from oil_alpha import signals_cpp` succeeds — the pattern mm_analysis.py already uses as a fallback." >`events.py` uses a bare <code>import signals_cpp</code>, which fails in this editable-install layout; it needs a <code>from oil_alpha import signals_cpp</code> fallback like <code>mm_analysis.py</code> already has.</li>
+        <li data-correct="false" data-why="The build genuinely succeeded — the compiled .so file exists and was confirmed importable via `from oil_alpha import signals_cpp` earlier in this session.">The C++ build genuinely failed and the extension doesn't actually exist.</li>
+        <li data-correct="false" data-why="This has nothing to do with Streamlit's rerun/session_state model — it's a plain Python import-path issue, unrelated to reruns.">Streamlit's rerun model reset the import cache, so the module had to be re-imported and failed.</li>
+        <li data-correct="false" data-why="The ITCH fixture file was present and used successfully elsewhere — the failure happens before any file is even opened, at the `import signals_cpp` line.">The AAPL ITCH fixture file was missing from the test machine.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div class="question" data-question>
+      <span class="qtag">Q5 · often confused with</span>
+      <p>What's the key difference between Streamlit's model and a traditional Tkinter/PyQt callback GUI?</p>
+      <ul class="options">
+        <li data-correct="true" data-why="Right — that's the core distinction this lesson opened with: Streamlit has no 'run just this callback' concept. Every interaction re-executes the full script; only session_state persists." >Streamlit re-runs the ENTIRE script on every interaction; a callback GUI runs only the specific handler tied to what you clicked.</li>
+        <li data-correct="false" data-why="Streamlit apps are still ordinary Python and CAN use loops/conditionals freely — that's not what distinguishes the two models.">Streamlit doesn't allow loops or conditionals in app code, but Tkinter does.</li>
+        <li data-correct="false" data-why="Both models render to a screen the user interacts with — that's not the distinguishing factor between them.">Tkinter renders to a native window while Streamlit renders to nothing visible.</li>
+        <li data-correct="false" data-why="Both models are equally capable of holding state — the difference is WHERE it's safe to hold it (session_state vs. plain object attributes), not whether state exists at all.">Streamlit apps cannot hold any state at all, ever.</li>
+      </ul>
+      <p class="feedback" hidden></p>
+    </div>
+  </div>
+
+  <div class="scorebar">
+    <span>Quiz score</span>
+    <span><b id="score">0</b> / <span id="qtotal">5</span> answered correctly &nbsp;·&nbsp; <span id="answered" class="faint">0 attempted</span></span>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2><span class="n">07</span> Check your understanding</h2>
+  <p class="muted">No auto-grading — say your answer out loud, then expand to compare.</p>
+
+  <details class="cyq"><summary>1. You click "Run pipeline," it completes, then five minutes later you drag the "Max lag" slider without clicking Run again. What do you see, and why?</summary>
+    <p>The exact same Results section as before — nothing recomputes. Dragging the slider triggers a rerun of
+    the whole script, but <code>run</code> (bound to the Run-pipeline button) is False on that rerun, so the
+    <code>if run:</code> block is skipped entirely. <code>result = st.session_state.get("result")</code> still
+    finds the old <code>PipelineResult</code> and redraws it unchanged. The slider's new value only takes
+    effect the next time you actually click <b>Run pipeline</b>.</p></details>
+
+  <details class="cyq"><summary>2. Why does the Oil Volume panel use a session_state flag instead of just checking `if run_volume:` directly?</summary>
+    <p>Because <code>run_volume</code> (from <code>st.button(...)</code>) is only <code>True</code> for the
+    single rerun triggered by the click itself — Streamlit resets button state to <code>False</code> on every
+    subsequent rerun. Without <code>or st.session_state.get("volume_loaded")</code>, the panel would render for
+    one instant and then disappear the next time you touched anything else on the page.</p></details>
+
+  <details class="cyq"><summary>3. If you wanted to add a "clear results" button, what would it need to do (in session_state terms)?</summary>
+    <p>Set <code>st.session_state["result"] = None</code> (and probably the Oil Volume / microstructure flags
+    too, if you want a full reset). Since the Results section is gated on
+    <code>result = st.session_state.get("result")</code> being non-<code>None</code>, clearing that one key is
+    enough to make the whole section disappear on the next rerun — no special "un-render" logic needed.</p></details>
+
+  <footer>
+    Lesson 0008 · The Dashboard You Just Ran · self-contained, offline · pairs with <code>/drill-me streamlit-dashboard-tour</code>
+  </footer>
+
+</div>
+
+<script>
+  function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+  const answeredSet = new Set();
+  let correctCount = 0;
+  const scoreEl = document.getElementById('score');
+  const answeredEl = document.getElementById('answered');
+  document.getElementById('qtotal').textContent = document.querySelectorAll('[data-question]').length;
+
+  document.querySelectorAll('[data-question]').forEach((q, qi) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const fb = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const correct = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked','correct','wrong'));
+        li.classList.add('picked', correct ? 'correct' : 'wrong');
+        if (correct) list.querySelectorAll('li').forEach(o => { if(o.dataset.correct==='true') o.classList.add('correct'); });
+        fb.hidden = false;
+        fb.innerHTML = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        fb.style.color = correct ? 'var(--green)' : 'var(--red)';
+        if (!answeredSet.has(qi)) {
+          answeredSet.add(qi);
+          if (correct) correctCount++;
+          scoreEl.textContent = correctCount;
+          answeredEl.textContent = answeredSet.size + ' attempted';
+        }
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-mark]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const done = btn.classList.toggle('done');
+      btn.textContent = (done ? '✓ read' : '◻ mark section read');
+    });
+  });
+</script>
+</body>
+</html>

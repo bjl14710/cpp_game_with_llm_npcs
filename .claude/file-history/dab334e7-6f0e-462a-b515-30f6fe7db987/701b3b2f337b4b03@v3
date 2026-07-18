@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Pairs trading / stat-arb research module (pairs-scan, pairs-backtest).
+
+RESEARCH-tier by design: fully backtestable, registered in the arena report
+under status RESEARCH, hard-gated from live paper trading (requires a
+margin account, ~$2,000 minimum, and shorting capability that the Robinhood
+setup doesn't have — `arena-run live` names the requirements when skipping).
+
+No new dependencies: Engle–Granger two-step with numpy OLS and a
+hand-rolled Dickey–Fuller test against hardcoded MacKinnon critical values.
+Known omission, flagged in output: borrow costs/availability for the short
+leg are NOT modeled. See .claude/plans/pairs-stat-arb.md.
+"""
+from __future__ import annotations
+
+import argparse
+import itertools
+import os
+import sys
+from typing import Dict, List, Tuple
+
+import numpy as np
+import pandas as pd
+
+#: MacKinnon asymptotic critical values, Engle–Granger cointegration test,
+#: 2 variables, constant / no trend.
+DF_CRITICAL_VALUES: Dict[str, float] = {"1%": -3.90, "5%": -3.34, "10%": -3.04}
+
+
+def hedge_ratio(a: pd.Series, b: pd.Series) -> float:
+    """OLS slope of a on b (with intercept), numpy lstsq only.
+
+    Raises ValueError for identical series (dual-listing guard) and for
+    economically meaningless (near-zero or negative) hedge ratios.
+    """
+    x = np.asarray(b, dtype=float)
+    y = np.asarray(a, dtype=float)
+    if len(x) != len(y) or len(x) < 30:
+        raise ValueError("need >= 30 aligned observations")
+    if np.allclose(x, y):
+        raise ValueError("identical series — dual listing?")
+    design = np.column_stack([np.ones(len(x)), x])
+    coef, *_ = np.linalg.lstsq(design, y, rcond=None)
+    beta = float(coef[1])
+    if beta <= 1e-6:
+        raise ValueError(f"hedge ratio {beta:.4f} is not economically meaningful")
+    return beta
+
+
+def _df_tstat(residuals: np.ndarray) -> float:
+    """Dickey–Fuller t-statistic (no constant): Δe_t = γ·e_{t-1} + err."""
+    e = np.asarray(residuals, dtype=float)
+    de = np.diff(e)
+    lag = e[:-1]
+    denom = float(lag @ lag)
+    if denom <= 0:
+        return 0.0
+    gamma = float(lag @ de) / denom
+    noise = de - gamma * lag
+    dof = max(len(de) - 1, 1)
+    s2 = float(noise @ noise) / dof
+    se = (s2 / denom) ** 0.5
+    return gamma / se if se > 0 else 0.0
+
+
+def engle_granger(a: pd.Series, b: pd.Series) -> Tuple[float, float, bool]:
+    """(hedge_ratio, df_tstat, cointegrated_at_5pct) via the two-step test."""
+    beta = hedge_ratio(a, b)
+    x = np.asarray(b, dtype=float)
+    y = np.asarray(a, dtype=float)
+    design = np.column_stack([np.ones(len(x)), x])
+    coef, *_ = np.linalg.lstsq(design, y, rcond=None)
+    resid = y - design @ coef
+    t = _df_tstat(resid)
+    return beta, t, t < DF_CRITICAL_VALUES["5%"]
+
+
+def z_positions(z: pd.Series, entry_z: float = 2.0, exit_z: float = 0.5,
+                stop_z: float = 4.0) -> Tuple[pd.Series, bool]:
+    """Spread position per bar from its z-score path — the pure state machine.
+
+    Positions: +1 long-spread (long A / short βB) entered at z < −entry;
+    −1 short-spread at z > +entry; exit at |z| < exit; HARD STOP at
+    |z| > stop (the cointegration broke — the classic pairs blow-up mode),
+    after which the pair trades no more. A bar's position is established at
+    its close and earns the NEXT bar's spread move (no lookahead).
+
+    Returns (positions, broken).
+    """
+    pos = 0
+    broken = False
+    out = []
+    for value in z:
+        if not broken and not pd.isna(value):
+            if pos == 0:
+                if value < -entry_z:
+                    pos = 1
+                elif value > entry_z:
+                    pos = -1
+            else:
+                if abs(value) > stop_z:
+                    pos = 0
+                    broken = True
+                elif abs(value) < exit_z:
+                    pos = 0
+        out.append(pos)
+    return pd.Series(out, index=z.index), broken
+
+
+def backtest_pair(a: pd.Series, b: pd.Series, formation: int = 252,
+                  z_window: int = 60, entry_z: float = 2.0, exit_z: float = 0.5,
+                  stop_z: float = 4.0, capital: float = 100000.0,
+                  cost_model=None) -> Tuple[pd.DataFrame, bool]:
+    """Spread z-score walk-forward for one pair, dollar-neutral legs.
+
+    β is fixed from the first ``formation`` bars (no lookahead into the
+    trading window); the spread z-score uses a rolling ``z_window``. Both
+    legs are charged through the CostModel on every entry/exit (0.5 gross
+    weight per leg). Returns the dual-track equity frame + broken flag.
+    """
+    from costs import CostModel, day_cost
+
+    model = cost_model if cost_model is not None else CostModel(mode="flat", flat_bps=1.0)
+    a = a.astype(float)
+    b = b.astype(float)
+    if len(a) <= formation + z_window:
+        raise ValueError("not enough bars beyond the formation window")
+
+    beta = hedge_ratio(a.iloc[:formation], b.iloc[:formation])
+    spread = a - beta * b
+    z = (spread - spread.rolling(z_window).mean()) / spread.rolling(z_window).std()
+    trading = spread.index[formation:]
+    positions, broken = z_positions(z.loc[trading], entry_z, exit_z, stop_z)
+
+    equity = capital
+    equity_gross = capital
+    rows = []
+    prev_pos = 0
+    for i, ts in enumerate(trading):
+        if i == 0:
+            prev_pos = int(positions.iloc[0])
+            continue
+        prev_ts = trading[i - 1]
+        gross_notional = abs(a.loc[prev_ts]) + abs(beta) * abs(b.loc[prev_ts])
+        ret = prev_pos * (spread.loc[ts] - spread.loc[prev_ts]) / gross_notional
+        cost = 0.0
+        new_pos = int(positions.iloc[i])
+        if new_pos != prev_pos:
+            delta = abs(new_pos - prev_pos) * 0.5  # each leg is half the book
+            cost = day_cost(model, equity, {"A": (delta, None), "B": (delta, None)},
+                            had_position=True)
+        equity_gross *= (1 + ret)
+        equity = equity * (1 + ret) - cost
+        rows.append({"date": ts, "equity": equity, "equity_gross": equity_gross,
+                     "cost": cost, "position": prev_pos, "z": float(z.loc[ts])})
+        prev_pos = new_pos
+    return pd.DataFrame(rows).set_index("date"), broken
+
+
+def _load_universe(tickers_file: str) -> List[str]:
+    with open(tickers_file, "r", encoding="utf-8") as f:
+        return [ln.strip().upper() for ln in f if ln.strip() and not ln.startswith("#")]
+
+
+def main_scan() -> None:
+    """CLI pairs-scan: correlation pre-filter then Engle–Granger, ranked CSV."""
+    p = argparse.ArgumentParser(description="Scan a universe for cointegrated pairs")
+    p.add_argument("--tickers_file", type=str, required=True)
+    p.add_argument("--start", type=str, required=True)
+    p.add_argument("--end", type=str, default=None)
+    p.add_argument("--min_corr", type=float, default=0.8)
+    p.add_argument("--max_pairs", type=int, default=50)
+    p.add_argument("--out_csv", type=str, default="pairs_scan.csv")
+    args = p.parse_args()
+
+    from paper_trading_sim import fetch_history
+
+    raw = fetch_history(_load_universe(args.tickers_file), args.start, args.end)
+    closes = pd.DataFrame({t: df["Close"] for t, df in raw.items()
+                           if "Close" in df.columns}).dropna(how="any")
+    corr = closes.corr()
+    candidates = [(x, y) for x, y in itertools.combinations(closes.columns, 2)
+                  if corr.loc[x, y] > args.min_corr]
+    print(f"{len(candidates)} candidate pair(s) pass corr > {args.min_corr}")
+
+    rows = []
+    for x, y in candidates:
+        try:
+            beta, t, ok = engle_granger(closes[x], closes[y])
+        except ValueError as exc:
+            print(f"  {x}/{y}: rejected — {exc}")
+            continue
+        rows.append({"a": x, "b": y, "hedge_ratio": beta, "df_tstat": t,
+                     "cointegrated_5pct": ok})
+    table = (pd.DataFrame(rows).sort_values("df_tstat")
+             if rows else pd.DataFrame(columns=["a", "b", "hedge_ratio", "df_tstat"]))
+    dropped = max(0, len(table) - args.max_pairs)
+    table = table.head(args.max_pairs)
+    table.to_csv(args.out_csv, index=False)
+    print(f"wrote {len(table)} pair(s) to {args.out_csv}"
+          + (f" ({dropped} beyond --max_pairs dropped)" if dropped else ""))
+    print("NOTE: borrow costs/availability for short legs are NOT modeled.")
+
+
+def main_backtest() -> None:
+    """CLI pairs-backtest: run one pair, print metrics, register RESEARCH."""
+    p = argparse.ArgumentParser(description="Backtest one cointegrated pair's spread")
+    p.add_argument("--pair", type=str, required=True, help="A,B ticker pair")
+    p.add_argument("--start", type=str, required=True)
+    p.add_argument("--end", type=str, default=None)
+    p.add_argument("--formation", type=int, default=252)
+    p.add_argument("--z_window", type=int, default=60)
+    p.add_argument("--capital", type=float, default=100000.0)
+    p.add_argument("--db", type=str, default=os.path.join("arena_state", "arena.db"))
+    p.add_argument("--no_register", action="store_true",
+                   help="skip writing the RESEARCH row to the arena DB")
+    args = p.parse_args()
+
+    names = [t.strip().upper() for t in args.pair.split(",")]
+    if len(names) != 2:
+        sys.exit("--pair wants exactly two tickers, e.g. --pair KO,PEP")
+
+    from analyze_equity import compute_metrics
+    from paper_trading_sim import fetch_history
+
+    raw = fetch_history(names, args.start, args.end)
+    if any(t not in raw for t in names):
+        sys.exit(f"missing data for {[t for t in names if t not in raw]}")
+    joined = pd.DataFrame({t: raw[t]["Close"] for t in names}).dropna()
+    eq, broken = backtest_pair(joined[names[0]], joined[names[1]],
+                               formation=args.formation, z_window=args.z_window,
+                               capital=args.capital)
+    metrics = compute_metrics(eq["equity"])
+    label = f"pair:{names[0]}/{names[1]}"
+    print(f"{label}: " + ", ".join(f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
+                                   for k, v in metrics.items()))
+    if broken:
+        print("  !! cointegration BROKE during the run (|z| > stop) — classic pairs risk")
+    print("NOTE: research-only. Live trading requires a margin account (~$2,000 min) "
+          "and shorting; borrow costs are not modeled.")
+    if not args.no_register:
+        from strategy_arena import ArenaState
+
+        state = ArenaState(args.db)
+        state.record_backtest(label, "RESEARCH", metrics)
+        print(f"registered {label} as RESEARCH in {args.db} — visible in arena-run report, "
+              f"never live-ticked")
+
+
+if __name__ == "__main__":
+    main_scan()

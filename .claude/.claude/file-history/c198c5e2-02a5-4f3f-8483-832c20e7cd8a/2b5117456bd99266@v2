@@ -1,0 +1,30 @@
+## What to change
+Add visual tests for each hardware block widget that can be placed on
+the Silmulator canvas (PSU block, oscilloscope block, etc.).
+
+## Specifically
+1. Create `tests/visual/test_gui_blocks.py` with one test per block type:
+   - `test_psu_block_renders()` → golden: psu_block.png
+   - `test_oscilloscope_block_renders()` → golden: oscilloscope_block.png
+   - (add more if other block types exist in src/gui/blocks/)
+2. Each test: instantiate the block, show it, waitExposed, processEvents,
+   compare_screenshot
+3. Generate and commit all golden images
+
+## How to verify it's done
+`pytest tests/visual/test_gui_blocks.py -v` passes.
+One golden image per block type committed to tests/visual/golden/.
+
+## Constraints
+Each block test is independent — no shared state between tests.
+Use the block's default/initial state for the golden (no configuration).
+If a block type doesn't exist yet, skip it with pytest.mark.skip and a note.
+
+## Code economy note
+Follow the exact pattern from test_gui_main_window.py — no new helpers.
+
+## Branch name
+`feature/issue-N-visual-test-block-components`
+
+## Concept for learning materials
+"QWidget.grab() screenshot capture and PIL pixel-level image comparison"

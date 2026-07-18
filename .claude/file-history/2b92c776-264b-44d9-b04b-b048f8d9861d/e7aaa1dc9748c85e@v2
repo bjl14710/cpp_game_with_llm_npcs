@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0023 — The Single Authoritative Source</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0023 · Systems design · from PR #94 (#91, #93)</div>
+<h1>The Single Authoritative Source, and the Moonwalk Bug</h1>
+<p>Two of this milestone's fixes look unrelated — one is about where a bullet
+goes, the other about when a preview figure spins. They are the same lesson.
+Both are cases where a value was <em>reconstructed</em> next to its real
+source instead of <em>derived</em> from it, and the copy drifted.</p>
+
+<h2>The bug class: the moonwalk</h2>
+<p>The name comes from an earlier fix (#61): a character whose facing was
+computed in one place and whose movement was computed in another, so it slid
+backwards while appearing to walk forward — a moonwalk. The shape recurs
+whenever two consumers each derive "the same" quantity from raw inputs
+separately. They agree until one side changes its math, and then they
+silently disagree.</p>
+
+<h2>Case 1 — aim reconstructed from feet (#91)</h2>
+<p>The camera looked along yaw <em>and</em> pitch from eye height. The weapon
+built its own aim: yaw only, flat, spawned from the player's feet. Fire while
+looking up and the round left horizontally from the ground — the crosshair
+and the bullet were two different vectors that happened to share a yaw.</p>
+<p>The fix is not "add pitch to the weapon too". That just makes two copies
+that agree <em>today</em>. The fix is one function both sides read:</p>
+<pre><code>// src/core/Math.hpp
+inline Vec3 lookDirection(float yawDeg, float pitchDeg) {
+    const float yr = degToRad(yawDeg), pr = degToRad(pitchDeg);
+    const float cp = std::cos(pr);
+    return normalize({std::sin(yr)*cp, std::sin(pr), std::cos(yr)*cp});
+}</code></pre>
+<pre><code>// the camera  (RaylibRenderer.cpp:141)
+const Vec3 dir = lookDirection(pose.yawDeg, pose.pitchDeg);
+// the weapon  (main.cpp:567)
+world.playerAttack(lookDirection(player.yawDeg, player.pitchDeg));</code></pre>
+<p>Now the aim <em>cannot</em> drift from the crosshair, because there is no
+second aim to drift. A weapon added next year gets correct behavior for free
+— the bug is designed out, not patched over. Note <code>kEyeHeight</code> is
+shared the same way: camera and spawn origin both read the one constant.</p>
+
+<h2>Case 2 — a decision re-sampled every frame (#93)</h2>
+<p>The creator preview rotates when you drag it, but a click on a control
+button must not. The first cut asked each frame: "is the cursor over an
+interactive rect right now?" That re-derives the intent — drag vs click —
+from a value (cursor position) that moves <em>during</em> the very gesture it
+is trying to classify. A control-click flicked off its button mid-press spun
+the preview; a real drag that grazed a button stalled.</p>
+<p>The intent is fixed at one instant — the press — so read it once and hold
+it:</p>
+<pre><code>if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    previewDragging = !menu.pointOverInteractive(GetMousePosition()); // latch
+if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+    previewDragging = false;                                          // release</code></pre>
+<p>This is the same move as #91 in the time dimension: the authoritative fact
+("this gesture is a drag") is established once, at its source event, and every
+later frame reads that latch instead of recomputing an answer from data that
+has since moved on.</p>
+
+<h2>Deriving toward a target: <code>shortestAngleDelta</code></h2>
+<p>When the preview is idle it eases back to front. "Face the camera" is
+derived every frame from one owned value (<code>player.yawDeg + 180</code>),
+never stored as a second copy that could go stale:</p>
+<pre><code>const float defaultYaw = player.yawDeg + 180.f;   // derived, not cached
+previewYaw += shortestAngleDelta(previewYaw, defaultYaw)
+            * (1.f - std::exp(-kPreviewEaseRate * dt));</code></pre>
+<p><code>shortestAngleDelta</code> wraps the difference to [-180, 180] so the
+ease always takes the short way round instead of unwinding through 359°.</p>
+
+<h2>How to recognise it before it ships</h2>
+<table>
+<tr><th>Smell</th><th>Fix</th></tr>
+<tr><td>Two sites compute "the same" value from raw inputs</td><td>Extract one function; both call it</td></tr>
+<tr><td>A per-frame test answers a question fixed at an earlier event</td><td>Latch the answer at that event; read the latch</td></tr>
+<tr><td>A value is cached "for convenience" beside its owner</td><td>Derive it on read from the owner</td></tr>
+</table>
+
+<div class="callout good"><strong>The general shape.</strong> A quantity used
+in two places should have exactly one place that computes it — a shared
+function (space) or a latched event (time). The moment a second reconstruction
+exists, the two are only ever <em>coincidentally</em> equal, and coincidences
+expire.</div>
+
+<div class="callout warn"><strong>The tell in review.</strong> If a bug fix
+adds a term to a copy so it matches the original "now", stop — you have made
+two copies agree, not made them one. Ask where the value is truly owned and
+have the other site derive from there.</div>
+</div></body>
+</html>

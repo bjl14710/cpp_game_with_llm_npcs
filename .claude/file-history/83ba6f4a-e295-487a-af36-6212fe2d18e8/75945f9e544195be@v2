@@ -1,0 +1,183 @@
+"""Tests for the datasheet-grounded MSP430 fault and drift models.
+
+Tolerances under test come from SLASE54D (``hardware_docs/ti/MSP430FR5994/``):
+§8.12.3.3 (DCO ±3.5%, jitter ≤3 ns) and §8.12.9.3 (ADC12_B INL ±2.2 LSB,
+offset ±1.5 mV, gain ±1.7%, total unadjusted error ≤±2.6%).
+"""
+import pytest
+
+from silmulator.devices.msp430 import MSP430
+from silmulator.devices.msp430_faults import (
+    ADC_GAIN_MAX,
+    ADC_INL_MAX_LSB,
+    ADC_OFFSET_MAX_V,
+    DCO_JITTER_MAX_S,
+    DCO_TOLERANCE,
+)
+
+
+@pytest.fixture
+def mcu():
+    return MSP430()
+
+
+def ideal_code(voltage: float, resolution: int = 12) -> int:
+    """The historical (nominal) conversion: int(v / 3.3 * full_scale), clamped."""
+    full_scale = (1 << resolution) - 1
+    return max(0, min(full_scale, int(voltage / 3.3 * full_scale)))
+
+
+class TestNominalIsUnchanged:
+    """The NOMINAL profile must be bit-identical to the pre-fault-model device."""
+
+    def test_adc_nominal_matches_historical_formula(self, mcu):
+        for mv in range(0, 3400, 37):
+            v = mv / 1000.0
+            mcu.inject_adc(0, v)
+            assert int(mcu.process("ADC:CHANNEL0:RAW?")) == ideal_code(v), v
+
+    def test_clock_frequencies_nominal_unchanged(self, mcu):
+        mcu.process("CLOCK:DCO:FREQUENCY 8000000")
+        assert mcu.process("CLOCK:MCLK:FREQUENCY?") == "8000000"
+        assert mcu.process("CLOCK:SMCLK:FREQUENCY?") == "8000000"
+        assert mcu.process("CPU:SPEED?") == "8000000"
+
+    def test_default_profiles_are_nominal(self, mcu):
+        assert mcu.process("FAULT:PROFILE?") == "NOMINAL"
+        assert mcu.process("FAULT:ADC:PROFILE?") == "NOMINAL"
+        assert mcu.process("FAULT:CLOCK:PROFILE?") == "NOMINAL"
+        assert mcu.process("FAULT:TIMER:PROFILE?") == "NOMINAL"
+
+
+class TestCornerADC:
+    def test_corner_differs_from_nominal(self, mcu):
+        mcu.process("FAULT:ADC:PROFILE CORNER")
+        mcu.inject_adc(0, 1.65)  # mid-scale, where the INL bow peaks
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) != ideal_code(1.65)
+
+    def test_corner_error_within_datasheet_budget(self, mcu):
+        # SLASE54D §8.12.9.3: worst-case gain 1.7% + offset 1.5 mV + INL 2.2 LSB.
+        mcu.process("FAULT:ADC:PROFILE CORNER")
+        budget_lsb = (
+            ADC_GAIN_MAX * 4095
+            + ADC_OFFSET_MAX_V / 3.3 * 4095
+            + ADC_INL_MAX_LSB
+            + 1  # quantization
+        )
+        for mv in range(0, 3400, 53):
+            v = mv / 1000.0
+            mcu.inject_adc(0, v)
+            corner = int(mcu.process("ADC:CHANNEL0:RAW?"))
+            assert abs(corner - ideal_code(v)) <= budget_lsb, v
+
+    def test_corner_quantization_step_preserved(self, mcu):
+        # Two inputs closer than one 12-bit LSB (3.3/4096 ≈ 0.81 mV) must land
+        # on the same output code — quantization survives the error terms.
+        mcu.process("FAULT:ADC:PROFILE CORNER")
+        mcu.inject_adc(0, 1.0000)
+        c1 = int(mcu.process("ADC:CHANNEL0:RAW?"))
+        mcu.inject_adc(0, 1.0002)
+        c2 = int(mcu.process("ADC:CHANNEL0:RAW?"))
+        assert c1 == c2
+
+    def test_corner_is_deterministic(self, mcu):
+        mcu.process("FAULT:ADC:PROFILE CORNER")
+        mcu.inject_adc(0, 2.0)
+        first = mcu.process("ADC:CHANNEL0:RAW?")
+        assert all(mcu.process("ADC:CHANNEL0:RAW?") == first for _ in range(5))
+
+    def test_corner_composes_with_injection(self, mcu):
+        # inject_adc() still sets the ideal input; CORNER transforms it.
+        mcu.process("FAULT:ADC:PROFILE CORNER")
+        mcu.inject_adc(0, 0.5)
+        low = int(mcu.process("ADC:CHANNEL0:RAW?"))
+        mcu.inject_adc(0, 2.5)
+        high = int(mcu.process("ADC:CHANNEL0:RAW?"))
+        assert high > low  # transfer function is still monotonic in the input
+
+
+class TestCornerClock:
+    def test_dco_drift_exactly_at_tolerance_bound(self, mcu):
+        mcu.process("CLOCK:DCO:FREQUENCY 8000000")
+        mcu.process("FAULT:CLOCK:PROFILE CORNER")
+        drifted = float(mcu.process("CLOCK:MCLK:FREQUENCY?"))
+        rel = abs(drifted - 8e6) / 8e6
+        assert rel == pytest.approx(DCO_TOLERANCE)
+        assert rel <= DCO_TOLERANCE + 1e-12  # never exceeds the datasheet band
+
+    def test_drift_applies_to_all_dco_derived_clocks(self, mcu):
+        mcu.process("FAULT:CLOCK:PROFILE CORNER")
+        mclk = float(mcu.process("CLOCK:MCLK:FREQUENCY?"))
+        smclk = float(mcu.process("CLOCK:SMCLK:FREQUENCY?"))
+        speed = float(mcu.process("CPU:SPEED?"))
+        assert mclk == smclk == speed != 1e6
+
+    def test_aclk_is_crystal_derived_and_unaffected(self, mcu):
+        # DCO drift must not touch the 32768-Hz LFXT-sourced ACLK.
+        mcu.process("FAULT:CLOCK:PROFILE CORNER")
+        assert mcu.process("CLOCK:ACLK:FREQUENCY?") == "32768"
+
+    def test_uart_actual_baud_shifts_with_clock(self, mcu):
+        mcu.process("UART0:BAUD 115200")
+        assert float(mcu.process("UART0:BAUD:ACTUAL?")) == pytest.approx(115200)
+        mcu.process("FAULT:CLOCK:PROFILE CORNER")
+        actual = float(mcu.process("UART0:BAUD:ACTUAL?"))
+        assert abs(actual - 115200) / 115200 == pytest.approx(DCO_TOLERANCE)
+
+
+class TestCornerTimer:
+    def test_interval_shift_within_dco_tolerance(self, mcu):
+        # Acceptance criterion: timer-derived durations shift by an amount
+        # within (not exceeding) the DCO tolerance band.
+        mcu.process("TIMERA0:CLOCK:SOURCE SMCLK")
+        nominal_s = float(mcu.process("TIMERA0:INTERVAL? 1000"))
+        mcu.process("FAULT:CLOCK:PROFILE CORNER")
+        drifted_s = float(mcu.process("TIMERA0:INTERVAL? 1000"))
+        rel = abs(drifted_s - nominal_s) / nominal_s
+        assert 0 < rel <= DCO_TOLERANCE + 1e-9
+
+    def test_capture_jitter_bounded_by_datasheet(self, mcu):
+        mcu.process("TIMERA0:CLOCK:SOURCE ACLK")  # crystal source: no DCO drift
+        nominal_s = float(mcu.process("TIMERA0:INTERVAL? 100"))
+        mcu.process("FAULT:TIMER:PROFILE CORNER")
+        jittered_s = float(mcu.process("TIMERA0:INTERVAL? 100"))
+        assert 0 < abs(jittered_s - nominal_s) <= 2 * DCO_JITTER_MAX_S
+
+    def test_interval_needs_simulated_clock_source(self, mcu):
+        # TACLK/INCLK are external pins with no simulated frequency.
+        mcu.process("TIMERA0:CLOCK:SOURCE TACLK")
+        mcu.process("TIMERA0:INTERVAL? 100")
+        assert len(mcu._error_queue) == 1
+
+
+class TestProfileControls:
+    def test_per_peripheral_independence(self, mcu):
+        # Drifted clock with a nominal ADC is a valid teaching configuration.
+        mcu.process("FAULT:CLOCK:PROFILE CORNER")
+        mcu.inject_adc(0, 1.65)
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) == ideal_code(1.65)
+        assert mcu.process("FAULT:PROFILE?") == "MIXED"
+
+    def test_global_switch_sets_all(self, mcu):
+        mcu.process("FAULT:PROFILE CORNER")
+        for sub in ("ADC", "CLOCK", "TIMER"):
+            assert mcu.process(f"FAULT:{sub}:PROFILE?") == "CORNER"
+
+    def test_invalid_profile_rejected(self, mcu):
+        mcu.process("FAULT:PROFILE BANANA")
+        assert len(mcu._error_queue) == 1
+
+    def test_rst_returns_to_nominal(self, mcu):
+        mcu.process("FAULT:PROFILE CORNER")
+        mcu.process("*RST")
+        assert mcu.process("FAULT:PROFILE?") == "NOMINAL"
+
+    def test_part_variation_reproducible_across_instances(self):
+        # Signs are sampled per instance from a fixed seed: two devices in
+        # CORNER read identically, and reads are stable (no per-read noise).
+        a, b = MSP430(), MSP430()
+        for dev in (a, b):
+            dev.process("FAULT:PROFILE CORNER")
+            dev.inject_adc(0, 1.234)
+        assert a.process("ADC:CHANNEL0:RAW?") == b.process("ADC:CHANNEL0:RAW?")
+        assert a.process("CLOCK:MCLK:FREQUENCY?") == b.process("CLOCK:MCLK:FREQUENCY?")

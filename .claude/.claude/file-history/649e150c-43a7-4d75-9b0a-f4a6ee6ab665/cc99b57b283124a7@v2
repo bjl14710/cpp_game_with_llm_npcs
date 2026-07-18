@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0001 — Basic HFT Concepts</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p  { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0001</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Concept</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Example</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 In this project</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Contrasts</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Basic HFT Concepts</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: the repo is named "HFT" but most
+    of its Python is daily-frequency portfolio rebalancing. The <em>actual</em> HFT muscle
+    lives in <code>fpga/market_maker.vhd</code> and the C++ ONNX path in
+    <code>gradient_boosting/</code>. To grow either side, you need the vocabulary that
+    professional HFT systems are built on.
+  </p>
+
+  <!-- ===================== §1 CONCEPT ===================== -->
+  <h2>1. What HFT actually is</h2>
+
+  <p>
+    <strong>High-Frequency Trading (HFT)</strong> is a style of automated trading
+    distinguished by three things, in order of importance:
+  </p>
+  <ol>
+    <li><strong>Latency</strong> — measured in microseconds (µs) or nanoseconds (ns), not seconds.</li>
+    <li><strong>High order rates</strong> — thousands to millions of messages per second per strategy.</li>
+    <li><strong>Short holding periods</strong> — positions opened and closed inside a day, often within seconds.</li>
+  </ol>
+
+  <p>
+    The "high frequency" refers to the rate of <em>orders</em>, not the rate of profitable
+    trades. A typical HFT firm sends far more order cancels than fills.
+  </p>
+
+  <h3>The vocabulary HFT is built on</h3>
+  <table>
+    <tr><th>Term</th><th>What it means</th></tr>
+    <tr><td><strong>Bid</strong></td><td>The highest price a buyer is currently willing to pay.</td></tr>
+    <tr><td><strong>Ask (Offer)</strong></td><td>The lowest price a seller is currently willing to accept.</td></tr>
+    <tr><td><strong>Spread</strong></td><td><code>ask − bid</code>. The cost of crossing the book.</td></tr>
+    <tr><td><strong>Mid-price</strong></td><td><code>(bid + ask) / 2</code>. A common "fair value" reference.</td></tr>
+    <tr><td><strong>Limit Order Book (LOB)</strong></td><td>The full list of resting buy/sell orders at every price level.</td></tr>
+    <tr><td><strong>Limit order</strong></td><td>"I will buy at X or lower." Rests in the book. Passive.</td></tr>
+    <tr><td><strong>Market order</strong></td><td>"Fill me now at the best price." Crosses the spread. Aggressive.</td></tr>
+    <tr><td><strong>Tick</strong></td><td>A single market data update (a trade, a quote change, a cancel).</td></tr>
+    <tr><td><strong>Tick-to-trade</strong></td><td>Time from receiving a market tick to your order leaving your NIC.</td></tr>
+    <tr><td><strong>Market maker</strong></td><td>Strategy that posts both a bid and an ask, earning the spread.</td></tr>
+    <tr><td><strong>Colocation</strong></td><td>Renting rack space inside the exchange's building to cut wire latency.</td></tr>
+  </table>
+
+  <div class="callout">
+    <strong>The single most important sentence in HFT:</strong>
+    a market maker quotes <em>both sides</em> of the book and tries to capture the
+    spread on round-trips. Everything in <code>fpga/market_maker.vhd</code> is in service of that.
+  </div>
+
+  <h3>Latency scale (memorize this)</h3>
+  <table>
+    <tr><th>System</th><th>Typical tick-to-trade</th></tr>
+    <tr><td>Python script over the internet (you, today)</td><td>~50–500 <em>milliseconds</em></td></tr>
+    <tr><td>Tuned CPU C++ in colocation</td><td>~500 ns – 5 µs</td></tr>
+    <tr><td>FPGA in colocation (top firms)</td><td>~100–300 ns tick-to-trade</td></tr>
+  </table>
+  <p class="small">
+    Source: industry summaries for 2025 cite FPGA tick-to-trade in the 100–500 ns range,
+    vs. 500–1000 µs for CPU systems. That's a ~1000× gap, which is exactly why
+    <code>market_maker.vhd</code> exists in this repo even though the Python is daily-frequency.
+  </p>
+
+  <!-- ===================== §2 MINIMAL EXAMPLE ===================== -->
+  <h2>2. A minimal market-maker, in plain Python</h2>
+  <p>
+    Forget FPGAs for a moment. Here is the <em>logic</em> a market maker runs every time
+    a new tick arrives. Read every comment.
+  </p>
+
+<pre><span class="com"># minimal_market_maker.py — illustrative; not for real trading</span>
+
+<span class="kw">def</span> <span class="fn">quote</span>(bid: <span class="ty">float</span>, ask: <span class="ty">float</span>, my_spread: <span class="ty">float</span>):
+    <span class="com"># 1. "Fair value" reference: midpoint of the current book.</span>
+    mid = (bid + ask) / <span class="num">2</span>
+
+    <span class="com"># 2. We want to sit INSIDE the current spread to be at the top of the queue.</span>
+    <span class="com">#    Our buy quote sits below mid, our sell quote sits above mid,</span>
+    <span class="com">#    separated by `my_spread` (the edge we want to earn).</span>
+    my_bid = mid - my_spread / <span class="num">2</span>
+    my_ask = mid + my_spread / <span class="num">2</span>
+
+    <span class="com"># 3. If we get filled on BOTH sides we pocket roughly `my_spread` per share,</span>
+    <span class="com">#    minus exchange fees and minus inventory risk.</span>
+    <span class="kw">return</span> my_bid, my_ask
+
+<span class="com"># Example: book shows bid=100.00, ask=100.04. We want a 2-cent edge.</span>
+buy, sell = <span class="fn">quote</span>(<span class="num">100.00</span>, <span class="num">100.04</span>, my_spread=<span class="num">0.02</span>)
+<span class="com"># buy  = 100.01   (better than current bid → top of queue on buy side)</span>
+<span class="com"># sell = 100.03   (better than current ask → top of queue on sell side)</span>
+</pre>
+
+  <p>
+    That's it. The math is trivial. <strong>The hard part of HFT is doing this
+    arithmetic, plus risk checks, plus order submission, in under a microsecond,
+    on every tick, on every symbol, every day.</strong>
+  </p>
+
+  <!-- ===================== §3 IN THIS PROJECT ===================== -->
+  <h2>3. In this project</h2>
+  <p>
+    Now look at the same logic, in VHDL, running on an FPGA.
+  </p>
+  <span class="filepath">fpga/market_maker.vhd (lines 93–117, condensed)</span>
+<pre><span class="kw">if</span> valid_in = <span class="str">'1'</span> <span class="kw">then</span>
+    <span class="com">-- (bid + ask) / 2  → mid price.  resize(_, 33) avoids overflow.</span>
+    bid_plus_ask <= resize(bid_price_in, <span class="num">33</span>) + resize(ask_price_in, <span class="num">33</span>);
+    mid_price    <= resize(
+                        shift_right(
+                            resize(bid_price_in, <span class="num">33</span>) + resize(ask_price_in, <span class="num">33</span>),
+                            <span class="num">1</span>),
+                        <span class="num">32</span>);
+
+    <span class="com">-- spread / 2  → half-spread.  Arithmetic right shift = divide by 2.</span>
+    half_spread  <= shift_right(spread_in, <span class="num">1</span>);
+
+    <span class="com">-- buy quote  = mid − half_spread</span>
+    <span class="com">-- sell quote = mid + half_spread</span>
+    buy_price_r  <= ... - shift_right(spread_in, <span class="num">1</span>);
+    sell_price_r <= ... + shift_right(spread_in, <span class="num">1</span>);
+<span class="kw">end if</span>;
+</pre>
+
+  <p>Map it back to the Python:</p>
+  <div class="grid2">
+    <div class="card">
+      <h4>Python you just read</h4>
+      <p><code>mid = (bid + ask) / 2</code></p>
+      <p><code>my_bid = mid - my_spread/2</code></p>
+      <p><code>my_ask = mid + my_spread/2</code></p>
+    </div>
+    <div class="card">
+      <h4>VHDL doing the same thing</h4>
+      <p><code>bid_plus_ask + resize → /2</code> via <code>shift_right(_, 1)</code></p>
+      <p><code>buy_price_r &lt;= mid - half_spread</code></p>
+      <p><code>sell_price_r &lt;= mid + half_spread</code></p>
+    </div>
+  </div>
+
+  <p>
+    Two things to notice:
+  </p>
+  <ul>
+    <li>
+      <strong>Q16.16 fixed-point.</strong> The header says
+      <code>real_value = integer_signal / 65536</code>. Why not floating point?
+      Because float DSP blocks burn cycles and silicon. Integer + shift is one cycle.
+      In HFT, every cycle is a position in the order queue.
+    </li>
+    <li>
+      <strong>1 clock-cycle latency</strong> (line 14 of the header). On a 250 MHz
+      clock, that's 4 ns. Compare to the Python interpreter doing the same arithmetic:
+      ~hundreds of ns just for the function call overhead.
+    </li>
+  </ul>
+
+  <p>
+    Meanwhile in the Python world, <code>paper_trading_sim.py</code> trains a
+    <code>GradientBoostingRegressor</code> on daily OHLCV bars from yfinance, ranks
+    tomorrow's expected returns, and rebalances <em>once per day</em>. That's not HFT —
+    it's quantitative daily allocation. The C++ ONNX path in
+    <code>gradient_boosting/main.cpp</code> is the bridge: same model, but loaded into
+    a low-latency runtime so it <em>could</em> sit next to the FPGA logic one day.
+  </p>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> calling this project "HFT_practice" is aspirational.
+    The Python is daily/quant; the FPGA + C++ are the genuine HFT building blocks. Knowing
+    which is which will save you from misnaming things in interviews and PRs.
+  </div>
+
+  <!-- ===================== §4 OFTEN CONFUSED WITH ===================== -->
+  <h2>4. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>HFT vs. Algorithmic Trading</h4>
+      <p>
+        All HFT is algorithmic, but not all algorithmic trading is HFT.
+        Algo trading just means "decisions made by code." HFT additionally
+        demands <em>microsecond-grade latency</em>. Your
+        <code>paper_trading_sim.py</code> is algorithmic; it is not HFT.
+      </p>
+    </div>
+    <div class="card">
+      <h4>HFT vs. Day Trading</h4>
+      <p>
+        A day trader holds for minutes-to-hours and clicks a mouse. HFT holds for
+        milliseconds-to-seconds and never touches a mouse. Both close positions
+        intraday — that's where the confusion comes from.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Market Making vs. Stat-Arb</h4>
+      <p>
+        <strong>Market making</strong> posts both sides and earns the spread; it is
+        directionally neutral and worries about inventory.
+        <strong>Stat-arb</strong> takes a directional view (long X, short Y) based on
+        a statistical signal. Your model in <code>predict_next.py</code> is closer to
+        stat-arb / momentum than to market making.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Limit Order vs. Market Order</h4>
+      <p>
+        A <strong>limit order</strong> says "this price or better, otherwise wait" — it
+        rests in the book, costs no spread, may never fill. A <strong>market order</strong>
+        says "fill now" — it pays the spread, always fills (if liquidity exists).
+        Market makers post limits; takers send markets.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Latency vs. Throughput</h4>
+      <p>
+        <strong>Latency</strong> = time for one message to traverse the pipeline.
+        <strong>Throughput</strong> = messages per second the pipeline can handle.
+        HFT firms care about <em>both</em>, but the marketing number quoted in
+        headlines is almost always latency.
+      </p>
+    </div>
+    <div class="card">
+      <h4>FPGA vs. CPU</h4>
+      <p>
+        A CPU runs general code and pays for it with branch prediction, caches,
+        and OS jitter. An <strong>FPGA</strong> is a sea of logic gates that you
+        wire into a fixed pipeline at synthesis time — no OS, no cache misses, no
+        instruction fetch. Deterministic latency in nanoseconds is the prize.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §5 QUIZ ===================== -->
+  <h2>5. Practice — click an answer for instant feedback</h2>
+  <p class="small">Answer order is shuffled on every page load. Read each option before clicking.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. What is the bid-ask spread?</p>
+    <ul class="options">
+      <li data-correct="true"  data-why="Yes — the spread is the gap between the best ask and the best bid. Crossing it costs you that gap.">The difference between the lowest ask and the highest bid in the order book.</li>
+      <li data-correct="false" data-why="That's the mid-price, not the spread.">The midpoint between the bid and the ask.</li>
+      <li data-correct="false" data-why="No — fees are separate. The spread is purely the bid/ask gap.">The fee an exchange charges per filled order.</li>
+      <li data-correct="false" data-why="That describes slippage on a large market order, not the spread itself.">How much the price moves while your order is in flight.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. A market maker's core source of profit is…</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's a directional / momentum strategy, the opposite of pure market making.">Predicting price direction and holding for hours.</li>
+      <li data-correct="true"  data-why="Correct — quote both sides, earn the spread on round-trips, manage the inventory risk in between.">Posting both a bid and an ask and capturing the spread when both sides fill.</li>
+      <li data-correct="false" data-why="Rebates help, but the primary edge is the spread itself. Without spread capture, rebates can't keep a market maker alive.">Exchange rebates alone, independent of price action.</li>
+      <li data-correct="false" data-why="That's adverse selection — it's a *risk* market makers fear, not a profit source.">Trading against informed flow whenever possible.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Why is <code>market_maker.vhd</code> written in VHDL with Q16.16 fixed-point arithmetic instead of Python with floats?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="VHDL is verbose, not concise. That's not the reason.">VHDL is more concise than Python for this kind of math.</li>
+      <li data-correct="false" data-why="Floats are fine for accuracy at this scale; the issue is speed and determinism, not precision.">Floating-point is too imprecise for stock prices.</li>
+      <li data-correct="true"  data-why="Right — fixed-point + shift = one clock cycle (~4 ns at 250 MHz). Python interpretation is hundreds of ns just in function-call overhead. HFT lives or dies on this gap.">An FPGA computing fixed-point math in one clock cycle is ~1000× faster and more deterministic than a Python interpreter.</li>
+      <li data-correct="false" data-why="No — the FPGA logic computes quotes, it doesn't directly model risk on-chip. Risk overlays in this repo live in Python (walkforward_sim.py).">Because floating-point is unable to represent risk constraints.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. Which of these statements about <code>paper_trading_sim.py</code> is most accurate?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="It uses end-of-day OHLCV bars from yfinance — there are no microsecond ticks anywhere in the pipeline.">It is true HFT because it processes ticks in microseconds.</li>
+      <li data-correct="true"  data-why="Correct — daily bars, daily decisions, daily rebalance. It's algorithmic and quantitative, but the timescale is days, not microseconds.">It is algorithmic daily-frequency trading, not HFT, because it rebalances once per day on yfinance daily bars.</li>
+      <li data-correct="false" data-why="Frequency isn't determined by *backtest* speed; it's determined by *trading* cadence. A fast backtest of a daily strategy is still a daily strategy.">It is HFT because the backtest runs quickly.</li>
+      <li data-correct="false" data-why="Manual trading means a human clicks. This script is fully automated — that part of HFT's definition is satisfied. What's missing is latency.">It is manual trading because a user runs the script from a CLI.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. You see <code>bid=100.00, ask=100.04, spread_in=0.02</code> handed to <code>market_maker.vhd</code>. What buy/sell quotes does the module emit?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That would be buying right at the bid and selling right at the ask — you'd just be matching the existing book, not improving it.">buy = 100.00, sell = 100.04</li>
+      <li data-correct="true"  data-why="Right — mid = 100.02, half_spread = 0.01, so buy = 100.01 and sell = 100.03. Both quotes are inside the existing spread, putting you at the top of the queue.">buy = 100.01, sell = 100.03</li>
+      <li data-correct="false" data-why="No — the mid is 100.02, not 100.00. Re-check (bid + ask)/2.">buy = 99.99, sell = 100.01</li>
+      <li data-correct="false" data-why="That's a 4-cent spread on each side — but spread_in is 0.02, not 0.04, and half of 0.02 is 0.01.">buy = 99.98, sell = 100.06</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §6 SCENARIOS ===================== -->
+  <h2>6. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A teammate says "let's run <code>paper_trading_sim.py</code> on a colocated server to make it HFT." What do you say?</summary>
+    <p>
+      Colocation only helps if your bottleneck is wire latency. This script's bottleneck is
+      that it makes <em>one decision per day</em> from yfinance bars. Colocation cuts microseconds
+      off network hops; it does nothing for a strategy whose decision cadence is 24 hours.
+      To make it "HFT," you'd need to replace the data feed, the model loop, and the execution path —
+      essentially everything except the ticker list.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. Why does <code>market_maker.vhd</code> have a <code>valid_in</code> input even though arithmetic could run every cycle?</summary>
+    <p>
+      Because not every clock cycle has a fresh price tick. <code>valid_in</code> is a
+      handshake: "this cycle's <code>bid_price_in</code> / <code>ask_price_in</code> are
+      meaningful — go compute." Downstream consumers watch <code>order_valid_out</code>
+      to know when the buy/sell quotes are real outputs versus stale registers. This is the
+      universal pattern for pipelined hardware: every meaningful datum carries a valid bit.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. Why might a market maker prefer to <em>cancel</em> a quote rather than let it fill?</summary>
+    <p>
+      Because a fill that happens right before the mid-price moves against you is called
+      <strong>adverse selection</strong> — the other side knew something you didn't. If your
+      tick-to-trade is too slow to update quotes when the market shifts, you become a
+      systematic loser to faster participants. That's why HFT firms cancel <em>far</em> more
+      orders than they execute, and why nanoseconds of cancel latency are existential.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson idea: <strong>The Limit Order Book in depth — price-time priority, queue
+    position, and what "top of book" actually means</strong>. That builds directly on this one
+    and unlocks reading the next layer of HFT papers.
+  </p>
+
+</main>
+
+<script>
+  // -- Quiz: shuffle options and wire click feedback ------------------------
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    // Shuffle DOM order so position never encodes correctness.
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        // Visual feedback on the clicked option.
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        // Score only the FIRST attempt per question to keep it honest.
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

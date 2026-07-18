@@ -1,0 +1,77 @@
+"""Tests for the ATR trailing-stop engine overlay (issue #65)."""
+import numpy as np
+import pandas as pd
+import pytest
+
+from strategies.daily import DailySignal, DailyStrategy
+from walkforward_sim import run_strategy_walkforward
+
+
+class AlwaysLong(DailyStrategy):
+    name = "always-long"
+
+    def generate_signal(self, df):
+        return DailySignal(1, 1.0, "long")
+
+
+def _crash_after_runup(make_ohlcv):
+    """Steady climb then a hard multi-day crash — must breach a 3x ATR trail."""
+    closes = [100 + i * 0.5 for i in range(40)]          # calm climb, small ATR
+    closes += [closes[-1] * f for f in (0.97, 0.93, 0.88, 0.84, 0.80, 0.78, 0.76)]
+    return make_ohlcv(closes)
+
+
+def test_trailing_stop_exits_and_cooldown_suppresses(make_ohlcv):
+    df = _crash_after_runup(make_ohlcv)
+    _, blot = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, top_n=1,
+                                       trade_cost_bps=0.0, atr_stop=3.0,
+                                       cooldown_days=5)
+    stopped = blot[blot["stopped"]]
+    assert len(stopped) >= 1, "crash never breached the trail"
+    stop_date = stopped["date"].iloc[0]
+    # the ticker is absent from the blotter for the cooldown window after the stop
+    dates = list(df.index)
+    stop_pos = dates.index(stop_date)
+    cooldown_dates = set(dates[stop_pos + 1: stop_pos + 6])
+    assert cooldown_dates.isdisjoint(set(blot["date"])), "traded during cooldown"
+    assert "|stopped" in stopped["reason"].iloc[0]
+
+
+def test_no_flag_means_no_stops(make_ohlcv):
+    """Without atr_stop the same crash is held throughout (regression pin)."""
+    df = _crash_after_runup(make_ohlcv)
+    _, blot = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, top_n=1,
+                                       trade_cost_bps=0.0)
+    assert "stopped" not in blot.columns or not blot.get("stopped", pd.Series(dtype=bool)).any()
+    # every tradable bar is held — no suppression gaps
+    assert len(blot) == len(df) - 2  # warmup bar + final (no fwd) bar
+
+
+def test_stop_replay_is_deterministic(make_ohlcv):
+    """Identical data replays identical stops — the live-backfill invariant."""
+    df = _crash_after_runup(make_ohlcv)
+    kw = dict(top_n=1, trade_cost_bps=0.0, atr_stop=3.0, cooldown_days=5)
+    _, a = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, **kw)
+    _, b = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, **kw)
+    pd.testing.assert_frame_equal(a, b)
+
+
+def test_direction_flip_resets_the_trail(make_ohlcv):
+    """A flip from long to short starts a fresh trail instead of instantly
+    stopping against the old long extreme."""
+
+    class FlipAt30(DailyStrategy):
+        name = "flip"
+
+        def generate_signal(self, df):
+            pos = 1 if len(df) < 30 else -1
+            return DailySignal(pos, 1.0, "flip")
+
+    closes = [100 + i for i in range(28)] + [128 - i for i in range(25)]
+    df = make_ohlcv(closes)
+    _, blot = run_strategy_walkforward(FlipAt30(), {"AAA": df}, top_n=1,
+                                       trade_cost_bps=0.0, atr_stop=3.0)
+    shorts = blot[blot["position"] == -1]
+    # the short leg trades (falling prices never breach a SHORT trail upward)
+    assert len(shorts) > 5
+    assert not shorts["stopped"].any()

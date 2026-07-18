@@ -1,0 +1,56 @@
+"""Per-ticker time-series trend following (TSMOM) — scaffold.
+
+Spec: .claude/plans/trend-following.md. Long a ticker only when its OWN
+trailing return is positive; volatility scaling is built into confidence
+so conf_vol sizing delivers the vol-scaled positions the research wants.
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class TrendFollowingStrategy(DailyStrategy):
+    """Long when trailing (lookback − skip) return is positive; else hold.
+
+    NOT yet registered in strategies/registry.py — registration happens in
+    the implementing commit so the arena never offers an unimplemented name.
+    """
+
+    name = "tsmom"
+    # TSMOM self-gates by trend sign — stacking the regime gate would
+    # double-filter the same information. All four regimes allowed.
+
+    def __init__(self, lookback: int = 252, skip_days: int = 21) -> None:
+        self.lookback = lookback
+        self.skip_days = skip_days
+
+    @property
+    def warmup_bars(self) -> int:
+        """Full lookback plus the skipped recent window plus one bar."""
+        return self.lookback + self.skip_days + 1
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Long iff the trailing (lookback, excluding skip window) trend > 0.
+
+        Confidence is the trend expressed in annualized-vol units, so the
+        arena's conf_vol sizing produces the vol-scaled positions the TSMOM
+        literature builds in from the start — the scaling lives here in the
+        signal, not bolted on later.
+        """
+        if len(df) < self.warmup_bars:
+            return HOLD
+        close = df["Close"].astype(float)
+        recent = float(close.iloc[-1 - self.skip_days])
+        old = float(close.iloc[-1 - self.skip_days - self.lookback])
+        if old <= 0:
+            return HOLD
+        trend = recent / old - 1.0
+        if trend <= 0:
+            return HOLD  # long-only: negative trends sit out, never short
+        sigma_daily = float(close.pct_change().iloc[-self.lookback:].std())
+        ann_vol = max(sigma_daily, 1e-4) * (252.0 ** 0.5)
+        return DailySignal(position=1, confidence=trend / ann_vol,
+                           reason=f"tsmom +{trend:.1%} over {self.lookback}d")
+
+
+__all__ = ["TrendFollowingStrategy"]

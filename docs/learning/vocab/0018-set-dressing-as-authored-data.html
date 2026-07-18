@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0018 — Set Dressing as Authored Data</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0018 · pairs with lesson 0018</div>
+<h1>Vocab: Set Dressing as Authored Data</h1>
+<dl>
+<dt>set dressing</dt>
+<dd>Non-interactive world objects (parked cars, dumpsters, bins) placed
+purely to make a scene feel inhabited. Film term; in games it should ride
+existing pipelines, not spawn new ones.</dd>
+
+<dt>authored data</dt>
+<dd>Hand-written, reviewable placement rows (the Building list) as opposed
+to procedural or runtime-generated content. Diffable, testable, and the
+single source for both rendering and collision here.</dd>
+
+<dt>collision honesty</dt>
+<dd>The property that an object's collider matches its visible footprint —
+no walk-through props (collider missing) and no invisible walls (collider
+oversized). Both directions get a test.</dd>
+
+<dt>clearance test</dt>
+<dd>A data-driven test asserting that designated walkable points (persona
+home spots, crossing centers) keep a clear circle of the actor's collision
+radius. Guards pathing against future set dressing.</dd>
+
+<dt>identity orientation</dt>
+<dd>The direction a model faces when drawn with no rotation. A pipeline
+without rotation support constrains placement to spots where identity
+orientation reads correctly (Z-long cars on Z-running streets).</dd>
+
+<dt>probe point</dt>
+<dd>A coordinate inside an obstacle's AABB used by the completeness test to
+prove the collider exists — chosen inside the box, not on its edge, so the
+check can't pass by luck.</dd>
+</dl>
+</div></body>
+</html>

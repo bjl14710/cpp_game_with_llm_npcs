@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0025 — Inverted-Hull Outlines</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0025 · pairs with lesson 0025</div>
+<h1>Drill: Inverted-Hull Outlines</h1>
+
+<div class="q"><h3>1. Why does the rim appear at the silhouette?</h3>
+<p>The outline copy is drawn with front faces culled. Walk through why the
+camera ends up seeing a rim only around the object's edge.</p>
+<details><summary>Answer</summary><div class="a">
+<p>With front faces culled, only the far (inside-out) side of the inflated
+shell renders. The real object, drawn after, covers that shell everywhere
+their screen projections overlap — which is everywhere except the band where
+the 6%-larger shell extends past the real silhouette. That uncovered band is
+the outline, and it tracks the silhouette from any viewpoint.</p>
+</div></details></div>
+
+<div class="q"><h3>2. Inflate about what point — and why not the feet?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>About each PART's own center (translate to center, scale, translate
+back). Scaling about the figure's feet would displace high parts (hair,
+head) outward more than low parts — the rim would grow thicker up the body
+and hair could visibly detach from the head.</p>
+</div></details></div>
+
+<div class="q"><h3>3. The missing flush</h3>
+<p>Someone removes the <code>rlDrawRenderBatchActive()</code> calls around
+<code>rlSetCullFace</code>. Nothing crashes. What actually goes wrong?</p>
+<details><summary>Answer</summary><div class="a">
+<p>raylib batches immediate geometry; GL state applies when the batch
+FLUSHES, not when the call is made. Without draining first, the cull-mode
+switch can apply to earlier queued geometry (or not yet apply to the outline
+pass) — outlines silently render with the wrong culling, or unrelated scene
+geometry drawn in the same batch gets front-culled. Classic invisible
+reordering bug.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Why grouped passes instead of outline+color per part?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>Each cull-face switch forces a batch drain. Interleaving would drain the
+batch twice per PART (~2×5 per character); grouping the outline pass then
+the color pass drains twice per CHARACTER. Same image, a fraction of the
+flushes.</p>
+</div></details></div>
+
+<div class="q"><h3>5. One function, two passes</h3>
+<p>The outline pass required almost no new drawing code. What earlier
+decision made that true, and what does it buy future graphics packs?</p>
+<details><summary>Answer</summary><div class="a">
+<p>#101 isolated every part shape behind <code>drawPartRecipe(part, at,
+dim, colors)</code>. The outline pass is the same dispatch called with an
+all-black color set inside an inflation matrix — so every part, including
+ones added by future packs, inherits outlines with zero extra work.</p>
+</div></details></div>
+
+<div class="q"><h3>6. Where the technique fails</h3>
+<p>Name two kinds of geometry in this game that inverted hull handles
+poorly or not at all, and what the mitigation was.</p>
+<details><summary>Answer</summary><div class="a">
+<p>(1) Hard-edged boxes: at sharp corners the inflated shell can gap; kept
+the scale small (1.06) and authored an escalation path (bigger scale →
+per-recipe outline opt-out) — not needed in practice. (2) Billboards (the
+mood emote): camera-facing sprites have no hull at all — it renders
+un-outlined and now clashes with the style, recorded as playtest finding #1
+rather than fixed (observations-only brief).</p>
+</div></details></div>
+
+<div class="q"><h3>7. Transfer it</h3>
+<p>You want a soft glow behind pickups rendered with the same immediate-mode
+primitives. Apply the lesson's general shape.</p>
+<details><summary>Answer</summary><div class="a">
+<p>Same skeleton: re-issue the pickup's existing draw path scaled up,
+tinted glow-color (maybe additive blend), state changes wrapped in explicit
+batch flushes, passes grouped. No parallel "glow mesh" pipeline — the one
+draw path serves both, so every new pickup glows by construction.</p>
+</div></details></div>
+</div></body>
+</html>

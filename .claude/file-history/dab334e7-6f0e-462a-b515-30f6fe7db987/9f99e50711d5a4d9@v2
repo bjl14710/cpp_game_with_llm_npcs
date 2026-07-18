@@ -1,0 +1,90 @@
+"""Tests for costs.py — the shared transaction cost & slippage model."""
+import math
+
+import pandas as pd
+import pytest
+
+from costs import CostModel, adv_dollars, day_cost, one_way_cost_bps
+
+
+def test_one_way_cost_zero_notional_is_commission_plus_spread_only():
+    """A zero-size trade still pays the fixed cost of crossing the market."""
+    model = CostModel(commission_bps=1.0, half_spread_bps=2.5, impact_coeff_bps=30.0)
+    assert one_way_cost_bps(model, 0.0, adv=1_000_000.0) == pytest.approx(3.5)
+
+
+def test_impact_scales_as_square_root_of_participation():
+    """Quadrupling trade notional exactly doubles the impact term (sqrt(4)=2)."""
+    model = CostModel(commission_bps=0.0, half_spread_bps=0.0, impact_coeff_bps=30.0)
+    small = one_way_cost_bps(model, trade_notional=10_000, adv=1_000_000)
+    big = one_way_cost_bps(model, trade_notional=40_000, adv=1_000_000)
+    assert big == pytest.approx(2 * small)
+
+
+def test_missing_adv_falls_back_to_conservative_default():
+    """No ADV data -> use fallback_adv, never crash, never divide by zero."""
+    model = CostModel(fallback_adv=500_000.0, impact_coeff_bps=30.0,
+                      commission_bps=0.0, half_spread_bps=0.0)
+    bps = one_way_cost_bps(model, trade_notional=50_000, adv=None)
+    expected = 30.0 * math.sqrt(50_000 / 500_000)
+    assert bps == pytest.approx(expected)
+
+
+def test_adv_dollars_no_volume_column_returns_all_nan_series():
+    """A frame without Volume degrades to an all-NaN ADV series, not a crash."""
+    df = pd.DataFrame({"Close": [10.0, 11.0, 12.0]}, index=pd.bdate_range("2024-01-02", periods=3))
+    adv = adv_dollars(df)
+    assert adv.isna().all()
+
+
+def test_adv_dollars_computes_rolling_dollar_volume():
+    """ADV is Volume * Close, rolled — check a fully-warmed-up window."""
+    idx = pd.bdate_range("2024-01-02", periods=25)
+    df = pd.DataFrame({"Close": [10.0] * 25, "Volume": [1000.0] * 25}, index=idx)
+    adv = adv_dollars(df, window=20)
+    assert adv.iloc[-1] == pytest.approx(10.0 * 1000.0)
+    assert adv.iloc[:4].isna().all()  # min_periods=5
+
+
+# ---------------------------------------------------------------------------
+# day_cost: mode dispatch
+# ---------------------------------------------------------------------------
+
+def test_day_cost_none_mode_is_always_zero():
+    model = CostModel(mode="none")
+    assert day_cost(model, equity=100_000, weight_changes={"A": (0.5, 1e6)}, had_position=True) == 0.0
+
+
+def test_day_cost_flat_mode_matches_legacy_formula():
+    """flat mode: equity * flat_bps/10000 when there's any position, else 0."""
+    model = CostModel(mode="flat", flat_bps=1.0)
+    c = day_cost(model, equity=100_000.0, weight_changes={}, had_position=True)
+    assert c == pytest.approx(100_000.0 * 1.0 / 10000.0)
+    assert day_cost(model, equity=100_000.0, weight_changes={}, had_position=False) == 0.0
+
+
+def test_day_cost_realistic_mode_sums_per_ticker_costs():
+    """realistic mode charges each ticker's |Δweight| notional independently."""
+    model = CostModel(mode="realistic", commission_bps=0.0, half_spread_bps=10.0,
+                      impact_coeff_bps=0.0)  # isolate the flat spread component
+    weight_changes = {"A": (0.3, None), "B": (-0.2, None)}
+    c = day_cost(model, equity=100_000.0, weight_changes=weight_changes, had_position=True)
+    # each: notional * 10bps/10000 = notional * 0.001
+    expected = (0.3 * 100_000.0 * 0.001) + (0.2 * 100_000.0 * 0.001)
+    assert c == pytest.approx(expected)
+
+
+def test_day_cost_realistic_mode_zero_delta_is_free():
+    """Holding (Δweight=0) costs nothing under realistic mode — only churn pays."""
+    model = CostModel(mode="realistic", half_spread_bps=10.0, impact_coeff_bps=30.0)
+    c = day_cost(model, equity=100_000.0, weight_changes={"A": (0.0, 1e6)}, had_position=True)
+    assert c == 0.0
+
+
+def test_day_cost_realistic_mode_less_liquid_ticker_costs_more():
+    """Same trade size, lower ADV -> higher cost (more market impact)."""
+    model = CostModel(mode="realistic", commission_bps=0.0, half_spread_bps=0.0,
+                      impact_coeff_bps=30.0)
+    liquid = day_cost(model, equity=100_000.0, weight_changes={"A": (0.1, 10_000_000.0)}, had_position=True)
+    illiquid = day_cost(model, equity=100_000.0, weight_changes={"A": (0.1, 100_000.0)}, had_position=True)
+    assert illiquid > liquid

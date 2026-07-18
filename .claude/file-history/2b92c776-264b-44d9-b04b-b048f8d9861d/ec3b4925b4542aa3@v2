@@ -1,0 +1,30 @@
+// Diagnoses whether SFML's cursor warp works without Accessibility
+// permission, and whether CGWarpMouseCursorPosition does.
+#include <SFML/Graphics.hpp>
+#include <ApplicationServices/ApplicationServices.h>
+#include <iostream>
+
+int main() {
+    sf::RenderWindow window(sf::VideoMode(400, 300), "mouse test");
+    sf::sleep(sf::milliseconds(500));
+    sf::Event e;
+    while (window.pollEvent(e)) {}
+
+    std::cout << "AXIsProcessTrusted: " << (AXIsProcessTrusted() ? "yes" : "no") << "\n";
+
+    sf::Mouse::setPosition(sf::Vector2i(200, 150), window);
+    sf::sleep(sf::milliseconds(200));
+    while (window.pollEvent(e)) {}
+    sf::Vector2i p1 = sf::Mouse::getPosition(window);
+    std::cout << "after SFML setPosition: " << p1.x << "," << p1.y << " (want 200,150)\n";
+
+    sf::Vector2i g = sf::Mouse::getPosition();
+    sf::Vector2i r = sf::Mouse::getPosition(window);
+    CGWarpMouseCursorPosition(CGPointMake(g.x - r.x + 200, g.y - r.y + 150));
+    CGAssociateMouseAndMouseCursorPosition(true);
+    sf::sleep(sf::milliseconds(200));
+    while (window.pollEvent(e)) {}
+    sf::Vector2i p2 = sf::Mouse::getPosition(window);
+    std::cout << "after CGWarp: " << p2.x << "," << p2.y << " (want 200,150)\n";
+    return 0;
+}

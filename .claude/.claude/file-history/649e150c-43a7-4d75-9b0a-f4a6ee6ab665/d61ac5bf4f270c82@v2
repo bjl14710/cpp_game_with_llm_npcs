@@ -1,0 +1,130 @@
+-- =============================================================================
+-- Reference solution — Exercise 05: testbench for fpga/market_maker.vhd
+--
+-- Verifies: 1-cycle latency on the valid handshake, one-shot valid pulse,
+-- and Q16.16 quote arithmetic (buy = mid - spread/2, sell = mid + spread/2).
+--
+-- Run:  bash scripts/run_vhdl_tests.sh tb_market_maker
+-- (HFT_EXERCISE_TARGET=solutions selects this file.)
+-- =============================================================================
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity tb_market_maker is
+end entity tb_market_maker;
+
+architecture sim of tb_market_maker is
+
+    constant CLK_PERIOD : time := 10 ns;
+
+    signal clk             : std_logic := '0';
+    signal rst_n           : std_logic := '0';
+    signal bid_price_in    : signed(31 downto 0) := (others => '0');
+    signal ask_price_in    : signed(31 downto 0) := (others => '0');
+    signal spread_in       : signed(31 downto 0) := (others => '0');
+    signal valid_in        : std_logic := '0';
+    signal buy_price_out   : signed(31 downto 0);
+    signal sell_price_out  : signed(31 downto 0);
+    signal order_valid_out : std_logic;
+
+    signal done : boolean := false;
+
+    -- Q16.16 encode: real dollars -> signed(31 downto 0)
+    function q16(x : real) return signed is
+    begin
+        return to_signed(integer(x * 65536.0), 32);
+    end function;
+
+begin
+
+    dut : entity work.market_maker
+        port map (
+            clk             => clk,
+            rst_n           => rst_n,
+            bid_price_in    => bid_price_in,
+            ask_price_in    => ask_price_in,
+            spread_in       => spread_in,
+            valid_in        => valid_in,
+            buy_price_out   => buy_price_out,
+            sell_price_out  => sell_price_out,
+            order_valid_out => order_valid_out
+        );
+
+    clk_gen : process
+    begin
+        while not done loop
+            clk <= '0';
+            wait for CLK_PERIOD / 2;
+            clk <= '1';
+            wait for CLK_PERIOD / 2;
+        end loop;
+        wait;
+    end process clk_gen;
+
+    stimulus : process
+    begin
+        -- Synchronous active-low reset for two cycles
+        rst_n <= '0';
+        wait until rising_edge(clk);
+        wait until rising_edge(clk);
+        rst_n <= '1';
+        wait until rising_edge(clk);
+
+        -- ---------------------------------------------------------------
+        -- Case 1: bid $100.00, ask $101.00, spread $0.50
+        --   mid = 100.50  ->  buy 100.25, sell 100.75
+        -- ---------------------------------------------------------------
+        bid_price_in <= q16(100.0);
+        ask_price_in <= q16(101.0);
+        spread_in    <= q16(0.5);
+        valid_in     <= '1';
+        wait until rising_edge(clk);   -- DUT samples here (latency starts)
+        valid_in     <= '0';
+        wait for 1 ns;                 -- let registered outputs settle
+
+        assert order_valid_out = '1'
+            report "case 1: order_valid_out must assert one cycle after valid_in"
+            severity error;
+        assert buy_price_out = q16(100.25)
+            report "case 1: buy quote wrong — expected 100.25 (mid 100.50 - 0.25)"
+            severity error;
+        assert sell_price_out = q16(100.75)
+            report "case 1: sell quote wrong — expected 100.75 (mid 100.50 + 0.25)"
+            severity error;
+
+        -- valid must be a one-cycle pulse
+        wait until rising_edge(clk);
+        wait for 1 ns;
+        assert order_valid_out = '0'
+            report "order_valid_out must be a one-cycle pulse"
+            severity error;
+
+        -- ---------------------------------------------------------------
+        -- Case 2: bid $99.50, ask $100.50, spread $1.00
+        --   mid = 100.00  ->  buy 99.50, sell 100.50
+        -- ---------------------------------------------------------------
+        bid_price_in <= q16(99.5);
+        ask_price_in <= q16(100.5);
+        spread_in    <= q16(1.0);
+        valid_in     <= '1';
+        wait until rising_edge(clk);
+        valid_in     <= '0';
+        wait for 1 ns;
+
+        assert order_valid_out = '1'
+            report "case 2: order_valid_out must assert one cycle after valid_in"
+            severity error;
+        assert buy_price_out = q16(99.5)
+            report "case 2: buy quote wrong — expected 99.50"
+            severity error;
+        assert sell_price_out = q16(100.5)
+            report "case 2: sell quote wrong — expected 100.50"
+            severity error;
+
+        done <= true;
+        report "TB PASSED" severity note;
+        wait;
+    end process stimulus;
+
+end architecture sim;

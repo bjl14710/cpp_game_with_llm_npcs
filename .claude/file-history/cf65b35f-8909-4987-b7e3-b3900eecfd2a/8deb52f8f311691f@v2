@@ -1,0 +1,164 @@
+"""Hayashi-Yoshida lead-lag for asynchronous intraday tick data.
+
+The daily layer's :mod:`oil_alpha.analysis.leadlag` computes
+``rho(k) = corr(x_t, y_{t+k})`` on synchronous, evenly spaced bars. Tick data
+breaks both assumptions: two instruments trade at different, irregular times,
+and forcing them onto a common grid (previous-tick sampling) biases
+correlations toward zero as the grid shrinks — the Epps effect. The
+Hayashi-Yoshida (2005) estimator avoids the grid entirely: it sums products
+of tick-to-tick returns over every pair of **overlapping time intervals**,
+
+    cov_HY = sum_{i,j} dx_i * dy_j * 1{ (a_i, b_i] overlaps (c_j, d_j] }
+
+where dx_i is x's return over its i-th inter-tick interval (a_i, b_i], and
+correlation is normalised by sqrt(sum dx^2 * sum dy^2).
+
+Lead-lag (Hoffmann-Rosenbaum-Yoshida 2013): recompute the HY correlation with
+y's clock shifted and scan the shift.
+
+Sign convention (stated explicitly, same discipline as leadlag.py):
+``rho_HY(l) = HY-corr(x, y with its timestamps shifted EARLIER by l)``.
+A peak at **l > 0 means x leads y by l** — today's x movement lines up with
+y's movement l later — the same reading as the daily CCF's ``peak at k > 0 =>
+x leads``. Pinned by a synthetic known-lead unit test
+(tests/test_hayashi_yoshida.py), so the convention can't silently drift.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+
+@dataclass
+class HYLeadLagResult:
+    """Result of a Hayashi-Yoshida lead-lag scan (mirrors LeadLagResult)."""
+
+    lags_ns: np.ndarray         # scanned shifts, ns; positive => x leads
+    corr: np.ndarray            # rho_HY at each shift
+    peak_lag_ns: int            # shift maximising |rho_HY|
+    peak_corr: float
+    leader: str                 # x_name, y_name, or "contemporaneous"
+    x_name: str
+    y_name: str
+    n_x: int                    # tick-return counts that entered the estimate
+    n_y: int
+
+    @property
+    def x_leads(self) -> bool:
+        return self.peak_lag_ns > 0
+
+
+def _tick_returns(times_ns: np.ndarray, prices: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Inter-tick intervals (start, end] and log-price changes.
+
+    Collapses simultaneous ticks (equal timestamps) by keeping the last price
+    at each distinct time — zero-length intervals contribute nothing to HY
+    but break the strictly-increasing assumption the sweep relies on.
+    """
+    t = np.asarray(times_ns, dtype=np.int64)
+    p = np.asarray(prices, dtype=float)
+    if t.shape != p.shape:
+        raise ValueError("times and prices must have equal length")
+    if len(t) < 2:
+        raise ValueError("need at least two ticks per series")
+    if np.any(np.diff(t) < 0):
+        raise ValueError("timestamps must be non-decreasing")
+    # last observation per distinct timestamp
+    keep = np.append(t[1:] != t[:-1], True)
+    t, p = t[keep], p[keep]
+    if len(t) < 2:
+        raise ValueError("need at least two distinct tick times per series")
+    dlogp = np.diff(np.log(p))
+    return t[:-1], t[1:], dlogp  # interval (start_i, end_i], return dlogp_i
+
+
+def hy_covariance(
+    tx: np.ndarray, px: np.ndarray,
+    ty: np.ndarray, py: np.ndarray,
+    lag_ns: int = 0,
+) -> tuple[float, float, float]:
+    """HY covariance of two asynchronous tick series at a given shift.
+
+    Returns ``(cov, sum_dx2, sum_dy2)`` so callers can normalise. ``lag_ns``
+    shifts y's timestamps earlier: positive lag tests "x leads y by lag_ns"
+    (see module docstring for the pinned convention).
+    """
+    xa, xb, dx = _tick_returns(tx, px)
+    ya, yb, dy = _tick_returns(ty, py)
+    ya = ya - lag_ns
+    yb = yb - lag_ns
+
+    # For x-interval (xa_i, xb_i]: overlapping y-intervals (ya_j, yb_j] are
+    # those with yb_j > xa_i and ya_j < xb_i. y intervals are sorted, so the
+    # overlap set is a contiguous index range found by binary search, and its
+    # dy-sum comes from a prefix-sum — O((n+m) log m) per lag, all NumPy.
+    cy = np.concatenate(([0.0], np.cumsum(dy)))
+    j_lo = np.searchsorted(yb, xa, side="right")
+    j_hi = np.searchsorted(ya, xb, side="left")
+    overlap_sums = cy[np.maximum(j_hi, j_lo)] - cy[j_lo]
+    cov = float(np.dot(dx, overlap_sums))
+    return cov, float(np.dot(dx, dx)), float(np.dot(dy, dy))
+
+
+def hy_correlation(
+    tx: np.ndarray, px: np.ndarray,
+    ty: np.ndarray, py: np.ndarray,
+    lag_ns: int = 0,
+) -> float:
+    """HY correlation at one shift; NaN if either series never moves."""
+    cov, sx2, sy2 = hy_covariance(tx, px, ty, py, lag_ns)
+    denom = np.sqrt(sx2 * sy2)
+    return cov / denom if denom > 0 else float("nan")
+
+
+def hy_leadlag_scan(
+    tx: np.ndarray, px: np.ndarray,
+    ty: np.ndarray, py: np.ndarray,
+    lags_ns: np.ndarray,
+    x_name: str = "x",
+    y_name: str = "y",
+) -> HYLeadLagResult:
+    """Scan HY correlation over shifts; peak |corr| names the leader.
+
+    ``lags_ns`` should straddle zero (e.g. -30s..+30s). Positive peak =>
+    ``x_name`` leads — identical reading to ``leadlag.ccf_leadlag``.
+    """
+    lags = np.asarray(sorted(int(l) for l in lags_ns), dtype=np.int64)
+    if len(lags) == 0:
+        raise ValueError("lags_ns must be non-empty")
+    corr = np.array([hy_correlation(tx, px, ty, py, int(l)) for l in lags])
+    if np.all(np.isnan(corr)):
+        raise ValueError("HY correlation undefined at every lag (constant series?)")
+    peak_idx = int(np.nanargmax(np.abs(corr)))
+    peak_lag = int(lags[peak_idx])
+    if peak_lag > 0:
+        leader = x_name
+    elif peak_lag < 0:
+        leader = y_name
+    else:
+        leader = "contemporaneous"
+    xa, _, dx = _tick_returns(tx, px)
+    ya, _, dy = _tick_returns(ty, py)
+    return HYLeadLagResult(
+        lags_ns=lags,
+        corr=corr,
+        peak_lag_ns=peak_lag,
+        peak_corr=float(corr[peak_idx]),
+        leader=leader,
+        x_name=x_name,
+        y_name=y_name,
+        n_x=len(dx),
+        n_y=len(dy),
+    )
+
+
+def default_lag_grid_ns(max_lag_s: float = 30.0, points_per_side: int = 25) -> np.ndarray:
+    """Symmetric log-spaced shift grid: dense at ms scale, sparse at seconds.
+
+    Lead-lag between related instruments concentrates at short horizons, so a
+    linear grid wastes most of its points where nothing happens.
+    """
+    pos = np.unique(np.geomspace(1e6, max_lag_s * 1e9, points_per_side).astype(np.int64))
+    return np.concatenate((-pos[::-1], [0], pos))

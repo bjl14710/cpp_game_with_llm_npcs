@@ -1,0 +1,6 @@
+export CODEX_COMPANION_SESSION_ID='2b92c776-264b-44d9-b04b-b048f8d9861d'
+export CODEX_COMPANION_TRANSCRIPT_PATH='/Users/brandonlee/.claude/projects/-Users-brandonlee-development-repos-products-cpp-games-cpp-game-with-llm-npcs/2b92c776-264b-44d9-b04b-b048f8d9861d.jsonl'
+export CLAUDE_PLUGIN_DATA='/Users/brandonlee/.claude/plugins/data/codex-openai-codex'
+export CODEX_COMPANION_SESSION_ID='2b92c776-264b-44d9-b04b-b048f8d9861d'
+export CODEX_COMPANION_TRANSCRIPT_PATH='/Users/brandonlee/.claude/projects/-Users-brandonlee-development-repos-products-cpp-games-cpp-game-with-llm-npcs/2b92c776-264b-44d9-b04b-b048f8d9861d.jsonl'
+export CLAUDE_PLUGIN_DATA='/Users/brandonlee/.claude/plugins/data/codex-openai-codex'

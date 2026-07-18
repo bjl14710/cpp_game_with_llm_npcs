@@ -1,0 +1,75 @@
+/idea
+
+Goal: Replace the current "weird/scary" character look by swapping in free
+CC0 stylized character assets (Quaternius modular characters as the default
+choice), wiring them through the existing socket/size-contract systems,
+applying a toon shader with outlines, and moving faces to flat textures —
+committing the whole character pipeline to one consistent cartoony style.
+
+Context: The problem is uncanny-valley mismatch — parts of the characters
+sit at different realism levels. The fix is committing harder to
+stylization everywhere at once, not adding detail. Godot's renderer is
+well-suited to this target; no engine change is involved. This builds on
+existing systems: the socket/attach-point compositional character system,
+the size-contract system, the shared parts pool used by roaming NPCs, the
+character creator, and player avatars — all three consumers must end up on
+the new assets together, or the mismatch just moves around.
+
+Scope:
+1. Asset acquisition — download the Quaternius Ultimate Modular Character
+   pack(s) (CC0, quaternius.com). If the modular set can't be fetched or
+   imported cleanly, fall back to KayKit character packs (CC0, GLTF) and
+   note the substitution. Record pack name/version and license in an
+   ASSETS.md or existing credits file — CC0 needs no attribution but the
+   provenance record keeps future packs auditable.
+2. Import pipeline — bring the models into Godot as GLTF with a repeatable
+   import setup (consistent scale, materials routed to the toon shader,
+   rest pose verified). Document the steps so future packs follow the same
+   path.
+3. Socket integration — map the modular parts (heads, bodies, hair, etc.)
+   into the existing socket/attach-point system as a new style-tagged part
+   family. Parts must honor the existing size contracts; if the pack's
+   proportions conflict with current entity world-sizes, adjust the size
+   specs deliberately and log the new values, don't hand-scale meshes ad hoc.
+4. Flat faces — implement faces as swappable flat textures on the head
+   mesh (Mii/Animal Crossing approach), not 3D facial geometry. Face
+   options in the character creator become texture picks. Include a small
+   starter set of face textures consistent with the pack's style.
+5. Toon shader + outlines — apply a cel/toon shader across all character
+   materials (eldskald's MIT "Complete Cel Shader for Godot 4" from
+   godotshaders.com as the default; Binbun's as fallback), plus
+   inverted-hull outlines. Character lighting goes through this shader
+   everywhere — no character should render with the default lit material.
+6. Animation — rig/retarget the pack's included animations (or Mixamo
+   retargets if the pack lacks needed clips — note Mixamo is free but not
+   CC0, record it separately in the credits file) for the existing
+   animation states: idle, walk, run, and the weapon states from the
+   fist/gun work. Facing/aim must still derive from the single-source
+   values per the earlier fixes — retargeting must not reintroduce
+   moonwalk-style desync.
+7. Unified rollout — roaming NPCs, character-creator output, and player
+   avatars all switch to the new part family in this same pass. The old
+   assets can remain in the repo behind their style tag but must no longer
+   be the default anywhere.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Where a decision would normally prompt me, pick the
+  most defensible option yourself, log the decision and reasoning in
+  OVERNIGHT_REPORT.md, and keep going.
+- Style commitment beats fidelity: when choosing between a more detailed
+  option and a simpler more consistent one, choose simpler/consistent.
+  No realistic eyes, skin materials, or per-character one-off shaders.
+- If specific modular pieces won't map cleanly onto existing sockets,
+  integrate the pieces that do map cleanly and list the exceptions in the
+  report rather than forcing bad attachments or blocking the whole ticket.
+- Before opening the draft PR, run the visual-qa subagent: screenshot a
+  created character, a roaming NPC, and the player avatar side by side in
+  the town with the new assets, toon shader, and outlines active, and have
+  it judge (a) style consistency across all three and (b) that nothing
+  reads as uncanny/mismatched (no realistic features on stylized bodies).
+  Include the report and screenshot paths in OVERNIGHT_REPORT.md.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

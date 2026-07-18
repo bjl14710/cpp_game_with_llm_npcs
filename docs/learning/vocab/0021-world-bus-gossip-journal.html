@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0021 — World Bus, Gossip, Journal</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0021 · covers lessons 0021-0022 + the journal</div>
+<h1>Vocab: World Bus, Gossip, Journal</h1>
+<dl>
+<dt>world bus</dt>
+<dd>The single shared store (<code>WorldState</code>) systems read facts
+from instead of keeping private copies. The clock was the first tenant;
+gossip facts the second; the journal reads it without new wiring.</dd>
+
+<dt>injected time</dt>
+<dd>Passing the shared clock into consumers as a parameter
+(<code>update(..., timeOfDayHours)</code>) rather than letting them own a
+timer — testable by varying the argument.</dd>
+
+<dt>propose → validate → commit</dt>
+<dd>The discipline for LLM-created state: the model proposes structured
+candidates; code validates all-or-nothing; only validated records write.
+Model output never touches the store directly.</dd>
+
+<dt>knowledge set</dt>
+<dd>Per-agent record of WHICH facts an agent has heard, stored beside the
+facts (not inside them). Propagation and the journal's visibility filter
+are both just queries over these sets.</dd>
+
+<dt>propagation gates</dt>
+<dd>The conservative conditions for spread: proximity radius, minimum
+teller-knowledge age, per-tick chance, one fact per pair. Slower is
+recoverable; instant town-wide knowledge is not.</dd>
+
+<dt>read model</dt>
+<dd>A derived, filtered view over shared state for one consumer — the
+journal is a read model of the fact store (player-heard facts, grouped,
+conflict-flagged) that owns no data and never writes.</dd>
+
+<dt>corroboration vs conflict</dt>
+<dd>Same subject + same content from two tellers = corroboration (not
+flagged). Same subject + different content = conflict (both rows
+flagged). Exact normalized subjects make the comparison honest.</dd>
+</dl>
+</div></body>
+</html>

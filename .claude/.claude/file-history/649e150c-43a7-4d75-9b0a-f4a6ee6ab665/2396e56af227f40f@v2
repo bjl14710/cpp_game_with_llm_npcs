@@ -1,0 +1,44 @@
+// Reference solution — Exercise 04 Part A: O(1) ring-buffer moving average.
+//
+// Fixes the O(window) recompute that gradient_boosting/
+// sample_with_gradient_boosting.cpp admits it should avoid: a running sum
+// over a fixed array gives O(1) push and O(1) average, no heap, no loop.
+//
+// Peek policy: attempt exercises/04_spsc_ring/ring_ma.hpp first.
+#pragma once
+
+#include <array>
+#include <cstddef>
+
+template <std::size_t N>
+class RingMA {
+    static_assert(N > 0, "window must be non-empty");
+
+public:
+    // O(1): subtract the value falling out of the window, add the new one.
+    void push(double x) noexcept {
+        if (count_ == N) {
+            sum_ -= buf_[head_];  // head_ points at the oldest sample
+        } else {
+            ++count_;
+        }
+        buf_[head_] = x;
+        sum_ += x;
+        head_ = (head_ + 1) % N;
+    }
+
+    // Mean of the samples currently in the window (0.0 before any push).
+    double average() const noexcept {
+        return count_ == 0 ? 0.0 : sum_ / static_cast<double>(count_);
+    }
+
+    std::size_t size() const noexcept { return count_; }
+
+    bool warmed_up() const noexcept { return count_ == N; }
+
+private:
+    std::array<double, N> buf_{};  // fixed storage — no heap on the hot path
+    double sum_ = 0.0;
+    std::size_t head_ = 0;   // next write slot == oldest sample once full
+    std::size_t count_ = 0;
+};

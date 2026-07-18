@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Analyze + elaborate + run the flat-book testbench against a golden-vector
+# file (SCAFFOLD). Plan: .claude/plans/vhdl-flat-book.md.
+#
+# Usage: ./scripts/run_vhdl_sim.sh <golden.csv> [DEPTH]
+#
+# TODO(vhdl-2): implement —
+#   1. require ghdl (point at scripts/setup-vhdl.sh if missing)
+#   2. workdir hw/vhdl/work/ (gitignored)
+#   3. ghdl -a --std=08 hw/vhdl/flat_book.vhd hw/vhdl/flat_book_tb.vhd
+#   4. ghdl -e --std=08 flat_book_tb
+#   5. ghdl -r flat_book_tb -gDEPTH=${2:-4096} -gVECTORS=$1
+#   6. propagate ghdl's exit code (nonzero = parity failure)
+set -euo pipefail
+
+echo "run_vhdl_sim.sh is scaffolded but not implemented yet" >&2
+echo "(plan: .claude/plans/vhdl-flat-book.md, TODO(vhdl-2))" >&2
+exit 2

@@ -1,0 +1,68 @@
+#pragma once
+
+// effects.hpp — Enhanced visual effects: fire, smoke, and impact sparks.
+//
+// Extends the existing ImpactEffect (defined in main.cpp) with typed variants
+// so different hits look different. Fire impacts linger and expand; bullet
+// sparks are bright and brief; smoke trails fade slowly upward.
+//
+// Integration: call the addXxx() helpers from updateProjectiles() / updateEnemies()
+// in main.cpp wherever addImpact() is currently called. The GameState::impacts
+// vector stores all effects; updateEffects() / drawImpact() are unchanged.
+//
+// This header adds NO new structs to GameState — it only provides
+// free-function wrappers that call addImpact() with tuned parameters.
+
+#include <SFML/Graphics.hpp>
+
+// Forward declarations — defined in main.cpp.
+struct Vec3;
+struct GameState;
+void addImpact(GameState& game, const Vec3& pos, const sf::Color& color,
+               float size, float lifetime);
+
+// Bullet striking a concrete/metal surface — brief white-yellow spark burst.
+// Replace addImpact() calls in updateProjectiles() for player shots hitting walls.
+// TODO(impl): call addImpact twice (inner bright + outer dim ring).
+inline void addBulletSpark(GameState& game, const Vec3& pos) {
+    addImpact(game, pos, sf::Color(255, 235, 140), 2.4f, 0.18f);
+    // TODO(impl): second ring: sf::Color(255, 180, 60), size 3.6f, lifetime 0.28f
+}
+
+// Enemy killed — orange fire burst with lingering smoke trail.
+// Replace the kill addImpact() call in updateProjectiles().
+// TODO(impl): three layered impacts: fire core, ember ring, smoke fadeout.
+inline void addKillFireBurst(GameState& game, const Vec3& pos) {
+    // Layer 1: fire core — bright orange, fast expand
+    addImpact(game, pos, sf::Color(255, 140, 30), 5.0f, 0.38f);
+    // Layer 2: ember ring — TODO(impl): offset pos upward by +1.5 y
+    // addImpact(game, pos + Vec3{0,1.5f,0}, sf::Color(255, 80, 20), 3.2f, 0.55f);
+    // Layer 3: smoke — TODO(impl): dark grey, slow fade, size 6.0f, lifetime 0.9f
+    // addImpact(game, pos + Vec3{0,3.0f,0}, sf::Color(60, 55, 50, 160), 6.0f, 0.9f);
+}
+
+// Enemy shot hitting the player — red damage pulse.
+// Replace the player-hit addImpact() in updateProjectiles().
+// TODO(impl): pulsing red ring + screen-space damage vignette (already done via
+//   game.damageFlash — this just adds a world-space marker).
+inline void addPlayerHitEffect(GameState& game, const Vec3& pos) {
+    addImpact(game, pos, sf::Color(255, 60, 60), 3.8f, 0.32f);
+    // TODO(impl): second pulse: sf::Color(200, 20, 20), size 5.0f, lifetime 0.22f
+}
+
+// Pickup collected — colour-coded glow.
+// Replace addImpact() calls in updatePickups().
+// TODO(impl): two rings (inner bright, outer faded) matching pickup colour.
+inline void addPickupGlow(GameState& game, const Vec3& pos, bool isHealth) {
+    const sf::Color color = isHealth ? sf::Color(80, 255, 120) : sf::Color(90, 180, 255);
+    addImpact(game, pos, color, 4.0f, 0.30f);
+    // TODO(impl): outer ring at size 6.0f, lifetime 0.45f, alpha 120
+}
+
+// Muzzle flash on enemy fire — small orange flicker at gun muzzle.
+// Add this alongside the existing muzzle addImpact() in updateEnemies().
+// TODO(impl): tiny bright flash (size 1.8f, lifetime 0.10f) + one larger fading ring.
+inline void addMuzzleFlash(GameState& game, const Vec3& muzzlePos) {
+    addImpact(game, muzzlePos, sf::Color(255, 200, 80), 1.8f, 0.10f);
+    // TODO(impl): fading ring: sf::Color(255, 140, 40), size 3.0f, lifetime 0.18f
+}

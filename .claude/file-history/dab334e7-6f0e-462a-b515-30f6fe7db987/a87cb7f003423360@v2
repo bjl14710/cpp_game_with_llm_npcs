@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0037 — Using the Platform: The Operator's Guide</title>
+<style>
+  :root { --bg:#0f1419; --panel:#161d26; --ink:#e6e1d7; --dim:#9aa4b2; --accent:#e8a33d;
+          --good:#4cc38a; --bad:#e5534b; --code-bg:#1c2530; --border:#2a3644; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#faf8f4; --panel:#ffffff; --ink:#1f2933; --dim:#5b6572; --accent:#b06f0e;
+            --good:#0e7a4f; --bad:#c0362c; --code-bg:#f0ede6; --border:#ddd6c8; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.65 Georgia, 'Times New Roman', serif; }
+  main { max-width:47rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.7rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size:1.25rem; margin:2.6rem 0 .8rem; color:var(--accent);
+       border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  h3 { font-size:1.02rem; margin:1.6rem 0 .5rem; }
+  .kicker { color:var(--dim); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; }
+  .why { background:var(--panel); border-left:4px solid var(--accent); padding:.8rem 1rem;
+         margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  .warn { background:var(--panel); border-left:4px solid var(--bad); padding:.8rem 1rem;
+          margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; overflow-x:auto; font:13.5px/1.55 'SF Mono', Menlo, Consolas, monospace; }
+  code { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:.88em;
+         background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  .cm { color:var(--dim); font-style:italic; }
+  table { border-collapse:collapse; width:100%; font-size:.9em; margin:1rem 0; }
+  th, td { border:1px solid var(--border); padding:.45rem .65rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .options { list-style:none; padding:0; }
+  .options li { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                padding:.6rem .9rem; margin:.45rem 0; cursor:pointer; }
+  .options li:hover { border-color:var(--accent); }
+  .options li.picked-right { border-color:var(--good); }
+  .options li.picked-wrong { border-color:var(--bad); }
+  .feedback { font-size:.92em; padding:.5rem .8rem; border-radius:6px; background:var(--panel); }
+  .question { margin:2rem 0; }
+  #score { font-weight:bold; }
+  .scenario { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+              padding:1rem 1.2rem; margin:1rem 0; }
+  .scenario summary { cursor:pointer; color:var(--accent); }
+  .done-row { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin:1.6rem 0 0;
+              color:var(--dim); font-size:.85rem; font-family:Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">HFT Practice · Lesson 0037 · Operator's Guide</p>
+<h1>Using the Platform: From Fresh Clone to a Running Strategy Arena</h1>
+<div class="why"><strong>Why this matters:</strong> the platform now has ~15 entry
+points and a multi-stage workflow (train → validate → screen → live paper-trade →
+monitor → decide). This is the map: what to run, in what order, and which safety
+rails are watching you. Everything here is a real command from
+<code>pyproject.toml</code>'s <code>[project.scripts]</code>.</div>
+
+<div class="warn"><strong>Branch note:</strong> the arena commands
+(<code>arena-run</code> and friends) live on the PR stack
+<code>#52 → #53 → #63</code>. Until those merge to <code>main</code>, run them from
+the <code>feature/july6-batch</code> branch.</div>
+
+<h2 id="s1">1 · One-time setup</h2>
+<pre><code>git clone https://github.com/bjl14710/algo_trading_practice.git
+cd algo_trading_practice
+uv sync --extra dev        <span class="cm"># installs everything + pytest; NEVER bare pip</span>
+uv run pytest tests/ -m "not exercise"   <span class="cm"># sanity: should be all green</span></code></pre>
+<p>Environment variables (only needed for their feature): <code>ALPHAVANTAGE_API_KEY</code>
+(news pipeline), <code>WEB_AUTH_USER/PASS</code> (web app), <code>RH_USERNAME/PASSWORD/MFA</code>
+(Robinhood execution). Docker users: <code>cp .env.docker.example .env.docker</code>, fill it,
+never commit it.</p>
+
+<h2 id="s2">2 · The command map</h2>
+<table>
+<tr><th>Command</th><th>What it does</th><th>When you run it</th></tr>
+<tr><td><code>paper-backtest</code></td><td>Trains the GBM + historical backtest; <code>--save_model</code> writes the bundle (now with the drift reference baked in)</td><td>When (re)training a model</td></tr>
+<tr><td><code>walkforward-sim</code></td><td>Rolling walk-forward with risk overlay; <code>--stress</code> replays COVID-2020 / 2022 / Q4-2018 shock windows</td><td>Validating a model before trusting it</td></tr>
+<tr><td><code>arena-run backtest</code></td><td>Screens strategies (engulfing, technical, meanrev, gbm) through one filter bar; stores PASS/EXCLUDED + sizing mode + divergence fingerprint</td><td>Once per strategy configuration</td></tr>
+<tr><td><code>arena-run live</code></td><td>One idempotent daily paper tick per PASS strategy — backfills missed days, evaluates breaker + divergence</td><td>Daily (cron or morning routine)</td></tr>
+<tr><td><code>arena-run report</code></td><td>Unranked side-by-side table: live vs backtest, win rate, drawdown, alerts</td><td>Whenever you want the standings</td></tr>
+<tr><td><code>arena-run resume &lt;name&gt;</code></td><td>The ONLY way to un-pause a breaker-tripped strategy</td><td>After you've reviewed why it tripped</td></tr>
+<tr><td><code>arena-run ensemble</code></td><td>Weighted-vote meta-strategy from PASS members, weights = live Sharpe</td><td>Once members have ~20 live days</td></tr>
+<tr><td><code>predict-next</code></td><td>Tomorrow's per-ticker predictions + allocation; <code>--explain</code> (SHAP), <code>--check_drift</code> (PSI)</td><td>Ad-hoc, or via morning-runner</td></tr>
+<tr><td><code>analyze-equity</code></td><td>Sharpe/CAGR/drawdown from any equity CSV</td><td>After any backtest</td></tr>
+<tr><td><code>web-hft</code> / <code>gui-hft</code></td><td>FastAPI web app (:8000) / Tkinter desktop GUI</td><td>Browsing results visually</td></tr>
+<tr><td><code>rh-exec</code></td><td>Robinhood order submission — <strong>dry-run by default</strong></td><td>Only when you mean it</td></tr>
+</table>
+
+<h2 id="s3">3 · The core workflow, end to end</h2>
+<h3>Step A — Train a model (optional: rule strategies need no model)</h3>
+<pre><code>uv run paper-backtest --tickers_file tickers/sap500_tickers.txt \
+    --start 2016-01-01 --end 2020-12-31 \
+    --save_model models/my_bundle.joblib</code></pre>
+<p>The bundle stores <code>{"model", "features", "feature_reference"}</code> — the
+features list pins column order at inference (lesson 0035), the reference powers
+drift checks (lesson 0036).</p>
+
+<h3>Step B — Validate it, including against crashes</h3>
+<pre><code>uv run walkforward-sim --model models/my_bundle.joblib \
+    --start 2021-01-01 --end 2025-01-01 --stress
+uv run analyze-equity --equity_csv walkforward_equity.csv</code></pre>
+<p><code>--stress</code> appends one metrics row per historical shock window — the
+scenarios a few months of live paper trading will never show you.</p>
+
+<h3>Step C — Screen the arena field</h3>
+<pre><code>uv run arena-run backtest --start 2023-01-01 --end 2025-01-01 \
+    --tickers AAPL,MSFT,GOOG,AMZN,NVDA \
+    --cost_model realistic          <span class="cm"># net-of-costs screening</span>
+<span class="cm"># add gbm explicitly: --strategies engulfing,technical,meanrev,gbm --gbm_bundle models/my_bundle.joblib</span></code></pre>
+<p>Each strategy gets PASS or EXCLUDED against a lenient bar (Sharpe &gt; 0, drawdown
+&lt; 30%) — excluded ones stay visible in the report, never silently dropped. The
+sizing mode chosen here (<code>conf_vol</code> by default) is locked to the strategy's
+ledger from now on.</p>
+
+<h3>Step D — Trade it live (paper), daily</h3>
+<pre><code>uv run arena-run live      <span class="cm"># ticks every PASS strategy</span></code></pre>
+<p>Idempotent: run it twice, nothing duplicates. Miss a week: it backfills
+deterministically. Each tick also evaluates the drawdown breaker (auto-pause at
+−20%) and the divergence z-test (flags likely overfits). Cron it or add it to your
+morning routine next to <code>morning-runner</code>.</p>
+
+<h3>Step E — Read the standings, act like the human in the loop</h3>
+<pre><code>uv run arena-run report</code></pre>
+<p>Key columns: <code>status</code> (PASS/EXCLUDED/PAUSED), <code>sharpe_divergence</code>
+and <code>divergence_z</code> (overfit canaries), <code>vol_ratio</code>,
+<code>paused_since</code>. A PAUSED strategy stays dark until
+<code>arena-run resume &lt;name&gt;</code> — resuming resets its drawdown baseline to today.</p>
+
+<h3>Step F — When track records exist, try the ensemble</h3>
+<pre><code>uv run arena-run ensemble --name blend --members engulfing,technical,meanrev</code></pre>
+
+<h2 id="s4">4 · The safety rails (what's protecting you)</h2>
+<table>
+<tr><th>Rail</th><th>Default</th><th>Override</th></tr>
+<tr><td>Real-money orders</td><td><code>rh-exec</code> is dry-run</td><td><code>--no_dry_run</code>, typed by you, on purpose</td></tr>
+<tr><td>Drawdown breaker</td><td>Pauses a live strategy at −20% from peak</td><td><code>--breaker_dd</code> / <code>--no_breaker</code></td></tr>
+<tr><td>Divergence alert</td><td>Flags (never pauses) at z &lt; −2 after 20 live days</td><td><code>--divergence_z</code>, <code>--min_live_days</code></td></tr>
+<tr><td>Regime gate</td><td>Reversal strategies sit out trending markets, momentum sits out mean-reverting ones</td><td><code>--no_regime_gate</code></td></tr>
+<tr><td>Position cap</td><td>No single name above 30% of the book (<code>conf_vol</code>)</td><td><code>--max_pos</code></td></tr>
+<tr><td>Cost realism</td><td><code>flat</code> (legacy) so old numbers reproduce</td><td><code>--cost_model realistic</code> for honest nets</td></tr>
+</table>
+
+<h2 id="s5">5 · Often confused with each other</h2>
+<table>
+<tr><th>Pair</th><th>The difference</th></tr>
+<tr><td><code>paper-backtest</code> vs <code>walkforward-sim</code></td><td>paper-backtest trains AND tests once (single split — optimistic); walkforward-sim never trains on the day it trades (rolling, honest). Validate with the second.</td></tr>
+<tr><td><code>arena-run backtest</code> vs <code>arena-run live</code></td><td>Same deterministic engine, different role: backtest = one-shot screening over a fixed window; live = incremental daily ticks persisted to arena_state/arena.db with watchdogs active.</td></tr>
+<tr><td>PAUSED vs EXCLUDED</td><td>EXCLUDED failed the screening backtest (never traded live); PAUSED was trading live until the breaker tripped it. Only PAUSED can be resumed.</td></tr>
+<tr><td><code>predict-next</code> vs <code>arena-run live</code></td><td>predict-next is a one-off forecast + suggested allocation (nothing persisted); arena live maintains ongoing ledgers and track records.</td></tr>
+</table>
+
+<h2 id="s6">6 · Practice</h2>
+<p>Score: <span id="score">0 / 0</span></p>
+
+<div class="question" data-question>
+  <p><strong>Q1.</strong> You retrained a model and want to trust it before the arena sees it. Which command sequence is right?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="predict-next is a one-off forecast — it validates nothing about historical robustness.">paper-backtest → predict-next → arena-run live</li>
+    <li data-correct="true" data-why="Train (save the bundle), validate honestly with the rolling walk-forward including shock replays, THEN screen it into the arena.">paper-backtest --save_model → walkforward-sim --stress → arena-run backtest</li>
+    <li data-correct="false" data-why="arena-run live only ticks strategies that already PASSED screening — gbm isn't in the arena until backtest screens it.">paper-backtest --save_model → arena-run live</li>
+    <li data-correct="false" data-why="rh-exec submits (dry-run) orders to Robinhood — it has no role in validation.">walkforward-sim → rh-exec → arena-run report</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q2.</strong> Your laptop was closed for four days. What do you do about the arena's missed ticks?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="There is no --backfill flag — you never need one.">Run arena-run live --backfill 4</li>
+    <li data-correct="false" data-why="Nothing is corrupted; deleting the DB throws away every strategy's track record.">Delete arena_state/arena.db and re-screen</li>
+    <li data-correct="true" data-why="The live tick is self-backfilling: strategies are deterministic given data, so the next run replays the missed days exactly. Running it twice is also safe (idempotent).">Just run arena-run live — it backfills the gap automatically</li>
+    <li data-correct="false" data-why="Manual SQL against the ledger defeats the deterministic-replay design and will desync equity chaining.">INSERT the missing rows into the equity table by hand</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q3.</strong> The report shows <code>meanrev: PAUSED, paused_since=2026-07-01</code>. What happened, and what's the ONLY way it trades again?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="EXCLUDED is the screening verdict; PAUSED comes from the live breaker.">It failed the backtest filter; re-run arena-run backtest</li>
+    <li data-correct="true" data-why="The drawdown breaker tripped (>20% below its running peak). Nothing auto-resumes it — you review the breaker_events row, decide, and run arena-run resume meanrev, which also resets its drawdown baseline to today.">Its live drawdown crossed the breaker threshold; arena-run resume meanrev after your review</li>
+    <li data-correct="false" data-why="Divergence deliberately never pauses — it only flags.">The divergence z-test paused it; wait for z to recover</li>
+    <li data-correct="false" data-why="The regime gate produces per-day holds, not a persistent status change.">The regime gate paused it; it resumes when the regime flips</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q4.</strong> Which single flag moves you from "gross-ish" results to net-of-costs results across screening?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="--trade_cost_bps tunes the LEGACY flat haircut — still turnover-blind.">--trade_cost_bps 5</li>
+    <li data-correct="true" data-why="realistic mode charges commission + half-spread + square-root impact on actual turnover; equity_gross and cost columns let you see the drag explicitly.">--cost_model realistic</li>
+    <li data-correct="false" data-why="That's the per-position sizing cap — risk control, not cost modeling.">--max_pos 0.30</li>
+    <li data-correct="false" data-why="fallback_adv only sets the assumed liquidity when Volume data is missing, within realistic mode.">--fallback_adv 500000</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q5.</strong> What does it take for real money to move on this platform?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The arena is paper-only by construction — its ledgers are SQLite rows, not brokerage orders.">A strategy passing arena-run backtest</li>
+    <li data-correct="false" data-why="predict-next prints forecasts and suggested weights; it submits nothing.">Running predict-next with --capital set</li>
+    <li data-correct="true" data-why="Only rh-exec touches Robinhood, and only with the explicit --no_dry_run flag (plus RH_* credentials). Every other command in this guide is simulation or paper.">You explicitly running rh-exec --no_dry_run</li>
+    <li data-correct="false" data-why="The ensemble is just another paper ledger in the arena.">Building an ensemble of PASS strategies</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2 id="s7">7 · Check your understanding (scenarios)</h2>
+<div class="scenario"><details><summary><strong>Scenario A.</strong> Monday morning routine in three commands — what would yours be?</summary>
+<p>Something like: <code>arena-run live</code> (tick + backfill the weekend, watchdogs run),
+<code>arena-run report</code> (read the standings, note any PAUSED/diverged rows),
+and <code>predict-next --model ... --explain --check_drift</code> if you want the GBM's
+view of today with its reasoning and input-health attached. <code>morning-runner</code>
+can wrap the pipeline pieces you automate.</p></details></div>
+<div class="scenario"><details><summary><strong>Scenario B.</strong> The report shows technical's live Sharpe at 0.1 vs backtest 1.4, divergence_z = −2.6, but it's NOT paused. Why not, and what's your move?</summary>
+<p>Divergence flags but never pauses — its drawdown hasn't breached the breaker.
+The z-score says live returns are inconsistent with the screening backtest beyond
+sampling noise: the classic overfit signature (lesson 0036). Your move is judgment:
+check <code>--check_drift</code>-style input health and the regime log; if nothing
+external explains it, retire or re-screen the strategy. The system deliberately
+leaves that call to you.</p></details></div>
+<div class="scenario"><details><summary><strong>Scenario C.</strong> You want the engulfing strategy to trade in ALL regimes for an experiment. Two ways to do it?</summary>
+<p>Quick and global: <code>--no_regime_gate</code> on the arena command (disables gating
+for every strategy that run). Surgical and permanent: widen
+<code>DailyEngulfingStrategy.compatible_regimes</code> in
+<code>strategies/candlestick_daily.py</code> — but that's a strategy-definition change,
+so re-screen afterwards.</p></details></div>
+
+<div class="done-row">
+  <label><input type="checkbox"> setup</label>
+  <label><input type="checkbox"> command map</label>
+  <label><input type="checkbox"> core workflow</label>
+  <label><input type="checkbox"> safety rails</label>
+  <label><input type="checkbox"> quiz</label>
+  <label><input type="checkbox"> scenarios</label>
+</div>
+
+<script>
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+let answered = 0, right = 0;
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = q.querySelector('.feedback');
+  let done = false;
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      const correct = li.dataset.correct === 'true';
+      if (!done){ answered++; if (correct) right++; done = true; }
+      li.classList.add(correct ? 'picked-right' : 'picked-wrong');
+      feedback.hidden = false;
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      document.getElementById('score').textContent = right + ' / ' + answered;
+    });
+  });
+});
+</script>
+</main>
+</body>
+</html>

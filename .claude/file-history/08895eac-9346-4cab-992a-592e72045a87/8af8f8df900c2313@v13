@@ -1,0 +1,298 @@
+"""Backtest-vs-live divergence: walk-forward CCF vs full-sample CCF.
+
+Plan: ``.claude/plans/backtest-vs-live-divergence.md``. Runs the flagship
+CCF lead-lag signal two ways — the current backtest path (full dataset
+visible) and an "as-if-live" walk-forward path (each estimate sees only data
+before its as-of date) — and quantifies the gap.
+
+"Live" here means information-set restriction only: yfinance history is
+retroactively adjusted, so vendor point-in-time data is out of reach on the
+free tier. The docs/perf writeup must restate this.
+
+Sign convention is inherited unchanged from ``leadlag.ccf_leadlag``: a peak
+at ``k > 0`` means ``x`` leads ``y`` (see that module's docstring).
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+
+from oil_alpha.analysis.leadlag import LeadLagResult, ccf_leadlag
+
+#: Trailing estimation window / re-estimation step, in trading days.
+DEFAULT_WINDOW = 252
+DEFAULT_STEP = 21
+
+
+@dataclass(frozen=True)
+class WalkForwardStep:
+    """One as-of-date estimate plus its out-of-sample score.
+
+    ``oos_corr_at_pit_lag`` scores the point-in-time estimate on the NEXT
+    ``step`` days; ``oos_corr_at_full_lag`` scores the full-sample peak lag
+    on the same days — the difference is the look-ahead advantage.
+    """
+
+    as_of: pd.Timestamp
+    window_start: pd.Timestamp
+    leader: str
+    peak_lag: int
+    peak_corr: float
+    oos_corr_at_pit_lag: float
+    oos_corr_at_full_lag: float
+
+
+@dataclass(frozen=True)
+class DivergenceReport:
+    """Aggregate backtest-vs-live gap over all walk-forward steps."""
+
+    steps: list[WalkForwardStep]
+    full_sample: LeadLagResult
+    leader_agreement_rate: float   # fraction of steps agreeing with full-sample leader
+    mean_abs_lag_drift: float      # mean |pit peak_lag - full-sample peak_lag|
+    mean_oos_gap: float            # mean (full-lag OOS corr - pit-lag OOS corr)
+    n_steps: int
+    n_skipped: int = field(default=0)
+
+
+def _aligned(x: pd.Series, y: pd.Series) -> pd.DataFrame:
+    """Inner-join on common dates and drop NaNs (shared by both paths).
+
+    Dropping NaNs up front never leaks future information: it removes whole
+    rows by date, and every window below still sees only rows strictly
+    before its as-of date.
+    """
+    return pd.concat([x, y], axis=1, join="inner").dropna()
+
+
+def _lagged_corr(x: pd.Series, y: pd.Series, k: int) -> float:
+    """Pearson corr(x_t, y_{t+k}) over an aligned slice — leadlag's convention.
+
+    Positive ``k`` pairs today's ``x`` with future ``y`` (x leads). Returns
+    NaN when fewer than two overlapping points survive the shift or a side
+    has zero variance.
+    """
+    xv = x.to_numpy(dtype=float)
+    yv = y.to_numpy(dtype=float)
+    n = len(xv)
+    if k >= 0:
+        a, b = xv[: n - k], yv[k:]
+    else:
+        a, b = xv[-k:], yv[: n + k]
+    if len(a) < 2:
+        return float("nan")
+    a = a - a.mean()
+    b = b - b.mean()
+    denom = np.sqrt((a * a).sum()) * np.sqrt((b * b).sum())
+    return float((a * b).sum() / denom) if denom > 0 else float("nan")
+
+
+def _min_length(window: int, step: int) -> int:
+    """Fewest aligned rows for even one estimate-and-score cycle."""
+    return window + step
+
+
+def walkforward_ccf(
+    x: pd.Series,
+    y: pd.Series,
+    window: int = DEFAULT_WINDOW,
+    step: int = DEFAULT_STEP,
+    max_lag: int = 10,
+    full_lag: int | None = None,
+) -> list[WalkForwardStep]:
+    """Strict point-in-time CCF estimates over a rolling schedule.
+
+    For each as-of index ``t`` in ``range(window, n - step + 1, step)`` the
+    estimate uses only ``[t - window, t)`` (asserted: no row at index ``>= t``
+    enters) and is scored out-of-sample on ``[t, t + step)`` at both its own
+    peak lag and the full-sample peak lag. ``full_lag`` is passed by
+    :func:`divergence_report` so the full-sample fit happens once; when
+    ``None`` it is computed here from the whole series (used by standalone
+    callers and the look-ahead guard test — it never enters the PIT estimate).
+
+    Steps whose window degenerates (zero variance / too few points) are
+    skipped; the count is recoverable as ``scheduled - len(result)``. Raises
+    ``ValueError`` if fewer than ``window + step`` aligned rows exist.
+    """
+    joined = _aligned(x, y)
+    n = len(joined)
+    need = _min_length(window, step)
+    if n < need:
+        raise ValueError(
+            f"series too short for walk-forward: need at least "
+            f"window+step = {need} aligned rows, got {n}"
+        )
+    xs, ys = joined.iloc[:, 0], joined.iloc[:, 1]
+    if full_lag is None:
+        full_lag = ccf_leadlag(xs, ys, max_lag=max_lag).peak_lag
+
+    steps: list[WalkForwardStep] = []
+    for t in range(window, n - step + 1, step):
+        x_in, y_in = xs.iloc[t - window : t], ys.iloc[t - window : t]
+        as_of = xs.index[t]
+        # Strict point-in-time guard: nothing at or after the as-of date. A
+        # real raise, not an assert — this is the load-bearing invariant of a
+        # look-ahead-bias study and must survive `python -O`.
+        if x_in.index.max() >= as_of:
+            raise RuntimeError(
+                f"look-ahead: window ending {x_in.index.max()} reached the "
+                f"as-of date {as_of}"
+            )
+        try:
+            res = ccf_leadlag(x_in, y_in, max_lag=max_lag)
+        except (ValueError, ZeroDivisionError):
+            continue  # degenerate window — skipped, counted by the caller
+        if not np.isfinite(res.peak_corr):
+            continue
+
+        x_oos, y_oos = xs.iloc[t : t + step], ys.iloc[t : t + step]
+        steps.append(
+            WalkForwardStep(
+                as_of=as_of,
+                window_start=xs.index[t - window],
+                leader=res.leader,
+                peak_lag=res.peak_lag,
+                peak_corr=res.peak_corr,
+                oos_corr_at_pit_lag=_lagged_corr(x_oos, y_oos, res.peak_lag),
+                oos_corr_at_full_lag=_lagged_corr(x_oos, y_oos, full_lag),
+            )
+        )
+    return steps
+
+
+def divergence_report(
+    x: pd.Series,
+    y: pd.Series,
+    window: int = DEFAULT_WINDOW,
+    step: int = DEFAULT_STEP,
+    max_lag: int = 10,
+) -> DivergenceReport:
+    """Run both paths and aggregate the gap into a :class:`DivergenceReport`.
+
+    Leader agreement is exact-string on the leader label, so a contemporaneous
+    PIT verdict (``peak_lag == 0`` → ``"contemporaneous"``) agrees only with a
+    contemporaneous full-sample verdict, per the plan.
+    """
+    joined = _aligned(x, y)
+    n = len(joined)
+    need = _min_length(window, step)
+    if n < need:
+        raise ValueError(
+            f"series too short for walk-forward: need at least "
+            f"window+step = {need} aligned rows, got {n}"
+        )
+    xs, ys = joined.iloc[:, 0], joined.iloc[:, 1]
+    full = ccf_leadlag(xs, ys, max_lag=max_lag)
+
+    steps = walkforward_ccf(x, y, window, step, max_lag, full_lag=full.peak_lag)
+    scheduled = len(range(window, n - step + 1, step))
+    n_skipped = scheduled - len(steps)
+
+    if steps:
+        agree = sum(s.leader == full.leader for s in steps) / len(steps)
+        lag_drift = float(np.mean([abs(s.peak_lag - full.peak_lag) for s in steps]))
+        gaps = [
+            s.oos_corr_at_full_lag - s.oos_corr_at_pit_lag
+            for s in steps
+            if np.isfinite(s.oos_corr_at_full_lag)
+            and np.isfinite(s.oos_corr_at_pit_lag)
+        ]
+        oos_gap = float(np.mean(gaps)) if gaps else float("nan")
+    else:
+        agree = lag_drift = oos_gap = float("nan")
+
+    return DivergenceReport(
+        steps=steps,
+        full_sample=full,
+        leader_agreement_rate=agree,
+        mean_abs_lag_drift=lag_drift,
+        mean_oos_gap=oos_gap,
+        n_steps=len(steps),
+        n_skipped=n_skipped,
+    )
+
+
+def _print_report(report: DivergenceReport, x_name: str, y_name: str) -> None:
+    """Human-readable dump of the step table and the three headline metrics."""
+    full = report.full_sample
+    print(
+        f"Full-sample (backtest) verdict: leader={full.leader} "
+        f"peak_lag={full.peak_lag:+d} peak_corr={full.peak_corr:+.3f}"
+    )
+    print(
+        f"Walk-forward steps: {report.n_steps} "
+        f"(skipped {report.n_skipped}); window/step by trading days.\n"
+    )
+    header = (
+        f"{'as_of':<12}{'leader':<16}{'lag':>5}{'peak_r':>9}"
+        f"{'oos_pit':>9}{'oos_full':>9}"
+    )
+    print(header)
+    print("-" * len(header))
+    for s in report.steps:
+        print(
+            f"{s.as_of.date()!s:<12}{s.leader:<16}{s.peak_lag:>+5d}"
+            f"{s.peak_corr:>+9.3f}{s.oos_corr_at_pit_lag:>+9.3f}"
+            f"{s.oos_corr_at_full_lag:>+9.3f}"
+        )
+    print("\n=== Divergence (backtest vs as-if-live) ===")
+    print(f"leader_agreement_rate : {report.leader_agreement_rate:.3f}")
+    print(f"mean_abs_lag_drift    : {report.mean_abs_lag_drift:.3f} trading days")
+    print(f"mean_oos_gap          : {report.mean_oos_gap:+.4f} correlation")
+    print(
+        f"\nInterpretation: agreement below 1.0 means the {x_name}->{y_name} "
+        f"leader conclusion is not stable once the future is hidden; a positive "
+        f"mean_oos_gap is the full-sample lag's unfair out-of-sample advantage."
+    )
+
+
+def _main() -> None:
+    """CLI: run on real CL/XLE via the cached pipeline data path.
+
+    Fetches the two protagonists (config LEAD/LAG = CL=F / XLE) through the
+    same ``fetch_prices`` + ``build_returns_frame`` path the pipeline uses
+    (cache on by default; no new API surface), then prints the step table and
+    the three headline metrics that feed the docs/perf writeup.
+    """
+    from oil_alpha.clean import build_returns_frame
+    from oil_alpha.config import DEFAULT_START, LAG, LEAD, default_end
+    from oil_alpha.data import sources
+    from oil_alpha.data.budget import APIBudget
+
+    parser = argparse.ArgumentParser(description="Backtest-vs-live CCF divergence")
+    parser.add_argument("--start", default=DEFAULT_START)
+    parser.add_argument("--end", default=default_end())
+    parser.add_argument("--window", type=int, default=DEFAULT_WINDOW)
+    parser.add_argument("--step", type=int, default=DEFAULT_STEP)
+    parser.add_argument("--max-lag", type=int, default=10)
+    parser.add_argument(
+        "--no-cache", action="store_true", help="bypass the parquet cache"
+    )
+    args = parser.parse_args()
+
+    prices = sources.fetch_prices(
+        [LEAD, LAG], args.start, args.end,
+        budget=APIBudget(), use_cache=not args.no_cache,
+    )
+    if prices.empty:
+        raise SystemExit("no price data fetched; check connectivity or cache")
+    returns, _flags = build_returns_frame(prices)
+    x, y = returns[LEAD], returns[LAG]
+
+    print(
+        f"CL(={LEAD})-leads-XLE(={LAG}) divergence, {args.start} -> {args.end}\n"
+        f"'As-if-live' = information-set restriction only; yfinance history is "
+        f"retroactively adjusted, so this is NOT vendor point-in-time.\n"
+    )
+    report = divergence_report(
+        x, y, window=args.window, step=args.step, max_lag=args.max_lag
+    )
+    _print_report(report, LEAD, LAG)
+
+
+if __name__ == "__main__":
+    _main()

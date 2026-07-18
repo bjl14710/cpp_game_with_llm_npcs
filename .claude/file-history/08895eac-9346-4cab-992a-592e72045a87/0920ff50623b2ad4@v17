@@ -1,0 +1,63 @@
+# Checkpoint
+Session: 2026-07-07 (continued, scaffolded-plan implementation)
+Goal: Implement the five scaffolded 2026-07-06 plans (GitHub auth broken, so
+      no issue queue — working directly from the plan docs on feature branches).
+Status: IN PROGRESS
+
+## Scaffolded plans — implementation status  (ALL 5 COMPLETE)
+- [x] bench-latency-history   → feature/bench-latency-history   → PR #18 (draft) COMPLETED
+- [x] backtest-vs-live-divergence → feature/backtest-vs-live-divergence → PR #17 COMPLETED
+- [x] itch-replay-clock        → feature/itch-replay-clock       → PR #19 (draft) COMPLETED
+- [x] avellaneda-stoikov-mm-sim → feature/avellaneda-stoikov-mm-sim → PR #20 (draft) COMPLETED
+- [x] vhdl-flat-book           → feature/vhdl-flat-book           → PR #21 (draft) COMPLETED
+
+## GitHub auth: RESOLVED (2026-07-07)
+User put a valid 40-char PAT on the active `export GH_TOKEN=` line of ~/.zshrc.
+This process's env still has the OLD invalid token, so drive gh by reading the
+token from .zshrc per-command:
+  TOKEN=$(grep -E '^[[:space:]]*export[[:space:]]+GH_TOKEN=' ~/.zshrc | head -1 | sed -E 's/^[[:space:]]*export[[:space:]]+GH_TOKEN=//; s/^"//; s/"$//; s/[[:space:]]*#.*$//')
+  GH_TOKEN="$TOKEN" gh ...
+Never print the token. (~/.zshrc line 5 still re-exports it in new shells; user
+may want to switch to keychain later but not required.)
+
+## Completed this session
+### bench-latency-history (feature/bench-latency-history)
+- scripts/bench_history.py: parser, regression rule, host fingerprint, runner
+  (best-of-K, schema-marked LF CSV, exit 0/1/2). scripts/install_bench_hook.sh:
+  idempotent pre-push hook. tests/test_bench_history.py: 12 tests (un-skipped).
+  docs/perf/history.csv seeded; docs/perf/README.md added. Reviewed clean.
+### backtest-vs-live-divergence (feature/backtest-vs-live-divergence)
+- src/oil_alpha/analysis/walkforward.py: strict PIT walk-forward CCF +
+  divergence_report + CLI. tests/test_walkforward.py: 5 tests (un-skipped).
+  docs/perf/03-backtest-vs-live.md: real-data null (contemporaneous, 124 steps,
+  0 divergence) + synthetic regime-flip control (agreement 0.489). PROGRESS.md
+  teach-target note. Reviewed clean (assert hardened to a raise).
+
+### avellaneda-stoikov-mm-sim (feature/avellaneda-stoikov-mm-sim → PR #20)
+- OrderBookQueue (FIFO per-level deques, top_of_book parity), ShadowOrder
+  (no-impact fills by riding real executions), MMSimulator (A-S quoter clamped
+  to the touch, latency-deferred action queue, PnL decomposition), pybind11
+  run_mm_sim columnar bridge, mm_analysis.py + CLI (--latency-sweep). 11 C++ +
+  3 py tests. docs/perf/04: fills 1091→783→701→636 (−42%) at 0/1/5/20 ms.
+  Reviewer CRITICAL fixed: apply_requote was resetting BOTH shadows on a
+  one-sided reprice (violated quote_size cap) → per-side set_bid/set_ask gating
+  + QuoteSizeCapHoldsWhenOnlyOtherSideReprices regression test.
+### vhdl-flat-book (feature/vhdl-flat-book → PR #21)
+- golden_vectors_main.cpp (LevelBook oracle, schema-pinned CSV, edge+random),
+  hw/vhdl/flat_book.vhd (priority-encoder best scan, registered outputs),
+  flat_book_tb.vhd (std.textio file-driven, header pins depth/shares_w),
+  run_vhdl_sim.sh, tests/test_vhdl_flat_book.py (3 parity tests). GHDL 6.0.0
+  installed via Homebrew (user-approved). docs/perf/05 constant-cycle vs
+  range-linear. Reviewer CRITICAL fixed: edge_ops hardcoded indexes overran
+  level arrays at small depth (heap overflow) → derived-from-depth + depth>=8
+  guard; HIGH: deterministic oracle-binary selection; MEDIUM: header asserts
+  depth/shares_w.
+
+## Standing constraints
+- GitHub auth RESOLVED (see above): drive gh with the ~/.zshrc token per-command;
+  never print it. MUST NOT extract keychain creds via `git credential fill`.
+- plan_document.md (untracked repo-root) and .claude/memory/ — never stage.
+
+## Per-branch suite status (each branch shows sibling plans as scaffold skips):
+- vhdl-flat-book: pytest 48 passed / 13 skipped, ctest 38/38, GHDL 3/3. 0 failures.
+All five plans implemented, reviewed, committed, pushed, draft PRs #17-21 open.

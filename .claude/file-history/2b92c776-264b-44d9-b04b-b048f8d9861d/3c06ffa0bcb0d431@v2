@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "KayKit City Builder Bits + Character Pack Adventures (both CC0), pinned to "
+    "immutable commit archives with sha256 checks in `tools/fetch_assets.sh`; "
+    "`assets/LICENSES.md` records provenance. `Assets` loads 22 city models once at "
+    "startup (curated picks for named landmarks, stable-hash rotation for filler); "
+    "`RaylibRenderer` scales every model to its authoritative collision AABB and lays "
+    "streets/sidewalks/plaza from the documented 3x3 downtown grid. Missing assets "
+    "degrade to primitive boxes + an on-screen notice.\n\n"
+    "**Verified:** all 22 models load, 60/150-frame smoke runs exit 0, and a "
+    "last-frame screenshot (new `--frames N shot.png` option) shows textured "
+    "buildings, layered ground, and props seated correctly. Suite green (96).\n\n"
+    "**Known polish item (deferred to #42):** the plaza fountain uses the pack's "
+    "`base` tile as a stand-in and reads as a flat slab.\n\n"
+    "**Stack position:** bases on #44 (input/modes). Merge in order.\n\n"
+    "Closes #37\n\n---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(
+            title="feat(render): low-poly city scene from CC0 asset packs",
+            body=body, head="feature/issue-37-raylib-city-scene",
+            base="feature/issue-36-raylib-input-modes", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)
+
+issue = repo.get_issue(37)
+issue.remove_from_labels("ready-for-ai")
+issue.add_to_labels("ai-completed")
+issue.create_comment(f"Implemented. Draft PR: #{pr.number} — closes on merge.")
+print("issue 37 ai-completed")

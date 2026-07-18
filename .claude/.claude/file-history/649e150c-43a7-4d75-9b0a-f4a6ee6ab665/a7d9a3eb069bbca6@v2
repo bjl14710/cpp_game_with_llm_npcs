@@ -1,0 +1,159 @@
+#pragma once
+/**
+ * @file order_book.hpp  (exercises/06_cpp_order_book)
+ * @brief Exercise 06 — C++ price-time-priority limit order book.
+ *
+ * Port the Python LOB from exercise 01 to C++.  Same semantics, faster
+ * data structures.
+ *
+ *   Data structure          BBO         Insert      Cancel
+ *   std::map (your task)    O(log P)    O(log P)    O(log P + L)
+ *   Flat tick array (L4+)   O(1) amort  O(1)        O(L)
+ *
+ * Price convention: integer TICKS, where 1 tick = $0.0001.
+ *   Example: $100.25 → price_ticks = 1,002,500
+ *   This avoids float equality bugs in map lookups.
+ *
+ * Side convention: 'B' = bid/buy, 'A' = ask/sell.
+ *
+ * Grading: uv run pytest tests/exercises/test_06_cpp_order_book.py -v
+ * Peek:    see solutions/06_cpp_order_book/order_book.hpp after attempting.
+ *
+ * --------------------------------------------------------------------
+ * Complexity / theoretical speed profile (per operation):
+ *   std::map lookup     ≈ O(log P)   ≈ 100–300 ns for P ~ 10^4 levels
+ *   std::deque insert   ≈ O(1) amort ≈ 30–80 ns
+ *   O(1) cancel (index) ≈ O(1)        ≈ 50–150 ns unordered_map lookup
+ *   Market fill (k ord) ≈ O(k log P) ≈ k × above
+ *
+ * The L4 flat-array book cuts BBO and insert to ~10 ns amortized by
+ * replacing std::map with a fixed-size price-level array and maintaining
+ * best_bid/ask as a running pointer.  That is exercise 06's "extension"
+ * and exercise 10's capstone.
+ * --------------------------------------------------------------------
+ */
+#include <algorithm>
+#include <climits>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+// ---------------------------------------------------------------------------
+// Shared structs — do not modify.
+// ---------------------------------------------------------------------------
+struct Order { int64_t order_id; int64_t price_ticks; int32_t qty; };
+struct Fill  { int64_t order_id; int64_t price_ticks; int32_t qty; };
+
+// ---------------------------------------------------------------------------
+// OrderBook — implement all six TODO sections below.
+// ---------------------------------------------------------------------------
+class OrderBook {
+public:
+    // -----------------------------------------------------------------------
+    // TODO 1 — add_limit
+    // Add a resting limit order.
+    //   - Validate: side must be 'B' or 'A'; price_ticks and qty must be > 0.
+    //   - Validate: order_id must not already exist (throw std::invalid_argument).
+    //   - Route the Order to the correct level deque in bids_ or asks_.
+    //   - Record {side, price_ticks} in order_index_ so cancel is O(1).
+    // -----------------------------------------------------------------------
+    void add_limit(int64_t order_id, char side, int64_t price_ticks, int32_t qty) {
+        (void)order_id; (void)side; (void)price_ticks; (void)qty;
+        throw std::logic_error("not implemented");
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 2 — cancel
+    // Remove a resting order by order_id.
+    //   - Look up the order in order_index_ (throw std::out_of_range if missing).
+    //   - Remove the Order entry from its level deque (linear search in deque).
+    //   - Erase the price level from the map if the deque is now empty
+    //     (critical: leaving empty levels breaks best_bid/best_ask).
+    //   - Erase the entry from order_index_.
+    // -----------------------------------------------------------------------
+    void cancel(int64_t order_id) {
+        (void)order_id;
+        throw std::logic_error("not implemented");
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 3 — execute_market
+    // Execute a market order; return fills in price-time order.
+    //   side 'B' (buy) lifts asks: walk asks_ from begin() (lowest price first).
+    //   side 'A' (sell) hits bids: walk bids_ from begin() (highest price first).
+    //
+    //   Within each level, consume FIFO (front of deque first).
+    //   A partially-consumed order stays at the front with reduced qty.
+    //   Erase a price level when its deque becomes empty.
+    //   Erase from order_index_ when an order is FULLY filled.
+    // -----------------------------------------------------------------------
+    std::vector<Fill> execute_market(char side, int32_t qty) {
+        (void)side; (void)qty;
+        throw std::logic_error("not implemented");
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 4 — best_bid / best_ask
+    // Return the best (highest) bid or (lowest) ask price in ticks.
+    // Return INT64_MIN (no bids) or INT64_MAX (no asks) when the side is empty.
+    //
+    // Hint: for bids_ (sorted largest-first), begin() IS the best bid.
+    //       for asks_ (sorted smallest-first), begin() IS the best ask.
+    //       Each is a one-liner.
+    // -----------------------------------------------------------------------
+    int64_t best_bid() const {
+        throw std::logic_error("not implemented");
+    }
+
+    int64_t best_ask() const {
+        throw std::logic_error("not implemented");
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 5 — level_qty
+    // Return total resting quantity at a price level; 0 if absent.
+    // -----------------------------------------------------------------------
+    int32_t level_qty(char side, int64_t price_ticks) const noexcept {
+        (void)side; (void)price_ticks;
+        return 0;  // replace with real implementation
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 6 — imbalance
+    // Signed imbalance in [-1, 1]:
+    //   (bid_qty - ask_qty) / (bid_qty + ask_qty)
+    // Sum the top `levels` price levels on each side.
+    // Return 0.0 if both sides are empty.
+    // -----------------------------------------------------------------------
+    double imbalance(int levels = 1) const noexcept {
+        (void)levels;
+        return 0.0;  // replace with real implementation
+    }
+
+private:
+    // -----------------------------------------------------------------------
+    // TODO 0 (data members) — pick your container types.
+    //
+    // Requirements:
+    //   bids_:  map price → FIFO deque of Orders, best (highest) price first.
+    //           Hint: std::map<int64_t, std::deque<Order>, std::greater<int64_t>>
+    //
+    //   asks_:  map price → FIFO deque of Orders, best (lowest) price first.
+    //           Hint: std::map<int64_t, std::deque<Order>>   (default less<>)
+    //
+    //   order_index_:  order_id → {side, price_ticks} for O(1) cancel lookup.
+    //           Hint: std::unordered_map<int64_t, std::pair<char, int64_t>>
+    //
+    // Replace these placeholders:
+    // -----------------------------------------------------------------------
+
+    // TODO: declare bids_ here
+    // TODO: declare asks_ here
+    // TODO: declare order_index_ here
+};

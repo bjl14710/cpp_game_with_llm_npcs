@@ -1,0 +1,44 @@
+// Scaffolded stubs for the trait system (plan: npc-traits-and-ratings).
+// Un-skip each in the commit that implements its step.
+#include "Trait.hpp"
+#include "doctest.h"
+
+using namespace llm_npc;
+
+TEST_CASE("trait files parse and malformed ones are skipped with errors" *
+          doctest::skip()) {
+    // Step 1. TODO(traits): loadAllTraits over a temp dir — valid file
+    // (traits/grumpy.trait is the format spec) yields rules + paired
+    // examples in order; example_npc without a preceding example_user is
+    // a named error; file skipped, others load (loadAllPersonas contract).
+}
+
+TEST_CASE("prompt assembly order: rules -> examples -> memory -> reinforcement" *
+          doctest::skip()) {
+    // Step 2. TODO(traits): render a persona with trait 'grumpy' and a
+    // non-empty memory; assert string indices:
+    //   backstory < trait rules < examples < memory summary < reinforcement
+    // — the post-memory reinforcement is the anti-drift contract (brief
+    // item 4) and MUST be pinned by index comparison, not presence.
+}
+
+TEST_CASE("unknown trait ids demote at spawn with a logged reason" *
+          doctest::skip()) {
+    // Step 2/3. TODO(traits): persona `trait = nonexistent` still spawns;
+    // remaining valid traits render; reason surfaced (stale-look rule).
+    // Also: >3 trait keys = parse error (cap keeps prompts bounded).
+}
+
+TEST_CASE("persona trait keys round-trip through renderPersonaText" *
+          doctest::skip()) {
+    // Step 2. TODO(traits): repeated `trait =` lines parse in order and
+    // render back identically (same guarantee as schedule/look lines).
+}
+
+TEST_CASE("rating capture appends JSONL and never touches live prompts" *
+          doctest::skip()) {
+    // Step 4. TODO(traits): good -> saves/ratings/candidates.jsonl row
+    // {trait ids, persona id, player line, npc reply, ts}; bad ->
+    // rejected.jsonl; the rendered system prompt is byte-identical before
+    // and after rating (no auto-promotion, by design).
+}

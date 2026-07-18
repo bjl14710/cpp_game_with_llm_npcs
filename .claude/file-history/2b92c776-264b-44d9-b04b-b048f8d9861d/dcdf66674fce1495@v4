@@ -1,0 +1,91 @@
+# Overnight Build Report
+Date: 2026-07-05 (session 2 — raylib migration + NPC memory)
+Sessions: #1 multiplayer (earlier tonight, PRs #28-#34, merged by you),
+#2 raylib overhaul + your 1:30 AM /idea project (this report)
+
+## Summary
+The ENTIRE raylib milestone shipped as stacked draft PRs — SFML and the
+hand-rolled GL renderer are gone; the game runs on raylib 5.5 with a KayKit
+low-poly city, animated characters, mood emote billboards, the full
+dialogue/menu/HUD, complete multiplayer wiring, and the legacy renderer
+deleted. Your mid-session /idea (NPC memory + local model benchmark) is
+implemented: NPCs persist first-person memories in SQLite across restarts,
+and the model benchmark ran against the game's real directive contract.
+Stale weapons issues were triaged with an integration map.
+
+## Completed ✅
+| Issue | Title | PR | Notes |
+|-------|-------|----|----|
+| #35 | FetchContent raylib + blank window | #43 | raylib 5.5 pinned; SFML gone; `--frames` smoke flag |
+| #36 | input/camera/mode machine | #44 | keybindings.cfg still loads; macOS cursor hack deleted |
+| #37 | low-poly city scene | #47 | KayKit packs pinned+sha256; screenshot-verified |
+| #38 | animated glTF characters | #48 | 5 adventurers, clips by name; screenshot-verified |
+| #39 | mood faces | #51 | emote billboards (KayKit uses one atlas material — plan's documented fallback) |
+| #40 | DialogUI/Menu/HUD parity | #52 | full gameplay + multiplayer wiring back; your interactive checklist is in the PR |
+| #42 | legacy renderer deletion | #53 | -607 lines; face side-by-side gate = review of this draft |
+| /idea | NPC memory + model bench | #54 | qwen3:8b adopted with think=false; see below |
+| — | weapons issues #7-13 triage | — | needs-human + integration map in issue #46 |
+| — | multiplayer stack consolidation | #45 (**ready to merge**) | your stacked merges only reached feature branches; #45 carries them into main |
+
+## Your /idea project (autonomous decisions logged)
+Plan + full decision log: `.claude/plans/npc-memory-and-model.md`. Highlights:
+1. **Your brief said Gemma + `format: json` — the repo actually runs
+   qwen2.5:3b with `[MOOD:]`/`[ACTION:]` text tags** (config/llm.cfg,
+   NpcAction.hpp). Benchmarked the real tag contract; the C++ interface is
+   untouched as you required.
+2. **Mistral Small (24B) doesn't fit 16 GB RAM** → substituted
+   mistral:7b-instruct.
+3. Persona consistency is proxy-scored (fourth-wall breaks, identity drift,
+   sustained tag compliance) — fully local, no cloud judge.
+4. SQLite = vendored amalgamation 3.50.2 in external/ (public domain), since
+   MinGW lacks system sqlite; single table `conversations(npc_id, summary,
+   transcript_json, updated_at)`.
+5. Memory = the NPC's own model summarizes on conversation close; injected
+   before the action protocol so directives stay last.
+6. Transcript persistence is currently bounded to the NPC's 10-turn history
+   window; the unbounded transcript needs #40's dialogue port to observe
+   turns. Full end-to-end in-game memory demo also lands with #40 — the
+   store/injection loop is covered by 7 new unit tests meanwhile.
+7. **Benchmark verdict (bench/REPORT.md, committed on PR #54): qwen3:8b
+   ADOPTED with `think = false`.** Baseline qwen2.5:3b = 70% tag compliance /
+   1.1s TTFT; qwen3:8b = 100% compliance but 24s TTFT with thinking on,
+   2.7s with thinking disabled — so LlmClient gained a `think` config
+   passthrough and llm.cfg ships qwen3:8b + think=false. gemma3:4b and
+   mistral:7b skipped-with-reason (downloads repeatedly killed by the flaky
+   connection); one command reruns them. Suite now 106 cases green.
+
+## Needs your hands ⏭
+| Issue | Why |
+|-------|-----|
+| #41 multiplayer parity pass | it IS the human verification: two instances, checklist in PR #52 |
+
+## Skipped (needs human)
+Weapons issues #7-#13 — written for the pre-multiplayer, pre-raylib codebase
+and the merged weapons code itself contains unfinished TODO stubs. Issue #46
+holds the full integration map (what to salvage, where it conflicts).
+
+## Test Status
+`make -C tests test`: **103 cases / 732 assertions, 0 failed** (96 → 103 with
+the ConversationStore + memory-prompt tests). Game builds and smoke-runs
+clean; two screenshots verified the city and characters visually.
+
+## Findings worth knowing
+- raylib 5.5 segfaults in `rlglInit` if launched while the display is asleep
+  (environmental; players unaffected). Smoke runs `caffeinate -u` first.
+- raylib 5.5 CPU skinning crashes on unskinned attachment meshes in character
+  glbs — stripped at load; v1 characters are bare-handed.
+- GetMouseDelta noise accumulates in unattended runs — smoke runs pin the
+  camera (`--frames N [shot.png]` renders deterministically + screenshots).
+
+## Suggested First Move
+Merge **#45** (multiplayer → main), then the raylib stack in order
+(#43 → #44 → #47 → #48 → #51 → #52 → #53), then the memory/bench PR (#54). Then run
+the #41 two-instance checklist from PR #52 — that's the one thing that needs
+your eyes.
+
+## Learning materials
+Session 1 shipped 6 lessons/drills/vocab (PR #34). Session 2 concepts are
+queued rather than written (context budget went to your /idea project):
+FetchContent pinning, AABB-fitted kit-bashing, glTF clip switching, the
+lost-GL-context crash class, prompt-injected memory. Say the word and a
+follow-up session generates them.

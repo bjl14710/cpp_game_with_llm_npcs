@@ -1,0 +1,125 @@
+-- =============================================================================
+-- Reference solution — Exercise 05: testbench for
+-- fpga/linear_regression_predictor.vhd
+--
+-- Features are integer x1000. Hardcoded weights (x1000): W0=50, W=[300,-100,200].
+-- prediction_out is in the x10^6 domain: acc = 300*f0 - 100*f1 + 200*f2 + 50000.
+-- Thresholds: > +10000 -> BUY "01"; < -10000 -> SELL "10"; else HOLD "00".
+-- Latency: 2 cycles (multiply stage, accumulate stage).
+--
+-- Run:  bash scripts/run_vhdl_tests.sh tb_linear_regression_predictor
+-- =============================================================================
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity tb_linear_regression_predictor is
+end entity tb_linear_regression_predictor;
+
+architecture sim of tb_linear_regression_predictor is
+
+    constant CLK_PERIOD : time := 10 ns;
+
+    signal clk            : std_logic := '0';
+    signal rst_n          : std_logic := '0';
+    signal feature_0      : signed(31 downto 0) := (others => '0');
+    signal feature_1      : signed(31 downto 0) := (others => '0');
+    signal feature_2      : signed(31 downto 0) := (others => '0');
+    signal valid_in       : std_logic := '0';
+    signal prediction_out : signed(63 downto 0);
+    signal valid_out      : std_logic;
+    signal signal_out     : std_logic_vector(1 downto 0);
+
+    signal done : boolean := false;
+
+    -- Drive one feature vector through the 2-stage pipeline and check the
+    -- accumulator value and trading signal.
+    procedure check_case(
+        signal f0, f1, f2 : out signed(31 downto 0);
+        signal vin        : out std_logic;
+        constant a, b, c  : in integer;
+        constant exp_acc  : in integer;
+        constant exp_sig  : in std_logic_vector(1 downto 0);
+        constant label_s  : in string) is
+    begin
+        f0  <= to_signed(a, 32);
+        f1  <= to_signed(b, 32);
+        f2  <= to_signed(c, 32);
+        vin <= '1';
+        wait until rising_edge(clk);   -- stage 1: products
+        vin <= '0';
+        wait until rising_edge(clk);   -- stage 2: accumulate + threshold
+        wait for 1 ns;
+        assert valid_out = '1'
+            report label_s & ": valid_out must assert two cycles after valid_in"
+            severity error;
+        assert prediction_out = to_signed(exp_acc, 64)
+            report label_s & ": prediction_out mismatch"
+            severity error;
+        assert signal_out = exp_sig
+            report label_s & ": trading signal mismatch"
+            severity error;
+        wait until rising_edge(clk);   -- pipeline drains
+        wait for 1 ns;
+        assert valid_out = '0'
+            report label_s & ": valid_out must be a one-cycle pulse"
+            severity error;
+    end procedure;
+
+begin
+
+    dut : entity work.linear_regression_predictor
+        port map (
+            clk            => clk,
+            rst_n          => rst_n,
+            feature_0      => feature_0,
+            feature_1      => feature_1,
+            feature_2      => feature_2,
+            valid_in       => valid_in,
+            prediction_out => prediction_out,
+            valid_out      => valid_out,
+            signal_out     => signal_out
+        );
+
+    clk_gen : process
+    begin
+        while not done loop
+            clk <= '0';
+            wait for CLK_PERIOD / 2;
+            clk <= '1';
+            wait for CLK_PERIOD / 2;
+        end loop;
+        wait;
+    end process clk_gen;
+
+    stimulus : process
+    begin
+        rst_n <= '0';
+        wait until rising_edge(clk);
+        wait until rising_edge(clk);
+        rst_n <= '1';
+        wait until rising_edge(clk);
+
+        -- BUY: f = (1.0, 0, 0) -> 300*1000 + 50000 = 350000 > +10000
+        check_case(feature_0, feature_1, feature_2, valid_in,
+                   1000, 0, 0, 350000, "01", "buy case");
+
+        -- SELL: f = (-1.0, 0, 0) -> -300000 + 50000 = -250000 < -10000
+        check_case(feature_0, feature_1, feature_2, valid_in,
+                   -1000, 0, 0, -250000, "10", "sell case");
+
+        -- HOLD: f = (-0.15, 0, 0) -> -45000 + 50000 = 5000, inside the band
+        check_case(feature_0, feature_1, feature_2, valid_in,
+                   -150, 0, 0, 5000, "00", "hold case");
+
+        -- All three weights: f = (0, 1.0, 1.0)
+        --   -100*1000 + 200*1000 + 50000 = 150000 -> BUY
+        check_case(feature_0, feature_1, feature_2, valid_in,
+                   0, 1000, 1000, 150000, "01", "all-weights case");
+
+        done <= true;
+        report "TB PASSED" severity note;
+        wait;
+    end process stimulus;
+
+end architecture sim;

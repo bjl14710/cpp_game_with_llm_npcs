@@ -1,0 +1,36 @@
+# Issue Planning Summary
+Date: 2026-07-05
+Repo: bjl14710/Silmulator (remote exists; API auth unavailable this session)
+Focus: "scpi, vendor doc, fault drift, code input semantic, spec driven test generation"
+
+## Status: issues NOT created on GitHub
+`gh` is not installed, `GH_TOKEN` holds the placeholder value "TOKEN", and
+`GITHUB_USERNAME` is unset. The work itself was implemented locally instead
+(branch `feature/msp430-quality-suite`, five commits). If you still want the
+GitHub trail, fix auth and re-run `/plan-github` — the specs below are ready
+to replay, with each issue's scope already DONE and verifiable locally.
+
+## Milestone: "MSP430 Quality Suite" (all five DONE on the branch)
+
+1. **audit: doc-grounded MSP430 SCPI compliance auditor** — DONE (172fb20)
+   Verify: `python scripts/audit_msp430.py` → 137 families, 0 unscored, 0 stale.
+   Concept: doc-grounded compliance auditing with self-verifying probes.
+2. **tests: MSP430 spec-driven edge cases (GPIO/ADC/Timer_A)** — DONE (bf91a66)
+   Verify: `uv run pytest tests/test_msp430_edge_cases.py -v` → 18 pass / 16 xfail.
+   Concept: xfail(strict) as a captured-failure ledger against a spec audit.
+3. **msp430: datasheet-grounded fault & drift modeling** — DONE (bb29013)
+   Verify: `uv run pytest tests/test_msp430_fault_modeling.py -v`.
+   Concept: worst-case-within-spec corner modeling (INL/gain/offset, DCO ppm drift).
+4. **code_parser: MSP430 semantic sequencing reviewer** — DONE (ac59eb3)
+   Verify: `uv run pytest tests/test_semantic_review_msp430.py -v`.
+   Concept: sequencing lint over extracted call streams (trigger-before-read).
+5. **custom-blocks: vendor-doc block spec + diff vs model** — DONE (aefc5dc)
+   Verify: `uv run python -m silmulator.custom_blocks.diff_report`.
+   Concept: spec-vs-implementation structural diffing with behavioral probes.
+
+## What Was NOT Planned
+- Fixing the 43 non-COMPLIANT audit findings in msp430.py — deliberately out
+  of scope for every plan; the audit report + xfail ledger is the follow-up
+  backlog. Suggest a "msp430 compliance fixes" milestone next.
+- Learning materials (lesson/drill/terms per concept) — deferred; see
+  OVERNIGHT_REPORT.md.

@@ -1,0 +1,54 @@
+"""Confirmation-gate wrapper — scaffold.
+
+Spec: .claude/plans/indicators-to-features.md. Composes two DailyStrategy
+instances: the base's signal passes through only when the confirmer agrees
+— the "demoted" candlestick/technical strategies' second life as entry
+filters instead of standalone alpha.
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class ConfirmedStrategy(DailyStrategy):
+    """base's signal, gated by confirmer's opinion.
+
+    Modes:
+      - "direction": pass base's signal only when confirmer emits the SAME
+        direction (confirmer HOLD blocks).
+      - "veto": pass unless confirmer emits the OPPOSITE direction
+        (confirmer HOLD passes).
+    """
+
+    name = "confirmed"
+
+    def __init__(self, base: DailyStrategy, confirmer: DailyStrategy,
+                 mode: str = "direction") -> None:
+        if mode not in ("direction", "veto"):
+            raise ValueError(f"unknown mode '{mode}'")
+        self.base = base
+        self.confirmer = confirmer
+        self.mode = mode
+
+    @property
+    def warmup_bars(self) -> int:
+        return max(self.base.warmup_bars, self.confirmer.warmup_bars)
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """base's signal, passed through only when the confirmer allows it."""
+        base_sig = self.base.generate_signal(df)
+        if base_sig.position == 0:
+            return base_sig
+        conf_sig = self.confirmer.generate_signal(df)
+        if self.mode == "direction":
+            allowed = conf_sig.position == base_sig.position
+        else:  # veto: only an OPPOSITE confirmer signal blocks
+            allowed = conf_sig.position != -base_sig.position
+        if not allowed:
+            return HOLD
+        return DailySignal(position=base_sig.position, confidence=base_sig.confidence,
+                           reason=f"{base_sig.reason} [ok:{self.confirmer.name}"
+                                  f"{conf_sig.position:+d}]")
+
+
+__all__ = ["ConfirmedStrategy"]

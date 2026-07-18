@@ -1,0 +1,97 @@
+#pragma once
+/**
+ * @file latency.hpp  (solutions/08_latency_bench)
+ * @brief rdtsc-based cycle counter + logarithmic latency histogram — Exercise 08.
+ *
+ * rdtsc() reads the CPU's Time Stamp Counter.  One delta measurement =
+ * stop_cycles − start_cycles.  Divide by MHz to get nanoseconds.
+ *
+ *   ns = cycles / (cpu_MHz / 1000.0)
+ *   e.g. 300 cycles at 3000 MHz = 100 ns
+ *
+ * Histogram: 64 power-of-two buckets.
+ *   Bucket i covers [2^i, 2^(i+1)) cycles.
+ *   __builtin_clzll counts leading zeros → MSB position = floor(log2(cycles)).
+ *   This gives O(1) record and O(64) percentile.
+ *
+ * Why percentiles beat averages in latency:
+ *   A 0.001% tail at 1 ms shifts the average by 1 µs — invisible.
+ *   But p99.9 = 1 ms means one in a thousand orders takes 10× longer, and
+ *   the next customer sees it.  Traders and exchange SLAs quote p99+.
+ *
+ * @see exercises/08_latency_bench/latency.hpp  — the practice stub
+ * @see tests/exercises/cpp/test_08_latency.cpp  — grading tests
+ */
+#include <cstdint>
+#include <cstdio>
+
+// ---------------------------------------------------------------------------
+// rdtsc — cycle-accurate timestamp
+// ---------------------------------------------------------------------------
+#if defined(__x86_64__) || defined(_M_X64)
+#  include <immintrin.h>
+inline uint64_t rdtsc() noexcept { return __rdtsc(); }
+#else
+// Fallback for non-x86 (ARM, RISC-V, etc.): use CLOCK_MONOTONIC_RAW.
+// Returns nanoseconds; treat "cycles" as "nanoseconds" and set mhz=1000
+// so the ns conversion is a no-op.
+#  include <ctime>
+inline uint64_t rdtsc() noexcept {
+    struct timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return static_cast<uint64_t>(ts.tv_sec) * 1'000'000'000ULL
+           + static_cast<uint64_t>(ts.tv_nsec);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Histogram — logarithmic, 64 buckets
+// ---------------------------------------------------------------------------
+class Histogram {
+public:
+    static constexpr int BUCKETS = 64;  // bucket i: [2^i, 2^(i+1)) cycles
+
+    /** Record one observation. */
+    void record(uint64_t cycles) noexcept {
+        int bucket = cycles == 0 ? 0
+                   : 63 - __builtin_clzll(cycles);   // MSB position = floor(log2)
+        if (bucket < 0)          bucket = 0;
+        if (bucket >= BUCKETS)   bucket = BUCKETS - 1;
+        counts_[bucket]++;
+    }
+
+    /**
+     * Return the lower bound of the bucket containing the p-th percentile.
+     * @param p  value in [0, 1].
+     * @return   cycles at the bucket's lower bound (2^bucket).
+     */
+    uint64_t percentile(double p) const noexcept {
+        uint64_t total = 0;
+        for (int i = 0; i < BUCKETS; ++i) total += counts_[i];
+        if (total == 0) return 0;
+        const uint64_t target = static_cast<uint64_t>(p * static_cast<double>(total));
+        uint64_t cumulative = 0;
+        for (int i = 0; i < BUCKETS; ++i) {
+            cumulative += counts_[i];
+            if (cumulative > target)
+                return (i == 0) ? 1ULL : (1ULL << i);
+        }
+        return 1ULL << (BUCKETS - 1);
+    }
+
+    /**
+     * Print p50 / p99 / p99.9 in nanoseconds.
+     * @param mhz  CPU frequency in MHz (default 3000 = 3 GHz).
+     */
+    void print(double mhz = 3000.0) const {
+        auto to_ns = [&](uint64_t cycles) -> double {
+            return static_cast<double>(cycles) / (mhz / 1000.0);
+        };
+        std::printf("  p50:   %8.0f ns\n", to_ns(percentile(0.50)));
+        std::printf("  p99:   %8.0f ns\n", to_ns(percentile(0.99)));
+        std::printf("  p99.9: %8.0f ns\n", to_ns(percentile(0.999)));
+    }
+
+private:
+    uint64_t counts_[BUCKETS]{};
+};

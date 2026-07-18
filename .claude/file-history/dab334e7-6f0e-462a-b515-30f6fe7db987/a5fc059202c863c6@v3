@@ -1,0 +1,25 @@
+# Checkpoint
+Session started: 2026-07-05 (overnight)
+Goal: Work through the strategy-layer queue (GitHub issues could NOT be created — GH_TOKEN is a placeholder; queue taken from .claude/plans/strategy-arena.md + scaffold specs)
+Status: COMPLETE (2026-07-05)
+Mode: LOCAL-ONLY (no gh CLI, token invalid → no issue labels, no draft PRs; branch push attempted at end)
+Branch: feature/arena-strategy-layer
+Issues to process:
+  [A] implement DailyEngulfingStrategy adapter (strategies/candlestick_daily.py)
+  [B] implement TechnicalStrategy RSI+MACD+MA crossover (strategies/technical.py)
+  [C] implement MeanReversionStrategy z-score fade + breakout (strategies/mean_reversion.py)
+  [D] implement GBMStrategy model-bundle adapter (strategies/gbm_adapter.py)
+Issues completed: [A (e424b48), B (af3c29c), C (89021d2), D (2bc3f66)]
+Issues failed: []
+Issues skipped: []
+Branch pushed: origin/feature/arena-strategy-layer (git keychain auth worked; API token still placeholder → no draft PR, no issue labels)
+Test status: 85 passed, 54 exercise-deselected — full suite green
+Notable finding: predict_next.py:136-144 predicts off the second-newest bar
+(build_features dropna eats the latest row) — pre-existing 1-day inference lag,
+flagged in OVERNIGHT_REPORT.md, NOT fixed (changes live behavior).
+Learning: lessons/0035-feature-contracts-at-inference.html +
+drills/0006-feature-contracts-at-inference.html, index rebuilt, PROGRESS.md updated.
+Report: OVERNIGHT_REPORT.md (on the feature branch, not main).
+
+## Prior session (2026-06-30) — COMPLETE
+- #42-#46 PWA/mobile/Mac-setup batch, PRs #47-#51 (see git history)

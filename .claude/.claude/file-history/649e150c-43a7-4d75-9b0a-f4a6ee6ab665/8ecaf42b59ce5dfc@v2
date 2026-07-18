@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0022 — AI: Object Detection</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}pre .kw{color:var(--code-kw)}pre .str{color:var(--code-str)}pre .num{color:var(--code-num)}pre .com{color:var(--code-com);font-style:italic}pre .fn{color:var(--code-fn)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0022</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>AI: Object Detection</h1>
+<p class="lead">Why this matters: the alt-data lessons (0015, 0020) leaned on "count cars in parking lots" and "count ships in ports." That counting is <em>object detection</em>. This lesson formalizes what object detection is, the three modern model families, and what you'd actually deploy on a satellite-imagery pipeline.</p>
+
+<h2>1. Classification vs Detection vs Segmentation</h2>
+<table>
+<tr><th>Task</th><th>Output</th><th>Example</th></tr>
+<tr><td>Classification</td><td>One label for the whole image.</td><td>"this image contains a parking lot"</td></tr>
+<tr><td>Object detection</td><td>A list of <strong>bounding boxes</strong>, each with a class label and confidence score.</td><td>"car at (x=120, y=340, w=80, h=40), confidence 0.95"</td></tr>
+<tr><td>Semantic segmentation</td><td>A class label for every pixel.</td><td>"these pixels are cars, those are asphalt, those are grass" (Lesson 0023)</td></tr>
+<tr><td>Instance segmentation</td><td>A mask + class for every individual object.</td><td>"this clump of pixels is car #1, that clump is car #2" (Lesson 0023)</td></tr>
+</table>
+
+<p>For an alt-data pipeline that counts cars at Walmart parking lots, you'd typically use object detection (boxes + count) for speed, falling back to instance segmentation (Lesson 0023) when cars are partially occluded or touching.</p>
+
+<h2>2. The three model families</h2>
+
+<h3>Family 1: Two-stage detectors (R-CNN, Faster R-CNN)</h3>
+<p>Stage 1: a Region Proposal Network suggests ~1000 candidate boxes where objects might be. Stage 2: a classifier inspects each candidate. Accurate but slow because of the two passes. Production has largely moved on from this family — too slow for real-time, no clear accuracy advantage over modern alternatives.</p>
+
+<h3>Family 2: Single-stage detectors (YOLO, SSD, RetinaNet)</h3>
+<p>One pass: the model directly emits boxes + classes for the whole image in a single forward pass. The <strong>YOLO</strong> ("You Only Look Once") series dominates production:</p>
+<ul>
+<li><strong>YOLOv5–YOLOv11</strong>: Ultralytics-maintained PyTorch implementations. Fast, accurate, easy to fine-tune. Default choice for most production pipelines in 2024–25.</li>
+<li><strong>YOLOv8/v11</strong>: native instance-segmentation head bolted on, blurring the line with the segmentation lesson.</li>
+</ul>
+<p>YOLO's appeal: a small image-tiles → boxes pipeline, ~30 FPS on a commodity GPU, easy to fine-tune on 100s of labeled examples.</p>
+
+<h3>Family 3: Transformer-based (DETR, RT-DETR, Grounding DINO)</h3>
+<p><strong>DETR</strong> ("DEtection TRansformer", Facebook 2020): treats detection as a set-prediction problem solved by a transformer over image patches. Simpler pipeline (no anchors, no NMS) but slower convergence. Modern variants (RT-DETR from Baidu, 2023) have caught up to YOLO on speed and surpass it on accuracy for many tasks.</p>
+<p><strong>Grounding DINO</strong> (2023): open-vocabulary detection. Give a text prompt ("car", "ship", "shipping container") and the model finds all instances. Hugely valuable for alt-data because you can detect arbitrary new classes without retraining.</p>
+
+<h2>3. The standard detection output</h2>
+<pre><span class="com"># Each detection is a 6-tuple</span>
+detection = {
+    <span class="str">"x"</span>: <span class="num">120</span>,           <span class="com"># top-left x in pixels</span>
+    <span class="str">"y"</span>: <span class="num">340</span>,           <span class="com"># top-left y in pixels</span>
+    <span class="str">"w"</span>: <span class="num">80</span>,            <span class="com"># width</span>
+    <span class="str">"h"</span>: <span class="num">40</span>,            <span class="com"># height</span>
+    <span class="str">"class_id"</span>: <span class="num">2</span>,      <span class="com"># 2 = car (per training-set ontology)</span>
+    <span class="str">"confidence"</span>: <span class="num">0.95</span>  <span class="com"># model's certainty in [0, 1]</span>
+}
+</pre>
+<p>Two key concepts on top of this output:</p>
+<ul>
+<li><strong>NMS</strong> (Non-Maximum Suppression): the model often emits multiple overlapping boxes for the same object. NMS keeps the highest-confidence box and suppresses overlapping ones with IoU above a threshold (typically 0.5).</li>
+<li><strong>IoU</strong> (Intersection over Union): metric for box overlap = area of intersection / area of union. 1.0 = identical boxes; 0 = no overlap.</li>
+</ul>
+
+<h2>4. Evaluation metrics</h2>
+<table>
+<tr><th>Metric</th><th>Definition</th><th>When to use</th></tr>
+<tr><td>Precision</td><td>(true positives) / (true positives + false positives)</td><td>When false alarms are costly.</td></tr>
+<tr><td>Recall</td><td>(true positives) / (true positives + false negatives)</td><td>When missing real objects is costly.</td></tr>
+<tr><td>AP@IoU=0.5</td><td>Average Precision at IoU threshold 0.5</td><td>Headline benchmark metric.</td></tr>
+<tr><td>mAP@[0.5:0.95]</td><td>Mean AP averaged across IoU thresholds 0.5–0.95</td><td>COCO standard, harder metric.</td></tr>
+</table>
+
+<h2>5. Production: counting cars at Walmart (illustrative)</h2>
+<pre><span class="kw">from</span> ultralytics <span class="kw">import</span> YOLO
+
+model = <span class="fn">YOLO</span>(<span class="str">"yolov11m.pt"</span>)                <span class="com"># pretrained on COCO</span>
+results = <span class="fn">model</span>(<span class="str">"walmart_2025-06-10.png"</span>,    <span class="com"># satellite tile</span>
+                classes=[<span class="num">2</span>],                  <span class="com"># COCO class 2 = 'car'</span>
+                conf=<span class="num">0.3</span>,                      <span class="com"># confidence threshold</span>
+                iou=<span class="num">0.5</span>)                       <span class="com"># NMS IoU threshold</span>
+
+car_count = <span class="fn">len</span>(results[<span class="num">0</span>].boxes)
+<span class="fn">print</span>(<span class="str">f"Cars detected: {car_count}"</span>)
+</pre>
+<p>That's the entire engineering of an alt-data signal in 8 lines. The real work is:</p>
+<ol>
+<li><strong>Domain-shift fine-tuning</strong> — COCO is street-level cars; satellite cars look completely different (top-down, small, low contrast). Fine-tune on a few thousand labeled satellite tiles.</li>
+<li><strong>Tiling</strong> — a satellite image of a parking lot is huge (10000×10000 pixels). Cut into overlapping tiles, run YOLO on each, merge results.</li>
+<li><strong>Calibration</strong> — your model emits raw counts; you need a calibration function that maps counts → estimated revenue → trade signal.</li>
+<li><strong>Drift monitoring</strong> — accuracy degrades over time as fashions, vehicle shapes, and parking layouts change. Need ongoing retraining.</li>
+</ol>
+
+<h2>6. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Object detection vs Classification</h4><p><strong>Classification</strong>: one label for the image. <strong>Detection</strong>: many objects, each with a box and label. Detection subsumes classification when there's one detection per image.</p></div>
+<div class="card"><h4>YOLO vs DETR</h4><p><strong>YOLO</strong>: convnet-based, single-stage, NMS-based. Mature, fast. <strong>DETR</strong>: transformer-based, set-prediction, no NMS. Cleaner conceptually; slower to train; modern variants competitive.</p></div>
+<div class="card"><h4>Detection vs Tracking</h4><p><strong>Detection</strong>: per-frame, no memory. <strong>Tracking</strong>: maintains object identity across frames. For static satellite imagery, detection is enough; for video of port activity, tracking is needed.</p></div>
+<div class="card"><h4>Closed-set vs Open-vocabulary</h4><p><strong>Closed-set</strong>: model knows N predefined classes; can only output those. <strong>Open-vocabulary</strong>: detect any class described by a text prompt (Grounding DINO). The latter is transformative for alt-data exploration.</p></div>
+</div>
+
+<h2>7. Practice</h2>
+<div class="question" data-question><p class="q">Q1. Why does object detection use NMS (Non-Maximum Suppression)?</p><ul class="options">
+<li data-correct="false" data-why="NMS is post-processing, not part of training. The training loss handles duplicates differently.">To regularize training when the model overfits to common classes.</li>
+<li data-correct="true" data-why="Right. Single-stage detectors emit many overlapping boxes for each real object — every nearby anchor or grid cell can produce a candidate. NMS keeps only the highest-confidence box per object cluster and suppresses overlapping (IoU above threshold) lower-confidence boxes.">To collapse multiple overlapping predictions for the same object down to one, keeping the highest-confidence box.</li>
+<li data-correct="false" data-why="NMS happens at inference, not at training. Augmentation is a separate concern handled in the data pipeline.">To augment training data with rotated copies of each image.</li>
+<li data-correct="false" data-why="NMS is computationally cheap. It's not a memory-management technique.">To reduce GPU memory usage during training.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. You use a YOLO model pretrained on COCO to count cars in satellite imagery. Performance is poor. Most likely cause?</p><ul class="options">
+<li data-correct="false" data-why="YOLO does support boxes well — it's the standard detection family. Box format isn't the issue.">YOLO doesn't natively output bounding boxes.</li>
+<li data-correct="true" data-why="Right. COCO is mostly street-level images. Satellite views show cars from directly overhead, much smaller (often &lt;30 pixels), with different lighting. The pretrained features don't transfer well. Fix: fine-tune on a few thousand labeled satellite tiles in your target geography and you'll see large gains.">COCO's cars are street-level and large; satellite views are top-down and small — pretrained features don't transfer. Fine-tuning on satellite-specific data is required.</li>
+<li data-correct="false" data-why="YOLO image-size limits are configurable and not the binding constraint for satellite work.">YOLO can only process images up to 640x640 pixels.</li>
+<li data-correct="false" data-why="Color isn't the issue; satellite imagery is also color (RGB) on most commercial sensors. Domain shift between street-level and top-down is the issue.">Satellite imagery is grayscale while YOLO expects color.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. What makes Grounding DINO different from a standard YOLO-style detector?</p><ul class="options">
+<li data-correct="false" data-why="Both can be fast; speed isn't the distinguishing feature. Open-vocabulary is.">It's faster at inference.</li>
+<li data-correct="true" data-why="Right. Grounding DINO is open-vocabulary — you can prompt it with any text description ('cargo ship', 'wind turbine', 'crop circle') and it'll find instances of that, without retraining. Standard YOLO requires a fixed class ontology decided at training time. For exploratory alt-data work this difference is enormous.">It's open-vocabulary: given a text prompt, it detects arbitrary classes without retraining. Standard YOLO has a fixed ontology.</li>
+<li data-correct="false" data-why="It does have a learning rate and is trained, like any neural net. The key feature is open-vocabulary inference.">It doesn't require any training data.</li>
+<li data-correct="false" data-why="Detection can be done in the cloud or on the edge for both models; deployment isn't the differentiator.">It runs only on quantum hardware.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. mAP@[0.5:0.95] is a stricter metric than AP@0.5. Why?</p><ul class="options">
+<li data-correct="false" data-why="The IoU threshold is what changes — higher thresholds require tighter box localization.">It averages over more classes.</li>
+<li data-correct="true" data-why="Right. mAP@[0.5:0.95] averages AP across IoU thresholds from 0.5 to 0.95 in 0.05 steps. Higher thresholds require the predicted box to overlap the ground-truth box very precisely. Models score well at IoU=0.5 (loose box) and poorly at IoU=0.95 (near-perfect localization). Averaging the two is much harsher than IoU=0.5 alone.">It requires tighter box localization at IoU thresholds up to 0.95, where small box errors fail.</li>
+<li data-correct="false" data-why="Confidence threshold and IoU threshold are different things; the AP metric integrates over confidence already.">It uses a stricter confidence threshold.</li>
+<li data-correct="false" data-why="Both metrics use the same dataset; the difference is the IoU criterion for what counts as a 'correct' detection.">It evaluates on a held-out test set instead of validation.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>8. Scenarios</h2>
+<details class="scenario"><summary>S1. Your YOLO car-counter trained on suburban malls performs poorly on dense urban parking garages. Why?</summary>
+<p>Distribution shift. The training set's cars were spaced out on open asphalt; in urban garages they're packed tightly, often partially occluded, and the lighting is much different. YOLO's anchor-based proposal density doesn't handle very dense overlapping objects well. Three responses: (1) fine-tune on labeled urban-garage data; (2) lower the NMS IoU threshold so densely packed cars aren't suppressed by their neighbors; (3) switch to an instance-segmentation model (Lesson 0023) that's better at touching-but-distinct objects. Option 1 is the cleanest and the others are emergency fixes.</p></details>
+
+<details class="scenario"><summary>S2. You want a single model that detects cars, trucks, ships, and storage tanks at a hedge fund. Build one big model or four specialized ones?</summary>
+<p>Probably four specialized ones, then a shared inference framework. Reasons: (1) the optimal image resolution differs — cars need fine resolution, storage tanks are fine at lower res; (2) the fine-tuning datasets are sourced separately and have very different sizes; (3) deploying changes to one class won't risk regressing the others; (4) model size scales sub-linearly with class count, so four small models is comparable cost to one large one. Single multi-task models are seductive but practically fragile for production alt-data pipelines.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li><a href="https://docs.ultralytics.com/">Ultralytics YOLOv8/v11 documentation</a></li>
+<li><a href="https://arxiv.org/abs/2005.12872">DETR — End-to-End Object Detection with Transformers (Carion et al, 2020)</a></li>
+<li><a href="https://arxiv.org/abs/2303.05499">Grounding DINO — open-vocabulary detection (Liu et al, 2023)</a></li>
+<li><a href="https://cocodataset.org/">COCO dataset and evaluation metrics</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

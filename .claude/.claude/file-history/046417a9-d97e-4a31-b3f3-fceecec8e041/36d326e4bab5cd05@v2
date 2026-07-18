@@ -1,0 +1,131 @@
+#pragma once
+
+// textures_proc.hpp — Procedural texture generators.
+//
+// All textures are 64×64 RGBA, generated in CPU memory and uploaded via
+// createTexture() (defined in main.cpp). No image files are loaded from disk.
+//
+// Noise approach: integer hash (Wang hash variant) seeded per pixel + octave,
+// giving a deterministic concrete-like pattern without <random> overhead.
+// Each function returns a GLuint handle — caller owns the GL texture object.
+
+#include <SFML/Graphics.hpp>
+#include <cstdint>
+#include <vector>
+
+// Forward declaration — defined in main.cpp.
+unsigned int createTexture(const std::vector<std::uint8_t>& pixels, int size);
+
+// Simple integer hash — maps (x, y, seed) to [0, 255].
+// Used by every generator below; not meant to be cryptographic.
+inline std::uint8_t hashNoise(int x, int y, int seed) {
+    std::uint32_t h = static_cast<std::uint32_t>(x * 1619 + y * 31337 + seed * 6971);
+    h = (h ^ (h >> 16)) * 0x45d9f3bU;
+    h = (h ^ (h >> 16)) * 0x45d9f3bU;
+    h ^= (h >> 16);
+    return static_cast<std::uint8_t>(h & 0xFFU);
+}
+
+// Smooth 2-octave noise in [0, 1] for a pixel.
+// TODO(impl): bilinear-interpolate between hash samples for smooth concrete.
+inline float smoothNoise(int x, int y, int seed) {
+    // Placeholder — implement bilinear lerp of hashNoise at two octaves.
+    // Octave 1: scale 8 pixels, weight 0.65
+    // Octave 2: scale 3 pixels, weight 0.35
+    (void)x; (void)y; (void)seed;
+    return 0.5f; // TODO(impl)
+}
+
+// Concrete wall texture: grey base with subtle noise grain.
+// Used for load-bearing walls and ceilings.
+// TODO(impl): fill pixels using smoothNoise(); base colour sf::Color(105,102,98).
+inline unsigned int makeConcreteTexture() {
+    constexpr int kSize = 64;
+    std::vector<std::uint8_t> pixels(kSize * kSize * 4, 255);
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            // TODO(impl): compute noise, mix with base concrete colour, write RGBA.
+            const int i = (y * kSize + x) * 4;
+            pixels[i + 0] = 105; // R — placeholder flat colour
+            pixels[i + 1] = 102; // G
+            pixels[i + 2] = 98;  // B
+            pixels[i + 3] = 255;
+        }
+    }
+    return createTexture(pixels, kSize);
+}
+
+// Brick wall texture: alternating mortar lines with row offset.
+// Used for site-area walls and T-spawn. Row height = 10 px, mortar = 2 px.
+// TODO(impl): implement the row-offset brick pattern and grout lines.
+inline unsigned int makeBrickTexture() {
+    constexpr int kSize = 64;
+    constexpr int kBrickH  = 10;  // brick height in pixels
+    constexpr int kMortarW = 2;   // mortar line thickness
+    constexpr int kBrickW  = 32;  // brick width in pixels
+    std::vector<std::uint8_t> pixels(kSize * kSize * 4, 255);
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            const int i = (y * kSize + x) * 4;
+            const int row  = y / kBrickH;
+            const int rowY = y % kBrickH;
+            // Row offset: odd rows shift bricks by half width.
+            const int offset  = (row % 2) * (kBrickW / 2);
+            const int brickX  = (x + offset) % kBrickW;
+            const bool mortar = (rowY < kMortarW) || (brickX < kMortarW);
+            // TODO(impl): add hashNoise() grain to brick and mortar colours.
+            if (mortar) {
+                pixels[i + 0] = 78;
+                pixels[i + 1] = 74;
+                pixels[i + 2] = 70;
+            } else {
+                pixels[i + 0] = 162;
+                pixels[i + 1] = 94;
+                pixels[i + 2] = 68;
+            }
+            pixels[i + 3] = 255;
+        }
+    }
+    return createTexture(pixels, kSize);
+}
+
+// Brushed metal texture: horizontal streaks with hash grain.
+// Used for cover objects, railings, and door frames.
+// TODO(impl): layer horizontal streak lines over a steel-grey base + hashNoise().
+inline unsigned int makeMetalTexture() {
+    constexpr int kSize = 64;
+    std::vector<std::uint8_t> pixels(kSize * kSize * 4, 255);
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            const int i = (y * kSize + x) * 4;
+            // Horizontal streak: every ~6 rows a slightly lighter band.
+            const bool streak = (y % 6) < 2;
+            // TODO(impl): add hashNoise(x, y, 42) grain scaled ±8 on top.
+            const std::uint8_t base = streak ? 130 : 100;
+            pixels[i + 0] = base;
+            pixels[i + 1] = base;
+            pixels[i + 2] = static_cast<std::uint8_t>(base + 8);
+            pixels[i + 3] = 255;
+        }
+    }
+    return createTexture(pixels, kSize);
+}
+
+// Sand/ground texture: warm tan noise for the floor.
+// Replaces the green checkerboard ground.
+// TODO(impl): two-octave noise over base sf::Color(196, 176, 128).
+inline unsigned int makeGroundTexture() {
+    constexpr int kSize = 64;
+    std::vector<std::uint8_t> pixels(kSize * kSize * 4, 255);
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            const int i = (y * kSize + x) * 4;
+            // TODO(impl): smoothNoise() grain over warm tan base.
+            pixels[i + 0] = 196;
+            pixels[i + 1] = 176;
+            pixels[i + 2] = 128;
+            pixels[i + 3] = 255;
+        }
+    }
+    return createTexture(pixels, kSize);
+}

@@ -1,0 +1,29 @@
+# Plan: issue #18 — reference-aware ADC conversion
+Status: IN PROGRESS (overnight 2026-07-15)
+Branch: feature/issue-18-adc-reference-scaling (off master)
+
+## Goal
+ADC conversion honors the selected reference per SLAU367P §34.2.1 Eq. 13:
+NADC = FS × (Vin − VR−)/(VR+ − VR−). Validate ADC:REFERENCE against
+{AVCC, VREF 1.2/2.0/2.5, VEREF}; reject others with -224. AVCC tracks
+clock.vcc.
+
+## Touch points
+- silmulator/devices/msp430.py — ADC:REFERENCE validation; thread
+  reference voltage into the two conversion call sites
+- silmulator/devices/msp430_faults.py — adc_code(full_scale_v=...) already
+  parameterized; only the full-scale source changes (NOT corner math)
+- docs/audits/msp430-compliance-report.md — adc_ignores_reference /
+  adc_reference_unvalidated entries go STALE → rewrite as COMPLIANT
+- tests/test_msp430_edge_cases.py — delete the two xfail markers that flip
+
+## Acceptance
+1. test_reference_out_of_range_rejected and
+   test_raw_respects_selected_reference pass WITHOUT xfail markers
+2. python scripts/audit_msp430.py runs clean, 0 stale probes after the
+   audit entries are updated
+3. Fault-modeling suite stays green; NOMINAL exact for AVCC=3.3
+4. Short-form aliases still work; full suite green
+
+## Constraints
+No new files. No CORNER-math changes. Existing handler style exactly.

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0016 — Order-Book Dynamics</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+.book{display:grid;grid-template-columns:1fr 100px 1fr;gap:4px;font-family:"JetBrains Mono",monospace;font-size:13px;background:var(--panel);padding:12px;border-radius:8px;border:1px solid var(--rule);margin:12px 0}.book .h{font-weight:600;color:var(--accent-2);text-align:center;padding:4px}.book .bid{text-align:right;color:var(--good);padding:2px 8px}.book .ask{text-align:left;color:var(--bad);padding:2px 8px}.book .px{text-align:center;color:var(--ink)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0016</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Order-Book Dynamics</h1>
+<p class="lead">Why this matters: Lesson 0001 introduced the limit order book. This lesson goes deeper — price-time priority, queue position, the lifecycle of an order, and what every event in the book actually means.</p>
+
+<h2>1. The LOB as a state machine</h2>
+<p>A <strong>limit order book</strong> (LOB) is a continuously updated data structure tracking every resting buy and sell order, sorted by price then by arrival time. At any instant it has:</p>
+<ul>
+<li>A <strong>bid side</strong>: buy orders, sorted descending by price (highest bid at top).</li>
+<li>An <strong>ask side</strong>: sell orders, sorted ascending by price (lowest ask at top).</li>
+<li>A <strong>best bid</strong> and <strong>best ask</strong> — the inside quote.</li>
+<li>A <strong>spread</strong> = best ask − best bid.</li>
+<li>A <strong>mid</strong> = (best bid + best ask) / 2.</li>
+</ul>
+
+<p>Illustrative top-of-book snapshot for ES (E-mini S&amp;P futures):</p>
+<div class="book">
+<div class="h">BIDS (size × price)</div><div class="h">PX</div><div class="h">ASKS (price × size)</div>
+<div class="bid"></div><div class="px">4523.50</div><div class="ask">4523.50 × 18</div>
+<div class="bid"></div><div class="px">4523.25</div><div class="ask">4523.25 × 47</div>
+<div class="bid">12 × 4523.00</div><div class="px">4523.00</div><div class="ask"></div>
+<div class="bid">85 × 4522.75</div><div class="px">4522.75</div><div class="ask"></div>
+<div class="bid">120 × 4522.50</div><div class="px">4522.50</div><div class="ask"></div>
+</div>
+<p class="small">Best bid 4523.00, best ask 4523.25. Spread = $0.25. Mid = 4523.125. The "12" on the best bid means 12 contracts are waiting at that level — sorted internally by arrival time.</p>
+
+<h2>2. Price-time priority — the rule that runs everything</h2>
+<p>When a marketable order arrives (an order that crosses the spread), it matches against resting orders by <strong>price first, then by time of arrival</strong>:</p>
+<ol>
+<li>Match against the best available price first (4523.25 ask, 47 contracts).</li>
+<li>Within that price level, match against orders in <strong>FIFO order</strong> — the order that arrived first gets filled first.</li>
+<li>If the incoming order exceeds the size at one level, walk up the book to the next price level.</li>
+</ol>
+<p>The single most important consequence: <strong>queue position matters as much as price</strong>. If you posted a buy at 4523.00 first, you're at the front of the line; you fill first when a marketable sell hits. If you arrived 100 µs after someone else at the same price, you're behind them in the queue and may never fill.</p>
+
+<div class="callout"><strong>Why HFT loves queue position:</strong> a market maker that consistently gets to the front of the queue gets filled when prices are favorable (a passive seller crossed the spread, often because they had to) and avoids fills when prices are about to move against them (because faster traders ahead in the queue absorb the order flow). Queue position is half of why latency matters.</div>
+
+<h2>3. The five LOB events</h2>
+<table>
+<tr><th>Event</th><th>Effect</th><th>Information signal</th></tr>
+<tr><td>ADD (limit order)</td><td>New resting order at a price level; size increases.</td><td>Someone wants to buy/sell at this price.</td></tr>
+<tr><td>CANCEL</td><td>An existing resting order is removed; size decreases.</td><td>Someone changed their mind — often because they saw new information.</td></tr>
+<tr><td>MODIFY</td><td>An existing order's size or price changes. Modifying price loses queue position.</td><td>Same as cancel + add.</td></tr>
+<tr><td>TRADE / EXECUTION</td><td>Marketable order crosses spread, matches against resting size. Both sides change.</td><td>Real demand. The headline tick.</td></tr>
+<tr><td>NEW LEVEL</td><td>A price level appears that didn't exist before (e.g. a new best bid above the prior one).</td><td>The book tightened — someone improved the quote.</td></tr>
+</table>
+<p>HFT firms care a lot about cancel rates. Adds far outnumber executions — typical exchange order-to-trade ratios can be 50:1 to 500:1 (more in Lesson 0019). The book is a continuous storm of additions and cancellations; trades are rare events on top of it.</p>
+
+<h2>4. Imbalance — the simplest predictive signal</h2>
+<p>The <strong>order-book imbalance</strong> is the most studied microstructure predictor:</p>
+<pre>imb = (bid_size - ask_size) / (bid_size + ask_size)   <span style="color:var(--code-com);font-style:italic">// in [-1, +1]</span></pre>
+<p>Positive imbalance → more pressure on the bid side → mid-price likely to drift up in the next few ticks. The signal decays in seconds; it's a microstructure feature, not a daily-frequency one. The repo's <code>fpga/linear_regression_predictor.vhd</code> uses imbalance as feature 1 (with a negative weight of −0.10×1000, suggesting the trained model expects a slight negative relationship — likely capturing adverse selection at the top of book).</p>
+
+<h2>5. In this project</h2>
+<p>The repo doesn't yet ingest live LOB data — yfinance gives only daily OHLCV bars, which are summaries that throw away the entire book structure. The <code>fpga/market_maker.vhd</code> module computes a quote relative to bid/ask, implying the existence of a feed that produces those numbers, but the wiring isn't there. A realistic add: ingest free LOB data (Databento, Polygon, Alpaca) into a Python research pipeline; add the imbalance feature to <code>build_features</code>; backtest whether daily-aggregated imbalance still predicts next-day return (probably weakly, but worth checking).</p>
+
+<h2>6. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Limit order vs Market order</h4><p><strong>Limit</strong>: rest at a price; may not fill. Adds liquidity. <strong>Market</strong>: cross the spread now. Takes liquidity. Market makers post limits; takers send markets.</p></div>
+<div class="card"><h4>Best bid/ask vs Mid-price</h4><p><strong>Best bid/ask</strong>: real prices at which someone is committed to trade. <strong>Mid</strong>: midpoint between them — a synthetic reference, no one trades at it directly.</p></div>
+<div class="card"><h4>Top of book vs Depth</h4><p><strong>Top of book</strong>: best bid + best ask only. <strong>Depth</strong>: multiple price levels into the book (L2, L3 data). Depth-aware strategies see iceberg-style behavior.</p></div>
+<div class="card"><h4>Cancel vs Modify (price change)</h4><p>Modifying an order's <em>size</em> often preserves queue position. Modifying its <em>price</em> resets queue position to the back. Operationally a price modify is just cancel + add.</p></div>
+</div>
+
+<h2>7. Practice</h2>
+<div class="question" data-question><p class="q">Q1. You post a buy limit at 4523.00 right after someone else posted theirs at the same price. A marketable sell for 5 contracts hits 4523.00. What happens?</p><ul class="options">
+<li data-correct="false" data-why="Pro-rata is used on some venues (e.g. some options exchanges) but not as the default for futures or US equities — which use price-time priority.">You and the other trader split the 5 contracts proportionally.</li>
+<li data-correct="true" data-why="Right. Price-time priority means the earlier order at the same price fills first. The other trader gets all 5; you fill nothing this round.">The other trader (earlier in time at the same price) fills all 5; you fill nothing.</li>
+<li data-correct="false" data-why="Time of arrival is the tiebreaker, not whichever order is largest. Larger orders don't jump the queue.">Whoever has the larger resting size fills first.</li>
+<li data-correct="false" data-why="The matching engine picks the earlier order deterministically — there's no randomness in price-time priority.">The matching engine picks randomly.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. Bid size = 200, ask size = 50. What does the book-imbalance signal suggest about the next few ticks?</p><ul class="options">
+<li data-correct="false" data-why="imb = (200-50)/(200+50) = 0.6, which is positive — more bid pressure, suggesting upward drift.">imb = -0.6, signaling downward pressure.</li>
+<li data-correct="true" data-why="Right. imb = (200-50)/(200+50) = 0.6 — strongly positive. Bid-side pressure typically predicts a small upward drift in the mid over the next few ticks. This is one of the most-studied microstructure signals.">imb = +0.6, suggesting upward mid-price pressure.</li>
+<li data-correct="false" data-why="An imbalance of zero would require equal sizes — 200 vs 50 is not zero.">imb = 0, the book is balanced.</li>
+<li data-correct="false" data-why="The imbalance is bounded to [-1, +1]; values outside that range aren't possible for that formula.">imb = +3, very strong upward signal.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Why does modifying an order's <em>price</em> (not size) reset queue position to the back?</p><ul class="options">
+<li data-correct="true" data-why="Right. A price modify is operationally equivalent to canceling the old order and posting a new one at the new price. The new order arrives at the matching engine 'now' so it takes the latest timestamp at that level — i.e. last in queue.">A price modify is implemented as cancel + add, so the new order takes the current timestamp at the new level — last in queue.</li>
+<li data-correct="false" data-why="The exchange isn't trying to be punitive — it's the mechanical consequence of how price priority works. A new price means a new line.">Exchanges penalize traders who change their minds.</li>
+<li data-correct="false" data-why="There's no per-modify fee that drives queue position. Some exchanges DO have OTR fees (Lesson 0019) but that's separate.">Exchanges charge a fee that bumps the order down the queue.</li>
+<li data-correct="false" data-why="No order is randomly placed by the matching engine — placement is deterministic by price-time priority.">The matching engine randomly re-sorts that price level.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. Your strategy posts thousands of orders per second; most are canceled within milliseconds. Two consequences worth knowing:</p><ul class="options">
+<li data-correct="false" data-why="Cancel cost is real but the deeper concern is regulatory: order-to-trade ratios are watched closely.">It increases your latency on every cancel.</li>
+<li data-correct="true" data-why="Right. Exchanges meter your order-to-trade ratio (OTR — Lesson 0019); above certain thresholds you face fees or throttling. Operationally, very high cancel rates also pollute your hot path and can interact with your venue's matching engine in ways you need to test.">It pushes up your exchange order-to-trade ratio, possibly triggering fees, AND it stresses your operational pipeline (logging, risk audit) in ways worth load-testing.</li>
+<li data-correct="false" data-why="No exchange has 'banned' aggressive quoting — they meter and price it. Outright bans are rare and venue-specific.">Most exchanges have banned high-cancel quoting since 2020.</li>
+<li data-correct="false" data-why="It doesn't 'improve queue position' — every cancel forfeits the position you had. Cancels are a cost, not a tactic for queue improvement.">It improves your queue position by clearing out competitors.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>8. Scenarios</h2>
+<details class="scenario"><summary>S1. Imbalance is +0.7 sustained for 30 seconds. You expect mid to drift up. It drifts down instead. Why might this happen?</summary>
+<p>Several possibilities. (1) The bid side may be informed buyers placing orders they intend to cancel before getting filled (spoofing — illegal but happens). (2) Hidden / iceberg sell orders that aren't visible in displayed depth. (3) A correlated instrument (e.g. SPY for ES) moved against the displayed signal. (4) The book imbalance signal is weak and noisy — over 30 seconds many other factors move price. The right response is robust sizing: trade small on imbalance signals and verify with other features rather than betting big on one microstructure number.</p></details>
+
+<details class="scenario"><summary>S2. Your colleague wants to backtest a strategy that "buys when imbalance > 0.5." Why is daily-frequency backtesting fundamentally wrong?</summary>
+<p>Book imbalance is a microstructure signal that decays in <em>seconds to minutes</em>. By the time you aggregate it to daily resolution, the signal is averaged across the entire day and has lost the within-day timing structure that made it predictive. Worse, daily yfinance data doesn't even contain the book — only OHLCV summaries. Honest evaluation of an imbalance-based strategy requires tick-level LOB data and a backtester that respects the seconds-to-minutes decay horizon. Different infrastructure entirely from <code>walkforward_sim.py</code>.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li><a href="https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf">High-frequency trading in a limit order book — Avellaneda &amp; Stoikov (Cornell)</a></li>
+<li><a href="https://databento.com/microstructure/dma">Databento Microstructure Guide — DMA / LOB primer</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

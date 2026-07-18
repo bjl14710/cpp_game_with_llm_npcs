@@ -1,0 +1,89 @@
+"""Tests for walk-forward CCF divergence (backtest vs as-if-live).
+
+One test per acceptance criterion in
+.claude/plans/backtest-vs-live-divergence.md.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from oil_alpha.analysis.walkforward import divergence_report, walkforward_ccf
+
+
+def _regime_flip_series(n: int = 1200, lead: int = 2, seed: int = 5) -> tuple[pd.Series, pd.Series]:
+    """x leads y by +lead for the first half, y leads x for the second.
+
+    Same construction family as test_leadlag's synthetic known lead; the
+    flip at n//2 is what full-sample estimation must blur and walk-forward
+    must track.
+    """
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2015-01-01", periods=n)
+    base = rng.normal(0, 1, n + lead)
+    x1, y1 = base[lead:], base[:-lead]          # x leads
+    flip = n // 2
+    x = np.concatenate([x1[:flip], y1[flip:]])  # after flip: y leads
+    y = np.concatenate([y1[:flip], x1[flip:]])
+    noise = rng.normal(0, 0.1, n)
+    return pd.Series(x + noise, idx, name="cl"), pd.Series(y - noise, idx, name="xle")
+
+
+def test_walkforward_tracks_regime_flip_full_sample_does_not() -> None:
+    """PIT leader changes across the flip; full-sample reports one leader."""
+    x, y = _regime_flip_series()
+    report = divergence_report(x, y, window=252, step=21)
+    leaders = [s.leader for s in report.steps]
+    assert len(set(leaders)) > 1, "walk-forward should see both regimes"
+    # Full-sample collapses the two regimes into a single verdict.
+    assert report.full_sample.leader in {"cl", "xle", "contemporaneous"}
+    # Roughly half the windows sit in each regime, so agreement is mid-range.
+    assert 0.3 < report.leader_agreement_rate < 0.9
+
+
+def test_no_future_data_enters_any_estimate() -> None:
+    """Poisoning all rows after each as-of date must not change estimates."""
+    x, y = _regime_flip_series(n=600)
+    steps_clean = walkforward_ccf(x, y, window=252, step=63)
+    # Re-run where, for the FIRST as-of date, everything after it is garbage:
+    t = steps_clean[0].as_of
+    x2, y2 = x.copy(), y.copy()
+    x2.loc[x2.index > t] = 1e9
+    y2.loc[y2.index > t] = -1e9
+    poisoned_first = walkforward_ccf(x2, y2, window=252, step=63)[0]
+    assert poisoned_first.peak_lag == steps_clean[0].peak_lag
+    assert poisoned_first.leader == steps_clean[0].leader
+
+
+def test_series_shorter_than_window_plus_step_raises() -> None:
+    """Minimum-length guard names the required length."""
+    x, y = _regime_flip_series(n=100)
+    with pytest.raises(ValueError, match="at least"):
+        walkforward_ccf(x, y, window=252, step=21)
+
+
+def test_agreement_is_one_when_no_regime_flip() -> None:
+    """A single stable regime: every PIT step matches the full-sample leader."""
+    rng = np.random.default_rng(0)
+    n, lead = 900, 2
+    idx = pd.bdate_range("2015-01-01", periods=n)
+    base = rng.normal(0, 1, n + lead)
+    x = pd.Series(base[lead:] + rng.normal(0, 0.05, n), idx, name="cl")   # x leads y
+    y = pd.Series(base[:-lead] + rng.normal(0, 0.05, n), idx, name="xle")
+    report = divergence_report(x, y, window=252, step=21)
+    assert report.full_sample.leader == "cl"
+    assert report.leader_agreement_rate == pytest.approx(1.0)
+    assert report.mean_abs_lag_drift == pytest.approx(0.0)
+
+
+def test_report_step_count_matches_schedule_when_nothing_skips() -> None:
+    """With clean data, n_steps + n_skipped equals the rolling schedule length."""
+    x, y = _regime_flip_series(n=1200)
+    window, step = 252, 21
+    report = divergence_report(x, y, window=window, step=step)
+    n = len(pd.concat([x, y], axis=1, join="inner").dropna())
+    scheduled = len(range(window, n - step + 1, step))
+    assert report.n_steps + report.n_skipped == scheduled
+    assert report.n_skipped == 0

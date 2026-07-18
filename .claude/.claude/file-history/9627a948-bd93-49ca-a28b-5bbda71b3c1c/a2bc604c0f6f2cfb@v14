@@ -1,0 +1,185 @@
+# Silmulator — Learning Progress
+
+## Learner Profile
+- Builder/developer of the Silmulator project itself
+- Experienced enough to be writing/fixing Python + Qt code
+- Learning goal: understand how to USE Silmulator as an end-user (the HIL/SIL workflow)
+
+## Sessions
+
+### Session 1 (2026-06-20)
+**Lesson:** [0001 — How to Use Silmulator](lessons/0001-how-to-use-silmulator.html)
+**Covered:**
+- What SIL/HIL/CIL means and why Silmulator exists
+- The three-step workflow: Place → Connect → Drive
+- Adding hardware blocks to the canvas
+- Drawing wires between ports
+- Sending SCPI commands via the console
+- Loading source code (snippet + project folder modes)
+- Saving and reloading layouts
+
+**Engagement:** First lesson — baseline not yet measured.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Session 2 (2026-06-20)
+**Lesson:** [0002 — Connections &amp; Documentation](lessons/0002-connections-and-documentation.html)
+**Covered:**
+- ConnectionPort internals: port_id, parent_block, connected_to, fractional x/y positioning
+- WireItem: ZValue=-1, update_position(), connect_ports() guards, remove_block() wire cleanup
+- disconnect() contract — both sides must be nulled or ghost state occurs
+- Reading real _setup_ports() patterns across Oscilloscope, MSP430
+- How to_dict()/from_dict() serialize and restore connections via port_map
+- hardware_docs/ folder purpose, layout, and workflow loop to custom blocks
+- Custom block JSON spec: ports, commands (literal / empty / template), discovery at startup
+- Contrasting Port vs Wire vs Qt Signal
+
+**Engagement:** Second lesson — quiz results pending.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Drill 1 (2026-06-20)
+**Drill:** [0001 — How to Use Silmulator](drills/0001-how-to-use-silmulator.html)
+**Channels drilled:** workflow · SCPI code path · SIL/HIL/CIL · real-code · bugs
+**Questions:** 20 (12 MC + 8 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+### Session 3 (2026-06-25)
+**Lesson:** [0003 — Running Silmulator on Windows, Mac &amp; Linux](lessons/0003-running-silmulator.html)
+**Covered:**
+- Four launch paths: dev (python main.py / uv run), Docker NoVNC, and standalone installers (.dmg / .AppImage / .exe)
+- How main.py → silmulator/app.py:main() is the shared entry point for all methods
+- uv sync vs pip install and what .venv / uv.lock do
+- Docker multi-stage build (C++ builder → slim runtime with Xvfb + x11vnc + NoVNC)
+- PyInstaller silmulator.spec for all three OS installer builds
+- macOS Gatekeeper workaround (right-click → Open) for unsigned builds
+- NoVNC (browser, no local display) vs X11 forwarding (native window, requires X server)
+- pip install -e . and the `silmulator` CLI entry point from pyproject.toml [project.scripts]
+
+**Engagement:** Lesson delivered; quiz results pending.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Session 4 (2026-06-25)
+**Lesson:** [0004 — Running a Complete SIL Test](lessons/0004-running-a-sil-test.html)
+**Covered:**
+- The full pipeline: firmware source → CodeParser → _run_commands() → Device.process()
+- CodeParser C_WRITE_PATTERNS / C_QUERY_PATTERNS and what they match (viWrite, scpi_send, ibwrt, etc.)
+- ParsedCommand dataclass fields: scpi_command, line_number, is_query, variable_name
+- _looks_like_scpi() heuristic and its limitation with dynamic format strings (sprintf → VOLT %f)
+- Code Input block: OUT1/OUT2/OUT3 ports, _get_connected_blocks(), broadcast-to-all behaviour
+- _run_commands() fans every command to every connected instrument (no routing by type)
+- ScpiParser: splits on ';', strips '?', uppercases path, separates params → ScpiCommand
+- Snippet mode (double-click) vs Project mode (load folder, Files: parsed/total)
+- Measurement responses: simulated noise (~1e-5 relative) is intentional, not a bug
+- Difference between Run parsed commands (replay all) vs SCPI Console (manual one-shot)
+
+**Engagement:** Lesson delivered; quiz results pending.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Drill 3 (2026-06-25)
+**Drill:** [0003 — Running Silmulator](drills/0003-running-silmulator.html)
+**Channels drilled:** dev mode · Docker/browser · installers · real project code · gotchas &amp; traps
+**Questions:** 20 (7 MC + 13 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+### Drill 4 (2026-06-25)
+**Drill:** [0004 — Running a Complete SIL Test](drills/0004-running-a-sil-test.html)
+**Channels drilled:** pipeline · parser &amp; ParsedCommand · routing &amp; broadcast · SCPI flow · snippet vs project · traps &amp; gotchas
+**Questions:** 20 (7 MC + 13 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+### Session 5 (2026-06-25)
+**Lesson:** [0005 — Block Connections: Backend](lessons/0005-block-connections-backend.html)
+**Covered:**
+- Three-layer model: data (connected_to pointers) · visual (WireItem) · signal (pyqtSignal emissions)
+- ConnectionPort: parent_block back-reference, port_id, connected_to, fractional x/y positioning via add_port()
+- The symmetry invariant: A.connected_to=B ↔ B.connected_to=A — always both sides or neither
+- connect_to() / disconnect() contract — why peer must be nulled before self
+- WireItem: ZValue=-1 (drawn below blocks), update_position() uses scenePos() not pos()
+- Why scenePos() not pos(): child items live in parent-local coordinates; scene coords needed for cross-block lines
+- Three-event mouse state machine: press→_start_wire / move→update temp / release→connect_ports or _cancel_wire
+- _port_at(): iterates items(pos) front-to-back, skips _temp_wire (ZValue 100), returns first ConnectionPort
+- event.accept() in mousePressEvent/moveEvent is load-bearing — without it, CanvasView's RubberBandDrag hijacks the gesture
+- Temp wire: ZValue=100, NoButton accepted, not selectable — so it doesn't eat subsequent hit tests
+- connect_ports() guards: self-loop and already-connected; creates WireItem then calls connect_to()
+- _remove_wire() order: disconnect both ports (data) → pop from _wires (dict) → removeItem (visual) → signal
+- to_dict()/from_dict() via port_map keyed by (block_id, port_id) tuples
+- Why wires silently drop on reload: device_type mismatch → add_block() returns None → port_map miss → wire skipped
+- clear() override: super().clear() deletes C++ items; dicts must be reset or RuntimeError on next access
+
+**Engagement:** Lesson just delivered.
+**Noted gaps:** Unknown until drill results reviewed.
+
+### Drill 5 (2026-06-25)
+**Drill:** [0005 — Block Connections: Backend](drills/0005-block-connections-backend.html)
+**Channels drilled:** layers · ports &amp; symmetry · WireItem · mouse state machine · connect_ports &amp; remove · serialisation &amp; clear
+**Questions:** 20 (7 MC + 13 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+### Session 6 (2026-06-25)
+**Lesson:** [0006 — Hardware Docs &amp; Custom Blocks](lessons/0006-hardware-docs-and-custom-blocks.html)
+**Covered:**
+- Two-folder system: hardware_docs/ (reference docs, offline) vs custom_blocks/ (executable JSON specs)
+- hardware_docs/ layout convention: vendor/model/programmer_reference.pdf + scpi_commands.md + notes.md
+- JSON spec format: name, manufacturer, model, color, ports (x/y fractions), commands (key → response)
+- Port coordinate fractions: x=0.0 left edge, x=1.0 right edge, y=0.5 vertical center
+- Three command response types: literal (static string), empty (write-only), template ({0}, {1}, etc.)
+- BlockSpec.from_dict() normalizes all command keys to UPPERCASE (str(k).upper())
+- _make_handler(): checks for '{' to determine literal vs template; falls back to template string on IndexError
+- _CustomDevice inherits from BaseDevice — gets common IEEE 488.2 handlers (*IDN? etc.) automatically
+- Discovery pipeline: discover_specs() → make_custom_block_class() → register_custom_blocks() → BLOCK_REGISTRY
+- PACKAGED_DIR = silmulator/custom_blocks/, USER_DIR = ~/.silmulator/custom_blocks/
+- First-seen wins on duplicate names; bad JSON files are silently skipped (non-fatal)
+- JSON spec vs Python subclass: JSON for static protocol verification, Python for stateful simulation
+- The upgrade path: start with JSON, promote to Python subclass when state is needed
+
+**Engagement:** Lesson just delivered.
+**Noted gaps:** Unknown until drill results reviewed.
+
+### Drill 6 (2026-06-25)
+**Drill:** [0006 — Hardware Docs &amp; Custom Blocks](drills/0006-hardware-docs-and-custom-blocks.html)
+**Channels drilled:** folders · JSON spec format · response patterns · discovery pipeline · traps &amp; gotchas · spec vs Python
+**Questions:** 20 (7 MC + 13 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+### Session 7 (2026-06-25)
+**Lesson:** [0007 — Creating New Blocks](lessons/0007-creating-new-blocks.html)
+**Covered:**
+- Two paths to a new block: JSON spec (fast, no-code, no state) vs Python class (stateful, computed responses, custom UI)
+- Step 1: Create the device file (silmulator/devices/my_device.py) — subclass BaseDevice, override _setup_handlers() with self._register(path, fn) calls and _do_reset()
+- Handler contract: writes return "", queries return str, invalid input raises ScpiError (not ValueError)
+- Why instance variables must be set BEFORE super().__init__() — super() calls _setup_handlers() which registers handler closures that reference self.state; state must exist first
+- Step 2: Create the block file (silmulator/gui/blocks/my_block.py) — subclass BaseBlock, set BLOCK_WIDTH/HEIGHT/HEADER_COLOR/BODY_COLOR
+- Four overrideable hooks: _setup_ports() (required), _paint_content(), _add_device_menu_actions(), _do_reset() (in device)
+- add_port(id, label, x_frac, y_frac) — x=0.0 left edge, x=1.0 right edge; fractions applied to BLOCK_WIDTH/BLOCK_HEIGHT
+- self.update() must be called after state-changing commands to schedule a repaint of the block face
+- Step 3: Register in canvas.py — import + BLOCK_REGISTRY["My Block"] = MyBlock; key must match device_type string in super().__init__()
+- Mismatch between BLOCK_REGISTRY key and device_type string = silent round-trip data loss on reload (same root cause as Function Gen bug)
+- GUI path: Add menu iterates BLOCK_REGISTRY; BlockLibraryPanel uses a hardcoded descriptions dict (does NOT auto-update on new Python blocks — known inconsistency)
+- Device vs block separation: device has no Qt imports, testable with plain pytest; block state (display cache) stays in block, SCPI state stays in device
+- Real example walkthrough: MultimeterBlock + Multimeter (_injected_values dict, _get_reading() with noise, block-local _last_reading display cache)
+
+**Engagement:** Lesson just delivered.
+**Noted gaps:** Unknown until drill results reviewed.
+
+### Drill 7 (2026-06-25)
+**Drill:** [0007 — Creating New Blocks](drills/0007-creating-new-blocks.html)
+**Channels drilled:** device layer · block layer · registration · gui path · device/block split · traps &amp; gotchas
+**Questions:** 20 (7 MC + 13 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+## Suggested Next Lessons
+1. **SCPI command structure** — the IEEE 488.2 tree syntax that every instrument in Silmulator uses; grounded in `silmulator/scpi/parser.py` and the device command handlers
+2. **Writing a complete SIL test** — paste real embedded C code into the Code Input block, wire it to simulated hardware, and interpret the responses
+3. **Reading the waveform** — inject a sine wave into the oscilloscope and interpret the CURVE? data transfer
+4. **Testing device logic** — unit-testing BaseDevice subclasses without a QApplication; parametrized tests over BLOCK_REGISTRY for round-trip safety

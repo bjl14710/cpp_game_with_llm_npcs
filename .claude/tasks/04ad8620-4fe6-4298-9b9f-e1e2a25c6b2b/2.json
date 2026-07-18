@@ -1,0 +1,9 @@
+{
+  "id": "2",
+  "subject": "Issue #3: Main window visual test",
+  "description": "test_gui_main_window.py: opens+golden, title, minimum size",
+  "activeForm": "Building main window visual test (#3)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

@@ -1,0 +1,41 @@
+"""Per-ticker time-series trend following (TSMOM) — scaffold.
+
+Spec: .claude/plans/trend-following.md. Long a ticker only when its OWN
+trailing return is positive; volatility scaling is built into confidence
+so conf_vol sizing delivers the vol-scaled positions the research wants.
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class TrendFollowingStrategy(DailyStrategy):
+    """Long when trailing (lookback − skip) return is positive; else hold.
+
+    NOT yet registered in strategies/registry.py — registration happens in
+    the implementing commit so the arena never offers an unimplemented name.
+    """
+
+    name = "tsmom"
+    # TSMOM self-gates by trend sign — stacking the regime gate would
+    # double-filter the same information. All four regimes allowed.
+
+    def __init__(self, lookback: int = 252, skip_days: int = 21) -> None:
+        self.lookback = lookback
+        self.skip_days = skip_days
+
+    @property
+    def warmup_bars(self) -> int:
+        """Full lookback plus the skipped recent window plus one bar."""
+        return self.lookback + self.skip_days + 1
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """TODO(implement): per the plan —
+        trend = close[-1 - skip_days] / close[-1 - lookback - skip_days] - 1;
+        HOLD unless trend > 0 (long-only); confidence = trend / (sigma_daily
+        * sqrt(252)) with the sizing module's _VOL_FLOOR discipline.
+        """
+        raise NotImplementedError("scaffold: see .claude/plans/trend-following.md")
+
+
+__all__ = ["TrendFollowingStrategy"]

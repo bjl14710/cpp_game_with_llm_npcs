@@ -1,0 +1,95 @@
+"""Reference solution — Exercise 03 (part 2): risk and compliance utilities.
+
+CUSUM regime-change detector (lesson 0006 / walkforward_sim.py concept),
+order-to-trade ratio tracker (lesson 0019), and walk-forward split helper.
+
+Peek policy: attempt exercises/03_stat_arb_risk/risk.py first.
+"""
+import numpy as np
+
+
+class CUSUMDetector:
+    """Two-sided CUSUM on a standardized stream (units of sigma).
+
+    pos_t = max(0, pos_{t-1} + x_t - k)
+    neg_t = max(0, neg_{t-1} - x_t - k)
+    Alarm when either statistic exceeds h.
+
+    k is the drift allowance (half the shift you want to detect), h the
+    decision threshold.
+    """
+
+    def __init__(self, k: float = 0.5, h: float = 5.0) -> None:
+        if k < 0:
+            raise ValueError("k must be non-negative")
+        if h <= 0:
+            raise ValueError("h must be positive")
+        self.k = k
+        self.h = h
+        self.reset()
+
+    def reset(self) -> None:
+        self.pos = 0.0
+        self.neg = 0.0
+
+    def update(self, x: float) -> bool:
+        """Feed one observation; returns True when an alarm fires."""
+        self.pos = max(0.0, self.pos + x - self.k)
+        self.neg = max(0.0, self.neg - x - self.k)
+        return self.pos > self.h or self.neg > self.h
+
+
+class OTRTracker:
+    """Order-to-trade ratio: messages (orders + cancels) per trade.
+
+    The MiFID II RTS 9-style metric — exchanges fine participants whose
+    ratio exceeds the venue threshold.
+    """
+
+    def __init__(self) -> None:
+        self.orders = 0
+        self.cancels = 0
+        self.trades = 0
+
+    def record_order(self, n: int = 1) -> None:
+        self.orders += n
+
+    def record_cancel(self, n: int = 1) -> None:
+        self.cancels += n
+
+    def record_trade(self, n: int = 1) -> None:
+        self.trades += n
+
+    def ratio(self) -> float:
+        """(orders + cancels) / trades; inf when there are messages but no
+        trades; 0.0 when nothing has happened at all."""
+        messages = self.orders + self.cancels
+        if self.trades == 0:
+            return float("inf") if messages else 0.0
+        return messages / self.trades
+
+    def breached(self, threshold: float) -> bool:
+        return self.ratio() > threshold
+
+
+def walkforward_splits(n: int, train: int, test: int,
+                       embargo: int = 0) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Chronological walk-forward splits over `n` samples.
+
+    Each split is (train_indices, test_indices): `train` consecutive samples,
+    an `embargo` gap (left out entirely, to stop leakage from overlapping
+    labels), then `test` consecutive samples. The window then rolls forward
+    by `test` so consecutive test windows tile without overlap.
+    """
+    if train <= 0 or test <= 0:
+        raise ValueError("train and test must be positive")
+    if embargo < 0:
+        raise ValueError("embargo must be non-negative")
+    splits: list[tuple[np.ndarray, np.ndarray]] = []
+    start = 0
+    while start + train + embargo + test <= n:
+        tr = np.arange(start, start + train)
+        te = np.arange(start + train + embargo, start + train + embargo + test)
+        splits.append((tr, te))
+        start += test
+    return splits

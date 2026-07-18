@@ -1,0 +1,15 @@
+# Checkpoint
+Session: 2026-07-15 overnight #3 (Streamlit console, milestone #5)
+Status: COMPLETE
+Branch: feature/streamlit-console (PR #75, base feature/lab-theme)
+Issues: #73, #74 completed; 273 passed (11 new); headless smoke HTTP 200
+Design: viewer bypasses ArenaState (constructor migrates=writes) — mode=ro
+  pinned by test; script-run-context guard keeps imports inert
+Note for Brandon: lab-theme branch still has no PR of its own (gap in the
+  review chain between #72 and #75)
+
+## Prior sessions
+- 2026-07-15 day: lab web theme shipped; streamlit plan+scaffold; issues #73-#74
+- 2026-07-14 night: research batch #64-#71 (PR #72)
+- 2026-07-14 day: 8 research plans; 2026-07-07: july6 batch (PR #63)
+- 2026-07-05: arena layer + orchestrator (PRs #52, #53)

@@ -1,0 +1,29 @@
+## What to change
+Merging PR #28 into master conflicts in `Silmulator/docs/learning/PROGRESS.md`: master's Session 3 (2026-06-28, visual-testing epic, via #25) and the branch's Session 3 (2026-07-15, issue #18) were appended independently at the same anchor. This is a keep-both conflict — the entries describe different work; neither replaces the other.
+
+Resolve it and repair the numbering across the whole msp430 stack:
+1. On `feature/issue-18-adc-reference-scaling`: merge `origin/master`, keep BOTH entries in chronological order (June's Session 3 first), renumber the issue-#18 entry to **Session 4**, commit the merge, push (PR #28 goes conflict-free).
+2. Propagate up the stack in order (merge each base branch into its child): issue-19 → issue-20 → issue-21 → issue-22 → issue-23, pushing each.
+3. On the stack tip (`feature/issue-23-i2c-wdt-interrupts`): renumber the remaining overnight entries — Sessions 4–8 become **Sessions 5–9** (issues #19–#23) — in `PROGRESS.md`. GLOSSARY.md needs no changes (append-only, no numbering).
+
+## Where it is
+`Silmulator/docs/learning/PROGRESS.md` (conflict + renumbering); merge commits on the six `feature/issue-1[89]-*`/`feature/issue-2[0-3]-*` branches. Do not touch lesson/drill/vocab HTML files — their 00NN file numbering is independent of session numbering and stays as-is.
+
+## How to verify it's done
+- `git merge-tree --write-tree origin/master origin/feature/issue-18-adc-reference-scaling` reports a clean merge.
+- On the tip: `grep '^### Session' Silmulator/docs/learning/PROGRESS.md` shows Sessions 1–9, strictly increasing, no duplicates, dates in chronological order.
+- No conflict markers: `grep -c '^<<<<<<<\|^=======$\|^>>>>>>>' PROGRESS.md` → 0.
+- Full suite still green: `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/` (388 passed, 3 xfailed — docs-only change, nothing should move).
+- All six PRs (#28–#33) show mergeable on GitHub. Do NOT merge them — that stays with the repo owner.
+
+## Constraints
+Keep-both resolution only — never drop either session entry. Chronological order wins over branch order. Merge (do not rebase) the stacked branches: rebasing rewrites SHAs referenced in PR bodies, the overnight report, and PROGRESS.md itself.
+
+## Code economy note
+Docs-only. No code, no new files, no test changes. The entire diff should be merge commits plus heading renumbers in one Markdown file.
+
+## Branch name
+Work happens directly on the six existing stack branches (merge commits) — no new branch needed.
+
+## Concept for learning materials
+Three-way merge semantics for append-only log files: why both-sides-append is a content conflict git cannot auto-resolve, keep-one vs keep-both diagnosis, and post-merge invariant repair (unique monotonically-numbered headings, chronological order)

@@ -1,0 +1,27 @@
+# Centralized LLM settings shared by every NPC.
+# Edit and re-run the game; no rebuild needed.
+
+host = localhost
+port = 11434
+
+# Any Ollama tag works. Pull it first with: ollama pull <model>
+model = qwen3:8b
+
+# Reasoning models only: "false" answers at chat speed (qwen3 measured
+# 24s -> 2.7s to first token). Remove the line for models without thinking.
+think = false
+
+# 0.0 = deterministic. 0.7-0.9 = natural chat. 1.0+ = chaotic.
+temperature = 0.8
+
+# How long to wait for a single reply before giving up.
+request_timeout_s = 60
+
+# How long Ollama should keep the model resident after the last request.
+# Use Go duration syntax (e.g. 30s, 5m, 1h). Longer keeps latency low but
+# holds VRAM.
+keep_alive = 10m
+
+# World generation (sandbox "Generate...") uses THIS same model. Measured
+# winner of tools/bench_schema_models.py (2026-07-14): qwen3:8b, 50% valid
+# vs 25%/0% for qwen2.5:3b/gemma3:4b — re-run the bench before changing.

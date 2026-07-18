@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0039 — The Position-Sizing Pipeline: Relative Weights × Gross Multipliers</title>
+<style>
+  :root { --bg:#0f1419; --panel:#161d26; --ink:#e6e1d7; --dim:#9aa4b2; --accent:#e8a33d;
+          --good:#4cc38a; --bad:#e5534b; --code-bg:#1c2530; --border:#2a3644; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#faf8f4; --panel:#ffffff; --ink:#1f2933; --dim:#5b6572; --accent:#b06f0e;
+            --good:#0e7a4f; --bad:#c0362c; --code-bg:#f0ede6; --border:#ddd6c8; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.65 Georgia, 'Times New Roman', serif; }
+  main { max-width:46rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.65rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size:1.22rem; margin:2.6rem 0 .8rem; color:var(--accent);
+       border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  .kicker { color:var(--dim); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; }
+  .why { background:var(--panel); border-left:4px solid var(--accent); padding:.8rem 1rem;
+         margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; overflow-x:auto; font:13.5px/1.55 'SF Mono', Menlo, Consolas, monospace; }
+  code { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:.88em;
+         background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  .cm { color:var(--dim); font-style:italic; }
+  table { border-collapse:collapse; width:100%; font-size:.9em; margin:1rem 0; }
+  th, td { border:1px solid var(--border); padding:.45rem .65rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .options { list-style:none; padding:0; }
+  .options li { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                padding:.6rem .9rem; margin:.45rem 0; cursor:pointer; }
+  .options li:hover { border-color:var(--accent); }
+  .options li.picked-right { border-color:var(--good); }
+  .options li.picked-wrong { border-color:var(--bad); }
+  .feedback { font-size:.92em; padding:.5rem .8rem; border-radius:6px; background:var(--panel); }
+  .question { margin:2rem 0; }
+  #score { font-weight:bold; }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">HFT Practice · Lesson 0039</p>
+<h1>The Position-Sizing Pipeline: Relative Weights × Gross Multipliers</h1>
+<div class="why"><strong>Why this matters:</strong> after the 2026-07-14 research batch,
+a single day's position sizes in <code>run_strategy_walkforward</code> flow through up
+to FOUR stages. Understanding why they compose the way they do — and why every stage
+is capped at 1 — is the difference between extending this pipeline safely and
+accidentally building leverage into a long-only paper trader.</div>
+
+<h2 id="s1">1 · The pipeline, in order</h2>
+<table>
+<tr><th>Stage</th><th>Question it answers</th><th>Range</th><th>Code</th></tr>
+<tr><td>1. Relative weights</td><td>How do today's picks split whatever we deploy? (confidence ÷ σ, capped per-name at max_pos, cash remainder)</td><td>Σ ≤ 1</td><td><code>_conf_vol_weights</code></td></tr>
+<tr><td>2. Vol-target multiplier</td><td>Is the LEDGER's recent volatility above target? Scale the whole book down.</td><td>(0, 1]</td><td><code>min(1, target_vol/realized_vol)</code></td></tr>
+<tr><td>3. Kelly multiplier</td><td>Does this strategy's own trade HISTORY justify full deployment?</td><td>[0, 1]</td><td><code>kelly_fraction</code> — λ·μ/σ², clamped</td></tr>
+<tr><td>4. ATR stop overlay</td><td>Did any held name breach its volatility-sized trail? (Removes candidates, not weights)</td><td>—</td><td>suppression + cooldown</td></tr>
+</table>
+<p>Stages 2 and 3 multiply: <code>final = relative × vol_mult × kelly_mult</code>. Since
+each factor is ≤ 1, the product is ≤ 1 — the book can only ever de-lever. That's a
+STRUCTURAL guarantee, not a hope: no configuration of flags can borrow.</p>
+
+<h2 id="s2">2 · Why multiply, not average or min?</h2>
+<p>The multipliers answer <em>independent</em> questions: realized-vol says "the market
+is currently wilder than my target"; Kelly says "my measured edge is thinner than full
+deployment assumes." If both are true, both discounts should apply — a 0.5 vol scale on
+a 0.5 Kelly conviction means 25% deployed, and that's correct, not double-counting.
+<code>min()</code> would ignore one true fact; averaging would invent a number neither
+control asked for. Multiplication is the only composition that respects both.</p>
+
+<h2 id="s3">3 · Determinism: the constraint that shaped everything</h2>
+<p>Every stage feeds on data the replay can reconstruct: relative weights from price
+history, the vol multiplier from the ledger's own accumulating returns, Kelly from the
+run's own accumulating blotter (deliberately NOT the stored trades table — one code
+path for backtest and live backfill), ATR trails from OHLC. The arena invariant —
+<em>live is a deterministic recompute</em> — survives because no sizing stage reads
+anything a replay can't rebuild. This is also why Kelly sizes today's bet only from
+trades BEFORE today: letting today's outcome size today's bet is lookahead wearing a
+risk-management costume.</p>
+
+<h2 id="s4">4 · Often confused</h2>
+<table>
+<tr><th>Pair</th><th>Distinction</th></tr>
+<tr><td>Inverse-vol weights (stage 1) vs vol targeting (stage 2)</td><td>Stage 1 equalizes risk ACROSS names (calm names get more of the pie); stage 2 sizes the pie itself against a target. You can be perfectly risk-balanced across names and still have twice the portfolio vol you want.</td></tr>
+<tr><td>Kelly multiplier vs the divergence alert</td><td>Both read realized performance; Kelly quietly scales exposure with the measured edge, divergence loudly flags statistical inconsistency with the backtest. One acts on size, the other on your attention.</td></tr>
+<tr><td>ATR stop vs the drawdown breaker</td><td>ATR: per-POSITION, price-path-based, auto-recovers after cooldown. Breaker: per-LEDGER (or portfolio), equity-based, human-resume only.</td></tr>
+<tr><td>Full Kelly vs fractional Kelly</td><td>f* = μ/σ² is optimal only if μ and σ are KNOWN. They're estimated — and overbetting a noisy edge estimate is ruinous asymmetrically. λ ∈ [0.25, 0.5] is deliberately the only offered range.</td></tr>
+</table>
+
+<h2 id="s5">5 · Practice</h2>
+<p>Score: <span id="score">0 / 0</span></p>
+
+<div class="question" data-question>
+  <p><strong>Q1.</strong> vol_mult = 0.6 and kelly_mult = 0.5 on the same day. Deployed fraction of the book?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="min() would ignore the other control's true finding.">0.5 — the stricter control wins</li>
+    <li data-correct="true" data-why="0.6 × 0.5 = 0.30. Independent discounts compose multiplicatively; both facts get respected.">0.30</li>
+    <li data-correct="false" data-why="Averaging invents a number neither control computed.">0.55</li>
+    <li data-correct="false" data-why="They don't cancel — both point the same direction: smaller.">1.0 — they offset</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q2.</strong> Why does the Kelly estimator use only trades from BEFORE today?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Speed is irrelevant — it's one mean and variance either way.">Including today would be too slow</li>
+    <li data-correct="true" data-why="Sizing today's bet with today's outcome is lookahead — the same sin as trading on tomorrow's close, hidden inside a risk control.">Today's outcome sizing today's bet is lookahead</li>
+    <li data-correct="false" data-why="The window is trailing anyway; the issue is WHICH trades, not how many.">The window would overflow</li>
+    <li data-correct="false" data-why="Backtest and live use the SAME in-window accumulation — that's the determinism design, not a limitation.">Live can't see today's trades</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q3.</strong> A strategy's Kelly multiplier reads 0.0 in the report. What happened, and what does the arena do?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Negative estimated edge clamps to zero: the strategy keeps ticking (rows with zero exposure) — a loud, visible anomaly rather than a silent skip, and the human decides what to do.">Its measured edge went negative; it still ticks but deploys nothing</li>
+    <li data-correct="false" data-why="Pausing is the breaker's job; Kelly only sizes.">The breaker paused it</li>
+    <li data-correct="false" data-why="Below min_trades the multiplier is exactly 1.0, not 0.">It has too few trades</li>
+    <li data-correct="false" data-why="λ is bounded [0.25, 0.5] and scales f*, it can't be 0 itself.">The lambda flag was set to zero</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q4.</strong> The ATR stop breaches on Tuesday's close. When does the position actually stop earning returns?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Tuesday's return IS realized — no intrabar fill fantasy; the engine can't exit at a price inside a bar it only sees at close.">Tuesday — the breach bar's return is cancelled</li>
+    <li data-correct="true" data-why="Right: the breach bar's return stays (honest — you couldn't have known intraday), and suppression removes the ticker from Wednesday's candidates for cooldown_days.">Wednesday — via suppression from the next bar's candidates</li>
+    <li data-correct="false" data-why="Cooldown controls RE-entry length, not exit timing.">After cooldown_days</li>
+    <li data-correct="false" data-why="The trail is per-position; the ledger-level pause is the breaker's separate mechanism.">When the ledger's breaker also trips</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<script>
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+let answered = 0, right = 0;
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = q.querySelector('.feedback');
+  let done = false;
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      const correct = li.dataset.correct === 'true';
+      if (!done){ answered++; if (correct) right++; done = true; }
+      li.classList.add(correct ? 'picked-right' : 'picked-wrong');
+      feedback.hidden = false;
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      document.getElementById('score').textContent = right + ' / ' + answered;
+    });
+  });
+});
+</script>
+</main>
+</body>
+</html>

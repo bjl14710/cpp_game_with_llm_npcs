@@ -1,0 +1,28 @@
+# Checkpoint
+Session: 2026-07-15 overnight — MSP430 Compliance Fixes (issues #18–#23)
+Status: COMPLETE
+
+Issues to process: [#18, #19, #20, #21, #22, #23]
+Issues completed: [#18, #19, #20, #21, #22, #23]  (all closed, draft PRs #28–#33)
+Issues failed: []
+Issues skipped: []
+
+## Per-issue
+#18 -> PR #28  feature/issue-18-adc-reference-scaling (base master); learning 0009 on branch
+#19 -> PR #29  feature/issue-19-timer-compliance (base #18)
+#20 -> PR #30  feature/issue-20-clock-compliance (base #19; implementation pre-staged by Brandon)
+#21 -> PR #31  feature/issue-21-gpio-pxren (base #20)
+#22 -> PR #32  feature/issue-22-cpu-pmm-compliance (base #21)
+#23 -> PR #33  feature/issue-23-i2c-wdt-interrupts (base #22; 3 commits)
+Learning 0010–0014 + index + overnight report: committed on the STACK TIP
+(PR #33) to avoid GLOSSARY/PROGRESS merge conflicts (June #11 precedent).
+
+## Key numbers
+Tests 358 -> 388 passed; xfails 16 -> 3 (remaining: ADC12ENC gate,
+invalid-channel convert, TA0 CCR3). Audit: 137 -> 139 families, score
+19.8% -> 42.7%, 0 stale. Vendor-doc diff: MATCH 13 -> 18, CONFLICT 5 -> 0.
+
+## Cleanup notes
+- Local branch feature/issue-19-timer-compliance has an unpushed duplicate
+  learning commit 18efa05 — do NOT push; content lives on tip as f9227f3.
+- Merge PRs bottom-up: #28 → #29 → #30 → #31 → #32 → #33.

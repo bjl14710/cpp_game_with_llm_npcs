@@ -1,0 +1,36 @@
+# Checkpoint
+Session: 2026-07-07 (continued, scaffolded-plan implementation)
+Goal: Implement the five scaffolded 2026-07-06 plans (GitHub auth broken, so
+      no issue queue — working directly from the plan docs on feature branches).
+Status: IN PROGRESS
+
+## Scaffolded plans — implementation status
+- [x] bench-latency-history   → branch feature/bench-latency-history   (pushed) COMPLETED
+- [x] backtest-vs-live-divergence → branch feature/backtest-vs-live-divergence (pushed) COMPLETED
+- [ ] itch-replay-clock        (C++ replay clock; not started)
+- [ ] vhdl-flat-book           (VHDL + GHDL; needs `bash scripts/setup-vhdl.sh`; not started)
+- [ ] avellaneda-stoikov-mm-sim (C++ pybind11 MM sim; run_mm_sim stub in bindings.cpp; not started)
+
+## Completed this session
+### bench-latency-history (feature/bench-latency-history)
+- scripts/bench_history.py: parser, regression rule, host fingerprint, runner
+  (best-of-K, schema-marked LF CSV, exit 0/1/2). scripts/install_bench_hook.sh:
+  idempotent pre-push hook. tests/test_bench_history.py: 12 tests (un-skipped).
+  docs/perf/history.csv seeded; docs/perf/README.md added. Reviewed clean.
+### backtest-vs-live-divergence (feature/backtest-vs-live-divergence)
+- src/oil_alpha/analysis/walkforward.py: strict PIT walk-forward CCF +
+  divergence_report + CLI. tests/test_walkforward.py: 5 tests (un-skipped).
+  docs/perf/03-backtest-vs-live.md: real-data null (contemporaneous, 124 steps,
+  0 divergence) + synthetic regime-flip control (agreement 0.489). PROGRESS.md
+  teach-target note. Reviewed clean (assert hardened to a raise).
+
+## Standing blockers / constraints
+- GitHub API auth (GH_TOKEN + gh keyring) is BROKEN all session → cannot create
+  issues or draft PRs. `git push` works (ordinary remote auth). MUST NOT work
+  around API auth via `git credential fill` / keychain extraction (denied earlier
+  as credential exploration). User must run `gh auth login` or refresh GH_TOKEN.
+- Feature branches awaiting manual PR creation (URLs printed on push).
+- plan_document.md is an untracked repo-root file — never stage it.
+
+## Full suite at last checkpoint: 62 passed, 9 skipped (0 failures).
+Remaining 9 skips = replay/vhdl/mm scaffold stubs.

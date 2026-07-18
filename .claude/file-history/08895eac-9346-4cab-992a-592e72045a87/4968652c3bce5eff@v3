@@ -1,0 +1,5 @@
+pybind11_add_module(oil_volume_cpp
+    bindings.cpp
+    volume_metrics.cpp
+)
+target_include_directories(oil_volume_cpp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

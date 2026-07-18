@@ -1,0 +1,122 @@
+"""Create the 8 'Research founded ideas 2026-07-14' issues. Idempotent on title."""
+import os
+import sys
+
+import requests
+
+REPO = "bjl14710/algo_trading_practice"
+USERNAME = "bjl14710"
+API = f"https://api.github.com/repos/{REPO}"
+
+MILESTONE_TITLE = "Research Ideas — 2026-07-14"
+MILESTONE_DESC = (
+    "8 research-founded plans from 2026-07-14 (specs in .claude/plans/): "
+    "vol-targeted sizing, ATR stops + portfolio breaker, TSMOM trend following, "
+    "low-volatility selection, PEAD, fractional Kelly, demoting indicators to "
+    "features, and margin-gated pairs stat-arb. Strategy stubs are already "
+    "scaffolded (tests/test_research_strategies.py has the skip sentinels). "
+    "User-stated priority: vol targeting first among risk controls."
+)
+
+BODY = """## What to change
+Implement the plan in `.claude/plans/{plan}` — it documents every design
+decision already made (nothing to re-litigate) and the scaffold stubs to
+fill in ({stubs}).
+
+## How to verify it's done
+The plan's Acceptance Criteria section, plus: remove the corresponding
+skip stubs in `tests/test_research_strategies.py` (where applicable) and
+`uv run pytest tests/ -m "not exercise"` stays green.
+
+## Constraints
+{constraints}
+
+## Spec
+`.claude/plans/{plan}`
+
+## Branch name
+`feature/issue-{{number}}-{slug}`
+"""
+
+SPECS = [
+    ("feat(sizing): volatility-targeted position sizing (portfolio vol target)", "vol-targeted-sizing",
+     "vol-targeted-sizing.md", "walkforward_sim.py sizing mode",
+     "Builds ON conf_vol (already inverse-vol weights) — the delta is the portfolio-level "
+     "exposure multiplier. Never levers above 1.0. equal/conf_vol regression-pinned. "
+     "USER PRIORITY: first risk control of the batch."),
+    ("feat(risk): ATR trailing stops + portfolio-level drawdown breaker", "atr-stops-portfolio-breaker",
+     "atr-stops-portfolio-breaker.md", "walkforward_sim.py overlay + strategy_arena.py portfolio breaker",
+     "Stops are an ENGINE overlay (opt-in --atr_stop), deterministic across live backfill. "
+     "Portfolio breaker pauses ALL live strategies; resume --all; manual-resume philosophy intact."),
+    ("feat(strategies): TSMOM per-ticker trend following with built-in vol scaling", "tsmom-trend",
+     "trend-following.md", "strategies/trend.py",
+     "Long-only; confidence = trend/vol so conf_vol sizing delivers the vol scaling; "
+     "skip-month exclusion default on; register 'tsmom' only when implemented."),
+    ("feat(strategies): low-volatility long-only selection", "low-vol",
+     "low-volatility.md", "strategies/low_vol.py",
+     "Confidence = 1/sigma makes top_n structurally prefer calm names; sigma floor "
+     "guards halted tickers; realized vol, not beta (beta variant is a future issue)."),
+    ("feat(strategies): PEAD — post-earnings-announcement drift", "pead",
+     "pead-strategy.md", "earnings_data.py + strategies/pead.py + engine df.attrs ticker",
+     "AV free tier: refresh-earnings drips under --budget 20/day, caches JSON; strategies "
+     "read cache ONLY. Entry starts the day AFTER reportedDate (lookahead guard). "
+     "Liquidity filter mandatory (min_adv) — the small-cap cost trap is the point."),
+    ("feat(sizing): fractional Kelly (quarter- to half-Kelly) from trade history", "fractional-kelly",
+     "fractional-kelly.md", "kelly.py + arena wiring",
+     "Continuous Kelly mu/var on blotter trade returns; lambda hard-limited to [0.25, 0.5]; "
+     "clamp [0,1]; <30 trades -> 1.0; composes multiplicatively with vol-target, capped at 1."),
+    ("refactor(strategies): demote candlestick/technical to GBM features + confirmation filters", "indicators-to-features",
+     "indicators-to-features.md", "strategies/confirmed.py + build_features + REFERENCE status",
+     "Historical arena metrics preserved under new REFERENCE status (never live, never "
+     "ensemble). build_features gains engulf_signal + macd_hist_norm — retrain + ONNX "
+     "re-export + C++ rebuild checklist applies (CLAUDE.md rule)."),
+    ("feat(pairs): cointegration pairs trading, research-only + margin-gated", "pairs-stat-arb",
+     "pairs-stat-arb.md", "pairs.py",
+     "NO new deps: numpy OLS + hand-rolled DF test with hardcoded MacKinnon criticals. "
+     "RESEARCH status hard-gated from live until --i_have_margin acknowledgment "
+     "(~$2,000 margin account + shorting). Backtest charges BOTH legs through CostModel."),
+]
+
+
+def main() -> None:
+    tok = os.environ.get("GH_TOKEN", "")
+    H = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
+    who = requests.get("https://api.github.com/user", headers=H)
+    if who.status_code != 200:
+        sys.exit("GH_TOKEN invalid")
+    print("Authenticated as", who.json()["login"])
+
+    issues = requests.get(f"{API}/issues?state=open&per_page=100", headers=H).json()
+    existing = {i["title"].lower() for i in issues if "pull_request" not in i}
+
+    ms = requests.get(f"{API}/milestones?state=open&per_page=100", headers=H).json()
+    ms_num = next((m["number"] for m in ms if m["title"] == MILESTONE_TITLE), None)
+    if ms_num is None:
+        r = requests.post(f"{API}/milestones", headers=H,
+                          json={"title": MILESTONE_TITLE, "description": MILESTONE_DESC})
+        r.raise_for_status()
+        ms_num = r.json()["number"]
+        print(f"Created milestone #{ms_num}")
+    else:
+        print(f"Reusing milestone #{ms_num}")
+
+    for title, slug, plan, stubs, constraints in SPECS:
+        if title.lower() in existing:
+            print("Skipping (exists):", title)
+            continue
+        body = BODY.format(plan=plan, stubs=stubs, constraints=constraints, slug=slug)
+        r = requests.post(f"{API}/issues", headers=H, json={
+            "title": title, "body": body.replace("{number}", "N"),
+            "labels": ["ready-for-ai"], "assignees": [USERNAME], "milestone": ms_num})
+        r.raise_for_status()
+        issue = r.json()
+        requests.patch(f"{API}/issues/{issue['number']}", headers=H,
+                       json={"body": body.replace("{number}", str(issue["number"]))}).raise_for_status()
+        print(f"  Created #{issue['number']}: {title}")
+
+    q = requests.get(f"{API}/issues?state=open&labels=ready-for-ai&per_page=100", headers=H).json()
+    print("\nready-for-ai queue:", sum(1 for i in q if "pull_request" not in i), "issues")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# One-time setup for the VHDL flat-book simulation (plan: vhdl-flat-book).
+# Installs GHDL via Homebrew — approved dependency. Idempotent.
+set -euo pipefail
+
+if command -v ghdl >/dev/null 2>&1; then
+    echo "ghdl already installed: $(ghdl --version | head -1)"
+    exit 0
+fi
+
+if ! command -v brew >/dev/null 2>&1; then
+    echo "ERROR: Homebrew not found — install ghdl manually (https://ghdl.github.io/ghdl/)" >&2
+    exit 1
+fi
+
+echo "Installing ghdl via Homebrew..."
+brew install ghdl
+ghdl --version | head -1

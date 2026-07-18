@@ -1,0 +1,32 @@
+"""Grading wrapper — Exercise 06: C++ Order Book.
+
+Compiles and runs tests/exercises/cpp/test_06_order_book.cpp via run_cpp.sh.
+HFT_EXERCISE_TARGET is inherited, so the same exercises-vs-solutions switch
+applies.
+
+Run:  uv run pytest tests/exercises/test_06_cpp_order_book.py -v
+"""
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+CPP_DIR = Path(__file__).resolve().parent / "cpp"
+
+
+def _run_cpp_test(name: str) -> None:
+    if shutil.which("g++") is None:
+        pytest.skip("g++ not installed")
+    proc = subprocess.run(
+        ["bash", str(CPP_DIR / "run_cpp.sh"), name],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 42:
+        pytest.skip("Exercise not implemented yet — fill in the TODOs")
+    assert proc.returncode == 0, f"\n{proc.stdout}\n{proc.stderr}"
+
+
+def test_order_book():
+    _run_cpp_test("test_06_order_book")

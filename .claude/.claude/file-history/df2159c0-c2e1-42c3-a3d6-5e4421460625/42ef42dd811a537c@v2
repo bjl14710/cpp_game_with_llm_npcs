@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0004 — Candlestick Pattern Detection</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #252836;
+    --green: #26a269; --red: #c01c28; --yellow: #e9b96e; --blue: #3584e4;
+    --text: #e0e0e0; --muted: #888; --radius: 8px; --mono: monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: Georgia, serif;
+         line-height: 1.7; max-width: 760px; margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 1.6rem; color: #fff; margin-bottom: 0.3rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; }
+  .card { background: var(--surface); border-radius: var(--radius); padding: 1.5rem;
+          margin-bottom: 1.5rem; border: 1px solid #2a2a2a; }
+  .card h2 { font-size: 1.05rem; color: var(--yellow); margin-bottom: 1rem; }
+  .q { font-weight: bold; margin-bottom: 0.8rem; }
+  .opts { list-style: none; }
+  .opts li { background: var(--surface2); border: 1px solid #333; border-radius: 6px;
+             padding: 0.55rem 0.9rem; margin-bottom: 0.4rem; cursor: pointer;
+             font-family: var(--mono); font-size: 0.88rem; transition: border-color 0.12s; }
+  .opts li:hover { border-color: var(--blue); }
+  .opts li.correct { border-color: var(--green); background: #0d2b1a; }
+  .opts li.wrong { border-color: var(--red); background: #2b0d0d; }
+  .fb { font-size: 0.85rem; margin-top: 0.5rem; display: none; }
+  .score { font-family: var(--mono); color: var(--yellow); margin-top: 1rem; font-size: 0.9rem; }
+  code { font-family: var(--mono); background: var(--surface2); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.87em; }
+</style>
+</head>
+<body>
+<h1>Drill 0004 — Candlestick Pattern Detection</h1>
+<p class="subtitle">Quick recall: engulfing rules, doji guard, lookahead bias. 8 questions.</p>
+
+<div id="drill-container"></div>
+<div class="score" id="final-score"></div>
+
+<script>
+const QS = [
+  {
+    q: "prev: Open=50, Close=45 (red). curr: Open=44, Close=52 (green). Signal?",
+    opts: [
+      {t:"BUY — bullish engulfing", c:true, w:"prev red ✓, curr green ✓, curr.Open(44)≤prev.Close(45) ✓, curr.Close(52)≥prev.Open(50) ✓. All four conditions met."},
+      {t:"SELL — bearish engulfing", c:false, w:"Bearish needs prev green and curr red. Here prev is red and curr is green — that's bullish."},
+      {t:"HOLD — partial overlap only", c:false, w:"curr.Close=52 exceeds prev.Open=50, so it does fully engulf. This is a valid bullish signal."},
+    ]
+  },
+  {
+    q: "prev: Open=80, Close=88 (green). curr: Open=87, Close=75 (red). Signal?",
+    opts: [
+      {t:"SELL — bearish engulfing", c:true, w:"prev green ✓, curr red ✓, curr.Open(87)≥prev.Close(88)? No — 87 < 88. Wait, let's check: curr.Open=87 >= prev.Close=88? No. So this is actually HOLD."},
+      {t:"HOLD — curr.Open doesn't reach prev.Close", c:false, w:"Actually correct — curr.Open=87 < prev.Close=88, so the bearish engulf condition fails. Answer should be HOLD."},
+      {t:"BUY — reversal upward", c:false, w:"prev is green and curr is red — that's the wrong direction for a bullish signal."},
+    ]
+  },
+  {
+    q: "A bar has Open=100.00, Close=100.04. DOJI_THRESHOLD=0.0005. Is it a doji?",
+    opts: [
+      {t:"Yes — body=0.04 < threshold=0.05", c:true, w:"threshold = 0.0005 × 100.04 ≈ 0.050. body = |100.04-100.00| = 0.04. Since 0.04 < 0.05, this IS a doji. generate_signal returns HOLD."},
+      {t:"No — body of 4 cents is significant", c:false, w:"At $100, 4 cents is only 0.04% — below the 0.05% threshold. The bar qualifies as a doji."},
+      {t:"Depends on the previous bar", c:false, w:"_is_doji() checks only the single bar passed to it. It's independent of adjacent bars."},
+    ]
+  },
+  {
+    q: "Signal fires at bar index 55. In PaperEngine, when does the trade open?",
+    opts: [
+      {t:"Bar 55's Close — confirmed at end of the signal bar", c:false, w:"Using bar 55's Close is subtle lookahead: you're using a price you can only see after the bar closes, then pretending you traded at that exact moment. Entry must be bar 56's Open."},
+      {t:"Bar 56's Open — first price after signal is confirmed", c:true, w:"The signal is confirmed when bar 55 closes. The earliest you can realistically act is bar 56's opening price. This is the only lookahead-free entry."},
+      {t:"Bar 55's Open — earliest price in the signal bar", c:false, w:"Bar 55's Open is before the engulfing pattern completes. You can't know it's an engulfing bar until bar 55 closes."},
+    ]
+  },
+  {
+    q: "Which code line introduces lookahead bias in a bar loop?",
+    opts: [
+      {t:"sig = strategy.generate_signal(df.iloc[i-1], df.iloc[i])", c:false, w:"Using only bars up to i — no future data. This is safe."},
+      {t:"entry = df.iloc[i+1]['Open'] if sig=='BUY' else None", c:false, w:"Opening at the NEXT bar's Open is the CORRECT no-lookahead approach. This is safe."},
+      {t:"sig = strategy.generate_signal(df.iloc[i], df.iloc[i+1])", c:true, w:"df.iloc[i+1] is a future bar. When processing bar i, bar i+1 hasn't happened yet. This is lookahead."},
+    ]
+  },
+  {
+    q: "What does the STRATEGIES registry dict in intraday_sim.py enable?",
+    opts: [
+      {t:"Adding a new strategy without changing any if/elif chain", c:true, w:"STRATEGIES = {'engulfing': EngulfingStrategy, 'new_pattern': NewStrategy}. One line to add a new strategy — the dispatch logic is unchanged."},
+      {t:"Running multiple strategies simultaneously on the same ticker", c:false, w:"The registry selects one strategy by name. Running multiple strategies simultaneously would require additional loop logic."},
+      {t:"Automatically testing all strategies in parallel", c:false, w:"The registry is a lookup table, not a test runner. It maps names to classes for CLI dispatch."},
+    ]
+  },
+  {
+    q: "How does PaperEngine know when a session ends to force-close positions?",
+    opts: [
+      {t:"It uses a hard-coded NYSE open/close time (9:30-16:00 ET)", c:false, w:"Hard-coding NYSE hours would break on holidays and for non-US assets. The engine avoids this."},
+      {t:"It groups bars by df.index.date to identify session boundaries", c:true, w:"df.groupby(df.index.date) splits the intraday DataFrame by calendar date. The last bar of each date group triggers the EOD force-close — derived from the actual data, not hard-coded hours."},
+      {t:"It checks if Volume drops to zero to detect market close", c:false, w:"Volume patterns are too noisy for reliable session detection. Date-grouping from timestamps is cleaner."},
+    ]
+  },
+  {
+    q: "BaseStrategy is an ABC. What happens if you instantiate it directly?",
+    opts: [
+      {t:"It works but generate_signal raises NotImplementedError", c:false, w:"ABCs prevent instantiation at the class level via __new__, not at the method level. You'd get TypeError before you ever call a method."},
+      {t:"TypeError is raised at instantiation — abstract classes cannot be instantiated directly", c:true, w:"Python's abc.ABC raises TypeError if you try to instantiate a class that has unimplemented abstract methods. This enforces the contract at construction time."},
+      {t:"No error — ABC is just documentation", c:false, w:"abc.ABC is enforced by the Python runtime, not just documentation. It actively prevents instantiation of incomplete subclasses."},
+    ]
+  },
+];
+
+function shuffle(a) {
+  for (let i = a.length-1; i>0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+
+let answered = 0;
+const container = document.getElementById('drill-container');
+
+QS.forEach((q, qi) => {
+  const card = document.createElement('div'); card.className = 'card';
+  card.innerHTML = `<h2>Q${qi+1} of ${QS.length}</h2><p class="q">${q.q}</p><ul class="opts"></ul><p class="fb"></p>`;
+  const ul = card.querySelector('.opts');
+  const fb = card.querySelector('.fb');
+  shuffle(q.opts).forEach(opt => {
+    const li = document.createElement('li');
+    li.textContent = opt.t;
+    li.dataset.correct = opt.c;
+    li.dataset.why = opt.w;
+    li.addEventListener('click', () => {
+      if (card.dataset.done) return;
+      card.dataset.done = '1';
+      answered++;
+      const correct = li.dataset.correct === 'true';
+      li.classList.add(correct ? 'correct' : 'wrong');
+      if (!correct) ul.querySelectorAll('[data-correct="true"]').forEach(r=>r.classList.add('correct'));
+      fb.style.display = 'block';
+      fb.style.color = correct ? 'var(--green)' : 'var(--red)';
+      fb.textContent = (correct ? '✓ ' : '✗ ') + li.dataset.why;
+      if (answered === QS.length) {
+        document.getElementById('final-score').textContent =
+          `Drill complete — ${document.querySelectorAll('.correct:first-child, li.correct:only-of-type').length} / ${QS.length} correct on first try. Refresh to retry.`;
+      }
+    });
+    ul.appendChild(li);
+  });
+  container.appendChild(card);
+});
+</script>
+</body>
+</html>

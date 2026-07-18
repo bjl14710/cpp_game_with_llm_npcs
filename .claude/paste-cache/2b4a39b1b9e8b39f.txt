@@ -1,0 +1,51 @@
+/idea
+
+Goal: Fix the moonwalk animation bug, fix curb/clipping collision issues, and
+add proper fist/gun weapon animations — all treated as one underlying fix
+(unify state that's currently split), not three unrelated patches.
+
+Context: NPCs animate a forward walk cycle while visibly moving backward
+relative to their facing — classic symptom of facing_direction being stored
+and updated separately from velocity instead of derived from it. Separately,
+the player can walk through curbs and clip through some objects — classic
+symptom of visual geometry existing without matching collision geometry for
+those tile/object types. Weapon animations (fist, gun) aren't showing
+correctly, likely because equipped-weapon state and animation-clip state
+aren't cleanly unified either.
+
+Scope:
+1. Facing/motion fix — audit how facing_direction (or equivalent) is set.
+   If it's stored independently of velocity, refactor so it's derived from
+   velocity each frame (recompute only above a small speed threshold so
+   standing still doesn't cause facing to flip). Every animation state that
+   reads facing should read this one derived value — do not patch the
+   moonwalk per-animation-state, fix it at the source so new animation
+   states (running, strafing, etc.) can't reintroduce the bug.
+2. Collision audit — find every tile/object type that renders as a physical
+   obstacle (curbs specifically, plus anything else clippable) and confirm
+   it has an authored collision shape matching its visual footprint. Add
+   missing colliders rather than special-casing curbs alone; treat this as
+   a data-completeness pass across obstacle types, not a one-off patch.
+3. Fist/gun animations — implement visible, correct animation states for
+   both fist and gun, driven by equipped-weapon state the same way facing is
+   driven by velocity: one authoritative "what's equipped" value that the
+   animation system reads, not several places that each need to remember to
+   sync. This should also set up cleanly for whatever additional weapons get
+   ported in from the other branches (see the earlier weapons ticket) without
+   requiring a new hardcoded animation-state branch per weapon.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Where a decision would normally prompt me, pick the
+  most defensible option yourself, log the decision and reasoning in
+  OVERNIGHT_REPORT.md, and keep going.
+- Prefer the derived-state fix over a per-animation-state patch even if the
+  patch would look done sooner — the ticket's value is in not having this
+  bug come back with the next new animation or weapon.
+- If auditing collision turns up more missing colliders than just curbs,
+  fix all of them in this pass and list what was found in the report,
+  rather than narrowing scope back to curbs only.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

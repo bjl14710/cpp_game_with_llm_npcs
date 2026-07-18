@@ -1,0 +1,39 @@
+# MR: feat: research-founded batch — 8 strategies & risk controls (#64–#71)
+
+Branch: `feature/research-batch` → `feature/gui-scroll-live-signals` (stacked: #52 → #53 → #63 → gui branch → this)
+
+## Summary
+Implements all 8 issues of milestone "Research Ideas — 2026-07-14": volatility-targeted sizing, ATR trailing stops + a portfolio-level drawdown breaker, TSMOM trend following, low-volatility selection, PEAD with a rate-limit-respecting earnings cache, fractional-Kelly gross scaling, demotion of candlestick/technical indicators to GBM features + confirmation filters, and margin-gated pairs stat-arb. One commit per issue, suite green after each — final: **235 passed, zero skips** (34 net new tests; every scaffold stub from the planning session is now live code).
+
+## Changes by Issue
+
+**#64 vol targeting** — `sizing="vol_target"`: conf_vol relative weights × `min(1, target_vol / realized ledger vol)`. De-levers in turbulence, never borrows; measured on the strategy's own accumulating equity curve so backtest and live replay share one code path. `target_vol` persisted as screened config.
+
+**#65 ATR stops + portfolio breaker** — Engine overlay (`--atr_stop 3.0` opt-in): Wilder ATR(14) trail on continuously-held positions, breach ⇒ suppression from candidates for `--cooldown_days`, deterministic across backfill (test-pinned). Portfolio breaker: PASS ledgers date-aligned/ffilled/summed; combined drawdown past `--portfolio_dd` (0.25) pauses ALL live strategies with one `portfolio_events` row; `arena-run resume --all` restores exactly those. Design note: `--portfolio_dd 0` disables it independently of `--no_breaker` — the two protections arm separately.
+
+**#66 TSMOM** — long iff trailing (252d − 21d skip) return > 0; confidence = trend / annualized σ so conf_vol sizing yields the vol-scaled positions from day one. Long-only; all regimes (it self-gates by trend sign).
+
+**#67 low-vol** — always-long, confidence = 1/σ (floored): the arena's top-N confidence ranking does the cross-sectional selection structurally; the per-ticker contract stays clean.
+
+**#68 PEAD** — `refresh-earnings` drip-fetches AV EARNINGS under `--budget 20/day` into `data/earnings/*.json` (fresh-skip at 80 days, rate-limit bodies stop cleanly with partial cache). Surprise = (act−est)/max(|est|, $0.10). Strategy: +1 for `hold_days` starting the day AFTER the report (lookahead guard), threshold +25%, mandatory ADV ≥ $50M filter — the small-cap cost trap is the point. Engine change: `run_strategy_walkforward` tags each history slice with `df.attrs["ticker"]` so aux-data strategies know who they are (regression-safe for everyone else).
+
+**#69 fractional Kelly** — `kelly.py`: continuous f* = μ/σ² on per-trade returns, λ hard-limited [0.25, 0.5], clamp [0, 1], negative edge sizes to 0, <30 trades bootstraps to 1.0. Deviation from plan: estimated from the run's OWN in-window trade history in both backtest and live (not the stored trades table) — one code path, determinism preserved.
+
+**#70 indicators → features** — new sticky `REFERENCE` status + `arena-run demote` (metrics preserved, never live, never ensemble); `ConfirmedStrategy(base, confirmer, mode=direction|veto)` wrapper; `build_features` gains `engulf_signal` (vectorized, parity-pinned against the real detector on every bar pair) and `macd_hist_norm` (TechnicalStrategy's confidence formula, formula-pinned). Old bundles keep working via the feature-list contract. **Reviewer note: retrain + ONNX re-export + C++ rebuild required before the GBM uses the new features live.**
+
+**#71 pairs** — Engle–Granger with numpy OLS + hand-rolled DF test vs hardcoded MacKinnon criticals (zero new deps); `z_positions` pure state machine (entry ±2σ, exit 0.5σ, HARD stop 4σ ⇒ pair dead + `broken` flag); `backtest_pair` charges both legs through the CostModel; `pairs-scan`/`pairs-backtest` CLIs; results register as `RESEARCH` — `arena-run live` refuses them naming the margin/shorting requirements. Deviation: no `--i_have_margin` override since live pairs execution itself is out of scope; an unlock into a nonexistent engine would be theater.
+
+## Why
+This batch converts the research review's verdicts into code: the strongest-evidence risk control (vol targeting) landed first per the user's stated priority; weak-evidence standalone indicators were demoted, not deleted; and every "edge" strategy passes through the liquidity/cost machinery that the literature says eats paper profits. Sizing multipliers (vol-target × Kelly) compose multiplicatively and stay ≤ 1 — long-only, never levered, everywhere.
+
+## Testing
+`uv run pytest tests/ -m "not exercise"` → **235 passed, 0 skipped**. Determinism (live-backfill replay), parity (feature vs detector), and hand-computed pins (Kelly f*, EG hedge ratio, surprise floors, DF separation of cointegrated vs independent walks) throughout. No network in tests.
+
+## Risk and Rollback
+Additive: new sizing modes/flags default off or to prior behavior (equal/conf_vol byte-identical, no ATR without the flag, Kelly off, portfolio breaker only in live). `build_features` gains columns — old bundles unaffected by the feature-list contract, but retraining will now see the new features (intended). Arena DBs migrate in place (2 new columns + 1 table). Revert = drop the merge.
+
+## Checklist
+- [x] 235 tests pass; suite green after every one of the 8 commits
+- [x] Zero new dependencies (numpy OLS + hardcoded DF criticals for pairs)
+- [x] Three documented deviations from plans (portfolio-breaker flag independence, in-window Kelly, no margin override)
+- [ ] Reviewer: the ATR breach-day semantics (breach bar's return realized, exit via next-day suppression) and the PEAD calendar-day hold window are the judgment calls worth eyes

@@ -1,0 +1,130 @@
+"""Tests for drift.py (PSI math) and the bundle feature_reference round trip."""
+import numpy as np
+import pandas as pd
+import pytest
+
+from drift import DriftReport, check_drift, compute_reference, psi
+
+
+def _frame(**cols):
+    n = max(len(v) for v in cols.values())
+    return pd.DataFrame({k: pd.Series(v) for k, v in cols.items()},
+                        index=pd.RangeIndex(n))
+
+
+# ---------------------------------------------------------------------------
+# compute_reference
+# ---------------------------------------------------------------------------
+
+def test_reference_has_interior_decile_edges_per_feature():
+    rng = np.random.RandomState(0)
+    train = _frame(a=rng.normal(0, 1, 1000), b=rng.uniform(0, 10, 1000))
+    ref = compute_reference(train, ["a", "b"])
+    assert set(ref) == {"a", "b"}
+    assert len(ref["a"]) == 9  # deciles -> 9 interior edges
+    assert ref["a"] == sorted(ref["a"])
+
+
+def test_reference_constant_feature_gets_empty_edges():
+    train = _frame(const=[5.0] * 100)
+    ref = compute_reference(train, ["const"])
+    assert ref["const"] == []
+
+
+def test_reference_skips_missing_columns():
+    train = _frame(a=np.arange(100.0))
+    ref = compute_reference(train, ["a", "ghost"])
+    assert "ghost" not in ref
+
+
+# ---------------------------------------------------------------------------
+# psi
+# ---------------------------------------------------------------------------
+
+def test_psi_identical_distribution_is_near_zero():
+    rng = np.random.RandomState(1)
+    train = pd.Series(rng.normal(0, 1, 5000))
+    ref = compute_reference(_frame(x=train), ["x"])["x"]
+    live = pd.Series(rng.normal(0, 1, 2000))  # same distribution, fresh draw
+    assert psi(ref, live) < 0.05
+
+
+def test_psi_shifted_distribution_exceeds_threshold():
+    rng = np.random.RandomState(2)
+    train = pd.Series(rng.normal(0, 1, 5000))
+    ref = compute_reference(_frame(x=train), ["x"])["x"]
+    live = pd.Series(rng.normal(4, 1, 500))  # shifted 4 std devs
+    assert psi(ref, live) > 0.25
+
+
+def test_psi_constant_feature_is_zero_by_convention():
+    assert psi([], pd.Series([1.0, 2.0, 3.0])) == 0.0
+
+
+def test_psi_empty_live_values_is_zero():
+    assert psi([0.1, 0.2, 0.3], pd.Series(dtype=float)) == 0.0
+
+
+def test_psi_small_live_sample_is_computable():
+    """Few tickers (small N) must not crash — sparse deciles are fine."""
+    ref = compute_reference(_frame(x=np.arange(1000.0)), ["x"])["x"]
+    value = psi(ref, pd.Series([500.0, 501.0, 502.0]))
+    assert np.isfinite(value)
+
+
+# ---------------------------------------------------------------------------
+# check_drift
+# ---------------------------------------------------------------------------
+
+def test_check_drift_none_without_reference():
+    assert check_drift(None, _frame(a=[1.0])) is None
+    assert check_drift({}, _frame(a=[1.0])) is None
+
+
+def test_check_drift_flags_only_shifted_features():
+    rng = np.random.RandomState(3)
+    train = _frame(stable=rng.normal(0, 1, 3000), moving=rng.normal(0, 1, 3000))
+    ref = compute_reference(train, ["stable", "moving"])
+    live = _frame(stable=rng.normal(0, 1, 400), moving=rng.normal(5, 1, 400))
+    report = check_drift(ref, live)
+    assert isinstance(report, DriftReport)
+    assert report.flagged == ["moving"]
+    assert report.overall_flagged
+    assert report.psi_by_feature["stable"] < 0.1
+
+
+def test_check_drift_ignores_features_absent_live():
+    ref = compute_reference(_frame(a=np.arange(100.0), b=np.arange(100.0)), ["a", "b"])
+    report = check_drift(ref, _frame(a=np.arange(50.0, 60.0)))
+    assert "b" not in report.psi_by_feature
+
+
+# ---------------------------------------------------------------------------
+# Bundle round trip via paper_trading_sim's save path helpers
+# ---------------------------------------------------------------------------
+
+def test_bundle_reference_round_trips_through_joblib(tmp_path):
+    """compute_reference -> joblib bundle -> check_drift, end to end; and a
+    legacy bundle without the key degrades to None (skip), not a crash.
+
+    joblib.load here only ever reads the bundle this same test just wrote
+    to tmp_path — the repo's standing trust model for model bundles
+    (locally produced only, never downloaded; see gbm_adapter.py).
+    """
+    import joblib
+
+    rng = np.random.RandomState(4)
+    train = _frame(close=rng.normal(100, 5, 500), ret_1d=rng.normal(0, 0.01, 500))
+    bundle = {"model": "stub", "features": ["close", "ret_1d"],
+              "feature_reference": compute_reference(train, ["close", "ret_1d"])}
+    path = tmp_path / "b.joblib"
+    joblib.dump(bundle, path)
+
+    loaded = joblib.load(path)
+    live = _frame(close=rng.normal(100, 5, 100), ret_1d=rng.normal(0, 0.01, 100))
+    report = check_drift(loaded.get("feature_reference"), live)
+    assert report is not None and not report.overall_flagged
+
+    legacy = {"model": "stub", "features": ["close"]}
+    joblib.dump(legacy, path)
+    assert check_drift(joblib.load(path).get("feature_reference"), live) is None

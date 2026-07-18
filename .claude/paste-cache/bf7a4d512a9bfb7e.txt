@@ -1,0 +1,38 @@
+/idea
+
+Goal: NPCs can talk to each other, and the player can form a small group —
+ask an NPC to follow you, walk to another NPC, and have a three-way (or
+N-way) conversation instead of strictly one-on-one.
+
+Context: Builds on the shared world-fact bus and per-NPC memory. Group
+conversation is turn-based over the same structured-JSON dialogue pipeline:
+each turn, one participant's persona prompt is assembled (their persona +
+traits + their view of relevant facts + the conversation so far) and they
+respond. NPC-to-NPC exchanges write facts to the world bus like any other
+conversation.
+
+Scope:
+1. Follow mechanic — ask an NPC (subject to affinity/persona willingness)
+   to follow; simple follow movement.
+2. Group conversation state — a participant list instead of a single NPC;
+   speaking order resolved simply (round-robin or addressed-by-name);
+   player messages can address the group or a named participant.
+3. NPC-to-NPC turns — when it's an NPC's turn responding to another NPC,
+   same pipeline, with the other NPC's last line as input. Cap consecutive
+   NPC-to-NPC turns (e.g. 2–3) before returning to the player so
+   conversations don't run away without them.
+4. Ambient NPC-to-NPC chatter (two NPCs whose schedules put them together
+   exchanging a line or two the player can overhear) — include only if it
+   falls out naturally from the group mechanism; otherwise list as
+   follow-up, don't force it.
+5. Memory/fact writes — each participant's private memory updates from
+   their own perspective; shared facts revealed in group conversation go to
+   the world bus attributed to whoever said them.
+
+Autonomy instructions — unattended run:
+- No clarifying questions or /grill-me-style interrogation; pick the most
+  defensible option, log reasoning, keep going.
+- Watch latency: N participants means N model calls per round. Keep group
+  size capped small (3–4) and log observed per-turn latency in the report.
+- Follow existing CLAUDE.md agent routing. Draft PR only, no merge, no
+  main. Standard gitignore rules apply.

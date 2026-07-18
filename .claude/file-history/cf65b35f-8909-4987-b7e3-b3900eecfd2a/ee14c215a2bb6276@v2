@@ -1,0 +1,35 @@
+// SCAFFOLD — stub bodies so the target links; the overnight session or
+// /develop replaces every throw with the real logic.
+// Plan: .claude/plans/itch-replay-clock.md (framing rules mirror
+// itch_parser.cpp: 2-byte BE length, zero-length = padding, truncated
+// final frame stops delivery cleanly; timestamp peeked at offset 5 when
+// len >= 11).
+
+#include "replay_clock.hpp"
+
+#include <stdexcept>
+
+namespace itch {
+
+ReplayClock::ReplayClock(std::vector<uint8_t> buffer) : buf_(std::move(buffer)) {}
+
+ReplayClock ReplayClock::from_file(const std::string& path) {
+    // TODO(replay-1): whole-file gulp with the same IO error handling as
+    // cpp/signals_py/bindings.cpp read_file().
+    throw std::logic_error("TODO(replay-1): ReplayClock::from_file — " + path);
+}
+
+void ReplayClock::run(const MessageSink& /*sink*/, ReplayMode /*mode*/, double speed) {
+    if (speed <= 0.0) throw std::invalid_argument("speed must be > 0");
+    // TODO(replay-1): MaxSpeed = drain step(); TODO(replay-2): WallClock
+    // pacing per the drift-corrected schedule in the plan.
+    throw std::logic_error("TODO(replay-1/2): ReplayClock::run");
+}
+
+bool ReplayClock::step(const MessageSink& /*sink*/) {
+    // TODO(replay-1): read length, skip zero-length frames (count them),
+    // stop before a truncated final frame, peek timestamp, deliver, advance.
+    throw std::logic_error("TODO(replay-1): ReplayClock::step");
+}
+
+}  // namespace itch

@@ -1,0 +1,38 @@
+// ReplayClock tests (SCAFFOLD — every case GTEST_SKIPs until implemented).
+// One stub per acceptance criterion in .claude/plans/itch-replay-clock.md.
+// TODO(replay-1/2): replace the skips with real assertions.
+
+#include <gtest/gtest.h>
+#include "../itch/replay_clock.hpp"
+
+TEST(ReplayClock, AllModesDeliverByteIdenticalSequences) {
+    // Hash of concatenated (msg,len,ts) deliveries equal across MaxSpeed,
+    // WallClock(any speed), SingleStep; ReplayStats counts identical.
+    GTEST_SKIP() << "TODO(replay-1): determinism contract";
+}
+
+TEST(ReplayClock, SingleStepDeliversExactlyOneMessagePerStep) {
+    // step() true once per message on a synthetic stream, false at end.
+    GTEST_SKIP() << "TODO(replay-1)";
+}
+
+TEST(ReplayClock, WallClockPacingRespectsScaledSpanLooseBounds) {
+    // 10 messages spaced 10 ms: 1x takes >= 80 ms; MaxSpeed < 20 ms.
+    // Bounds deliberately loose so CI never flakes.
+    GTEST_SKIP() << "TODO(replay-2)";
+}
+
+TEST(ReplayClock, PaddingSkippedTruncationStopsCleanly) {
+    // Zero-length frames counted in zero_len_frames_skipped; a truncated
+    // final message ends delivery with no over-read (parse_buffer paranoia).
+    GTEST_SKIP() << "TODO(replay-1)";
+}
+
+TEST(ReplayClock, NonPositiveSpeedThrows) {
+    // run(sink, WallClock, 0.0) -> std::invalid_argument. This one is
+    // already implemented in the scaffold stub; asserted for real.
+    itch::ReplayClock clock(std::vector<uint8_t>{});
+    EXPECT_THROW(clock.run([](const uint8_t*, uint16_t, uint64_t) {},
+                           itch::ReplayMode::WallClock, 0.0),
+                 std::invalid_argument);
+}

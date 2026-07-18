@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0016 — Composite Modeling from Primitives</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0016 · pairs with lesson 0016</div>
+<h1>Drill: Composite Modeling from Primitives</h1>
+
+<div class="q"><h3>1. The silent default</h3>
+<p>You delete the curated <code>"fountain" → "base"</code> mapping and add
+nothing else. What renders at the fountain's footprint, and why?</p>
+<details><summary>Answer</summary><div class="a">
+<p>A pseudo-random generic building. <code>modelForBuilding</code> hashes any
+uncurated id into the generic-buildings pool so filler blocks always get a
+model. Special cases must be dispatched <em>before</em> that lookup — the
+fallback can't tell "intentionally uncurated" from "forgot to curate".</p>
+</div></details></div>
+
+<div class="q"><h3>2. The invisible water</h3>
+<p>The first draft put a translucent water cylinder <em>inside</em> the basin,
+recessed below the rim. Screenshots showed only gray stone. Why?</p>
+<details><summary>Answer</summary><div class="a">
+<p><code>DrawCylinder</code> renders a capped solid — the basin's own top cap
+occludes everything nested inside it. Fix: draw the water as a thin disc
+floated just above the cap, so it reads as "filled to the brim".</p>
+</div></details></div>
+
+<div class="q"><h3>3. Where does the fountain's height live?</h3>
+<p>The fountain looked squat, so its height was raised from 1.2 to 2.6. Which
+file/table changed, and why not a constant in <code>drawFountain</code>?</p>
+<details><summary>Answer</summary><div class="a">
+<p>The <code>SizeSpec</code> table in <code>Assets.cpp</code> — the single
+sizing source for every rendered entity. A local constant would be a second
+sizing authority, exactly the stored-state-in-two-places disease the size
+contracts were built to kill.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Radii come from where?</h3>
+<p>Why does <code>drawFountain</code> derive its radii from the Building's
+collision AABB rather than taking a radius parameter?</p>
+<details><summary>Answer</summary><div class="a">
+<p>So the visual footprint and the collider match by construction. If a
+designer widens the fountain's AABB in <code>City::makeDowntown</code>, the
+rendered basin widens with it — no second edit, no walk-through gap or
+invisible wall.</p>
+</div></details></div>
+
+<div class="q"><h3>5. Compose or import?</h3>
+<p>You need (a) a stone obelisk landmark, (b) a pickup truck, (c) a row of
+planter boxes. Which do you compose from primitives?</p>
+<details><summary>Answer</summary><div class="a">
+<p>(a) and (c) — convex, low-detail silhouettes a few cylinders/boxes can
+sell. The truck (b) needs concavity, texture, and reads at close range;
+composed from primitives it would look like soap bars. Import it.</p>
+</div></details></div>
+</div></body>
+</html>

@@ -1,0 +1,102 @@
+# cpp_shooter_game — Claude Code Rules
+
+## Project Overview
+A C++ top-down or side-scrolling shooter game built with SFML and OpenGL.
+The project is in early development — core engine, rendering, and game-loop
+logic live in `src/main.cpp` and will expand into subsystems (weapons,
+enemies, collision, HUD) as the game grows.
+
+## Tech Stack
+- C++17
+- SFML 2.6 (graphics, window, system)
+- OpenGL (via `find_package(OpenGL)`)
+- CMake 3.20+
+- ctest for C++ tests (when added)
+
+## Build & Test
+```bash
+mkdir -p build && cd build && cmake .. && make -j4
+ctest --output-on-failure
+```
+
+## Hard Rules
+- No placeholders or TODOs in committed code
+- Every public function needs a docstring or comment
+- Match existing naming conventions in the codebase
+- Use type hints / type annotations where the language supports them
+- Tests required for new business logic
+
+## Workflow
+- For new features: start with /grill-me to align before coding
+- Use plan mode for any change touching 3+ files
+- For unfamiliar code: use /zoom-out for context
+- For bugs: use /diagnose for structured debugging (no guessing fixes)
+- Commit format: type(scope): description
+- Push to feature branches, never directly to main
+- Use the reviewer subagent before committing significant changes
+- Use the strict-reviewer subagent before milestones or risky integrations
+- At session end: /recap for learning, /handoff if continuing later
+
+## Preferred Agents (use for implementation)
+- cpp-cmake-specialist — C++17 code and CMake build changes
+- tester — writing and running tests
+- cross-platform-checker — before any OS-specific code paths
+
+## Agent Routing Rules
+After implementing each issue, before committing, check what changed:
+
+| What changed | Agent to invoke | Model |
+|---|---|---|
+| Game engine core / game loop | strict-reviewer | Opus |
+| Weapon or projectile system | strict-reviewer | Opus |
+| Collision detection logic | strict-reviewer | Opus |
+| Enemy AI or state machines | strict-reviewer | Opus |
+| CMake or build system | cpp-cmake-specialist + reviewer | Sonnet |
+| New gameplay feature | reviewer | Sonnet |
+| SFML rendering / HUD | reviewer | Sonnet |
+| Test additions | reviewer | Sonnet |
+| Documentation | reviewer | Sonnet |
+| Milestone / pre-merge to main | strict-reviewer | Opus |
+
+Run **strict-reviewer (Opus)** before ANY commit that touches:
+- The game loop or timing system
+- Weapon fire, reload, or damage calculation
+- Collision / hit-detection
+- Enemy spawning or pathfinding
+
+These are the correctness-critical paths — bugs here break gameplay silently.
+
+## Communication Style
+- Be direct and concise
+- Surface trade-offs explicitly
+- Ask questions when requirements are unclear
+
+## What NOT to Do
+- Don't modify .env files or anything in /secrets/
+- Don't install new dependencies without asking
+- Don't refactor code unrelated to the current task
+- Don't add features I didn't ask for
+
+## Skill Creation — Automatic
+When you notice you're applying a pattern that could be reused, propose
+it as a skill.
+
+A pattern qualifies as a skill when:
+- It's been used 2+ times in this codebase, OR
+- It's a non-trivial technique that took thought to get right, OR
+- It encodes domain knowledge specific to this project, OR
+- It's a workflow that could break if done wrong
+
+When you spot one, after completing the current task:
+1. Pause and propose: "I notice [pattern] is appearing repeatedly.
+   Should I save this as a skill?"
+2. If approved, create .claude/skills/[skill-name]/SKILL.md following
+   the format in .claude/skills/README.md
+3. Keep skill files focused and under 200 lines each
+4. Reference existing skills before reinventing patterns
+
+## Transparency Requirement
+When using a library, framework feature, language construct, or pattern
+not used elsewhere in this codebase, briefly mention it:
+"Using [X] for this because [Y]. New to this codebase."
+One sentence. I can ask follow-ups if interested.

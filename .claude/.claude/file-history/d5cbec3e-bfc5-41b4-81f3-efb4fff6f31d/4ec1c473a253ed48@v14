@@ -1,0 +1,93 @@
+# Learning Progress
+
+> Stateful tracker for `/teach`. Read this before teaching anything new.
+> The "map" of what the user has learned, what landed, what to teach next.
+
+## How to use this file
+
+- One row per lesson under **Lessons taught**.
+- Status reflects the user's chat-time grasp, not just whether they opened
+  the HTML.
+- **Suggested next** is the single most useful concept to teach in this
+  project, given the user's current level and the code they're writing.
+
+## Lessons taught
+
+| #     | Topic                                | File                                                                 | Status     | Notes |
+| ----- | ------------------------------------ | -------------------------------------------------------------------- | ---------- | ----- |
+| 0001  | Embedded LLMs in game applications   | [lessons/0001-embedded-llm-in-games.html](lessons/0001-embedded-llm-in-games.html) | In progress | First /teach lesson. Covers sidecar vs in-process, persona+history, async drain pattern. Real code walkthrough uses LlmClient.cpp / Npc.cpp from cpp_game_with_llm_npcs. |
+| 0002  | std::vector vs. array                | [lessons/0002-vector-vs-array.html](lessons/0002-vector-vs-array.html) | In progress | Grounds the decision rule in real code from all three games: std::array for quads/matrix/font-candidates (shooter+racing), std::vector for projectiles/enemies/chat history (shooter+npcs), and the one C-style array still hiding in cpp_game_with_llm_npcs/src/main.cpp:72. Covers decay-to-pointer, reserve(), and the vector-vs-list trap. |
+| 0003  | Low-latency C++ for game loops       | [lessons/0003-low-latency-cpp-game-loops.html](lessons/0003-low-latency-cpp-game-loops.html) | In progress | Frame budget mindset + three rules: don't allocate, don't copy, don't pointer-chase. Real-code walkthrough of shooter's update loop (auto&, GameState&, erase-remove idiom) and LlmClient (by-value+std::move, swap-based drain). Honestly flags an allocation-in-hot-loop pattern in my own DialogUI::render() at cpp_game_with_llm_npcs/src/DialogUI.cpp:109 — fix postponed pending profiling. |
+| 0004  | FPGAs, calling them from C++, LLMs on them | [lessons/0004-fpgas-and-llm-inference.html](lessons/0004-fpgas-and-llm-inference.html) | In progress | User-requested digression. Covers all four angles: (a) what an FPGA is at the LUT/FF/DSP level, (b) FPGA vs CPU vs GPU, (c) the C++ host-to-FPGA call pattern via XRT, (d) 2026 LLM-on-FPGA results (LUT-LLM Qwen 3 1.7B on Alveo V80: 1.1–3.3× a GPU, 3–6× energy efficiency). Project tie-in: shows the *hypothetical* FPGA backend for LlmClient::processOne() and notes nothing else in the codebase would need to change — the encapsulation from lesson 0001 paying off. |
+| 0005  | Multithreading and shared resources  | [lessons/0005-multithreading-and-shared-resources.html](lessons/0005-multithreading-and-shared-resources.html) | In progress | Pays off the long-standing PROGRESS suggestion. Anchored entirely in `LlmClient.cpp`. Covers: what threads share (heap, globals) vs not (stack, registers); race conditions; the three primitives (mutex, condition variable, atomic); the predicate form of `cv.wait` against spurious wakeups; why two mutexes instead of one (false-contention argument); RAII for thread lifetime; notify_one vs notify_all (thundering herd); CV vs sleep-polling. Often-confused pairs: mutex/atomic, race/deadlock, threads/processes (callback to lesson 0004). |
+| 0006  | Stack vs. heap                       | [lessons/0006-stack-vs-heap.html](lessons/0006-stack-vs-heap.html) | In progress | Foundational memory model lesson that ties together earlier hand-waves in 0002 (vector vs array), 0003 (don't allocate in hot loop), 0005 (threads share heap not stack). Covers the two regions' costs/lifetimes/sizes, default thread stack sizes (~8 MB main, ~1 MB worker on Linux), the "mixed case" where std::vector's 3 pointers are on stack but data on heap, Small String Optimization (~15 chars in libstdc++), the static/global third region, stack overflow vs heap exhaustion, std::stack-the-container vs the program stack. Real-code anchors: Vec3 (pure stack), GameState (mixed), ChatTurn::role/content (SSO trap), LlmClient::worker_ (allocates a whole second stack). |
+| 0007  | HAL + abstract base classes          | [lessons/0007-hal-and-abstract-base-classes.html](lessons/0007-hal-and-abstract-base-classes.html) | In progress | Forward-looking: their code has zero inheritance today, but the conceptual HAL is already there in LlmClient. Lesson formalises it. Covers (a) the HAL pattern with Arduino/Linux/SFML examples, (b) the four C++ features — virtual / =0 / override / virtual destructor (with the destructor gotcha as the headline bug). Concrete refactor proposal: LlmBackend abstract base, OllamaBackend (today's code), XrtFpgaBackend (callback to lesson 0004). Often-confused pairs: abstraction vs encapsulation, inheritance vs composition, virtual vs templates (runtime vs compile-time polymorphism), base class vs interface (no `interface` keyword in C++), virtual vs override keyword. |
+| 0008  | STL containers + memory layout       | [lessons/0008-stl-containers-and-memory-layout.html](lessons/0008-stl-containers-and-memory-layout.html) | In progress | Pulls together 0002/0003/0006 into one cohesive picture of containers. Three families (sequence, associative, adapter) with ASCII memory layouts of vector/array/deque/list/map/unordered_map. Real-code anchors: shooter's vectors and arrays (recap), DialogUI's std::deque<TranscriptLine> (the push_back/pop_front case where deque earns its segmentation), LlmClient's std::queue<ChatRequest> (the adapter as API restriction), config readers' std::unordered_map<string,string> (sparse keyed lookup, scattering doesn't matter). Often-confused pairs: vector/deque, map/unordered_map, container/adapter, container/iterator, "cache-friendly" vs "uses less RAM". Quiz includes the classic iterator/pointer-invalidation question. |
+| 0009  | OS fundamentals                      | [lessons/0009-os-fundamentals.html](lessons/0009-os-fundamentals.html) | In progress | The OS layer beneath lesson 0005's primitives. Four jobs of the OS (process model / virtual memory / syscalls / scheduling) with an ASCII arch diagram showing the user/kernel boundary. Real-code anchors: game ↔ Ollama as two processes (why HTTP, not shared memory); LlmClient threads as one process; std::ifstream as a syscall storm with the kernel page cache; signal handlers as the missing Ctrl-C handling work. Often-confused pairs: process vs thread (from the OS angle — both are `clone()` with different flags on Linux); syscall vs library call (~1ns vs ~100ns); user space vs kernel space (CPU mode bit); blocking vs non-blocking I/O; concurrency vs parallelism (one more pass). Quiz drills the syscall trace of one `cli.Post()` call. |
+| 0010  | Smart pointers                       | [lessons/0010-smart-pointers.html](lessons/0010-smart-pointers.html) | In progress | Pays off the long-standing gap: lesson 0007 used `std::unique_ptr<LlmBackend>` without explaining it. Covers all three (unique_ptr, shared_ptr, weak_ptr) framed as "answers to the ownership question." Real-code anchor: the lesson-0007 refactor (`unique_ptr<LlmBackend>`) explained for the first time — why it's required (LlmBackend is abstract), why not shared, why not raw. Hypothetical Quest/QuestLogUI for shared_ptr+weak_ptr with the cycle-leak gotcha. Often-confused pairs: unique vs shared (ownership model + perf), shared vs raw (owning vs observing), weak vs raw (detectable vs dangling), smart pointers vs GC (deterministic vs nondeterministic destruction), copy vs move on unique_ptr (compile-error vs ownership transfer). Honest call-out that the user has zero use case for shared/weak in their current code — these are taught so they recognise the problem when it appears. |
+| 0011  | Mutexes vs. semaphores               | [lessons/0011-mutexes-and-semaphores.html](lessons/0011-mutexes-and-semaphores.html) | In progress | C++20 added `std::counting_semaphore<N>` and `std::binary_semaphore`; lesson 0005 only covered mutexes. Headline distinction is **ownership** (mutex has it; semaphore doesn't). Real-code anchor: recap of LlmClient's two mutexes (textbook mutex case — protecting structures). Hypothetical: counting_semaphore<8>{3} as a GPU-slot rate limiter for a future worker pool; binary_semaphore as a one-shot startup handshake. Three problem shapes side-by-side: mutex (exclusion of one resource), counting semaphore (admission to a pool of K), binary semaphore (one-shot cross-thread signal). Often-confused pairs: mutex vs binary_semaphore (THE classic — same syntax, different semantics), mutex vs CV (still relevant), counting_semaphore vs mutex pool, spinlock vs mutex, shared_mutex (reader-writer) as an aside, and POSIX semaphores (cross-process) vs std:: ones (in-process). Honest call-out (like 0010) that the user has no immediate use case in current code. |
+| 0012  | emplace_back vs push_back            | [lessons/0012-emplace-back-vs-push-back.html](lessons/0012-emplace-back-vs-push-back.html) | In progress | Topic was hinted at in lesson 0003 but never taught head-on. Modern (Chromium/Abseil/Google) consensus inverts the old "always emplace" advice: **prefer push_back by default**. Three real-code anchor patterns from their repo: (a) push_back of a brace-init temp (Npc.cpp `history_.push_back({"user", std::move(...)})`) — equivalent to emplace but more readable; (b) push_back of `std::move(reply)` (LlmClient.cpp) — already idiomatic, emplace gains nothing; (c) push_back of a temp `sf::Vector2f` (racing) — closest case to "emplace would help"; (d) push_back of local POD copies (shooter `enemies/projectiles/pickups/impacts`) — fine. Audit summary: **zero of their 20 push_backs benefit from converting to emplace_back**. The headline gotcha is the explicit-constructor safety regression — emplace_back invokes them silently, push_back refuses. Often-confused pairs: emplace_back vs push_back(std::move(x)) (not identical semantics), emplace_back vs make_X factories, emplace_back vs emplace (the no-suffix middle-insert version), 2019-tutorial advice vs 2026 industry guidance. |
+| 0013  | Tour of C++11/14/17/20/23            | [lessons/0013-cpp-standards-tour.html](lessons/0013-cpp-standards-tour.html) | In progress | Project context: their CMake pins `CMAKE_CXX_STANDARD 17` across all three games. Lesson is a feature audit organised by standard. Per-version themes (C++11=modern starts, 14=polish, 17=comfortable, 20=overhaul, 23=long tail) with key features for each. Their-code anchors: every C++ feature they use sorted into a colored badge audit table — `auto`/range-for/lambdas/move/atomic/thread (C++11), `make_unique` (C++14), `std::filesystem`/`std::optional` (C++17). Two payoff tables: what bumping to C++20 (jthread, semaphores from lesson 0011, std::span, designated initializers, spaceship) and C++23 (std::expected, std::print, flat_map, stacktrace) would unlock — concretely tied to their existing code. Often-confused pairs: language standard vs library version (compiler does language, libstdc++/libc++/MSVC STL does library), -std=c++17 vs compiler version (dialect vs implementation completeness), "modern C++" (Bjarne's term = C++11+, not necessarily C++23), forward/backward compat, compiler extensions vs standard. Compiler-support reality check: GCC 11+/Clang 14+/MSVC 19.30+ for C++20; GCC 14+/Clang 17+/MSVC 2026+ for C++23. |
+
+## Concepts demonstrated in the project but not yet formally taught
+
+These are concepts the user has *seen* in the code I wrote but hasn't yet
+had a lesson on. Each is a candidate for a follow-up `/teach`.
+
+- ~~**Producer/consumer with `condition_variable`**~~ — covered in lesson 0005.
+- ~~**RAII for thread lifetime**~~ — covered (briefly) in lesson 0005.
+- **Header-only vendored deps** — `external/httplib.h`, `external/json.hpp`.
+  When this beats a package manager and when it doesn't.
+- **CMake `find_package` vs `target_include_directories`** — the difference
+  between a real find module (SFML) and just adding `external/` to the
+  include path.
+- **System fonts on Linux vs Windows** — the path-probing in
+  `findSystemFont()`. Why bundling a font is the alternative.
+- **Filesystem path walking with `std::filesystem`** — how `main.cpp`
+  locates `config/llm.cfg` whether launched from project root or `build/`.
+- **Memory model / `std::memory_order`** — lesson 0005 used the default
+  `seq_cst` ordering without discussing it. The relaxed/acquire/release
+  options are a natural follow-up once the basics are firm.
+
+## Suggested next topic
+
+**Profiling: actually finding the slow frame.** Now the strongest call.
+Lessons 0003, 0005, 0009 all gestured at "measure before you change."
+The user has working code, understands threads + heap + OS — they're
+ready to instrument the shooter game's main loop with
+`std::chrono::steady_clock`, log per-section milliseconds, and look at
+worst frames. Resolves two open threads: confirming or denying the
+`DialogUI::render()` allocation suspicion (lesson 0003) and seeing how
+long `LlmClient::submit()` vs `processOne()` actually take (lesson 0005).
+
+After that, still on the menu:
+Lesson 0003 ended on "measure before you change"; lesson 0005 ended with
+a worker thread we now understand but haven't measured. Instrument the
+shooter game's main loop with `std::chrono::steady_clock`, log per-section
+milliseconds, and look at the worst frames specifically. This pays off
+two open threads: confirming or denying the `DialogUI::render()`
+allocation suspicion, and seeing how long `LlmClient::submit()` actually
+takes vs how long the worker spends in `processOne()`.
+
+After that, three strong candidates:
+
+1. **Memory model / `std::memory_order`.** Lesson 0005 used the default
+   `seq_cst` without discussing the relaxed/acquire/release options. A
+   natural follow-up if the user wants to go deeper on the atomics they
+   now use.
+2. **Data layout: AoS vs SoA and cache lines.** Lesson 0003 mentioned
+   "don't pointer-chase" but didn't drill cache behaviour. Worth a focused
+   follow-up once they hit the inevitable "iterate 1000 entities" point.
+3. **Hardware tangent — High-Level Synthesis hands-on.** If the FPGA
+   excitement from lesson 0004 sticks, a follow-up walking through a
+   "hello world" Vitis HLS C++ matmul kernel would be the natural next
+   FPGA step. Note: requires the Vitis toolchain, which is a big install —
+   only schedule if user genuinely wants to dabble.
+
+## Things the user has *struggled* with
+
+(empty — fill in as we go)
+
+## Things the user has *grasped firmly*
+
+(empty — fill in as we go)

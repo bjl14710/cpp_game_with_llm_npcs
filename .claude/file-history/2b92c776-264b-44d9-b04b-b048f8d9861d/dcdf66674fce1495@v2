@@ -1,0 +1,89 @@
+# Overnight Build Report
+Date: 2026-07-05
+Session: overnight multiplayer build (plan: `.claude/plans/multiplayer-and-aws-deploy.md`)
+Issues attempted: 7 (all planned multiplayer tickets)
+
+## Summary
+Shared-world multiplayer v1 is fully implemented, tested, documented, and open
+for review as a 7-PR stack: 2-4 players over TCP, one authoritative host, shared
+NPCs with consistent memory and mood, host/join from the pause menu. Along the
+way the flake checks exposed and fixed a pre-existing lost-wakeup deadlock in
+`LlmClient`'s destructor. The suite went from 75 to 96 test cases, all green
+across repeated runs.
+
+## Completed ✅
+| Issue | Title | Branch | PR | Concept Taught |
+|-------|-------|--------|----|----------------|
+| — | scaffold (skeletons + skipped stubs) | feature/multiplayer-scaffold | #28 | — |
+| #21 | message protocol + framing | feature/issue-1-net-protocol-framing | #29 | Length-prefixed framing (lesson 0008) |
+| #22 | NetServer snapshots | feature/issue-2-netserver-snapshots | #30 | Server-authoritative replication (0009) |
+| #23 | NetClient connect/poll | (same branch as #22) | #30 | Publish/drain thread contract (0009) |
+| #24 | server-routed NPC chat | feature/issue-4-server-npc-chat | #31 | Request-id routing (0010) |
+| #25 | Menu host/join + app modes | feature/issue-5-menu-host-join | #32 | — (UI wiring; no lesson, too thin a concept) |
+| #26 | loopback fixture | folded into #30/#31 | #30, #31 | Deterministic threaded-socket testing (0012) |
+| #27 | multiplayer docs | feature/issue-7-docs-multiplayer | #33 | NAT & port forwarding (0013) |
+| bonus | LlmClient destructor deadlock fix | on #30's branch | #30 | Lost wakeup / condition variables (0011) |
+| — | learning materials | feature/learning-multiplayer | #34 | all of the above |
+
+## Failed ❌
+None.
+
+## Skipped ⏭
+None. (Phase B — headless AWS server build + deploy skill — was excluded from
+this milestone by the plan itself.)
+
+## Learning Materials Created
+| Concept | Lesson | Drill | Vocab |
+|---------|--------|-------|-------|
+| Length-prefixed framing over TCP | 0008 ✅ | 0008 ✅ | 0008 (shared) ✅ |
+| Server-authoritative replication + thread contract | 0009 ✅ | 0009 ✅ | ✅ |
+| Request-id routing of shared streams | 0010 ✅ | 0010 ✅ | ✅ |
+| Condition variables & the lost wakeup | 0011 ✅ | 0011 ✅ | ✅ |
+| Deterministic tests for threaded sockets | 0012 ✅ | 0012 ✅ | ✅ |
+| NAT, port forwarding, overlay VPNs | 0013 ✅ | 0013 ✅ | ✅ |
+
+`docs/learning/index.html` links everything (on PR #34). One consolidated vocab
+page covers all six concepts instead of six near-empty pages.
+
+## Test Status
+`make -C tests test`: **96 cases, 699 assertions, 0 failed, 1 skipped**
+(the deliberate live-Ollama test). Threaded loopback suites flake-checked:
+8 consecutive green runs after the deadlock fix (which the flake check itself
+caught — the suite hung on run 3 before it).
+
+## Suggested First Move
+Open **PR #30** and read the `fix(llm)` commit first — it's the one change that
+touches pre-existing behavior (the destructor deadlock). Then merge the stack
+top-down: #28 → #29 → #30 → #31 → #32 → #33 → #34. GitHub re-targets each PR
+automatically as its base merges. Before merging #32, do the one manual check
+the machines can't: run two instances, host in one, join `127.0.0.1:40605` in
+the other.
+
+## Draft PRs Awaiting Review
+- #28 scaffold — skeletons and skipped test stubs (merge first)
+- #29 protocol + framing — 11 unit tests
+- #30 NetServer/NetClient + **LlmClient deadlock fix** — 5 loopback tests
+- #31 server-routed NPC chat — 4 loopback tests
+- #32 pause-menu host/join + app modes — needs your eyeball test
+- #33 README/DEVELOPER multiplayer docs
+- #34 learning materials (lessons/drills/vocab/index)
+
+## Deviations & Notes
+- **Stacked PRs instead of independent branches**: the issues are sequential by
+  nature; each PR bases on the previous so every diff reviews clean.
+- **Issues #22/#23 share one PR** (#30): server and client can only be
+  integration-tested together; #26's fixture landed with them and #31.
+- **This report and `.claude/memory/checkpoint.md` are left uncommitted** —
+  your CLAUDE.md forbids pushing to main, and the report is a morning-read
+  artifact, not repo history.
+- **PROGRESS.md / GLOSSARY.md untouched**: both carry your uncommitted
+  Silmulator edits from an earlier session; appending tonight's entries would
+  have tangled unrelated changes into a commit. The vocab page (0008) holds the
+  glossary content instead.
+- **GitHub sync was blocked most of the night** by an invalid `GH_TOKEN` in
+  `~/.zshrc`; your `TOKEN` variable turned out to be the valid one. Consider
+  updating the `GH_TOKEN=` line to the same value — the github skill and
+  overnight tooling read `GH_TOKEN`.
+- Joined clients render NPC nameplates from their local `personas/` roster —
+  both machines should run the same build and persona files (documented in
+  DEVELOPER.md).

@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+import argparse
+from typing import List, Dict, Tuple
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import joblib
+
+from paper_trading_sim import build_features
+from walkforward_sim import meanvar_long_short
+
+
+def parse_tickers(arg_str: str, file_path: str | None) -> List[str]:
+    """Parse tickers from comma list or a file (one per line)."""
+    if file_path:
+        with open(file_path, "r", encoding="utf-8") as f:
+            tickers = [ln.strip().upper() for ln in f if ln.strip() and not ln.startswith("#")]
+            return tickers
+    return [t.strip().upper() for t in arg_str.split(",") if t.strip()]
+
+
+def fetch_latest_frames(tickers: List[str], period: str = "2y") -> Dict[str, pd.DataFrame]:
+    """Fetch recent daily OHLCV for tickers using yfinance.
+
+    Args:
+        tickers: List of symbols.
+        period: yfinance period string (e.g., "1y", "2y", "5y").
+
+    Returns:
+        Dict[ticker, DataFrame]
+    """
+    data: Dict[str, pd.DataFrame] = {}
+    for t in tickers:
+        df = yf.download(t, period=period, interval="1d", auto_adjust=True, progress=False)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            data[t] = df
+    return data
+
+
+def compute_returns(data: Dict[str, pd.DataFrame], lookback: int = 90) -> pd.DataFrame:
+    """Build aligned daily returns panel for covariance estimation.
+
+    Args:
+        data: Dict[ticker, OHLCV DataFrame] with 'Close'.
+        lookback: Number of most recent rows to keep after alignment.
+
+    Returns:
+        DataFrame of aligned daily returns indexed by date, columns=tickers.
+    """
+    rets = []
+    names = []
+    for t, df in data.items():
+        if "Close" not in df.columns:
+            continue
+        r = df["Close"].pct_change().dropna()
+        if not r.empty:
+            rets.append(r)
+            names.append(t)
+    if not rets:
+        return pd.DataFrame()
+    panel = pd.concat(rets, axis=1)
+    panel.columns = names
+    panel = panel.dropna(how="any")
+    if lookback > 0 and len(panel) > lookback:
+        panel = panel.iloc[-lookback:]
+    return panel
+
+
+def meanvar_long_only(mu: np.ndarray, Sigma: np.ndarray, max_w: float | None = 0.3) -> np.ndarray:
+    """Compute simple long-only mean-variance weights with an optional cap.
+
+    Uses w ∝ Σ^{-1} μ, projects negatives to 0, normalizes to sum 1, and
+    enforces an optional per-asset cap via iterative capping + renormalization.
+    """
+    # Regularize for stability
+    eps = 1e-6
+    Sigma_reg = Sigma + eps * np.eye(Sigma.shape[0])
+    w = np.linalg.pinv(Sigma_reg) @ mu
+    w = np.maximum(w, 0.0)
+    s = w.sum()
+    if s <= 0:
+        # Fallback: equal weight
+        w = np.ones_like(w) / len(w)
+    else:
+        w = w / s
+    if max_w is not None and max_w > 0:
+        # Iteratively cap and renormalize remaining mass
+        for _ in range(10):
+            over = w > max_w
+            if not np.any(over):
+                break
+            excess = float((w[over] - max_w).sum())
+            w[over] = max_w
+            under = ~over
+            if np.any(under):
+                add = excess
+                denom = float(w[under].sum())
+                if denom > 0:
+                    w[under] = w[under] + add * (w[under] / denom)
+                else:
+                    # spread equally among uncapped
+                    w[under] = w[under] + add / under.sum()
+            # Re-normalize tiny drift
+            w = np.maximum(w, 0)
+            w = w / w.sum()
+    return w
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Make next-day predictions and optional risk-aware allocations")
+    p.add_argument("--model", required=True, help="Path to joblib bundle saved by paper_trading_sim (--save_model)")
+    p.add_argument("--tickers", type=str, default="AAPL,MSFT,GOOG,AMZN,NVDA")
+    p.add_argument("--tickers_file", type=str, default=None, help="Path to file with tickers (one per line)")
+    p.add_argument("--period", type=str, default="2y", help="History length used to compute features")
+    p.add_argument("--top_n", type=int, default=5)
+    p.add_argument("--out_csv", type=str, default=None, help="Optional path to save predictions CSV")
+    p.add_argument("--optimize", type=str, default="meanvar", choices=["none", "meanvar"], help="How to create portfolio weights")
+    p.add_argument("--cov_lookback", type=int, default=90, help="Lookback days for covariance estimation")
+    p.add_argument("--shrink", type=float, default=0.2, help="Shrinkage toward diagonal (0-1)")
+    p.add_argument("--max_w", type=float, default=0.3, help="Max weight per asset for long-only portfolio")
+    p.add_argument("--capital", type=float, default=100000.0, help="Capital to allocate for reporting dollar sizes")
+    p.add_argument("--alloc_csv", type=str, default=None, help="Optional path to save allocation weights CSV")
+    p.add_argument("--allow_short", action="store_true", help="Allow negative (short) weights in mean-variance allocation")
+    p.add_argument("--check_drift", action="store_true",
+                   help="compare today's pooled feature values against the bundle's stored "
+                        "training distributions (PSI per feature) and flag drifted inputs")
+    p.add_argument("--drift_threshold", type=float, default=0.25,
+                   help="PSI above this flags a feature as drifted (0.25 = conventional significant shift)")
+    p.add_argument("--explain", action="store_true",
+                   help="attach per-prediction SHAP attributions: which features pushed "
+                        "each ticker's prediction up or down (requires the shap package)")
+    p.add_argument("--explain_top_k", type=int, default=3,
+                   help="number of top features (by |shap value|) shown per prediction")
+    p.add_argument("--explain_csv", type=str, default=None,
+                   help="optional long-format dump: one row per (date, ticker, feature, shap_value)")
+    args = p.parse_args()
+
+    bundle = joblib.load(args.model)
+    model = bundle["model"]
+    feat_cols: List[str] = bundle["features"]
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    raw = fetch_latest_frames(tickers, period=args.period)
+
+    explainer = None
+    if args.explain:
+        try:
+            import shap  # lazy: the default path must never require it installed
+        except ImportError:
+            raise SystemExit("--explain requires the 'shap' package: uv add shap")
+        # Built once per model — construction is the expensive part;
+        # TreeExplainer is exact for sklearn GBMs and needs no background data.
+        explainer = shap.TreeExplainer(model)
+
+    rows = []
+    live_rows = []  # today's feature vectors pooled across tickers (drift check)
+    explain_rows = []  # long-format (date, ticker, feature, shap_value) dump
+    for t, df in raw.items():
+        feats = build_features(df).dropna()
+        if feats.empty:
+            continue
+        # Select only the feature columns seen during training; skip missing
+        missing = [c for c in feat_cols if c not in feats.columns]
+        if missing:
+            # skip tickers that don't have the exact feature set
+            continue
+        latest = feats.iloc[-1]
+        X = latest[feat_cols].astype(float).values.reshape(1, -1)
+        pred = float(model.predict(X)[0])
+        row = {"date": latest.name, "ticker": t, "pred": pred}
+        if explainer is not None:
+            shap_vals = explainer.shap_values(X)[0]
+            k = min(args.explain_top_k, len(feat_cols))
+            order = sorted(range(len(feat_cols)), key=lambda i: -abs(shap_vals[i]))[:k]
+            row["shap_top"] = ",".join(f"{feat_cols[i]}:{shap_vals[i]:+.4g}" for i in order)
+            explain_rows.extend(
+                {"date": latest.name, "ticker": t, "feature": feat_cols[i],
+                 "shap_value": float(shap_vals[i])}
+                for i in range(len(feat_cols))
+            )
+        rows.append(row)
+        live_rows.append(latest[feat_cols])
+
+    pred_df = pd.DataFrame(rows).sort_values(["date", "pred"], ascending=[True, False])
+    if pred_df.empty:
+        print("No predictions produced (insufficient data or features missing)")
+        return
+
+    if args.check_drift:
+        # Pooled across tickers: PSI needs a distribution, not one point.
+        from drift import check_drift
+        report = check_drift(bundle.get("feature_reference"),
+                             pd.DataFrame(live_rows), threshold=args.drift_threshold)
+        if report is None:
+            print("Drift check skipped: this bundle has no stored feature_reference "
+                  "(re-save it with paper-backtest --save_model to enable).")
+        else:
+            print(f"\nFeature drift (PSI vs training, flag > {report.threshold}):")
+            for feature, value in sorted(report.psi_by_feature.items(),
+                                         key=lambda kv: -kv[1]):
+                marker = "  << DRIFTED" if feature in report.flagged else ""
+                print(f"  {feature:12s} {value:6.3f}{marker}")
+            if report.overall_flagged:
+                print(f"  !! {len(report.flagged)} feature(s) beyond the training regime — "
+                      f"treat today's predictions with suspicion.")
+            else:
+                print("  inputs consistent with the training distribution.")
+
+    # Show top-N for the most recent date
+    last_date = pred_df["date"].max()
+    today = pred_df[pred_df["date"] == last_date].sort_values("pred", ascending=False)
+    top = today.head(args.top_n)
+
+    print(f"Predictions for {last_date.date()}: top {len(top)}")
+    for _, r in top.iterrows():
+        line = f"  {r['ticker']}: pred_fwd_ret_1d={r['pred']:+.4%}"
+        if args.explain and "shap_top" in r and isinstance(r["shap_top"], str):
+            line += f"  [{r['shap_top']}]"
+        print(line)
+
+    if args.explain and args.explain_csv and explain_rows:
+        pd.DataFrame(explain_rows).to_csv(args.explain_csv, index=False)
+        print(f"Saved full SHAP attributions to {args.explain_csv}")
+
+    if args.out_csv:
+        pred_df.to_csv(args.out_csv, index=False)
+        print(f"Saved all predictions to {args.out_csv}")
+
+    # Optional portfolio construction
+    if args.optimize != "none":
+        # Universe = today's top-N
+        universe = top["ticker"].tolist()
+        # Estimate covariance from recent returns
+        ret_panel = compute_returns({t: raw[t] for t in universe if t in raw}, lookback=args.cov_lookback)
+        if ret_panel.empty or ret_panel.shape[1] < 2:
+            # Fallback: equal-weight among universe
+            w = np.ones(len(universe)) / max(1, len(universe))
+            Sigma = np.diag(np.ones(len(universe)) * 1e-4)
+        else:
+            Sigma_emp = ret_panel.cov().to_numpy()
+            # Simple shrinkage toward diagonal
+            lam = min(max(args.shrink, 0.0), 1.0)
+            diag = np.diag(np.diag(Sigma_emp))
+            Sigma = (1 - lam) * Sigma_emp + lam * diag
+            # Align mu in the same order
+            mu_map = {r.ticker: r.pred for _, r in top.iterrows()}
+            mu = np.array([mu_map[t] for t in universe])
+            alloc_fn = meanvar_long_short if args.allow_short else meanvar_long_only
+            w = alloc_fn(mu, Sigma, max_w=args.max_w)
+
+        closes = {t: float(raw[t]["Close"].iloc[-1]) if (t in raw and "Close" in raw[t].columns) else float("nan") for t in universe}
+        alloc = pd.DataFrame({"ticker": universe, "weight": w})
+        alloc["dollars"] = alloc["weight"] * float(args.capital)
+        alloc["close"] = alloc["ticker"].map(closes)
+        alloc["shares"] = (alloc["dollars"] / alloc["close"]).fillna(0.0)
+        # Report simple risk/return estimate
+        mu_vec = np.array([float(top[top["ticker"] == t]["pred"].iloc[0]) for t in universe])
+        port_mu = float((w @ mu_vec))
+        port_sigma = float(np.sqrt(w @ (Sigma @ w))) if len(universe) > 0 else 0.0
+        alloc_label = "long-short, abs-capped" if args.allow_short else "long-only, capped"
+        print(f"\nSuggested allocation ({alloc_label}):")
+        for _, r in alloc.sort_values("weight", ascending=False).iterrows():
+            print(f"  {r['ticker']}: {r['weight']:.2%}  (${r['dollars']:.0f})")
+        print(f"Est. next-day return: {port_mu:+.2%}  Est. daily vol: {port_sigma:.2%}")
+        if args.alloc_csv:
+            alloc.to_csv(args.alloc_csv, index=False)
+            print(f"Saved allocation to {args.alloc_csv}")
+
+
+if __name__ == "__main__":
+    main()

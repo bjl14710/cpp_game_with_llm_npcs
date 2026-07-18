@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0019 — Order-to-Trade Ratio (OTR)</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0019</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Order-to-Trade Ratio (OTR)</h1>
+<p class="lead">Why this matters: Lesson 0016 noted that market makers cancel orders 50–500× more than they execute. Regulators noticed. This lesson covers the headline metric exchanges use to throttle aggressive quoting and the rule framework around it.</p>
+
+<h2>1. The definition</h2>
+<p>The <strong>Order-to-Trade Ratio (OTR)</strong> is the ratio of order-entries (including modifications and cancels) to executions on a venue, measured per participant per instrument per day.<sup><a class="fn" href="#fn-1">[1]</a></sup> Two common flavors:</p>
+
+<pre>OTR_transactions = (orders + modifications + cancellations) / number of trades
+OTR_volume       = total order volume / total traded volume</pre>
+
+<p>An OTR of 100 means you sent 100 messages for every 1 trade you executed. Market makers easily hit 200–500. The metric was designed during MiFID II to identify and meter participants whose system load is disproportionate to their economic contribution.<sup><a class="fn" href="#fn-2">[2]</a></sup></p>
+
+<h2>2. The regulatory background — MiFID II RTS 9</h2>
+<p>Article 51(3) of MiFID II requires regulated venues to "have in place effective systems, procedures and arrangements to ensure that algorithmic trading systems cannot create or contribute to disorderly trading conditions … including systems to limit the ratio of unexecuted orders to transactions."<sup><a class="fn" href="#fn-3">[3]</a></sup></p>
+
+<p>RTS 9 (Regulatory Technical Standard 9, DelVO (EU) 2017/566) operationalizes the obligation:<sup><a class="fn" href="#fn-1">[1]</a></sup></p>
+<ul>
+<li>Each venue computes the OTR per member per instrument per day.</li>
+<li>Venues set per-instrument limits (different for an illiquid small-cap vs an active blue-chip).</li>
+<li>Exceeding limits triggers fees, throttling, or in extreme cases participant suspension.</li>
+</ul>
+
+<h3>Eurex example — the most public regime</h3>
+<p>Eurex publishes its OTR parameters publicly. In 2021 it recalibrated parameters and introduced intra-day periods.<sup><a class="fn" href="#fn-4">[4]</a></sup> Limits are set both on:</p>
+<ul>
+<li><strong>Volume-based OTR</strong>: ratio of total order-entry volume to traded volume per product per day.</li>
+<li><strong>Transaction-based OTR</strong>: ratio of order-entry message count to trade count per product per day.</li>
+</ul>
+<p>A participant exceeding the limit pays an Excessive System Usage (ESU) fee.<sup><a class="fn" href="#fn-5">[5]</a></sup> Other major venues (Borsa Istanbul, Vienna, BME) operate similar schemes; thresholds vary by venue and instrument.<sup><a class="fn" href="#fn-6">[6]</a></sup></p>
+
+<h2>3. What the metric is trying to discourage</h2>
+<div class="grid2">
+<div class="card"><h4>Spoofing</h4><p>Posting large orders with no intention to fill, to influence the book, then canceling. Already illegal; high OTR is a noisy proxy.</p></div>
+<div class="card"><h4>Quote stuffing</h4><p>Flooding the venue with messages to slow competitors' systems. Outright denial-of-service against the matching engine.</p></div>
+<div class="card"><h4>Excessive system load</h4><p>Honest but very high-cancel strategies that consume disproportionate matching-engine capacity. The bulk of what OTR actually polices.</p></div>
+<div class="card"><h4>What it doesn't catch</h4><p>Strategies that send fewer total messages but with manipulative <em>intent</em>. OTR is structural, not behavioral. Spoofing prosecutions rely on intent evidence (emails, code).</p></div>
+</div>
+
+<h2>4. The market-maker exemption</h2>
+<p>Real market makers have legitimately high OTRs — that's the nature of the strategy. Most venues offer relaxed OTR limits to participants registered as designated market makers (DMMs) or who meet specific quoting-obligation criteria.<sup><a class="fn" href="#fn-1">[1]</a></sup> This is the regulatory compromise: <em>let the people who provide liquidity be aggressive about quoting; throttle the rest</em>.</p>
+
+<h2>5. Practical tooling</h2>
+<p>An HFT shop's pre-trade risk system typically tracks OTR in real-time per venue per instrument and can:</p>
+<ul>
+<li>Throttle or pause the strategy when projected daily OTR approaches the venue limit.</li>
+<li>Reroute quoting to a different (less constrained) venue.</li>
+<li>Tighten the strategy's own internal cancel logic (e.g. wait for a bigger price move before re-quoting).</li>
+</ul>
+
+<pre><span style="color:var(--code-com);font-style:italic">// Illustrative pre-trade check</span>
+if (running_otr_today > 0.9 * venue_otr_limit) {
+    strategy.<span style="color:#ffe18a">throttle</span>();           <span style="color:var(--code-com);font-style:italic">// reduce quote update rate</span>
+}
+if (running_otr_today > 0.99 * venue_otr_limit) {
+    strategy.<span style="color:#ffe18a">pause_quoting</span>();      <span style="color:var(--code-com);font-style:italic">// stop until next day's reset</span>
+}</pre>
+
+<h2>6. In this project</h2>
+<p>Robinhood (the only execution venue this repo touches via <code>scripts/robinhood_executor.py</code>) is a retail brokerage with low order rates; OTR limits don't bite at the volumes a daily-rebalance strategy generates. If the repo ever connects to a real exchange, OTR tracking goes into the same pre-trade risk module as Rule 15c3-5 checks (Lesson 0013) and inventory limits.</p>
+
+<h2>7. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>OTR vs Cancel-to-fill ratio</h4><p><strong>OTR</strong>: every order-entry message (add, modify, cancel) divided by trades. <strong>Cancel ratio</strong>: just cancels divided by something. OTR is the regulatory metric; cancel ratio is internal diagnostics.</p></div>
+<div class="card"><h4>OTR limit vs Spoofing prosecution</h4><p>Hitting an OTR limit costs a fee. Spoofing is a criminal/civil prosecution requiring intent evidence. Very different consequences for behaviors that can look similar on the wire.</p></div>
+<div class="card"><h4>Venue OTR vs Broker OTR</h4><p><strong>Venue</strong>: tracks per-member, enforces fees. <strong>Broker</strong>: tracks per-client, may impose its own limits to protect its own venue-side standing. Both can throttle you independently.</p></div>
+<div class="card"><h4>OTR vs Rule 15c3-5</h4><p><strong>OTR</strong>: an EU-rooted venue-side metric. <strong>Rule 15c3-5</strong>: a US broker-dealer obligation (Lesson 0013). Different jurisdictions, different layers; many HFT firms must comply with both.</p></div>
+</div>
+
+<h2>8. Practice</h2>
+<div class="question" data-question><p class="q">Q1. A typical market-maker on a liquid instrument might run an OTR of:</p><ul class="options">
+<li data-correct="false" data-why="That's a directional strategy that takes liquidity — fills relatively often relative to orders. MMs are an order of magnitude higher.">~1 (one order per trade).</li>
+<li data-correct="false" data-why="Still way too low. Market makers cancel and re-quote constantly as the book changes.">~5–10.</li>
+<li data-correct="true" data-why="Right. Active market making on a liquid instrument routinely generates 100–500 order messages per executed trade because every book event triggers a re-quote. This is exactly what triggered the regulatory creation of OTR caps and DMM exemptions.">100–500.</li>
+<li data-correct="false" data-why="Even by HFT standards 10,000 is extreme — that's quote-stuffing territory and would draw regulatory attention immediately.">10,000+.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. Why do most venues exempt registered market makers from the strictest OTR limits?</p><ul class="options">
+<li data-correct="false" data-why="DMMs pay venue fees, but the exemption is given because high-OTR is structurally required for their function, not as a perk for paying customers.">Because DMMs pay venue fees.</li>
+<li data-correct="true" data-why="Right. Genuine market making requires posting and rapidly cancelling quotes as the book moves. Applying the standard OTR cap would destroy MM economics on the very participants who supply most of the displayed liquidity. The exemption is a regulatory compromise — exempt them from the cap in exchange for explicit quoting obligations.">Because real market making structurally requires high OTRs, and capping them would destroy MM liquidity provision. Exemption comes with quoting obligations.</li>
+<li data-correct="false" data-why="MM software isn't slower — if anything it's faster. The exemption is functional, not technical.">Because MM software is slower to react to news.</li>
+<li data-correct="false" data-why="No such grandfathering exists in MiFID II OTR rules. The framework explicitly accommodates active MMs through the DMM mechanism.">Because they were grandfathered in from pre-MiFID II rules.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Your strategy's OTR is approaching the venue limit by 14:00 each day. Which response is operationally sane?</p><ul class="options">
+<li data-correct="false" data-why="Doubling order rate is the opposite — it makes the problem worse and likely breaches the limit.">Double the order rate to fill the book with quotes before the limit hits.</li>
+<li data-correct="true" data-why="Right — pre-trade OTR tracking should already be widening internal re-quote thresholds when the limit approaches. The mechanically correct response is to update quotes less aggressively (bigger price moves trigger updates) so message count drops while spread capture is preserved as much as possible.">Tighten the strategy's internal re-quote logic (require larger price moves to update) so message count drops while keeping the strategy active.</li>
+<li data-correct="false" data-why="Spoofing is illegal and would draw worse consequences than an OTR fee. Compliance is non-negotiable.">Spoof additional sells to mark them as orders, lifting the denominator.</li>
+<li data-correct="false" data-why="Disabling pre-trade risk checks is illegal under Rule 15c3-5 (Lesson 0013) and won't help OTR anyway. The risk check is upstream of the venue OTR meter.">Disable the pre-trade risk check so orders get through faster.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. OTR catches some bad behaviors but not all. Which is it NOT designed to catch?</p><ul class="options">
+<li data-correct="false" data-why="Quote stuffing (flooding the venue) directly inflates the numerator and is exactly what OTR caps target.">Quote stuffing — flooding the venue with messages.</li>
+<li data-correct="true" data-why="Right. Spoofing with sophisticated camouflage may keep total message counts low (a few large fake orders, then a real trade in the opposite direction) so OTR is fine. Prosecuting that requires intent evidence — emails, chat logs, code. OTR is structural; spoofing prosecution is behavioral.">Sophisticated spoofing with low total message counts but manipulative intent.</li>
+<li data-correct="false" data-why="Excessive system usage (honest but very high cancel rates) is what OTR caps primarily target. The ESU fee on Eurex is literally named for it.">Excessive system usage by honest high-cancel strategies.</li>
+<li data-correct="false" data-79="Order-rate spikes affect the numerator and would push OTR up immediately. The metric catches them well.">Sudden order-rate spikes during news events.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>9. Scenarios</h2>
+<details class="scenario"><summary>S1. The strategy team complains "the OTR limit is killing our edge." How do you respond as the engineer?</summary>
+<p>First, check whether the strategy qualifies for designated market-maker status on the venue — if it provides genuine liquidity, the relaxed DMM limits may apply, in exchange for quoting obligations. Second, look at message efficiency: are the canceled orders adding economic value, or are they spurious re-quotes from poor signal stability? Smoothing the strategy's quote-update logic often drops OTR significantly without reducing alpha. Third, consider venue choice: some venues have higher limits for the same instrument. The "OTR limit is killing our edge" framing usually has a 30–50% operational improvement on top before any regulatory conversation is needed.</p></details>
+
+<details class="scenario"><summary>S2. Eurex changes its OTR parameters effective next quarter. The new transaction-based limit on your main instrument drops from 500 to 200. What's the operational plan?</summary>
+<p>Three weeks of preparation, broadly: (1) Modify the strategy's internal quote-update threshold so projected daily OTR comes in safely under 180 (with a 10% headroom for spikes). (2) Add real-time OTR monitoring to the dashboard so the trading desk sees the running count. (3) Run a one-week shadow deploy where the new logic is active but trades are unchanged, to validate that the OTR projection model matches reality. (4) Update the kill-switch logic so the strategy pauses at 95% of the new limit rather than 99% (more headroom). (5) Communicate to risk and compliance that the change is being made and update the playbook for what to do if the limit is hit.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://www.eurex.com/ex-en/rules-regs/regulations/order-to-trade-ratio">Order-to-Trade Ratio — Eurex regulations page</a></li>
+<li id="fn-2"><a href="https://www.afm.nl/~/profmedia/files/wet-regelgeving/europees/mifid/consultation-paper/high-frequency-trading-algoritmische-handel.pdf?la=en">ESMA draft RTS on Microstructural Issues — MiFID II / algo trading</a></li>
+<li id="fn-3"><a href="https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/289046/12-1077-eia18-order-to-trade-ratios-impact-italian-stock-market.pdf">Order to trade ratios and their impact on the Italian stock market — UK Government Office for Science</a></li>
+<li id="fn-4"><a href="https://www.eurex.com/ex-en/find/circulars/Redesign-of-the-Order-to-Trade-Ratio-OTR-in-the-context-of-MiFID-II-171826">Redesign of the OTR in the context of MiFID II — Eurex circular</a></li>
+<li id="fn-5"><a href="https://www.eurex.com/ex-en/find/circulars/HFT-Act-Enhancements-of-reports-related-to-Excessive-System-Usage-ESU-Fee-and-Order-to-Trade-Ratio-OTR--187056">HFT Act: ESU Fee and OTR enhancements — Eurex circular</a></li>
+<li id="fn-6"><a href="https://www.borsaistanbul.com/files/order-to-trade-ratio-(otr)-information-note.pdf">Borsa Istanbul OTR Information Note</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

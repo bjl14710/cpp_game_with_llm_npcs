@@ -1,0 +1,53 @@
+# Exercise 03 — Statistical Arbitrage + Risk Utilities
+
+**Lessons:** [0018 — Statistical arbitrage](../../docs/learning/lessons/0018-statistical-arbitrage.html),
+[0006 — Statistics math](../../docs/learning/lessons/0006-statistics-math-in-trading.html) (CUSUM),
+[0019 — Order-to-trade ratio](../../docs/learning/lessons/0019-order-to-trade-ratio.html)
+**Builds on:** lesson math only — independent of exercises 01/02.
+
+Two files, numpy only (no statsmodels):
+
+## `pairs.py`
+
+- `hedge_ratio(y, x)` — OLS slope (with intercept).
+- `spread_series(y, x, beta)` — `e = y − βx`.
+- `zscore(spread)` — standardize with sample std (`ddof=1`).
+- `dickey_fuller_stat(e)` — lag-0 DF t-stat: regress `Δe_t` on `e_{t−1}`
+  (plus constant), return `δ̂ / se(δ̂)`. The grading data: a constructed
+  cointegrated pair must come out below −3.5; two independent random walks
+  must stay above −2.86 (the 5% critical value).
+- `half_life(e)` — AR(1) fit, `−ln 2 / ln(1 + δ)`; `inf` if `δ ≥ 0`.
+
+All five are regressions in disguise — write one `_ols(y, X)` helper
+returning coefficients and standard errors and reuse it.
+
+## `risk.py`
+
+- `CUSUMDetector(k, h)` — two-sided CUSUM:
+  `pos = max(0, pos + x − k)`, `neg = max(0, neg − x − k)`, alarm when
+  either exceeds `h`. This is the clean version of the regime guard in
+  `walkforward_sim.py`.
+- `OTRTracker` — `(orders + cancels) / trades`; `inf` with messages but no
+  trades; `breached(threshold)` for the RTS 9-style check.
+- `walkforward_splits(n, train, test, embargo=0)` — chronological splits;
+  embargo gap between train and test; roll by `test` so test windows tile.
+
+## Acceptance criteria
+
+```bash
+uv run pytest tests/exercises/test_03_stat_arb_risk.py -v
+```
+
+## Hints
+
+- `np.linalg.lstsq` for the fit; standard errors are
+  `sqrt(diag(σ̂² · (XᵀX)⁻¹))` with `σ̂² = RSS / (n − k)`.
+- The DF statistic does NOT use the usual t critical values — the −2.86 in
+  the tests is the Dickey-Fuller 5% critical value with a constant (see
+  lesson 0018's Engle-Granger section).
+- For the walk-forward embargo: the gap exists because next-day-return
+  labels overlap; leaking even one bar inflates backtest Sharpe.
+
+## Check yourself
+
+Solutions: [`solutions/03_stat_arb_risk/`](../../solutions/03_stat_arb_risk/)

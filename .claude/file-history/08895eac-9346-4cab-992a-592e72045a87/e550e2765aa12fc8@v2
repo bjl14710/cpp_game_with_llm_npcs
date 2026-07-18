@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Optional pre-PUSH hook running the bench-history regression check
+# (SCAFFOLD). Plan: .claude/plans/bench-latency-history.md.
+# Pre-push, not pre-commit: benches take ~10s x K runs.
+#
+# TODO(bench-2): implement — idempotently write .git/hooks/pre-push that
+# runs `python3 scripts/bench_history.py --check-only` and blocks the push
+# on exit 1 (regression) but NOT on exit 2 (build/parse trouble shouldn't
+# hold your push hostage — print and allow).
+set -euo pipefail
+
+echo "install_bench_hook.sh is scaffolded but not implemented yet" >&2
+echo "(plan: .claude/plans/bench-latency-history.md, TODO(bench-2))" >&2
+exit 2

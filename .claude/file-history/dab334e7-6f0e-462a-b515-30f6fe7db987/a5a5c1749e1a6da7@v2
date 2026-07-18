@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_metric.html" import metric %}
+{% block content %}
+<h2>Analyze Equity</h2>
+<form method="post" class="form-grid">
+  <label>Equity CSV
+    <input type="text" name="equity_csv" value="{{ form_values.get('equity_csv','walkforward_equity.csv') }}">
+  </label>
+  <button type="submit" class="btn">Evaluate</button>
+</form>
+
+{% if metrics %}
+  <div class="metric-row">
+    {% for key in ("Sharpe", "CAGR", "MaxDD") if key in metrics %}
+      {{ metric(key, metrics[key]) }}
+    {% endfor %}
+  </div>
+  <h3>Metrics</h3>
+  <table class="metrics">
+    <tbody>
+      {% for key, value in metrics.items() %}
+        <tr>
+          <th>{{ key }}</th>
+          <td>{{ value }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+{% if returns %}
+  <h3>Recent Daily Returns</h3>
+  <table class="metrics">
+    <thead>
+      <tr><th>Date</th><th>Return</th></tr>
+    </thead>
+    <tbody>
+      {% for date, value in returns.items() %}
+        <tr>
+          <td>{{ date }}</td>
+          <td>{{ '{:.4%}'.format(value) }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,121 @@
+# Plan: Live Paper-Trading Drawdown Circuit Breaker
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+When a live arena strategy's equity falls more than a configurable percentage
+below its running peak, the arena automatically pauses it: no further paper
+trades, a logged breaker event explaining exactly why (peak, trough, threshold,
+date), and a visible PAUSED status in the report. It stays paused until a human
+runs an explicit resume command — it never un-pauses itself. Resuming resets
+the high-water mark to the resume-point equity, so the strategy gets full
+threshold headroom again instead of instantly re-tripping.
+
+## Goal
+A losing strategy stops digging on its own, and the operator can see why it
+stopped and consciously decide to turn it back on.
+
+## Decisions Made (were open questions)
+- **Resume resets the high-water mark** (user decision): drawdown is measured
+  from a per-strategy anchor date forward; resume moves the anchor to the
+  resume point. Pre-pause losses remain visible in the report but can't
+  re-trip the breaker.
+- Breaker is **on by default** at −20% (`--breaker_dd -0.20`), disabled with
+  `--no_breaker`. Threshold is global per run; the tripped value is stored on
+  the event so later threshold changes don't rewrite history.
+- The **tripping tick's rows are kept** — the day that crossed the threshold
+  already happened; the breaker gates *future* ticks.
+- Paused days leave a **hole in the ledger** (no shadow equity): pausing means
+  not trading. Metrics treat the gap as one period; the report's PAUSED status
+  plus breaker events make the hole explainable.
+
+## Out of Scope (this version)
+- Real-money execution (`rh-exec`) — arena paper trading only
+- Backtests — `arena-run backtest` and the walk-forward loops are untouched;
+  the existing `risk_overlay` in `simulate_walkforward` remains the backtest
+  risk mechanism
+- Per-strategy thresholds (single `--breaker_dd` per run)
+- Manual pause command, auto-resume timers, notification hooks
+- Portfolio-level (cross-strategy) breakers — each ledger is independent
+
+## Affected Areas
+- `strategy_arena.py` — all changes live here:
+  - `_SCHEMA`: new `breaker_events` table (strategy, date, event TRIP|RESUME,
+    drawdown, peak_equity, equity, threshold — PK (strategy, date, event));
+    `strategies` table gains `hwm_anchor` TEXT column (nullable; migration:
+    `ALTER TABLE ... ADD COLUMN` guarded by a pragma check so existing DBs
+    upgrade in place).
+  - `ArenaState`: `set_status(name, status)`, `anchor(name)`,
+    `set_anchor(name, date)`, `log_breaker_event(...)`,
+    `running_drawdown(name) -> (dd, peak, current)` computed over equity rows
+    with `date >= hwm_anchor` (anchor NULL ⇒ full history).
+  - `live_tick`: gains `since_date: str | None` — the append mask becomes
+    `index > max(last_equity_date, since_date)` so a resumed strategy does not
+    "backfill" the paused window as if it had been trading.
+  - `cmd_live`: skip strategies with status PAUSED (with a printed reason);
+    after each successful tick, evaluate `running_drawdown`; on breach set
+    status=PAUSED, log a TRIP event, print loudly. Pass the anchor as
+    `since_date`.
+  - New subcommand `arena-run resume <strategy>`: only valid on PAUSED
+    strategies (clear error otherwise); sets status=PASS, moves `hwm_anchor`
+    to the last recorded equity date, logs a RESUME event.
+  - CLI: `--breaker_dd` (default −0.20) and `--no_breaker` on the `live`
+    subparser.
+- `analyze_equity.py` — `compare_strategies`: include PAUSED in `status`
+  (it already passes through; add `paused_since` from the latest TRIP event so
+  the report answers "why is this one dark").
+- New tests: `tests/test_circuit_breaker.py`; one migration test asserting an
+  arena DB created by the current schema opens cleanly after upgrade.
+
+## Implementation Order
+1. Schema + `ArenaState` methods (events table, anchor column w/ in-place
+   migration, `running_drawdown`) + unit tests — no behavior change yet.
+2. Breaker evaluation in `cmd_live` + PAUSED skip + TRIP logging; extract the
+   per-strategy body into a testable helper so tests don't need the network
+   path. Tests: equity drops through threshold ⇒ status flips, event row
+   written, next tick skipped.
+3. `arena-run resume` subcommand + anchor reset + RESUME event + `since_date`
+   masking in `live_tick`. Tests: resume ⇒ PASS, no immediate re-trip, paused
+   window not backfilled, post-resume drawdown measured from anchor.
+4. Report enrichment (`paused_since`) + docs touch-up in the arena module
+   docstring.
+
+## Acceptance Criteria
+- [ ] Given equity that falls 21% from its running peak with `--breaker_dd
+      -0.20`, when the live tick completes, then status=PAUSED and a TRIP
+      event records date, drawdown, peak, threshold
+- [ ] A PAUSED strategy is skipped by subsequent `arena-run live` runs (no new
+      equity/trade rows) until resumed
+- [ ] `arena-run resume <name>` on a PAUSED strategy sets PASS, logs RESUME,
+      and the next tick appends rows only after the resume date (the paused
+      window is not backfilled)
+- [ ] After resume, drawdown is measured from the resume-point equity: a
+      further −19% does not trip; a further −21% does
+- [ ] `arena-run resume` on a non-paused strategy exits with a clear error
+      and changes nothing
+- [ ] `--no_breaker` ⇒ no evaluation, no events, legacy behavior
+- [ ] An arena DB created before this change opens and upgrades in place
+      (anchor column added, no data loss)
+- [ ] Report shows PAUSED status with `paused_since`
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Threshold crossed intra-window during backfill (missed week contains the breach) | Trip fires after the tick that backfilled it — all backfilled rows kept, breaker gates the future |
+| Equity recovers above threshold before the next run ever happens | Still tripped — the breaker is about the event, not the current reading; human decides |
+| Fewer than 2 equity rows for a strategy | No drawdown defined ⇒ breaker never evaluates |
+| Resume when no equity rows exist | Error: nothing to anchor to; suggest running live first |
+| Two TRIP evaluations same day (rerun after trip) | PAUSED strategies are skipped before ticking, so no duplicate trip; event PK also guards |
+| `--breaker_dd` given as positive number | Normalized: 0.20 is treated as −0.20 (magnitude), documented in --help |
+| EXCLUDED strategy | Never ticked, so never evaluated — breaker only concerns PASS strategies |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(arena): breaker_events table + hwm anchor + running_drawdown in ArenaState` — schema, in-place migration, unit tests
+2. `feat(arena): auto-pause on drawdown breach in live loop` — evaluation, PAUSED skip, TRIP events, --breaker_dd/--no_breaker
+3. `feat(arena): arena-run resume with anchor reset and pause-window masking` — resume subcommand, since_date in live_tick
+4. `feat(reporting): surface PAUSED + paused_since in comparison report` — report column + docs

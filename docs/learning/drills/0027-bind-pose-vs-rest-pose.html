@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0027 — Bind Pose vs Rest Pose</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #47a; padding-bottom: .4rem; }
+  .q { background: #f2f6fb; border-left: 4px solid #47a; padding: .8rem 1rem;
+       margin: 1.2rem 0; border-radius: 0 6px 6px 0; }
+  details { margin: .5rem 0 0 .5rem; }
+  summary { cursor: pointer; color: #247; font-weight: 600; }
+  code, pre { background: #f4f4f6; border-radius: 4px; padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Drill 0027 — Bind Pose vs Rest Pose in glTF Skinning</h1>
+<p>Answer before expanding. Source: lesson 0027, session-9 issues #139/#142.</p>
+
+<div class="q"><strong>1.</strong> Name the two default skeleton configurations a
+skinned glTF carries, where each is stored, and which one the mesh vertices are
+stored in.
+<details><summary>Answer</summary>
+<strong>Bind pose</strong> — stored (inversely) in
+<code>skins[0].inverseBindMatrices</code>; the mesh vertices are stored in this
+pose. <strong>Rest pose</strong> — the joint nodes' local TRS values composed down
+the hierarchy; it's what you get with no animation playing.</details></div>
+
+<div class="q"><strong>2.</strong> Write the standard skinning equation for a
+vertex stored in bind space and explain the role of the IBM.
+<details><summary>Answer</summary>
+<pre>v' = &Sigma; w_j · G_j(pose) · IBM_j · v</pre>
+The inverse bind matrix moves the vertex from bind space into joint-local space;
+the joint's global pose matrix then places it in the current pose. Without the
+IBM you are implicitly assuming vertices were stored in the rest pose.</details></div>
+
+<div class="q"><strong>3.</strong> The pack's characters froze in T-pose but their
+fingers and legs animated. Explain BOTH halves of that symptom in terms of
+rest-vs-bind agreement.
+<details><summary>Answer</summary>
+raylib computes rest-relative deltas and assumes vertices are in rest space. For
+joints where rest == bind (legs, fingers), the assumption holds and animation
+looks right. For the arms, rest (down) &ne; bind (T-pose): clips keep joints near
+rest, deltas &approx; identity, and the T-pose vertices render unchanged.</details></div>
+
+<div class="q"><strong>4.</strong> Why was ten lines of python more decisive than
+another renderer experiment?
+<details><summary>Answer</summary>
+glTF is JSON: composing node TRS down the hierarchy yourself gives ground truth
+about the DATA with no engine assumptions in the loop. Printing the wrist's
+global rest position ((&plusmn;0.25, 1.01) — hip height) proved the file was
+arms-down and shifted all suspicion onto the engine's conventions.</details></div>
+
+<div class="q"><strong>5.</strong> State the fix in one formula and say when it
+runs.
+<details><summary>Answer</summary>
+Re-bake every vertex from bind space to rest space ONCE at load:
+<pre>v_rest = &Sigma; w_j · (restGlobal_j · IBM_j) · v_bind</pre>
+then re-upload the vertex/normal buffers. Static draws now show the rest stance
+and rest-relative animation deltas become correct.</details></div>
+
+<div class="q"><strong>6.</strong> After the re-bake, a witch head mixed onto a
+soldier body follows the walk cycle with zero attachment code. Why?
+<details><summary>Answer</summary>
+Both files share one skeleton and animation library. Posing each model with the
+same clip at the same clock produces identical neck-bone trajectories, so the
+head's skinned vertices move exactly as if parented to the body's neck — the
+"attachment" is the shared rig itself.</details></div>
+
+<div class="q"><strong>7.</strong> Transfer: a teammate imports a character that
+looks correct in Blender but stands twisted in your custom engine, and only some
+limbs animate. List your first three checks, in order.
+<details><summary>Answer</summary>
+(1) Does the engine read <code>inverseBindMatrices</code>, or does it assume
+bind == rest? (2) Compute a limb's global rest position from the raw JSON —
+does the DATA say the pose differs from what the engine shows? (3) Compare a
+frozen limb's animated local TRS to its rest TRS: deltas near identity confirm
+the rest-relative mismatch rather than missing channels.</details></div>
+</body>
+</html>

@@ -1,0 +1,340 @@
+"""Streamlit dashboard for the CL-vs-XLE lead-lag study.
+
+Run:  ``streamlit run app/dashboard.py``
+
+Shows live pipeline *progress*, a *results* panel (CCF curve, Granger p-values,
+cointegration verdict, rolling corr/beta), and a *costs* panel with the three
+flavours the user asked for: API free-tier budget, hypothetical transaction
+cost, and per-stage compute time.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+# Make ``src`` importable when run via ``streamlit run app/dashboard.py``.
+_SRC = os.path.join(os.path.dirname(__file__), "..", "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, os.path.abspath(_SRC))
+
+import pandas as pd  # noqa: E402
+import plotly.graph_objects as go  # noqa: E402
+import streamlit as st  # noqa: E402
+
+from oil_alpha.config import DEFAULT_START, LAG, LEAD, SYMBOLS, RunConfig, default_end  # noqa: E402
+from oil_alpha.pipeline import ProgressEvent, run_pipeline  # noqa: E402
+from oil_alpha.oil_volume import (  # noqa: E402
+    CUSHING_CAPACITY_KB,
+    USING_CPP,
+    capacity_utilization,
+    days_of_supply,
+    fill_rate,
+)
+
+st.set_page_config(page_title="Crude-Oil Lead-Lag Lab", layout="wide")
+st.title("🛢️ Crude-Oil Lead-Lag Lab")
+st.caption(
+    f"Does **{SYMBOLS[LEAD]} (WTI futures)** lead **{SYMBOLS[LAG]} (energy ETF)**? "
+    "Daily study per the crude-oil research paper, Stages 1-3."
+)
+
+# --- Sidebar: run controls ---------------------------------------------------
+with st.sidebar:
+    st.header("Run settings")
+    start = st.text_input("Start date", DEFAULT_START)
+    end = st.text_input("End date", default_end())
+    return_kind = st.radio("Return type", ["log", "simple"], horizontal=True)
+    max_lag = st.slider("Max lag (trading days)", 1, 30, 10)
+    rolling_window = st.slider("Rolling window", 20, 120, 60, step=10)
+    drop_roll_days = st.checkbox("Drop CL=F roll-day jumps", value=True)
+    use_cache = st.checkbox("Use local cache", value=True)
+    turnover = st.number_input("Hypothetical turnover / yr", 1.0, 1000.0, 252.0, step=10.0)
+    run = st.button("▶ Run pipeline", type="primary", use_container_width=True)
+    st.markdown(
+        "<small>yfinance + FRED need no API key. Negative-price (Apr-2020) and "
+        "roll-day traps are handled automatically.</small>",
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+    st.header("Oil Size / Volume")
+    eia_key = st.text_input("EIA API key (optional)", type="password",
+                            help="Free key at eia.gov/opendata. Leave blank to use synthetic demo data.")
+    run_volume = st.button("▶ Load oil-volume data", use_container_width=True)
+
+
+def _ccf_figure(ll) -> go.Figure:
+    fig = go.Figure()
+    fig.add_bar(x=ll.lags, y=ll.ccf, name="CCF")
+    fig.add_vline(x=ll.peak_lag, line_dash="dash", line_color="crimson")
+    fig.add_annotation(
+        x=ll.peak_lag, y=ll.peak_corr,
+        text=f"peak lag {ll.peak_lag}", showarrow=True, arrowhead=2,
+    )
+    fig.update_layout(
+        title=f"Cross-correlation  ρ(k)=corr({ll.x_name}ₜ, {ll.y_name}ₜ₊ₖ)   (k>0 ⇒ {ll.x_name} leads)",
+        xaxis_title="lag k (days)", yaxis_title="correlation", height=340,
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+    return fig
+
+
+def _line(series: pd.Series, title: str, yaxis: str) -> go.Figure:
+    fig = go.Figure()
+    fig.add_scatter(x=series.index, y=series.to_numpy(), mode="lines")
+    fig.update_layout(title=title, yaxis_title=yaxis, height=300, margin=dict(l=10, r=10, t=40, b=10))
+    return fig
+
+
+def _render_results(result) -> None:
+    ll = result.leadlag
+    st.subheader("Results")
+
+    c1, c2, c3 = st.columns(3)
+    leader = "CL (futures)" if ll.x_leads else ("XLE" if ll.peak_lag < 0 else "contemporaneous")
+    c1.metric("Lead-lag leader", leader, f"peak lag {ll.peak_lag}")
+    if result.granger:
+        g = result.granger["x->y"]
+        c2.metric(f"Granger {SYMBOLS[LEAD]}→{SYMBOLS[LAG]}", f"p={g.p_value:.3f}",
+                  "significant" if g.significant else "n.s.")
+    if result.spot_check:
+        c3.metric("CL=F vs FRED spot", f"{result.spot_check['median_abs_pct']:.1f}%",
+                  f"{result.spot_check['common_days']} common days")
+
+    st.plotly_chart(_ccf_figure(ll), use_container_width=True)
+
+    gc, cc = st.columns(2)
+    with gc:
+        st.markdown("**Granger causality (both directions)**")
+        if result.granger:
+            rows = [
+                {"direction": g.direction, "best lag": g.best_lag,
+                 "p-value": round(g.p_value, 4), "significant": g.significant}
+                for g in result.granger.values()
+            ]
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.caption("Granger = predictive precedence, not true causation (paper Part 2.3).")
+    with cc:
+        st.markdown("**Cointegration (price levels)**")
+        if result.eg_coint:
+            st.write("•", result.eg_coint.verdict)
+        if result.johansen_coint:
+            st.write("•", result.johansen_coint.verdict)
+
+    rc, rb = st.columns(2)
+    if result.rolling_corr is not None and not result.rolling_corr.empty:
+        rc.plotly_chart(
+            _line(result.rolling_corr, f"Rolling correlation ({SYMBOLS[LEAD]} vs {SYMBOLS[LAG]})", "corr"),
+            use_container_width=True,
+        )
+    if result.rolling_beta is not None and not result.rolling_beta.empty:
+        rb.plotly_chart(
+            _line(result.rolling_beta, f"Rolling β of {SYMBOLS[LAG]} to oil", "beta"),
+            use_container_width=True,
+        )
+
+    if result.warnings:
+        for w in result.warnings:
+            st.warning(w)
+
+
+def _render_costs(result) -> None:
+    st.subheader("Projected costs")
+    a, b, c = st.tabs(["① API free-tier budget", "② Transaction cost", "③ Compute / time"])
+
+    with a:
+        rows = result.budget.as_rows()
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, hide_index=True, use_container_width=True)
+            for r in rows:
+                if r["cap"] is not None:
+                    st.progress(min(1.0, r["fraction"] or 0.0),
+                                text=f"{r['source']}: {r['used']}/{r['cap']} used")
+        st.caption(f"Total requests this run: {result.budget.total_requests()} "
+                   "(yfinance/FRED have no hard cap; capped sources shown with bars).")
+
+    with b:
+        if result.cost_estimates:
+            df = pd.DataFrame([
+                {"asset": SYMBOLS.get(c.asset_key, c.asset_key),
+                 "round-trip (bp)": round(c.round_trip_bp, 2),
+                 "turnover/yr": c.turnover_per_year,
+                 "annual drag (bp)": round(c.annual_drag_bp, 1),
+                 "annual drag (%)": round(c.annual_drag_pct, 2)}
+                for c in result.cost_estimates
+            ])
+            st.dataframe(df, hide_index=True, use_container_width=True)
+        st.caption("Illustrative half-spread + commission assumptions (config.COST_MODEL), "
+                   "not calibrated to live quotes.")
+
+    with c:
+        if result.metrics:
+            st.dataframe(pd.DataFrame(result.metrics.as_rows()), hide_index=True, use_container_width=True)
+            st.metric("Total compute time", f"{result.metrics.total_seconds:.2f} s")
+
+
+def _demo_volume_data(start: str, end: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Synthetic storage + production data for demo when no EIA key is set."""
+    import numpy as np
+
+    dates_w = pd.date_range(start, end, freq="W-FRI")
+    rng = np.random.default_rng(42)
+    storage = 35_000 + rng.normal(0, 2000, len(dates_w)).cumsum().clip(-5000, 35000)
+    storage_df = pd.DataFrame({"value": storage}, index=dates_w)
+    storage_df.index.name = "date"
+
+    dates_m = pd.date_range(start, end, freq="MS")
+    prod = 12_000 + rng.normal(0, 200, len(dates_m)).cumsum().clip(-2000, 2000)
+    prod_df = pd.DataFrame({"value": prod}, index=dates_m)
+    prod_df.index.name = "date"
+
+    return storage_df, prod_df
+
+
+def _render_oil_volume(eia_key: str, start: str, end: str) -> None:
+    """Render the Oil Size / Volume panel."""
+    import os
+
+    st.subheader("Oil Size / Volume")
+
+    if not USING_CPP:
+        st.warning("C++ extension not built — running unoptimised Python fallback. "
+                   "Run `./scripts/build_cpp.sh` to enable the fast path.")
+
+    # Resolve data ---------------------------------------------------------
+    using_demo = False
+    if eia_key:
+        os.environ["EIA_API_KEY"] = eia_key
+    elif not os.environ.get("EIA_API_KEY"):
+        using_demo = True
+
+    if using_demo:
+        st.info("No EIA API key provided — showing synthetic demo data. "
+                "Get a free key at [eia.gov/opendata](https://www.eia.gov/opendata/register.php) "
+                "and enter it in the sidebar to see real Cushing storage data.")
+        storage_df, prod_df = _demo_volume_data(start, end)
+    else:
+        from oil_alpha.data.sources import fetch_eia, EIA_SERIES
+        from oil_alpha.data.budget import APIBudget
+
+        budget = APIBudget()
+        try:
+            with st.spinner("Fetching Cushing storage from EIA…"):
+                storage_df = fetch_eia(EIA_SERIES["cushing_storage"], start, end,
+                                       budget=budget, use_cache=True)
+            with st.spinner("Fetching US production from EIA…"):
+                prod_df = fetch_eia(EIA_SERIES["us_production"], start, end,
+                                    budget=budget, use_cache=True)
+        except Exception as exc:
+            st.error(f"EIA fetch failed: {exc}")
+            return
+
+    if storage_df.empty:
+        st.warning("No storage data available for the selected window.")
+        return
+
+    storage_vals = storage_df["value"].tolist()
+    prod_vals = prod_df["value"].tolist() if not prod_df.empty else []
+
+    # Compute metrics via C++ (or Python fallback via oil_volume.py) -------
+    util = capacity_utilization(storage_vals, CUSHING_CAPACITY_KB)
+    fr = fill_rate(storage_vals)
+
+    latest_util = next((v for v in reversed(util) if not (v != v)), float("nan"))
+    latest_fr = next((v for v in reversed(fr) if not (v != v)), float("nan"))
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Cushing capacity util.", f"{latest_util:.1f}%")
+    m2.metric("Latest fill rate (kb/wk)", f"{latest_fr:+.0f}" if not (latest_fr != latest_fr) else "n/a")
+    m3.metric("Cushing capacity (kb)", f"{CUSHING_CAPACITY_KB:,.0f}")
+
+    # Storage time-series --------------------------------------------------
+    fig_storage = go.Figure()
+    fig_storage.add_scatter(
+        x=storage_df.index, y=storage_df["value"].tolist(),
+        mode="lines", name="Cushing storage (kb)",
+    )
+    fig_storage.add_scatter(
+        x=storage_df.index, y=util,
+        mode="lines", name="Capacity util (%)", yaxis="y2",
+        line=dict(dash="dash", color="crimson"),
+    )
+    fig_storage.update_layout(
+        title="Cushing Storage & Capacity Utilization",
+        yaxis=dict(title="Storage (thousand barrels)"),
+        yaxis2=dict(title="Utilization %", overlaying="y", side="right", range=[0, 110]),
+        height=350, margin=dict(l=10, r=10, t=50, b=10),
+        legend=dict(orientation="h", y=-0.15),
+    )
+    st.plotly_chart(fig_storage, use_container_width=True)
+
+    # Fill rate chart ------------------------------------------------------
+    fig_fr = go.Figure()
+    colors = ["green" if v >= 0 else "red" for v in fr]
+    fig_fr.add_bar(x=storage_df.index, y=fr, marker_color=colors, name="Fill rate")
+    fig_fr.update_layout(
+        title="Weekly Fill Rate (storage change, kb)",
+        yaxis_title="kb / week", height=280,
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+    st.plotly_chart(fig_fr, use_container_width=True)
+
+    # Days of supply -------------------------------------------------------
+    if prod_vals:
+        # Align production to storage dates (forward-fill monthly → weekly)
+        prod_s = prod_df["value"].resample("W-FRI").ffill()
+        prod_aligned = prod_s.reindex(storage_df.index, method="ffill").tolist()
+        dos = days_of_supply(storage_vals, prod_aligned)
+        fig_dos = go.Figure()
+        fig_dos.add_scatter(x=storage_df.index, y=dos, mode="lines", name="Days of supply")
+        fig_dos.update_layout(
+            title="Days of Supply",
+            yaxis_title="days", height=270,
+            margin=dict(l=10, r=10, t=50, b=10),
+        )
+        st.plotly_chart(fig_dos, use_container_width=True)
+
+    backend = "C++ (oil_volume_cpp)" if USING_CPP else "Python fallback"
+    st.caption(f"Metrics computed by: **{backend}** · Capacity bound: {CUSHING_CAPACITY_KB:,.0f} kb")
+
+
+def _run(cfg: RunConfig) -> None:
+    progress = st.progress(0.0, text="starting…")
+    with st.status("Running pipeline…", expanded=True) as status:
+        final = None
+        for event in run_pipeline(cfg):
+            progress.progress(event.pct, text=f"{event.stage} — {event.message}")
+            icon = {"ok": "✅", "warn": "⚠️", "error": "❌", "done": "🏁"}.get(event.status, "•")
+            if event.status != "start":
+                st.write(f"{icon} **{event.stage}** — {event.message}")
+            if event.stage == "done":
+                final = event.payload
+        status.update(label="Pipeline complete", state="complete")
+    st.session_state["result"] = final
+
+
+if run:
+    cfg = RunConfig(
+        start=start, end=end, return_kind=return_kind, max_lag=max_lag,
+        rolling_window=rolling_window, drop_roll_days=drop_roll_days,
+        use_cache=use_cache, turnover_per_year=turnover,
+    )
+    _run(cfg)
+
+result = st.session_state.get("result")
+if result is not None and result.leadlag is not None:
+    _render_results(result)
+    st.divider()
+    _render_costs(result)
+elif result is not None:
+    st.error("Pipeline aborted before producing results. Check warnings above / network access.")
+else:
+    st.info("Set your window in the sidebar and click **▶ Run pipeline** to begin.")
+
+# --- Oil Size / Volume panel -------------------------------------------------
+if run_volume or st.session_state.get("volume_loaded"):
+    st.session_state["volume_loaded"] = True
+    st.divider()
+    _render_oil_volume(eia_key=eia_key, start=start, end=end)

@@ -1,0 +1,222 @@
+/* theme-lab.css — the "Lab" theme: Streamlit's default design language
+   adapted from the HFT learning app's dashboard (stock Streamlit: accent
+   #FF4B4B, soft #F0F2F6 sidebar, #0E1117 dark mode, metric cards with
+   green/red deltas, wide tables). Loaded ONLY when body.theme-lab —
+   classic remains byte-identical without this file.
+   No CDN fonts: system stack approximating Source Sans keeps the PWA
+   offline-capable. */
+
+body.theme-lab {
+  --lab-bg: #ffffff;
+  --lab-secondary: #f0f2f6;
+  --lab-text: #31333f;
+  --lab-muted: #808495;
+  --lab-accent: #ff4b4b;
+  --lab-border: #d5dae5;
+  --lab-up: #09ab3b;
+  --lab-down: #ff2b2b;
+  --lab-radius: 8px;
+
+  font-family: "Source Sans 3", "Source Sans Pro", -apple-system, "Segoe UI",
+               Roboto, Helvetica, Arial, sans-serif;
+  background: var(--lab-bg);
+  color: var(--lab-text);
+}
+
+@media (prefers-color-scheme: dark) {
+  body.theme-lab {
+    --lab-bg: #0e1117;
+    --lab-secondary: #262730;
+    --lab-text: #fafafa;
+    --lab-muted: #a3a8b8;
+    --lab-border: #3d4051;
+  }
+}
+
+/* ---- Streamlit-style sidebar on wide screens --------------------------- */
+@media (min-width: 900px) {
+  body.theme-lab {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+  }
+  body.theme-lab header {
+    grid-row: 1 / span 3;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+    background: var(--lab-secondary);
+    border-right: 1px solid var(--lab-border);
+    padding: 1.25rem 1rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  body.theme-lab main   { grid-column: 2; }
+  body.theme-lab footer { grid-column: 2; }
+  body.theme-lab .nav-hamburger,
+  body.theme-lab .nav-toggle { display: none; }
+  body.theme-lab nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-top: 1rem;
+  }
+}
+
+body.theme-lab header { color: var(--lab-text); }
+body.theme-lab header h1 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--lab-text);
+  margin: 0;
+}
+body.theme-lab nav a {
+  color: var(--lab-text);
+  text-decoration: none;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--lab-radius);
+  font-size: 0.95rem;
+}
+body.theme-lab nav a:hover {
+  background: rgba(255, 75, 75, 0.12);
+  color: var(--lab-accent);
+}
+body.theme-lab .theme-toggle {
+  margin-top: auto;
+  font-size: 0.8rem;
+  color: var(--lab-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--lab-border);
+  border-radius: var(--lab-radius);
+  text-align: center;
+}
+body.theme-lab .theme-toggle:hover { color: var(--lab-accent); border-color: var(--lab-accent); }
+
+body.theme-lab main {
+  background: var(--lab-bg);
+  padding: 2rem 3rem;
+  max-width: 72rem;
+}
+@media (max-width: 899px) {
+  body.theme-lab main { padding: 1rem; }
+}
+
+/* ---- Cards / grids ------------------------------------------------------ */
+body.theme-lab .card {
+  background: var(--lab-secondary);
+  border: 1px solid var(--lab-border);
+  border-radius: var(--lab-radius);
+  box-shadow: none;
+}
+body.theme-lab .card h2 { color: var(--lab-text); font-size: 1.05rem; }
+body.theme-lab .btn {
+  background: var(--lab-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--lab-radius);
+  font-weight: 600;
+}
+body.theme-lab .btn:hover { filter: brightness(0.92); }
+
+/* ---- Metric cards (Streamlit st.metric look) ---------------------------- */
+body.theme-lab .metric-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0 1.5rem;
+}
+body.theme-lab .metric-card {
+  background: var(--lab-secondary);
+  border: 1px solid var(--lab-border);
+  border-radius: var(--lab-radius);
+  padding: 0.9rem 1.1rem;
+}
+body.theme-lab .metric-label {
+  font-size: 0.82rem;
+  color: var(--lab-muted);
+  margin-bottom: 0.15rem;
+}
+body.theme-lab .metric-value {
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--lab-text);
+}
+body.theme-lab .metric-delta { font-size: 0.85rem; font-weight: 600; }
+body.theme-lab .metric-delta.up   { color: var(--lab-up); }
+body.theme-lab .metric-delta.up::before { content: "▲ "; }
+body.theme-lab .metric-delta.down { color: var(--lab-down); }
+body.theme-lab .metric-delta.down::before { content: "▼ "; }
+
+/* ---- Tables (st.dataframe look) ----------------------------------------- */
+body.theme-lab table.metrics,
+body.theme-lab table.arena {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  border: 1px solid var(--lab-border);
+  border-radius: var(--lab-radius);
+  overflow: hidden;
+}
+body.theme-lab table.metrics th,
+body.theme-lab table.arena th {
+  background: var(--lab-secondary);
+  color: var(--lab-muted);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid var(--lab-border);
+}
+body.theme-lab table.metrics td,
+body.theme-lab table.arena td {
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--lab-border);
+}
+body.theme-lab table.metrics tr:last-child td,
+body.theme-lab table.arena tr:last-child td { border-bottom: none; }
+
+/* ---- Forms --------------------------------------------------------------- */
+body.theme-lab .form-grid input,
+body.theme-lab .form-grid select {
+  background: var(--lab-bg);
+  color: var(--lab-text);
+  border: 1px solid var(--lab-border);
+  border-radius: var(--lab-radius);
+  padding: 0.45rem 0.6rem;
+}
+body.theme-lab .form-grid input:focus,
+body.theme-lab .form-grid select:focus {
+  outline: none;
+  border-color: var(--lab-accent);
+  box-shadow: 0 0 0 1px var(--lab-accent);
+}
+body.theme-lab .form-grid label { color: var(--lab-muted); font-size: 0.88rem; }
+
+/* ---- Alerts (st.success / st.error) -------------------------------------- */
+body.theme-lab .alert {
+  border-radius: var(--lab-radius);
+  border: none;
+  padding: 0.8rem 1rem;
+}
+body.theme-lab .alert.success { background: rgba(9, 171, 59, 0.15); color: var(--lab-up); }
+body.theme-lab .alert.error   { background: rgba(255, 43, 43, 0.15); color: var(--lab-down); }
+
+/* ---- Status badges (arena page, but themable anywhere) ------------------- */
+/* badge shape lives in style.css (shared); lab-specific colors below */
+.badge.status-pass      { background: rgba(9, 171, 59, 0.18);  color: #09ab3b; }
+.badge.status-probation { background: rgba(255, 165, 0, 0.18); color: #cc8400; }
+.badge.status-paused    { background: rgba(255, 43, 43, 0.18); color: #ff2b2b; }
+.badge.status-excluded  { background: rgba(128, 132, 149, 0.2); color: #808495; }
+.badge.status-reference { background: rgba(128, 132, 149, 0.2); color: #808495; }
+.badge.status-research  { background: rgba(70, 130, 255, 0.18); color: #4682ff; }
+
+body.theme-lab footer {
+  color: var(--lab-muted);
+  background: transparent;
+  padding: 1rem 3rem;
+}

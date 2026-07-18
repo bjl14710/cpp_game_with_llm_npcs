@@ -1,0 +1,19 @@
+// Demo driver: replay a filtered ITCH file through the parser at a chosen
+// speed (SCAFFOLD). Plan: .claude/plans/itch-replay-clock.md, step 3.
+//
+// TODO(replay-2): argv = <file> <maxspeed|wallclock|step> [speed]; wire the
+// MessageSink to itch::parse_buffer per message; print ReplayStats +
+// ParseStats + wall time. Record fixture throughput in --help text.
+
+#include "replay_clock.hpp"
+
+#include <cstdio>
+
+int main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+    std::fprintf(stderr,
+        "replay_main is scaffolded but not implemented yet "
+        "(plan: .claude/plans/itch-replay-clock.md)\n");
+    return 2;
+}
