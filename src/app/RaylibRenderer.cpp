@@ -481,9 +481,13 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     // the part's WIDTH, which tracks the head; the part's height is the eye
     // style's own business and swings 2.5x across the catalog.
     auto drawBrows = [&](float dx) {
+        // Floored on the eye's own height as well: the tall styles (round,
+        // star) build a sclera taller than the width-derived rise, and the
+        // bar came down on top of the eye.
+        const float rise =
+            std::max(dim.x * 0.28f, dim.y * 0.63f + dim.x * 0.06f);
         for (const float side : {-1.f, 1.f}) {
-            DrawCube({at.x + side * dx * 1.15f, fy + dim.x * 0.28f,
-                      fz + dim.z * 0.10f},
+            DrawCube({at.x + side * dx * 1.15f, fy + rise, fz + dim.z * 0.10f},
                      dim.x * 0.33f, dim.x * 0.076f, dim.z * 0.70f, c.hair);
         }
     };
@@ -530,30 +534,41 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         const Vector3 hips{at.x, y0 + h * 0.471f, at.z};
         squashed(hips, 1.10f, 0.68f, 0.80f,
                  [&] { DrawSphere(hips, w * hipR, c.pants); });
+        // What has to clear the head socket is the capsule's APEX — endpoint
+        // PLUS radius — and the radius grows with the body's width, so the
+        // top endpoint absorbs it. A fixed h*0.750 put body_broad's shoulder
+        // 0.06 above its own head socket and swallowed the neck whole.
+        const float torsoTop = y0 + h * 0.9335f - w * torsoR;
         const Vector3 torso{at.x, y0 + h * 0.683f, at.z};
         squashed(torso, 1.05f, 1.f, 0.78f, [&] {
-            DrawCapsule({at.x, y0 + h * 0.617f, at.z},
-                        {at.x, y0 + h * 0.750f, at.z}, w * torsoR, 16, 8,
-                        c.outfit);
+            DrawCapsule({at.x, y0 + h * 0.617f, at.z}, {at.x, torsoTop, at.z},
+                        w * torsoR, 16, 8, c.outfit);
         });
         DrawCylinder({at.x, y0 + h * 0.875f, at.z}, w * 0.141f, w * 0.158f,
                      h * 0.117f, 16, c.skin);
         // Arms hang just clear of the torso's flattened surface, so the
         // offsets track each body's build instead of being absolute.
         const float armX = torsoR * 1.05f + 0.041f;
+        // Legs and shoes are POSITIONED in h but SIZED in w, and w/h spans
+        // 0.34 (slim) to 0.60 (broad) — a wider span than the one body the
+        // reference model validated. So the sole rests on the ground by its
+        // own radius, and the leg reaches down to meet it, instead of both
+        // trusting a fraction of h: at h*0.053 slim's shoes floated 2.7cm
+        // clear of the ankle and broad's sank into the pavement.
+        const float shoeY = y0 + w * 0.110f;
+        const float legLow = std::min(y0 + h * 0.1625f, shoeY + w * 0.22f);
         for (const float side : {-1.f, 1.f}) {
             const float legX = at.x + side * w * 0.198f;
-            DrawCapsule({legX, y0 + h * 0.1625f, at.z},
-                        {legX, y0 + h * 0.3625f, at.z}, w * 0.146f, 12, 8,
-                        c.pants);
-            DrawCapsule({legX, y0 + h * 0.053f, at.z - w * 0.023f},
-                        {legX, y0 + h * 0.053f, at.z + w * 0.167f}, w * 0.110f,
-                        12, 8, c.shoe);
+            DrawCapsule({legX, legLow, at.z}, {legX, y0 + h * 0.3625f, at.z},
+                        w * 0.146f, 12, 8, c.pants);
+            DrawCapsule({legX, shoeY, at.z - w * 0.023f},
+                        {legX, shoeY, at.z + w * 0.167f}, w * 0.110f, 12, 8,
+                        c.shoe);
             DrawCapsule({at.x + side * w * (armX + 0.007f), y0 + h * 0.858f, at.z},
                         {at.x + side * w * (armX - 0.007f), y0 + h * 0.817f, at.z},
                         w * 0.107f, 12, 8, c.outfit);
-            DrawCapsule({at.x + side * w * (armX + 0.072f), y0 + h * 0.786f, at.z},
-                        {at.x + side * w * (armX + 0.048f), y0 + h * 0.622f, at.z},
+            DrawCapsule({at.x + side * w * (armX + 0.089f), y0 + h * 0.786f, at.z},
+                        {at.x + side * w * (armX + 0.031f), y0 + h * 0.622f, at.z},
                         w * 0.084f, 12, 8, c.skin);
             const Vector3 hand{at.x + side * w * (armX + 0.121f),
                                y0 + h * 0.575f, at.z + w * 0.021f};
