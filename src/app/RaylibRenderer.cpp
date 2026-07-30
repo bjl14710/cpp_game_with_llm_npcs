@@ -366,16 +366,54 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
 namespace {
 
 // Palette colors resolved once per character and handed to every recipe.
+// skin/hair/outfit/pants come from the look's palette; the feature colors
+// below are FIXED across all twelve palettes — an eye white is an eye
+// white whatever the character is wearing.
 struct RecipeColors {
     Color skin;
+    Color skinDeep;  // one shade under `skin`: the nose bead
     Color hair;
     Color outfit;
-    Color dark;
+    Color pants;
+    Color dark;      // hard black plastic: glasses frames and visors ONLY
+    Color shoe;
+    Color sclera;
+    Color iris;
+    Color spark;
+    Color mouth;
+    Color blush;
 };
 
-// Rim color for the inverted-hull outline pass (issue #103) — near-black
-// with a hint of blue so lines feel inked, not void.
-constexpr Color kOutlineColor{32, 30, 38, 255};
+// Design tokens for the fixed feature colors. One near-black used to paint
+// pupils, lids, brows and mouths alike, which is the colour of a hole — on
+// a mouth it read as a scream. Split per feature instead.
+constexpr Color kSclera{253, 249, 242, 255};  // warm white, never pure WHITE
+constexpr Color kIris{74, 52, 42, 255};       // warm dark brown
+constexpr Color kSpark{255, 255, 255, 255};   // the one place pure white belongs
+constexpr Color kMouthTone{180, 100, 92, 255};
+constexpr Color kBlush{240, 168, 148, 255};
+constexpr Color kShoe{63, 58, 63, 255};
+constexpr Color kPlastic{38, 38, 44, 255};
+
+// Rim color for the inverted-hull outline pass (issue #103) — warm brown
+// ink rather than a cool void, and thin enough (see kHullScale) to read as
+// a drawn line instead of a crack.
+constexpr Color kOutlineColor{58, 44, 40, 255};
+
+// Every field one colour: the hull pass draws each recipe as a flat
+// silhouette, so no feature may show through the inflated copy.
+RecipeColors flatColors(Color c) {
+    return RecipeColors{c, c, c, c, c, c, c, c, c, c, c, c};
+}
+
+// The nose bead: skin, one shade deeper. Derived rather than authored so it
+// tracks all twelve palettes (the reference model's shade against its warm
+// skin is this ratio).
+Color deepenSkin(Color skin) {
+    return Color{static_cast<unsigned char>(skin.r * 0.93f),
+                 static_cast<unsigned char>(skin.g * 0.89f),
+                 static_cast<unsigned char>(skin.b * 0.84f), 255};
+}
 
 // TODO(stylized step 3): add the MESH branch at the top of this dispatch:
 // if (!part.meshName.empty()) draw the loaded mesh at `at`, scaled so its
@@ -396,13 +434,166 @@ constexpr Color kOutlineColor{32, 30, 38, 255};
 void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                     const RecipeColors& c) {
     const float cy = at.y + dim.y * 0.5f;  // box center height
+    // Feature parts (eyes, mouth) sit ON their socket rather than on their
+    // box centre: the head authors the exact feature LINE (eyes at ~46% of
+    // head height, mouths at ~28%), and centring on the box would drift
+    // that line by half the part's height — by a different amount for every
+    // eye style. The declared box still gives the feature its width and the
+    // face its depth budget.
+    const float fy = at.y;
+    const float fz = at.z + dim.z * 0.35f;
 
-    if (part.id == "body_round") {
-        // Tapered trunk: narrow shoulders over a wider base.
-        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.34f, dim.x * 0.5f,
-                     dim.y, 16, c.outfit);
+    // raylib primitives are axis-symmetric; the reference figure squashes
+    // several of them (a torso flattened front-to-back reads as a body, not
+    // a barrel). Scale about the shape's own centre so the surrounding
+    // outline-hull matrix still composes correctly.
+    auto squashed = [&](Vector3 pivot, float sx, float sy, float sz,
+                        auto&& draw) {
+        rlPushMatrix();
+        rlTranslatef(pivot.x, pivot.y, pivot.z);
+        rlScalef(sx, sy, sz);
+        rlTranslatef(-pivot.x, -pivot.y, -pivot.z);
+        draw();
+        rlPopMatrix();
+    };
+
+    // One dark ball per eye is what made the old faces read as dolls:
+    // near-black spheres sitting on skin with nothing behind them and no
+    // light in them. Three primitives instead — white, iris, spark, always
+    // in that order. The spark is the whole trick: about twenty triangles
+    // between a doll and a character. The sclera is FLATTENED front-to-back
+    // so a big eye sits IN the face instead of bulging off it, while the
+    // iris and spark stay proud of it. `side` mirrors the spark so both
+    // eyes catch the same light.
+    auto drawEye = [&](float x, float y, float z, float r, float side) {
+        squashed({x, y, z}, 1.f, 1.05f, 0.60f,
+                 [&] { DrawSphere({x, y, z}, r, c.sclera); });
+        const Vector3 iris{x, y, z + r * 0.45f};
+        squashed(iris, 1.f, 1.f, 0.62f,
+                 [&] { DrawSphere(iris, r * 0.55f, c.iris); });
+        DrawSphere({x - side * r * 0.27f, y + r * 0.32f, z + r * 0.78f},
+                   r * 0.20f, c.spark);
+    };
+
+    // Brows, in hair tone, a touch above the eye line with the outer end
+    // dropped so the expression reads relaxed rather than surprised. A face
+    // without brows reads blank no matter how good the eyes are. Sized off
+    // the part's WIDTH, which tracks the head; the part's height is the eye
+    // style's own business and swings 2.5x across the catalog.
+    auto drawBrows = [&](float dx) {
+        for (const float side : {-1.f, 1.f}) {
+            DrawCube({at.x + side * dx * 1.15f, fy + dim.x * 0.28f,
+                      fz + dim.z * 0.10f},
+                     dim.x * 0.33f, dim.x * 0.076f, dim.z * 0.70f, c.hair);
+        }
+    };
+
+    // Ears, cheek warmth and a nose bead. All three are nearly free and all
+    // three read as human instantly; the cheeks should be felt, not seen,
+    // and the nose exists only to stop the face reading flat. `cheekZ` and
+    // `noseZ` place them ON the face — a round skull and a boxy one put
+    // their surface in different places.
+    auto drawHeadFeatures = [&](float earX, float cheekZ, float noseZ) {
+        squashed({at.x, at.y + dim.y * 0.383f, at.z + dim.z * noseZ}, 1.f, 0.82f,
+                 0.80f, [&] {
+                     DrawSphere({at.x, at.y + dim.y * 0.383f,
+                                 at.z + dim.z * noseZ},
+                                dim.x * 0.044f, c.skinDeep);
+                 });
+        for (const float side : {-1.f, 1.f}) {
+            const Vector3 ear{at.x + side * dim.x * earX,
+                              at.y + dim.y * 0.447f, at.z - dim.z * 0.019f};
+            squashed(ear, 0.70f, 1.f, 0.75f,
+                     [&] { DrawSphere(ear, dim.x * 0.089f, c.skin); });
+            const Vector3 cheek{at.x + side * dim.x * 0.334f,
+                                at.y + dim.y * 0.367f, at.z + dim.z * cheekZ};
+            squashed(cheek, 1.f, 0.60f, 0.22f,
+                     [&] { DrawSphere(cheek, dim.x * 0.084f, c.blush); });
+        }
+    };
+
+    // A standing figure instead of a cone. The old single tapered cylinder
+    // is why the silhouette never resolved at street distance: a head on a
+    // cone reads as a ghost. Every number below is the design reference's
+    // 1.8u figure expressed as a fraction of the body's declared box, so
+    // the bands land where the handoff specifies them — shoes 0.00-0.10,
+    // legs 0.10-0.52, torso and arms 0.52-1.12, neck 1.12-1.18, head above.
+    // Capsule ENDPOINTS are the cylinder ends, not the extremes: a capsule
+    // written straight onto a band boundary overshoots it by its radius,
+    // which is what buries the neck in the chest and the legs in the hips.
+    // Arms cost the most and buy the most — they are what makes the
+    // silhouette a person. A short outfit sleeve over a skin forearm
+    // separates the arm from the torso; an all-outfit arm reads as a
+    // flipper.
+    auto drawFigure = [&](float torsoR, float hipR) {
+        const float w = dim.x, h = dim.y, y0 = at.y;
+        const Vector3 hips{at.x, y0 + h * 0.471f, at.z};
+        squashed(hips, 1.10f, 0.68f, 0.80f,
+                 [&] { DrawSphere(hips, w * hipR, c.pants); });
+        const Vector3 torso{at.x, y0 + h * 0.683f, at.z};
+        squashed(torso, 1.05f, 1.f, 0.78f, [&] {
+            DrawCapsule({at.x, y0 + h * 0.617f, at.z},
+                        {at.x, y0 + h * 0.750f, at.z}, w * torsoR, 16, 8,
+                        c.outfit);
+        });
+        DrawCylinder({at.x, y0 + h * 0.875f, at.z}, w * 0.141f, w * 0.158f,
+                     h * 0.117f, 16, c.skin);
+        // Arms hang just clear of the torso's flattened surface, so the
+        // offsets track each body's build instead of being absolute.
+        const float armX = torsoR * 1.05f + 0.041f;
+        for (const float side : {-1.f, 1.f}) {
+            const float legX = at.x + side * w * 0.198f;
+            DrawCapsule({legX, y0 + h * 0.1625f, at.z},
+                        {legX, y0 + h * 0.3625f, at.z}, w * 0.146f, 12, 8,
+                        c.pants);
+            DrawCapsule({legX, y0 + h * 0.053f, at.z - w * 0.023f},
+                        {legX, y0 + h * 0.053f, at.z + w * 0.167f}, w * 0.110f,
+                        12, 8, c.shoe);
+            DrawCapsule({at.x + side * w * (armX + 0.007f), y0 + h * 0.858f, at.z},
+                        {at.x + side * w * (armX - 0.007f), y0 + h * 0.817f, at.z},
+                        w * 0.107f, 12, 8, c.outfit);
+            DrawCapsule({at.x + side * w * (armX + 0.072f), y0 + h * 0.786f, at.z},
+                        {at.x + side * w * (armX + 0.048f), y0 + h * 0.622f, at.z},
+                        w * 0.084f, 12, 8, c.skin);
+            const Vector3 hand{at.x + side * w * (armX + 0.121f),
+                               y0 + h * 0.575f, at.z + w * 0.021f};
+            squashed(hand, 0.90f, 1.f, 0.78f,
+                     [&] { DrawSphere(hand, w * 0.127f, c.skin); });
+        }
+    };
+
+    if (part.category == PartCategory::Body && part.pack == "core") {
+        // Per-body character survives the shared figure recipe in two
+        // numbers: how thick the torso is and how wide the hips are.
+        // body_round carries the reference model's own values.
+        float torsoR = 0.379f;
+        float hipR = 0.327f;
+        if (part.id == "body_slim") {
+            torsoR = 0.335f;
+            hipR = 0.280f;
+        } else if (part.id == "body_pear") {
+            torsoR = 0.350f;
+            hipR = 0.390f;  // bottom-heavy
+        } else if (part.id == "body_block") {
+            torsoR = 0.395f;
+            hipR = 0.330f;
+        } else if (part.id == "body_bulk") {
+            torsoR = 0.430f;
+            hipR = 0.370f;
+        } else if (part.id == "body_broad") {
+            torsoR = 0.445f;
+            hipR = 0.360f;
+        }
+        drawFigure(torsoR, hipR);
     } else if (part.id == "head_round") {
         DrawSphere({at.x, cy, at.z}, dim.y * 0.5f, c.skin);
+        drawHeadFeatures(0.485f, 0.320f, 0.460f);
+    } else if (part.id == "head_block" || part.id == "head_tall") {
+        // The blocky family keeps its box skull; ears, cheeks and a nose
+        // are what turn it from a crate into a face. A flat face puts its
+        // surface further forward than a round one, hence the larger z.
+        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.skin);
+        drawHeadFeatures(0.485f, 0.500f, 0.520f);
     } else if (part.id == "hair_tuft") {
         DrawSphere({at.x, at.y + dim.y * 0.3f, at.z}, dim.x * 0.5f, c.hair);
     } else if (part.id == "hair_bowl") {
@@ -414,10 +605,6 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                           at.y - dim.y * 0.25f, at.z},
                          0.f, dim.x * 0.16f, dim.y, 8, c.hair);
         }
-    } else if (part.id == "body_slim") {
-        // Slimmer tapered trunk than body_round (issue #92).
-        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.30f, dim.x * 0.42f,
-                     dim.y, 16, c.outfit);
     } else if (part.id == "head_oval") {
         // Vertically stretched sphere reads as a longer, oval face.
         rlPushMatrix();
@@ -425,6 +612,7 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         rlScalef(1.f, dim.y / dim.x, 1.f);
         DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, c.skin);
         rlPopMatrix();
+        drawHeadFeatures(0.485f, 0.348f, 0.486f);
     } else if (part.id == "hair_pony") {
         // A rounded cap plus a small tail behind the head.
         DrawSphere({at.x, at.y + dim.y * 0.30f, at.z}, dim.x * 0.5f, c.hair);
@@ -473,10 +661,6 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                  dim.z, c.hair);
         DrawCube({at.x - dim.x * 0.45f, at.y - dim.y * 0.60f, at.z},
                  dim.x * 0.20f, dim.y * 1.60f, dim.z * 0.80f, c.hair);
-    } else if (part.id == "body_pear") {
-        // Bottom-heavy rounded trunk — motherly Tomodachi silhouette.
-        DrawCylinder({at.x, at.y, at.z}, dim.x * 0.28f, dim.x * 0.52f,
-                     dim.y, 16, c.outfit);
     } else if (part.id == "hair_long") {
         // Crown plus a long fall down the back.
         DrawSphere({at.x, at.y - dim.y * 0.55f, at.z}, dim.x * 0.50f, c.hair);
@@ -507,64 +691,76 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         DrawCube({at.x, at.y + dim.y * 0.45f, at.z + dim.z * 0.38f},
                  dim.x * 0.55f, dim.y * 0.8f, dim.z * 0.24f, c.hair);
     } else if (part.id == "eyes_sleepy") {
-        // Two low flat lids.
+        // Two low lids. A closed lid is a lash line, not a hole, so it is
+        // iris-toned rather than the old near-black.
         const float dx = dim.x * 0.5f - dim.y * 0.5f;
-        DrawCube({at.x - dx, cy, at.z}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.dark);
-        DrawCube({at.x + dx, cy, at.z}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.dark);
+        DrawCube({at.x - dx, fy, fz}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.iris);
+        DrawCube({at.x + dx, fy, fz}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.iris);
+        drawBrows(dx);
     } else if (part.id == "eyes_wink") {
-        // One open pupil, one closed lid.
+        // One open eye, one closed lid.
         const float dx = dim.x * 0.5f - dim.y * 0.5f;
-        DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
-        DrawCube({at.x + dx, cy, at.z}, dim.y * 1.5f, dim.y * 0.4f, dim.z, c.dark);
+        drawEye(at.x - dx, fy, fz, dim.y * 0.60f, -1.f);
+        DrawCube({at.x + dx, fy, fz}, dim.y * 1.5f, dim.y * 0.4f, dim.z, c.iris);
+        drawBrows(dx);
     } else if (part.id == "eyes_glasses") {
-        // Two framed lenses joined by a bridge, pupils inside.
+        // Round wire lenses: a dark disc a shade wider than the eye, with
+        // the eye drawn ON TOP of it, leaves a rim. Solid frames in FRONT
+        // of the eyes read as a burglar's mask, not as spectacles — the
+        // frames keep `dark` because frames really are black plastic, but
+        // only the rim of one may ever cover skin.
         const float dx = dim.x * 0.5f - dim.y * 0.55f;
         for (const float side : {-1.f, 1.f}) {
-            DrawCube({at.x + side * dx, cy, at.z}, dim.y * 1.15f,
-                     dim.y * 1.15f, dim.z * 0.6f, c.dark);
-            DrawSphere({at.x + side * dx, cy, at.z + dim.z * 0.15f},
-                       dim.y * 0.32f, c.skin);
+            const Vector3 lens{at.x + side * dx, fy, fz + dim.z * 0.05f};
+            squashed(lens, 1.f, 1.f, 0.20f,
+                     [&] { DrawSphere(lens, dim.y * 0.66f, c.dark); });
+            drawEye(at.x + side * dx, fy, fz + dim.z * 0.12f, dim.y * 0.54f,
+                    side);
         }
-        DrawCube({at.x, cy + dim.y * 0.12f, at.z}, dx * 0.9f, dim.y * 0.18f,
-                 dim.z * 0.5f, c.dark);
+        DrawCube({at.x, fy, fz + dim.z * 0.10f}, dx * 0.9f, dim.y * 0.10f,
+                 dim.z * 0.30f, c.dark);
+        drawBrows(dx);
     } else if (part.id == "eyes_angry") {
-        // Pupils under a heavy single brow bar.
+        // Eyes under a heavy single brow bar — this branch already does the
+        // brow job deliberately, so drawBrows stays out of it.
         const float dx = dim.x * 0.5f - dim.y * 0.5f;
-        DrawSphere({at.x - dx, cy - dim.y * 0.15f, at.z}, dim.y * 0.45f, c.dark);
-        DrawSphere({at.x + dx, cy - dim.y * 0.15f, at.z}, dim.y * 0.45f, c.dark);
-        DrawCube({at.x, cy + dim.y * 0.42f, at.z}, dim.x * 0.94f,
-                 dim.y * 0.30f, dim.z, c.dark);
+        drawEye(at.x - dx, fy - dim.y * 0.15f, fz, dim.y * 0.52f, -1.f);
+        drawEye(at.x + dx, fy - dim.y * 0.15f, fz, dim.y * 0.52f, 1.f);
+        DrawCube({at.x, fy + dim.x * 0.24f, fz + dim.z * 0.10f}, dim.x * 0.94f,
+                 dim.x * 0.09f, dim.z * 0.70f, c.hair);
     } else if (part.id == "mouth_smile") {
         // A wide low bar with raised end dots reads as an upturned smile.
-        DrawCube({at.x, cy - dim.y * 0.20f, at.z}, dim.x * 0.68f,
-                 dim.y * 0.38f, dim.z, c.dark);
-        DrawSphere({at.x - dim.x * 0.42f, cy + dim.y * 0.15f, at.z},
-                   dim.y * 0.30f, c.dark);
-        DrawSphere({at.x + dim.x * 0.42f, cy + dim.y * 0.15f, at.z},
-                   dim.y * 0.30f, c.dark);
+        DrawCube({at.x, fy - dim.y * 0.20f, fz}, dim.x * 0.68f,
+                 dim.y * 0.38f, dim.z, c.mouth);
+        DrawSphere({at.x - dim.x * 0.42f, fy + dim.y * 0.15f, fz},
+                   dim.y * 0.30f, c.mouth);
+        DrawSphere({at.x + dim.x * 0.42f, fy + dim.y * 0.15f, fz},
+                   dim.y * 0.30f, c.mouth);
     } else if (part.id == "mouth_open" || part.id == "mouth_o") {
-        // A flattened dark sphere: tall ellipse (open) or small ring (o).
+        // A flattened sphere: tall ellipse (open) or small ring (o).
         rlPushMatrix();
-        rlTranslatef(at.x, cy, at.z);
-        rlScalef(1.f, dim.y / dim.x, 0.35f);
-        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, c.dark);
+        rlTranslatef(at.x, fy, fz);
+        rlScalef(1.f, dim.y / dim.x, 0.30f);
+        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.42f, c.mouth);
         rlPopMatrix();
     } else if (part.id == "mouth_neutral") {
-        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
+        DrawCube({at.x, fy, fz}, dim.x, dim.y, dim.z, c.mouth);
     } else if (part.category == PartCategory::Eyes) {
         if (part.id == "eyes_visor") {
-            DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
+            // A visor is meant to read as opaque: no eyes, no brows.
+            DrawCube({at.x, fy, fz}, dim.x, dim.y, dim.z, c.dark);
         } else {
-            // Two pupils split across the part's declared width.
+            // Two eyes split across the part's declared width.
             const float dx = dim.x * 0.5f - dim.y * 0.5f;
-            DrawSphere({at.x - dx, cy, at.z}, dim.y * 0.5f, c.dark);
-            DrawSphere({at.x + dx, cy, at.z}, dim.y * 0.5f, c.dark);
+            drawEye(at.x - dx, fy, fz, dim.y * 0.60f, -1.f);
+            drawEye(at.x + dx, fy, fz, dim.y * 0.60f, 1.f);
+            drawBrows(dx);
         }
     } else if (part.category == PartCategory::Mouth) {
-        // Generic mouth: a thin dark bar, so family-specific mouth ids
-        // (e.g. the quaternius-scale marks) render without a bespoke
-        // recipe branch each.
-        DrawCube({at.x, cy, at.z}, dim.x, dim.y, dim.z, c.dark);
+        // Generic mouth: a thin bar, so family-specific mouth ids (e.g. the
+        // quaternius-scale marks) render without a bespoke recipe branch
+        // each.
+        DrawCube({at.x, fy, fz}, dim.x, dim.y, dim.z, c.mouth);
     } else if (part.localSize.y > 0.f) {
         // Generic recipe: any part without a bespoke shape renders as
         // its declared box (skin for heads, hair on top, outfit below)
@@ -695,11 +891,15 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     for (const PartPalette& candidate : paletteCatalog()) {
         if (candidate.id == look.paletteId) palette = &candidate;
     }
+    const Color skin{palette->skin[0], palette->skin[1], palette->skin[2], 255};
     const RecipeColors colors{
-        Color{palette->skin[0], palette->skin[1], palette->skin[2], 255},
+        skin,
+        deepenSkin(skin),
         Color{palette->hair[0], palette->hair[1], palette->hair[2], 255},
         Color{palette->outfit[0], palette->outfit[1], palette->outfit[2], 255},
-        Color{38, 38, 44, 255}};
+        Color{palette->pants[0], palette->pants[1], palette->pants[2], 255},
+        kPlastic, kShoe,   kSclera, kIris,
+        kSpark,   kMouthTone, kBlush};
 
     // Whole-figure transform: facing + procedural walk bob. Parts then draw
     // at their assembly-local positions and rotate correctly for free.
@@ -751,15 +951,19 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // around the real geometry), then normally. The passes are grouped —
     // not interleaved per part — because the cull-face switch must drain
     // the rlgl batch; two drains per character instead of two per part.
-    constexpr float kHullScale = 1.06f;
-    const RecipeColors outlineColors{kOutlineColor, kOutlineColor,
-                                     kOutlineColor, kOutlineColor};
+    // The hull is thin: at 1.06 the rim was roughly a centimetre of ink
+    // around every part at world scale, which cracked the figure into
+    // pieces instead of drawing it.
+    constexpr float kHullScale = 1.035f;
+    const RecipeColors outlineColors = flatColors(kOutlineColor);
     rlDrawRenderBatchActive();
     rlSetCullFace(RL_CULL_FACE_FRONT);
     for (const PlacedPart& placed : assembled.parts) {
-        // Face-decal families draw no eye/mouth geometry — nothing to hull.
-        if (meshFace && (placed.part->category == PartCategory::Eyes ||
-                         placed.part->category == PartCategory::Mouth)) {
+        // Outlines belong on the silhouette, not on the features: ringing
+        // every eye and mouth is what produced the webbed, cracked look.
+        // (Face-decal families have no eye/mouth geometry to hull either.)
+        if (placed.part->category == PartCategory::Eyes ||
+            placed.part->category == PartCategory::Mouth) {
             continue;
         }
         const Vec3 at = placed.position * s;

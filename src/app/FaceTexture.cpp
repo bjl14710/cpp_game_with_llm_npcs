@@ -44,10 +44,19 @@ Texture2D bake(NpcFace face) {
     DrawCircle(kSize / 2, kSize / 2, kSize / 2.f - 2.f, bubble);
     DrawCircleLines(kSize / 2, kSize / 2, kSize / 2.f - 2.f, Color{120, 110, 100, 200});
 
-    // Eyes: taller when surprised (legacy half-heights preserved).
+    // Eyes: taller when surprised (legacy half-heights preserved). Same
+    // three-part build as the 3D recipes — a warm white behind the dark
+    // iris, and a small spark at the upper-outer corner. One dark box on a
+    // pale bubble is what made the emote faces read as dead.
+    const Color sclera{253, 249, 242, 255};
     const float eyeHalfY = face == NpcFace::Surprised ? 0.040f : 0.022f;
-    box(-0.07f, 1.71f, 0.024f, eyeHalfY, dark);
-    box(0.07f, 1.71f, 0.024f, eyeHalfY, dark);
+    for (int side = -1; side <= 1; side += 2) {
+        const float ex = 0.07f * static_cast<float>(side);
+        box(ex, 1.71f, 0.024f * 1.7f, eyeHalfY * 1.7f, sclera);
+        box(ex, 1.71f, 0.024f, eyeHalfY, dark);
+        box(ex + 0.014f * static_cast<float>(side), 1.71f + eyeHalfY * 0.55f,
+            0.00375f, 0.00375f, WHITE);
+    }
 
     // Brows: +tilt lowers the inner (nose-side) ends via the mirrored
     // per-side rotation — angry slants inward-down, sad inward-up.
@@ -82,7 +91,12 @@ Texture2D bake(NpcFace face) {
             box(0.115f, 1.66f, 0.030f, 0.016f, blush);
             break;
         case NpcFace::Neutral:
-            box(0.f, 1.612f, 0.038f, 0.008f, lip);
+            // A shallow smile, not a flat bar: the Happy shape at half the
+            // corner lift. Neutral is the face players see most, and it
+            // should read pleasant rather than blank.
+            box(0.f, 1.615f, 0.045f, 0.008f, lip);
+            box(-0.048f, 1.6215f, 0.010f, 0.010f, lip);
+            box(0.048f, 1.6215f, 0.010f, 0.010f, lip);
             break;
     }
     EndTextureMode();

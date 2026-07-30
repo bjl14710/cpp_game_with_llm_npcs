@@ -55,6 +55,11 @@ struct PartPalette {
     unsigned char skin[3];
     unsigned char hair[3];
     unsigned char outfit[3];
+    // Trousers. A separate column rather than a tint of `outfit`: trousers
+    // in the outfit color read as a jumpsuit, and a derived tint comes out
+    // muddy across the twelve palettes. Three shared tones (denim, slate,
+    // clay) deliberately unify the street.
+    unsigned char pants[3];
     // Same pack seam as PartDef (aggregate-initialized rows without a pack
     // value default to "core" via this initializer).
     std::string pack = "core";
