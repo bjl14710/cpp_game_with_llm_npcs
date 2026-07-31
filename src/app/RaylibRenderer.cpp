@@ -441,7 +441,7 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     // eye style. The declared box still gives the feature its width and the
     // face its depth budget.
     const float fy = at.y;
-    const float fz = at.z + dim.z * 0.35f;
+    const float fz = at.z + dim.z * kFeatureZPush;
 
     // raylib primitives are axis-symmetric; the reference figure squashes
     // several of them (a torso flattened front-to-back reads as a body, not
@@ -490,6 +490,22 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
             DrawCube({at.x + side * dx * 1.15f, fy + rise, fz + dim.z * 0.10f},
                      dim.x * 0.33f, dim.x * 0.076f, dim.z * 0.70f, c.hair);
         }
+    };
+
+    // Every round skull is the ellipsoid of its OWN declared box — semi-axes
+    // are half of localSize on each axis. That is exactly what core's
+    // skullSurfaceZ() models, which is what lets a head derive its mouth
+    // socket from its own silhouette. Sourcing the radius from some other
+    // axis (this was localSize.y here and localSize.x on the oval, agreeing
+    // only because both boxes are square in plan) would let the model and the
+    // drawn skull drift apart the moment a head stops being square — and the
+    // model is what the socket contract is authored against.
+    auto drawEllipsoidSkull = [&] {
+        rlPushMatrix();
+        rlTranslatef(at.x, cy, at.z);
+        rlScalef(dim.x / dim.z, dim.y / dim.z, 1.f);
+        DrawSphere({0.f, 0.f, 0.f}, dim.z * 0.5f, c.skin);
+        rlPopMatrix();
     };
 
     // Ears, cheek warmth and a nose bead. All three are nearly free and all
@@ -601,7 +617,7 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         }
         drawFigure(torsoR, hipR);
     } else if (part.id == "head_round") {
-        DrawSphere({at.x, cy, at.z}, dim.y * 0.5f, c.skin);
+        drawEllipsoidSkull();
         drawHeadFeatures(0.485f, 0.320f, 0.460f);
     } else if (part.id == "head_block" || part.id == "head_tall") {
         // The blocky family keeps its box skull; ears, cheeks and a nose
@@ -621,12 +637,8 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
                          0.f, dim.x * 0.16f, dim.y, 8, c.hair);
         }
     } else if (part.id == "head_oval") {
-        // Vertically stretched sphere reads as a longer, oval face.
-        rlPushMatrix();
-        rlTranslatef(at.x, cy, at.z);
-        rlScalef(1.f, dim.y / dim.x, 1.f);
-        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.5f, c.skin);
-        rlPopMatrix();
+        // Same ellipsoid, a taller box: reads as a longer, oval face.
+        drawEllipsoidSkull();
         drawHeadFeatures(0.485f, 0.348f, 0.486f);
     } else if (part.id == "hair_pony") {
         // A rounded cap plus a small tail behind the head.
@@ -752,9 +764,16 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         DrawSphere({at.x + dim.x * 0.42f, fy + dim.y * 0.15f, fz},
                    dim.y * 0.30f, c.mouth);
     } else if (part.id == "mouth_open" || part.id == "mouth_o") {
-        // A flattened sphere: tall ellipse (open) or small ring (o).
+        // A flattened sphere: tall ellipse (open) or small ring (o). Kept
+        // flat, but nudged forward so its FRONT lands where the cube mouths
+        // put theirs — dim.z*0.5 past the socket. Every mouth reaching the
+        // same depth is what lets a head author one mouth.z per skull: these
+        // two reach only 0.020-0.033 of their own accord, so on a round
+        // skull, whose surface is derived for the full depth, the small "o"
+        // ended up INSIDE the head and survived on tessellation slop alone.
+        const float reach = dim.x * 0.42f * 0.30f;
         rlPushMatrix();
-        rlTranslatef(at.x, fy, fz);
+        rlTranslatef(at.x, fy, fz + dim.z * 0.5f - reach);
         rlScalef(1.f, dim.y / dim.x, 0.30f);
         DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.42f, c.mouth);
         rlPopMatrix();

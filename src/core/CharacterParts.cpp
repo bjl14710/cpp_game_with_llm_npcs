@@ -1,6 +1,7 @@
 #include "CharacterParts.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "json.hpp"
 
@@ -56,6 +57,20 @@ const std::vector<CategorySpec>& categorySpecs() {
     return specs;
 }
 
+float skullSurfaceZ(const PartDef& head, float y) {
+    const float halfDepth = head.localSize.z * 0.5f;
+    if (head.styleTag != "round") return halfDepth;  // box face, or a mesh's bounds
+    // The round recipes draw a sphere sized to the declared box and centred
+    // at half its height, so the silhouette is that ellipsoid: off the
+    // equator the surface pulls back, and hard — head_round loses a tenth of
+    // its depth between the eye line and the mouth line.
+    const float halfHeight = head.localSize.y * 0.5f;
+    if (halfHeight <= 0.f) return halfDepth;
+    const float t = (y - halfHeight) / halfHeight;
+    if (t <= -1.f || t >= 1.f) return 0.f;
+    return halfDepth * std::sqrt(1.f - t * t);
+}
+
 const std::vector<PartDef>& partCatalog() {
     // All positions are in each part's own local space, anchor at
     // bottom-center. Two style families plus "any" parts; sockets are
@@ -98,10 +113,28 @@ const std::vector<PartDef>& partCatalog() {
         // round skulls than the handoff table proposed: at 0.35 the small
         // eye styles (dot, happy, angry) disappeared inside the head, since
         // they build their radius from their own declared height.
+        // mouth.z is DERIVED, and has to be RE-derived whenever the mouth
+        // line moves, because a sphere is narrower further down. A mouth is a
+        // mark ON skin, so its front face belongs level with
+        // skullSurfaceZ(head, mouth.y):
+        //     mouth.z = surface - localSize.z * (kFeatureZPush + 0.5)
+        //                       + kMarkStandoff
+        // The middle term (0.068 for every core mouth) is how far past the
+        // socket a mouth recipe reaches — every one of them lands its front
+        // at dim.z*0.5, which is exactly what makes ONE z per skull correct
+        // for all four. Neither neighbour shares this rule: the eyes are sunk
+        // to ~0.82 of the surface (a sclera is a ball that needs a socket)
+        // and the nose bead is proud by ~0.009 (a nose sticks out).
+        // Skipping the re-derivation is what put a muzzle on these two:
+        // authored in #104 against a line of 0.30/0.34 and left alone when
+        // the appealing-character pass moved it to 0.27/0.31.
+        // The blocky pair below do NOT follow this rule and should not: their
+        // face is one flat plane, so a mark floating off it still reads as
+        // painted on, and sinking it to the plane would z-fight instead.
         {"head_round", PartCategory::Head, "round", {0.98f, 0.98f, 0.98f},
          {{"eyes", {0.f, 0.45f, 0.40f}},
           {"hair", {0.f, 0.88f, 0.f}},
-          {"mouth", {0.f, 0.27f, 0.44f}}}},
+          {"mouth", {0.f, 0.27f, 0.380f}}}},
         {"head_block", PartCategory::Head, "blocky", {1.00f, 1.00f, 1.00f},
          {{"eyes", {0.f, 0.46f, 0.44f}},
           {"hair", {0.f, 0.95f, 0.f}},
@@ -109,7 +142,7 @@ const std::vector<PartDef>& partCatalog() {
         {"head_oval", PartCategory::Head, "round", {0.90f, 1.10f, 0.90f},
          {{"eyes", {0.f, 0.51f, 0.36f}},
           {"hair", {0.f, 1.02f, 0.f}},
-          {"mouth", {0.f, 0.31f, 0.41f}}}},
+          {"mouth", {0.f, 0.31f, 0.347f}}}},  // derived — see head_round
         {"head_tall", PartCategory::Head, "blocky", {0.94f, 1.16f, 0.94f},
          {{"eyes", {0.f, 0.53f, 0.42f}},
           {"hair", {0.f, 1.10f, 0.f}},

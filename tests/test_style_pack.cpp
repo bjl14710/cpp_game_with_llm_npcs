@@ -92,6 +92,42 @@ TEST_CASE("a five-item look line still parses, mouth defaults to the smile") {
     CHECK(rendered.find("hair_tuft, mouth_smile, warm") != std::string::npos);
 }
 
+TEST_CASE("round skulls wear the mouth ON the face, not out in front of it") {
+    // Regression for the muzzle. A mouth socket's z is only correct for the
+    // mouth LINE it was authored against: #104 placed these against a line of
+    // 0.30 (round) / 0.34 (oval), the appealing-character pass lowered the
+    // line to 0.27 / 0.31, and z stayed put — so the mark kept the depth of a
+    // point higher up a skull that is narrower down there, and stood 0.07
+    // proud of a head only 0.49 deep, hiding the nose bead behind it.
+    //
+    // The invariant that catches it: the front face of the drawn mark sits
+    // level with the skull surface at the mouth's own height. Only the boxy
+    // heads may float a mark off a flat wall and still read as painted on;
+    // on a sphere that is a snout, so this is scoped to the round family.
+    for (const PartDef* head : partsForCategory(PartCategory::Head, "round")) {
+        if (head->pack != "core") continue;
+        const auto mouth = head->sockets.find("mouth");
+        REQUIRE_MESSAGE(mouth != head->sockets.end(), head->id);
+        const float surface = skullSurfaceZ(*head, mouth->second.y);
+        for (const PartDef* part : partsForCategory(PartCategory::Mouth, "round")) {
+            // Every mouth recipe lands its front at dim.z*0.5 past the
+            // socket — the cubes by filling their box, the flattened spheres
+            // by being nudged forward to match. That shared reach is what
+            // lets one authored z serve every mouth style on a skull; when
+            // mouth_open and mouth_o reached only 0.033 and 0.020 of their
+            // own accord, this same z left the small "o" inside the head.
+            const float front =
+                mouth->second.z + part->localSize.z * (kFeatureZPush + 0.5f);
+            CAPTURE(head->id);
+            CAPTURE(part->id);
+            // Bounded by the standoff the derivation authors in, with one
+            // standoff of slack: anything further out is the muzzle again.
+            CHECK(front > surface);
+            CHECK(front < surface + kMarkStandoff * 2.f);
+        }
+    }
+}
+
 TEST_CASE("catalog growth floors: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes>=12") {
     // Step 5. The roster test keeps the ten shipped looks valid and
     // pairwise-distinct; this pins the pool floors so a future cleanup
