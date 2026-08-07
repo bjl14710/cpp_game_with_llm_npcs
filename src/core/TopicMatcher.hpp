@@ -32,24 +32,24 @@ struct TopicMatch {
     float score = 0.f;
 };
 
-// TODO(linebank step 1): lowercase, strip punctuation, collapse whitespace
-// runs, and drop stopwords ("the", "a", "is", "do", "you", ...). Bytes
-// outside ASCII pass through untouched, so a non-English line simply fails
-// to match rather than corrupting — falling through to the live model is the
-// correct behaviour there, not an error.
+// Lowercases, turns punctuation into separators, collapses whitespace runs,
+// and drops stopwords ("the", "a", "is", "do", "you", ...). Bytes outside
+// ASCII pass through untouched, so a non-English line simply fails to match
+// rather than corrupting — falling through to the live model is the correct
+// behaviour there, not an error.
 std::string normalizeLine(const std::string& raw);
 
-// TODO(linebank step 1): blended similarity of two ALREADY-NORMALIZED
-// strings, 0..1. Token-set Jaccard (catches word reordering) averaged with
-// character-trigram Jaccard (catches typos and morphology). Neither alone is
-// enough: token-set alone misses "sells"/"sell", trigrams alone rank
-// "hello there"/"there hello" as identical to an exact match.
+// Blended similarity of two ALREADY-NORMALIZED strings, 0..1. Token-set
+// Jaccard (catches word reordering) averaged with character-trigram Jaccard
+// (catches typos and morphology). Neither alone is enough: token-set alone
+// misses "sells"/"sell", trigrams alone rank "hello there"/"there hello" as
+// identical to an exact match.
 float similarity(const std::string& normalizedA, const std::string& normalizedB);
 
-// TODO(linebank step 1): score `playerLine` against every trigger of every
-// topic and return the best. Ties break on topicId, ascending — a cache that
-// picks differently across two identical runs cannot be tested or reviewed.
-// Returns an empty topicId when the best score is below `threshold`.
+// Scores `playerLine` against every trigger of every topic and returns the
+// best. Ties break on topicId, ascending — a cache that picks differently
+// across two identical runs cannot be tested or reviewed. Returns an empty
+// topicId when the best score is below `threshold`.
 TopicMatch bestTopic(const std::string& playerLine,
                      const std::vector<TopicTriggers>& topics, float threshold);
 
