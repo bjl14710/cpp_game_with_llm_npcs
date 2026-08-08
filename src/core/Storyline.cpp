@@ -1,11 +1,14 @@
 #include "Storyline.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <unordered_set>
 
 #include "Config.hpp"  // trim
+#include "Zones.hpp"
 
 namespace llm_npc {
 namespace {
@@ -33,6 +36,42 @@ enum class Section { None, Role, Clue, Witness };
 
 bool parseBool(const std::string& text) {
     return text == "true" || text == "yes" || text == "1";
+}
+
+// KnownFact::content is capped at 140 chars — validateProposedFacts rejects
+// anything longer outright. A caption that cannot become a fact is useless, so
+// it is caught here at authoring time rather than clamped at match time.
+constexpr std::size_t kMaxCaption = 140;
+
+bool zoneExists(const std::string& zoneId) {
+    if (zoneId == kStreetsZoneId) return true;  // a real zone, just not a block
+    for (const ZoneDef& zone : zonesForDowntown()) {
+        if (zone.id == zoneId) return true;
+    }
+    return false;
+}
+
+// Two witnesses contradict when they place the same moment differently: same
+// zone and hour, different observation.
+//
+// This is a structural PROXY for the subject collision seedMysteryFacts
+// produces, chosen so this layer does not have to know how facts are keyed.
+// It is deliberately conservative — it can miss a contradiction expressed some
+// other way, and reporting a false "no contradiction" costs an author one
+// explicit disagreement, while a false pass would ship a mystery with nothing
+// to investigate.
+bool hasContradiction(const std::vector<StorylineWitness>& witnesses) {
+    for (std::size_t i = 0; i < witnesses.size(); ++i) {
+        for (std::size_t j = i + 1; j < witnesses.size(); ++j) {
+            const StorylineWitness& a = witnesses[i];
+            const StorylineWitness& b = witnesses[j];
+            if (a.zoneId != b.zoneId) continue;
+            // Within the same in-world half hour counts as the same moment.
+            if (std::abs(a.atHour - b.atHour) > 0.5) continue;
+            if (a.observed != b.observed) return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -150,6 +189,141 @@ std::optional<StorylineDef> parseStorylineFile(const std::filesystem::path& path
 
     if (errors) errors->insert(errors->end(), localErrors.begin(), localErrors.end());
     return story;
+}
+
+const std::vector<std::string>& storylineRoleKinds() {
+    static const std::vector<std::string> kKinds = {"killer", "witness",
+                                                    "red_herring", "bystander"};
+    return kKinds;
+}
+
+std::vector<StorylineError> validateStoryline(const StorylineDef& story,
+                                              int rosterSize) {
+    std::vector<StorylineError> errors;
+    const auto add = [&errors](std::string where, std::string reason) {
+        errors.push_back(StorylineError{std::move(where), std::move(reason)});
+    };
+
+    if (story.id.empty()) add("id", "missing");
+    if (story.clues.empty()) add("clues", "a storyline with no clues cannot be solved");
+
+    // ---- roles -----------------------------------------------------------
+    std::unordered_set<std::string> slots;
+    bool hasKiller = false;
+    for (std::size_t i = 0; i < story.roles.size(); ++i) {
+        const StorylineRole& role = story.roles[i];
+        const std::string where = "roles[" + std::to_string(i) + "]";
+
+        if (role.slotId.empty()) {
+            add(where, "missing slot id");
+        } else if (!slots.insert(role.slotId).second) {
+            add(where, "duplicate slot id `" + role.slotId + "`");
+        }
+
+        const std::vector<std::string>& kinds = storylineRoleKinds();
+        if (std::find(kinds.begin(), kinds.end(), role.kind) == kinds.end()) {
+            add(where, "unknown kind `" + role.kind + "`");
+        }
+        if (role.kind == "killer") hasKiller = true;
+    }
+
+    // ---- the chain -------------------------------------------------------
+    //
+    // Contiguous from 1, because the chain is an argument and a gap means a
+    // step of the reasoning was cut. Duplicates mean two clues claim the same
+    // position, which the montage cannot order.
+    std::unordered_set<int> seenOrders;
+    bool anyPointsAtKiller = false;
+    for (std::size_t i = 0; i < story.clues.size(); ++i) {
+        const StorylineClue& clue = story.clues[i];
+        const std::string where = "clues[" + std::to_string(i) + "]";
+
+        if (clue.order < 1) {
+            add(where, "order must be 1 or greater");
+        } else if (static_cast<std::size_t>(clue.order) > story.clues.size()) {
+            add(where, "order " + std::to_string(clue.order) + " is beyond the " +
+                           std::to_string(story.clues.size()) + " clues authored");
+        } else if (!seenOrders.insert(clue.order).second) {
+            add(where, "duplicate order " + std::to_string(clue.order));
+        }
+
+        if (clue.caption.empty()) add(where, "missing caption");
+        if (clue.caption.size() > kMaxCaption) {
+            add(where, "caption is " + std::to_string(clue.caption.size()) +
+                           " chars, over the " + std::to_string(kMaxCaption) +
+                           "-char KnownFact limit");
+        }
+        if (!zoneExists(clue.zoneId)) {
+            add(where, "unknown zone `" + clue.zoneId + "`");
+        }
+        if (!clue.slotId.empty() && slots.count(clue.slotId) == 0) {
+            add(where, "cites undeclared slot `" + clue.slotId + "`");
+        }
+        if (clue.pointsAtKiller) anyPointsAtKiller = true;
+    }
+
+    // A chain of pure red herrings points nowhere. The players can still lose,
+    // but they cannot win by reasoning, which is the whole deliverable.
+    if (!story.clues.empty() && !anyPointsAtKiller) {
+        add("clues", "no clue has points_at_killer = true");
+    }
+
+    // ---- witnesses -------------------------------------------------------
+    for (std::size_t i = 0; i < story.witnesses.size(); ++i) {
+        const StorylineWitness& witness = story.witnesses[i];
+        const std::string where = "witnesses[" + std::to_string(i) + "]";
+
+        if (witness.slotId.empty()) {
+            add(where, "missing slot id");
+        } else if (slots.count(witness.slotId) == 0) {
+            add(where, "cites undeclared slot `" + witness.slotId + "`");
+        }
+        if (witness.observed.empty()) add(where, "missing `observed`");
+        if (witness.observed.size() > kMaxCaption) {
+            add(where, "observation is " + std::to_string(witness.observed.size()) +
+                           " chars, over the " + std::to_string(kMaxCaption) +
+                           "-char KnownFact limit");
+        }
+        if (!zoneExists(witness.zoneId)) {
+            add(where, "unknown zone `" + witness.zoneId + "`");
+        }
+        if (witness.atHour < 0.0 || witness.atHour >= 24.0) {
+            add(where, "hour must be in [0, 24)");
+        }
+    }
+
+    // At least one PAIR of witnesses must disagree, or there is nothing for
+    // Journal.hpp's contradiction check to flag and nothing to investigate.
+    //
+    // "Disagree" is same zone and hour, different observation — the closest
+    // structural proxy for the subject collision seedMysteryFacts produces,
+    // without this layer having to know how facts are keyed.
+    if (!hasContradiction(story.witnesses)) {
+        add("witnesses",
+            "no two witnesses contradict each other; without a contradiction "
+            "there is nothing for the journal to flag");
+    }
+
+    // ---- the cast fits ---------------------------------------------------
+    if (story.minResidents < 2) {
+        add("min_residents", "must be at least 2 — a mystery needs a victim and a killer");
+    }
+    if (rosterSize > 0 && story.minResidents > rosterSize) {
+        add("min_residents", "needs " + std::to_string(story.minResidents) +
+                                 " residents but the roster has " +
+                                 std::to_string(rosterSize));
+    }
+    if (rosterSize > 0 && static_cast<int>(story.roles.size()) > rosterSize) {
+        add("roles", "declares " + std::to_string(story.roles.size()) +
+                         " slots but the roster has only " +
+                         std::to_string(rosterSize) + " residents");
+    }
+
+    if (!hasKiller) {
+        add("roles", "no role declares kind = killer, so the chain points at nobody");
+    }
+
+    return errors;
 }
 
 std::vector<StorylineDef> loadStorylines(const std::filesystem::path& dir,
