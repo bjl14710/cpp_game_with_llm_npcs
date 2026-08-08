@@ -353,18 +353,56 @@ TEST_CASE("a setup with no victim seeds nothing") {
 
 // ---- the answer ----------------------------------------------------------
 
-TEST_CASE("voteIsCorrect is true only for the killer" * doctest::skip()) {
-    // TODO(mystery step 5): true for setup.killer, false for every other
-    // roster name, false for a name that is not in the roster at all, and
-    // false for an empty string.
+TEST_CASE("voteIsCorrect is true only for the killer") {
+    const std::vector<Persona> roster = testRoster();
+    const MysterySetup setup = generateMystery(roster, 77u);
+
+    CHECK(voteIsCorrect(setup, setup.killer));
+
+    for (const Persona& person : roster) {
+        if (person.name == setup.killer) continue;
+        CHECK_FALSE(voteIsCorrect(setup, person.name));
+    }
+    CHECK_FALSE(voteIsCorrect(setup, "Someone Not In This Town"));
+    CHECK_FALSE(voteIsCorrect(setup, ""));
 }
 
-TEST_CASE("a setup with no killer never reports a correct vote" *
-          doctest::skip()) {
-    // TODO(mystery step 5): a default-constructed MysterySetup has an empty
-    // killer. Accusing "" must be false, not a match on empty == empty — a
-    // match with no ground truth reporting a win is the worst failure this
-    // function has.
+TEST_CASE("voteIsCorrect does not match loosely") {
+    // Exact compare, same key WorldState and the roster use. A lenient match
+    // would mean "marge holloway" convicts Marge while "Marge  Holloway" does
+    // not — a rule players cannot see.
+    MysterySetup setup;
+    setup.victim = "Ray Okafor";
+    setup.killer = "Marge Holloway";
+
+    CHECK(voteIsCorrect(setup, "Marge Holloway"));
+    CHECK_FALSE(voteIsCorrect(setup, "marge holloway"));
+    CHECK_FALSE(voteIsCorrect(setup, "Marge"));
+    CHECK_FALSE(voteIsCorrect(setup, " Marge Holloway "));
+}
+
+TEST_CASE("a setup with no killer never reports a correct vote") {
+    // A default MysterySetup has an empty killer. Accusing "" must be false
+    // rather than a match on empty == empty.
+    const MysterySetup empty;
+    CHECK_FALSE(voteIsCorrect(empty, ""));
+    CHECK_FALSE(voteIsCorrect(empty, "Marge Holloway"));
+
+    // And the same for a setup that generation refused to build.
+    const MysterySetup failed = generateMystery({}, 5u);
+    CHECK_FALSE(voteIsCorrect(failed, ""));
+}
+
+TEST_CASE("the debug reveal is compiled out by default") {
+    // The gate itself. This case exists so that defining
+    // LLM_NPC_REVEAL_KILLER in a shipped build breaks the suite rather than
+    // quietly handing every host the answer.
+#ifdef LLM_NPC_REVEAL_KILLER
+    FAIL("LLM_NPC_REVEAL_KILLER is defined — never ship a build that can host "
+         "a networked match with the killer reveal compiled in");
+#else
+    CHECK(true);
+#endif
 }
 
 // ---- the victim starts dead (LIVE — markDeadAtStart is implemented) ------

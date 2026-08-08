@@ -159,14 +159,32 @@ MysterySetup generateMystery(const std::vector<Persona>& roster, unsigned seed) 
 }
 
 bool voteIsCorrect(const MysterySetup& setup, const std::string& accused) {
-    (void)setup;
-    (void)accused;
-    // TODO(mystery step 5): exact compare against setup.killer, and nothing
-    // else in the codebase may read that field. An empty accusation is false,
-    // and so is an empty killer — a match with no ground truth must never
-    // report a correct vote.
-    return false;
+    // A setup with no killer has no ground truth, and a match with no ground
+    // truth reporting a correct vote is the worst failure this function has.
+    // Checked before the comparison so empty == empty can never be a win.
+    if (setup.killer.empty() || accused.empty()) return false;
+
+    // Exact compare. No trimming, no case folding, no normalisation: this is
+    // the same key WorldState::grantKnowledge and the roster use, and a lenient
+    // match here would mean "marge holloway" convicts Marge while
+    // "Marge  Holloway" does not — a rule players cannot see.
+    return setup.killer == accused;
 }
+
+#ifdef LLM_NPC_REVEAL_KILLER
+// Debug reveal. COMPILE-GATED, and deliberately not a config key or a runtime
+// flag: anything readable at runtime can be flipped by whoever is hosting, and
+// host advantage stops being theoretical the moment the answer is one keypress
+// away. A build that can host a networked match must not define this.
+//
+// It is also the second and last place in the codebase that reads
+// setup.killer — the first is voteIsCorrect above. Anywhere else it appears in
+// rendering, dialogue or networking code is a bug, and a reviewer can find them
+// all by grepping one field name.
+const std::string& revealKillerForDebug(const MysterySetup& setup) {
+    return setup.killer;
+}
+#endif
 
 void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
                       const std::vector<Persona>& roster) {
