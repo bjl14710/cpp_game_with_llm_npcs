@@ -1,5 +1,5 @@
 ---
-description: Daily NPC line-bank refinement — grow the banks from real play, prove quality and speed with the five gates, open a draft PR against dev.
+description: Daily NPC line-bank refinement — grow the banks from real play, measure quality and matching, open a draft PR against dev with the day's scorecard.
 ---
 
 You are running the daily NPC line refinement routine. The goal is that
@@ -12,15 +12,16 @@ You may NOT merge, and you may NOT touch `main`.
 
 Format contract: `banks/README.md`. Plan: `.claude/plans/npc-line-bank.md`.
 
+**Open a draft PR on every run, even a no-op one.** The daily PR is the
+review artifact; a run that changed nothing still reports its scorecard
+in the PR body and says plainly that nothing changed. Do not skip the PR
+because there was nothing to bank — say so in it instead.
+
 ---
 
-## STEP 0 — PRECONDITIONS (abort if any fail)
+## STEP 0 — PRECONDITIONS
 
 ```bash
-# Model must be up — gates 3 and 4 call it and fail closed without it
-command -v ollama >/dev/null 2>&1 || { echo "ABORT: no ollama on PATH"; exit 1; }
-ollama list | grep -q 'qwen3:8b'   || { echo "ABORT: missing qwen3:8b"; exit 1; }
-
 # Clean tree, current dev
 git status --short
 git checkout dev && git pull
@@ -41,6 +42,12 @@ Two that matter and have been guessed wrong before:
 - `refine_lines.py --dry-run` runs steps 1–5 and writes nothing. Use it
   whenever you want to see the candidate set without touching `banks/`.
 
+**This routine runs the OFFLINE gates by default.** Gates 1, 2 and 5 need
+no model and no key. Gates 3 and 4 need a judge, and a scheduled run
+starts in a fresh container with no ollama and no key, so they will not
+run. That is expected — report them as UNRUN, never as passed. See
+STEP 4 for what that means for the verdict.
+
 ---
 
 ## STEP 1 — BASELINE, BOTH BUILDS
@@ -56,16 +63,23 @@ NOT prove the cmake build works. This has broken before (see
 `fix(build): drop the CMakeLists entry for a scaffold file that is not here`).
 After adding any `src/core/*.cpp`, check it is in `CMakeLists.txt`.
 
-The cmake build is also what produces `build/persona_prompt`, which
-**gate 1 shells out to**. Skip this build and gate 1 cannot run, which
-counts as a failure, not a skip.
+The cmake build also produces the two binaries the measurements shell
+out to: `build/persona_prompt` (gate 1) and `build/bank_probe` (STEP 5).
+Skip this build and neither can run, which counts as a failure, not a
+skip.
 
 On a headless box the raylib configure step needs system headers:
 `libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev`.
 A `RandR headers not found` or `OPENGL_INCLUDE_DIR-NOTFOUND` error is a
 missing package, not a repo regression.
 
-Record the case count and assertion count. If either build is red,
+Also run the Python tool tests — stdlib only, no dependencies:
+
+```bash
+python3 -m unittest discover -s tools -p 'test_*.py'
+```
+
+Record the case count and assertion count. If any of the three is red,
 stop and report; do not refine on top of a broken tree.
 
 ---
@@ -78,46 +92,40 @@ Score every existing bank. One call per file:
 shopt -s nullglob
 for b in banks/*.bank; do
   echo "── $b"
-  python3 tools/eval_lines.py --bank "$b" --seed 1 \
+  python3 tools/eval_lines.py --bank "$b" --gates 1,2,5 --seed 1 \
       --markdown-out "/tmp/before-$(basename "$b" .bank).md"
 done
 ```
 
-If that loop runs zero times, there are no banks yet — that is issue
-#153, not a passing scorecard. Say so plainly and skip to Step 3.
+If that loop runs zero times, there are no banks at all — that is a
+broken checkout, not a passing scorecard. Say so and stop.
 
-Pass `--seed` so gate 4's order shuffling reproduces between the before
-and after runs. Without it you are comparing two different A/B draws and
-the delta is noise.
+Pass `--seed` so any judged run reproduces between the before and after
+runs. Without it you are comparing two different A/B draws and the delta
+is noise.
 
-`--gates 1,2,5` scores offline with no network. That is a debugging
-aid, **not** a substitute for a full run: 3 and 4 are the two gates that
-speak to quality, and a scorecard missing them is not a scorecard.
-
-Gates 3-5 need a judge. By default that is `anthropic/claude-haiku-4.5`
-via OpenRouter, keyed by `config/llm.cfg`'s `api_key_env`. Setting
-`base_url` in that file points them at any OpenAI-compatible server
-instead — including Ollama's shim, `http://localhost:11434/v1`, which
-needs no key. Do that only as a smoke test: a local judge is weaker, and
-it grades lines written by a sibling of itself. `eval_lines.py` stamps
-`judge:` on every scorecard and prints a warning banner when the judge
-was local, so a local run can never be mistaken for the gate 3/4
-evidence #153 wants before `line_bank = on`. It is also slow — on a
-CPU-only box budget minutes per line, not seconds.
-
-Save the five gate results verbatim. These are the before numbers:
+The five gates:
 
 - Gate 1 — tag compliance (shells to `build/persona_prompt --parse`, the
   one source of truth for `parseDirectives`)
 - Gate 2 — stream budget, not raw latency: a banked reply must not take
   longer to stream at `line_bank_cps` than qwen3:8b takes to generate one
-- Gate 3 — persona/voice fidelity, judge ≥ 4/5, none < 3
-- Gate 4 — blind, order-shuffled A/B against live qwen3:8b, win-or-tie ≥ 70%
-- Gate 5 — leakage: no fourth-wall breaks, spoken brackets, knowledge-boundary
-  violations, or prior-meeting references in `familiarity = first` lines
+- Gate 3 — persona/voice fidelity, judge ≥ 4/5, none < 3 — **needs a judge**
+- Gate 4 — blind, order-shuffled A/B against live qwen3:8b, win-or-tie
+  ≥ 70% — **needs a judge AND a local model**
+- Gate 5 — leakage: no fourth-wall breaks, spoken brackets, or
+  prior-meeting references in `familiarity = first` lines
 
-A gate that cannot run counts as a FAILURE, not a skip. The job fails
-closed on purpose.
+Gates 3-5 route through `config/llm.cfg`: `base_url` picks the endpoint
+(default OpenRouter, keyed by `api_key_env`), `judge_model` picks the
+model there. Pointing `base_url` at `http://localhost:11434/v1` runs them
+against Ollama with no key. Do that only as a smoke test — a local judge
+is weaker and grades lines written by a sibling of itself.
+`eval_lines.py` stamps `judge:` on every scorecard and prints a warning
+banner when the judge was local, so a local run can never be mistaken for
+real gate 3/4 evidence. It is also slow: on CPU-only hardware budget
+minutes per line, and gate 4 may exceed the request timeout and fail
+closed.
 
 ---
 
@@ -138,16 +146,17 @@ before:
 
 1. **No transcripts at all.** `refine_lines.py` reads
    `saves/conversations.sqlite3` and `saves/ratings/*.jsonl`. `saves/`
-   is gitignored, so a fresh clone or CI container has none and the
-   honest output is `no new transcripts — nothing to refine`. Check the
-   file exists before concluding anything about coverage.
+   is gitignored, so a fresh clone or a scheduled container has none and
+   the honest output is `no new transcripts — nothing to refine`. Check
+   the file exists before concluding anything about coverage. **This is
+   the expected result until the game has been played against this
+   checkout** — report it plainly, it is not a failure.
 2. **Traffic exists but every topic is already covered.** A real and
    good result — report it as such.
 3. **The persona mapping missed.** `ConversationStore` keys rows by
-   `Persona::name` ("Marge Holloway"), while banks and persona files are
-   named by stem ("baker"). `persona_files_by_name()` in
-   `refine_lines.py` maps between them; this silently skipped the whole
-   cast once. If transcripts exist but every NPC prints
+   `Persona::name`, while banks and persona files are named by stem.
+   `persona_files_by_name()` maps between them; this silently skipped
+   the whole cast once. If transcripts exist but every NPC prints
    `skip <name>: not in personas/`, that mapping is what to suspect —
    not an absence of traffic.
 
@@ -163,10 +172,14 @@ always MORE `trigger =` phrasings on an existing topic, NOT a new topic.
 `TopicMatcher` is deliberately lexical; paraphrase is solved at
 authoring time. Target 8–12 phrasings per topic, 3–5 replies.
 
+Author the CONTRACTED forms too. `normalizeLine` turns an apostrophe
+into a separator, so `"I'm lost"` normalizes to `"m lost"` while a
+trigger written `"im lost"` normalizes to `"im lost"` — different
+strings, under threshold, topic never fires. Players type contractions.
+
 **Familiarity tiers.** A `first` line and a `returning` line should not
 be interchangeable. If they are, one of them is wasted. Every other
-topic must be authored memory-agnostic — gate 5 hard-fails lines that
-reference prior meetings outside a `returning` topic.
+topic must be authored memory-agnostic.
 
 **Rotation.** Same speaker, same topic, asked three times, should give
 three different lines. That is the LRU doing its job.
@@ -175,43 +188,54 @@ three different lines. That is the LRU doing its job.
 
 ## STEP 4 — SCORECARD AFTER, AND THE DIFF
 
-Same loop as Step 2, same `--seed`, writing to `/tmp/after-*.md`:
+Same loop as STEP 2, same gates, same `--seed`, writing to `/tmp/after-*.md`.
 
-```bash
-shopt -s nullglob
-for b in banks/*.bank; do
-  echo "── $b"
-  python3 tools/eval_lines.py --bank "$b" --seed 1 \
-      --markdown-out "/tmp/after-$(basename "$b" .bank).md"
-done
-```
+Compare against STEP 2. Report as a table: gate, before, after, delta.
 
-Compare against Step 2. Report as a table: gate, before, after, delta.
+**Any gate that regressed blocks the merge.** Restore the banks from the
+snapshot, say which gate went backwards and by how much, and open the PR
+reporting the regression rather than the content. A faster cache that
+says worse things is not an improvement.
 
-**Any gate that regressed blocks the PR.** Restore the banks from the
-snapshot, say which gate went backwards and by how much, and stop.
-A faster cache that says worse things is not an improvement.
+Gates 3 and 4 are UNRUN on a scheduled run. Say `UNRUN` in the table —
+not `pass`, not `—`, not a blank cell. A blank reads as clean. The PR
+body must state that this scorecard is not sufficient to flip
+`line_bank = on`, which is what issue #153 gates on.
 
 ---
 
-## STEP 5 — SPEED, MEASURED
+## STEP 5 — MATCHING AND SPEED, MEASURED
+
+`eval_lines.py` scores the REPLIES. Nothing there scores the TRIGGERS,
+and a bank can pass all five gates and still never fire. `bank_probe`
+is the other half:
+
+```bash
+./build/bank_probe banks/ --probes bench/probes.txt
+./build/bank_probe banks/ --probes bench/probes.txt --json   # for the PR body
+```
+
+Exit codes: 0 every probe hit, 1 one or more missed, 2 a bank failed to
+load or none loaded at all.
 
 Report:
 
-- Cache hit rate before vs after (how many player lines the bank served
-  without touching the model)
+- Probe hit rate, before vs after, and every miss by name
+- Rotation: three identical asks must yield three distinct replies
+- Familiarity: first and returning must differ
 - Stream budget headroom at `line_bank_cps = 220`
 
+**Every miss goes into `bench/probes.txt` before the trigger that fixes
+it**, so the fix stays measured. Never add a probe by copying a trigger
+phrasing — that scores 1.0 and measures nothing.
+
 Baseline to beat, from `bench/REPORT.md`: 2.7 s to first token, 4.5 s
-median total. A banked reply should be visibly faster than a live one.
+median total.
 
-Hit rate and real served latency come from the C++ side's `BankStats`,
-not from `eval_lines.py` — gate 2 measures the stream budget, which is a
-different question. Do not quote a gate 2 pass as a hit rate.
-
-If hit rate did not move, say so plainly — that is the whole point of
-the routine, and a run that improved nothing is a real result worth
-reporting.
+The probe hit rate is NOT the cache hit rate issue #153 asks for. That
+one is measured over replayed real transcripts by the C++ side's
+`BankStats`. Do not quote one as the other. If there are no transcripts,
+say the cache hit rate is unmeasured.
 
 ---
 
@@ -220,48 +244,60 @@ reporting.
 ```bash
 make -C tests test
 cmake --build build -j8
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
-Both green, or restore and report.
+All three green, or restore and report.
 
 ---
 
-## STEP 7 — DRAFT PR
+## STEP 7 — DRAFT PR, EVERY RUN
 
 Stage explicit paths only. NEVER `git add .` or `git add -A`.
 
 ```bash
 git checkout -b refine/lines-$(date +%Y-%m-%d)
-git add banks/
+git add banks/ bench/probes.txt
 git commit -m "content(linebank): daily refinement $(date +%Y-%m-%d)"
 git push -u origin refine/lines-$(date +%Y-%m-%d)
 ```
 
+When nothing changed there is nothing to commit — push the branch with
+an empty commit (`git commit --allow-empty`) so the PR still exists and
+carries the day's numbers.
+
 Open a DRAFT PR with base `dev` via PyGithub (no `gh` CLI in this repo).
 
 The PR body must contain:
-1. The before/after gate table
-2. Cache hit rate delta
-3. Every line added or changed, grouped by persona, with one sentence
+1. The before/after gate table, with gates 3 and 4 marked UNRUN
+2. Probe hit rate before/after, and every miss by name
+3. Whether the cache hit rate was measurable, and if not, why
+4. Every line added or changed, grouped by persona, with one sentence
    on why each was worth banking
-4. Anything you rejected and why — this is the most useful section for
+5. Anything you rejected and why — this is the most useful section for
    review, because it shows the judgement, not just the output
+6. If nothing changed: say so in one line at the top, and keep the
+   numbers below it
+
+Title the PR `content(linebank): daily refinement YYYY-MM-DD`.
 
 Commit trailer: `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
 
 NEVER commit: `docs/learning/`, `OVERNIGHT_REPORT.md`, `.claude/memory/`,
-`docs/qa/**`. Those are local-only.
+`docs/qa/**`, `config/secrets.cfg`, or a `base_url` override in
+`config/llm.cfg`. Those are local-only; a committed local judge endpoint
+silently weakens gates 3-5 for everyone.
 
 ---
 
 ## FAILURE POLICY
 
-- A gate regression is a STOP, not a warning.
+- A gate regression is a STOP on merging, not on reporting. Open the PR
+  and say what regressed.
 - Two failed attempts at the same sticking point → restore, report, exit.
-- Never open a PR on an unverified tree.
+- Never claim a gate ran when it did not. UNRUN is a result.
 - Never lower a gate to make content pass. If gate 4 shows banked lines
   losing to the live model, the content is wrong — fix the content.
-- If there is nothing worth banking, say "nothing recurred often enough
-  to bank today" and open no PR. Distinguish that from "every topic is
-  already covered" and from "there were no transcripts at all" — they
-  are three different results (see Step 3).
+- Distinguish "nothing recurred often enough to bank today" from "every
+  topic is already covered" from "there were no transcripts at all" —
+  they are three different results (see STEP 3).

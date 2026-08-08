@@ -97,3 +97,6 @@ target_link_libraries(persona_prompt PRIVATE llm_npc_core)
 
 add_executable(worldgen_cli tools/worldgen_cli.cpp)
 target_link_libraries(worldgen_cli PRIVATE llm_npc_core)
+
+add_executable(bank_probe tools/bank_probe.cpp)
+target_link_libraries(bank_probe PRIVATE llm_npc_core)
