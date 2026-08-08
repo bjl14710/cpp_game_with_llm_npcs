@@ -48,6 +48,7 @@ topic = store_stock
   trigger = paint
   trigger = do you sell screws
   trigger = whats good
+  trigger = what's good
   reply = Fasteners, paint, plumbing. Four thousand parts, and I know where each one sits. [[MOOD: neutral]]
   reply = Screws, washers, hinges, pipe fittings. Ninety-eight cents for the hinge you're about to need. [[MOOD: neutral]]
   reply = Tools that last. Not the cheap ones. Buy once, that's the whole philosophy. [[MOOD: neutral]]
