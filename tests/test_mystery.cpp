@@ -1,15 +1,13 @@
 // Ground truth for the opening murder (plan: opening-murder).
 //
-// Most cases are SKIPPED: generateMystery, seedMysteryFacts, voteIsCorrect and
-// placeBodyClearOfColliders are stubs. The Npc::markDeadAtStart cases are LIVE —
-// that entry point is two lines and shipped with the scaffold, because a no-op
-// version of "make this NPC the victim" is a footgun rather than a placeholder.
-//
-// Un-skip each case in the commit that implements what it covers.
+// Generation (#178), fact seeding (#179) and body placement (#180) are live.
+// The remaining skipped cases cover voteIsCorrect (#181); un-skip each in the
+// commit that implements what it covers.
 #include <set>
 #include <string>
 #include <vector>
 
+#include "City.hpp"
 #include "Journal.hpp"
 #include "LlmClient.hpp"
 #include "Mystery.hpp"
@@ -25,7 +23,6 @@ namespace {
 
 // A four-person roster: enough that "victim != killer" is not trivially
 // satisfied and that a survivor set is non-empty.
-//
 std::vector<Persona> testRoster() {
     std::vector<Persona> roster;
     for (const char* name : {"Marge Holloway", "Ray Okafor", "Yuki Tanaka",
@@ -150,20 +147,92 @@ TEST_CASE("the murder happened the night before the match") {
     }
 }
 
-TEST_CASE("a colliding body position is moved clear of the map" *
-          doctest::skip()) {
-    // TODO(mystery step 3): build a City, force a setup whose bodyPosition is
-    // inside a building, and check placeBodyClearOfColliders moves it to
-    // somewhere circleIntersectsAny rejects no longer — while keeping it in
-    // the same zone.
+TEST_CASE("a colliding body position is moved clear of the map") {
+    const City city = City::makeDowntown();
+
+    MysterySetup setup;
+    setup.victim = "Marge Holloway";
+    setup.killer = "Ray Okafor";
+    setup.sceneZoneId = "bakery_block";
+    // Squarely inside Marge's Bakery (-84,-64) to (-56,-40).
+    setup.bodyPosition = {-70.f, 0.f, -50.f};
+    REQUIRE(city.circleIntersectsAny(setup.bodyPosition.x, setup.bodyPosition.z,
+                                     0.45f, 0.f));
+
+    placeBodyClearOfColliders(setup, city);
+
+    CHECK_FALSE(city.circleIntersectsAny(setup.bodyPosition.x,
+                                         setup.bodyPosition.z, 0.45f, 0.f));
+    // Still the same scene: moving the body into the street would make the
+    // zone id a lie, and every clue that cites it wrong.
+    CHECK(zoneAt(setup.bodyPosition.x, setup.bodyPosition.z) == "bakery_block");
 }
 
-TEST_CASE("a zone with no clear spot still returns a position" *
-          doctest::skip()) {
-    // TODO(mystery step 3): the bounded-retry fallback. Every sample colliding
-    // must yield the zone centre, not an infinite loop and not the world
-    // origin. A body at (0,0,0) when the scene is the bakery is a bug that
-    // looks like a placement.
+TEST_CASE("a position that is already clear is left exactly where it is") {
+    const City city = City::makeDowntown();
+
+    MysterySetup setup;
+    setup.victim = "Marge Holloway";
+    setup.sceneZoneId = "plaza";
+    setup.bodyPosition = {14.f, 0.f, 14.f};  // open plaza, well clear of the cart
+    REQUIRE_FALSE(city.circleIntersectsAny(14.f, 14.f, 0.45f, 0.f));
+
+    placeBodyClearOfColliders(setup, city);
+
+    CHECK(setup.bodyPosition.x == doctest::Approx(14.f));
+    CHECK(setup.bodyPosition.z == doctest::Approx(14.f));
+}
+
+TEST_CASE("every generated scene can hold a body") {
+    // The real assurance: run generation across many seeds, clear each body,
+    // and require the result to be walkable and still in its own zone. This is
+    // what proves the lattice is fine enough for the actual map rather than
+    // just for one hand-picked case.
+    const City city = City::makeDowntown();
+    const std::vector<Persona> roster = testRoster();
+
+    for (unsigned seed = 0; seed < 100; ++seed) {
+        MysterySetup setup = generateMystery(roster, seed);
+        placeBodyClearOfColliders(setup, city);
+
+        const bool clear = !city.circleIntersectsAny(
+            setup.bodyPosition.x, setup.bodyPosition.z, 0.45f, 0.f);
+        CHECK(clear);
+        CHECK(zoneAt(setup.bodyPosition.x, setup.bodyPosition.z) ==
+              setup.sceneZoneId);
+    }
+}
+
+TEST_CASE("an unknown scene zone leaves the body where it was") {
+    // Better than moving it somewhere arbitrary — and it cannot happen from
+    // generateMystery, which only picks from zonesForDowntown().
+    const City city = City::makeDowntown();
+
+    MysterySetup setup;
+    setup.sceneZoneId = "not_a_zone";
+    setup.bodyPosition = {5.f, 0.f, 6.f};
+
+    placeBodyClearOfColliders(setup, city);
+
+    CHECK(setup.bodyPosition.x == doctest::Approx(5.f));
+    CHECK(setup.bodyPosition.z == doctest::Approx(6.f));
+}
+
+TEST_CASE("a zone with no clear spot still returns a position in that zone") {
+    // The fallback. One building swallowing the whole plaza block means every
+    // lattice cell collides, and the result must be the zone centre — not the
+    // world origin and not an infinite loop.
+    const City city = City::fromBuildings(
+        {{"slab", "", -24.f, -24.f, 24.f, 24.f, 20.f, 0}}, 110.f);
+
+    MysterySetup setup;
+    setup.sceneZoneId = "plaza";
+    setup.bodyPosition = {10.f, 0.f, 10.f};
+
+    placeBodyClearOfColliders(setup, city);
+
+    CHECK(setup.bodyPosition.x == doctest::Approx(0.f));
+    CHECK(setup.bodyPosition.z == doctest::Approx(0.f));
 }
 
 // ---- seeding the world bus ----------------------------------------------
@@ -338,8 +407,73 @@ TEST_CASE("the dead victim stays dead when the town calms down") {
     CHECK(victim.combatState() == NpcState::Dead);
 }
 
-TEST_CASE("wiring the victim into a match start" * doctest::skip()) {
-    // TODO(mystery step 4): the integration case. Generate a setup, mark the
-    // named victim dead, seed the facts, and check the roster holds exactly
-    // one dead NPC and that it is setup.victim.
+TEST_CASE("startVictimDead kills exactly the victim") {
+    const std::vector<Persona> roster = testRoster();
+    const MysterySetup setup = generateMystery(roster, 31u);
+
+    std::vector<Npc> npcs;
+    for (const Persona& p : roster) npcs.emplace_back(p, idleClient());
+
+    REQUIRE(startVictimDead(npcs, setup));
+
+    int dead = 0;
+    for (const Npc& npc : npcs) {
+        if (npc.combatState() != NpcState::Dead) continue;
+        ++dead;
+        CHECK(npc.persona().name == setup.victim);
+    }
+    CHECK(dead == 1);
+}
+
+TEST_CASE("startVictimDead reports a victim who is not in the world") {
+    MysterySetup setup;
+    setup.victim = "Someone Who Left Town";
+
+    std::vector<Npc> npcs;
+    Persona p;
+    p.name = "Marge Holloway";
+    npcs.emplace_back(p, idleClient());
+
+    // False rather than a silent no-op: a mystery whose victim is walking
+    // around is not a mystery, so the caller has to be able to see it.
+    CHECK_FALSE(startVictimDead(npcs, setup));
+    CHECK(npcs[0].combatState() == NpcState::Idle);
+}
+
+TEST_CASE("startVictimDead on an empty setup does nothing") {
+    std::vector<Npc> npcs;
+    Persona p;
+    p.name = "Marge Holloway";
+    npcs.emplace_back(p, idleClient());
+
+    CHECK_FALSE(startVictimDead(npcs, MysterySetup{}));
+    CHECK(npcs[0].combatState() == NpcState::Idle);
+}
+
+TEST_CASE("a full match-start sequence leaves one body and an informed town") {
+    // The integration case: generate, clear the body, kill the victim, seed
+    // the facts. Everything this milestone builds, in the order match start
+    // will call it.
+    const City city = City::makeDowntown();
+    const std::vector<Persona> roster = testRoster();
+
+    MysterySetup setup = generateMystery(roster, 2024u);
+    placeBodyClearOfColliders(setup, city);
+
+    std::vector<Npc> npcs;
+    for (const Persona& p : roster) npcs.emplace_back(p, idleClient());
+    REQUIRE(startVictimDead(npcs, setup));
+
+    WorldState state;
+    seedMysteryFacts(state, setup, roster);
+
+    int dead = 0;
+    for (const Npc& npc : npcs) {
+        if (npc.combatState() == NpcState::Dead) ++dead;
+    }
+    CHECK(dead == 1);
+    REQUIRE(state.facts().size() == 1);
+    CHECK(state.knows("player", state.facts()[0].factId));
+    CHECK_FALSE(city.circleIntersectsAny(setup.bodyPosition.x,
+                                         setup.bodyPosition.z, 0.45f, 0.f));
 }

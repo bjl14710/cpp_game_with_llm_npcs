@@ -38,6 +38,34 @@ constexpr const char* kTownSource = "town";
 // fact would silently lose a clue. Clamp and say so once, matching the
 // degrade-to-inert contract ConversationStore, RatingLog and LineBank use:
 // absorb the failure, one line on stderr, never throw into the game loop.
+// The NPC collision circle. Npc.cpp has this as kNpcRadius but inside an
+// anonymous namespace, so it is not reachable from here. Duplicated with this
+// comment rather than guessed at: a body placed on a radius the NPCs do not
+// use is a body they can stand inside. If one of these ever changes, change
+// both.
+constexpr float kBodyRadius = 0.45f;
+
+// Grid resolution for the placement search. 24 steps over a 48-unit block is a
+// sample every 2 units, which is finer than the NPC radius and so cannot skip
+// over a gap wide enough to stand in.
+constexpr int kLatticeSteps = 24;
+
+// The zone table entry for `zoneId`, or nullptr. Zones.hpp exposes zoneAt and
+// zoneName but no lookup by id, and a linear scan over nine boxes does not
+// justify adding one to the header.
+const ZoneDef* findZone(const std::string& zoneId) {
+    for (const ZoneDef& zone : zonesForDowntown()) {
+        if (zone.id == zoneId) return &zone;
+    }
+    return nullptr;
+}
+
+// Would a body at (x, z) be inside something solid? feetY 0 because the body
+// lies on the ground — nothing here can be standing on a roof.
+bool collides(const City& city, float x, float z) {
+    return city.circleIntersectsAny(x, z, kBodyRadius, 0.f);
+}
+
 std::string clampContent(std::string content) {
     constexpr std::size_t kMaxContent = 140;
     if (content.size() <= kMaxContent) return content;
@@ -198,20 +226,85 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
 }
 
 void placeBodyClearOfColliders(MysterySetup& setup, const City& city) {
-    (void)setup;
-    (void)city;
-    // TODO(mystery step 3): if city.circleIntersectsAny(x, z, radius) rejects
-    // the generated spot, try a bounded number of offsets inside the same
-    // zone, then fall back to the zone centre. Bounded, because a zone whose
-    // every sample collides must still return — an unreachable body is a match
-    // nobody can finish.
+    const ZoneDef* scene = findZone(setup.sceneZoneId);
+    if (scene == nullptr) {
+        // Unknown scene zone: leave the position alone rather than move the
+        // body somewhere arbitrary. Loud, because generateMystery only ever
+        // picks from zonesForDowntown() — reaching here means a hand-built
+        // setup or a renamed zone.
+        std::fprintf(stderr,
+                     "[llm_npc] mystery: unknown scene zone \"%s\" — body left "
+                     "where it was generated\n",
+                     setup.sceneZoneId.c_str());
+        return;
+    }
+
+    if (!collides(city, setup.bodyPosition.x, setup.bodyPosition.z)) return;
+
+    // A LATTICE SCAN, not the plan's "bounded retries". Retries would be
+    // random and could miss a clear spot that exists; this walks every cell of
+    // a fixed grid over the zone and takes the CLEAREST one nearest to where
+    // generation intended, so the result stays close to the intended scene and
+    // is fully deterministic without needing a seed.
     //
-    // The radius wanted here is the NPC collision circle, 0.45f. Npc.cpp has
-    // it as kNpcRadius but in an anonymous namespace, so it is not reachable
-    // from this file: either declare a local constant with a comment pointing
-    // at the original, or promote the original. Do not silently pick a
-    // different number — a body placed on a radius the NPCs do not use is a
-    // body they can stand inside.
+    // Cost is kLatticeSteps^2 collision tests against ~35 buildings, once per
+    // match. That is nothing, and it buys a guarantee that sampling does not.
+    const float stepX = (scene->maxX - scene->minX) / (kLatticeSteps + 1);
+    const float stepZ = (scene->maxZ - scene->minZ) / (kLatticeSteps + 1);
+
+    bool found = false;
+    float bestX = 0.f, bestZ = 0.f, bestDistSq = 0.f;
+    for (int ix = 1; ix <= kLatticeSteps; ++ix) {
+        for (int iz = 1; iz <= kLatticeSteps; ++iz) {
+            const float x = scene->minX + stepX * ix;
+            const float z = scene->minZ + stepZ * iz;
+            if (collides(city, x, z)) continue;
+
+            const float dx = x - setup.bodyPosition.x;
+            const float dz = z - setup.bodyPosition.z;
+            const float distSq = dx * dx + dz * dz;
+            if (!found || distSq < bestDistSq) {
+                found = true;
+                bestX = x;
+                bestZ = z;
+                bestDistSq = distSq;
+            }
+        }
+    }
+
+    if (found) {
+        setup.bodyPosition.x = bestX;
+        setup.bodyPosition.z = bestZ;
+        return;
+    }
+
+    // Every cell solid. The plan's fallback is the zone centre, and this keeps
+    // it — but says so, because the centre is NOT guaranteed clear. The bakery
+    // block's centre sits exactly on Marge's Bakery's south edge, so a silent
+    // fallback there would put the body inside a wall and look like a
+    // placement rather than a failure.
+    setup.bodyPosition.x = (scene->minX + scene->maxX) * 0.5f;
+    setup.bodyPosition.z = (scene->minZ + scene->maxZ) * 0.5f;
+    std::fprintf(stderr,
+                 "[llm_npc] mystery: no clear spot in zone \"%s\" — body placed "
+                 "at the zone centre, which may be inside a building\n",
+                 setup.sceneZoneId.c_str());
+}
+
+bool startVictimDead(std::vector<Npc>& npcs, const MysterySetup& setup) {
+    if (setup.victim.empty()) return false;
+    for (Npc& npc : npcs) {
+        if (npc.persona().name != setup.victim) continue;
+        npc.markDeadAtStart();
+        return true;
+    }
+    // The victim is not in the world. The caller should treat this as a failed
+    // match start rather than carry on: a mystery whose victim is walking
+    // around is not a mystery.
+    std::fprintf(stderr,
+                 "[llm_npc] mystery: victim \"%s\" is not in the NPC roster\n",
+                 setup.victim.c_str());
+    return false;
 }
 
 }  // namespace llm_npc

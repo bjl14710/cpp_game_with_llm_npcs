@@ -5,6 +5,7 @@
 
 #include "City.hpp"
 #include "Math.hpp"
+#include "Npc.hpp"
 #include "Persona.hpp"
 #include "WorldState.hpp"
 
@@ -123,8 +124,18 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
 // second call — which the match-start path makes, and the determinism tests do
 // not — nudges it clear of the map.
 //
-// Bounded retries, then the zone centre. Never leaves the body unreachable, and
-// never loops unbounded on a zone that happens to be solid.
+// A generated spot that is already clear is left exactly where it is. Otherwise
+// this scans a fixed lattice over the scene zone and takes the clear cell
+// nearest the original, so the body stays close to where generation meant it to
+// be. Deterministic and bounded, with the zone centre as a last resort.
 void placeBodyClearOfColliders(MysterySetup& setup, const City& city);
+
+// Puts the setup's victim into NpcState::Dead via Npc::markDeadAtStart, so the
+// town opens with a body rather than killing someone during play.
+//
+// Returns false when the victim is not in `npcs`, which the caller should treat
+// as a failed match start: a mystery whose victim is walking around is not a
+// mystery.
+bool startVictimDead(std::vector<Npc>& npcs, const MysterySetup& setup);
 
 }  // namespace llm_npc
