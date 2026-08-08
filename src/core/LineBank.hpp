@@ -52,9 +52,9 @@ struct BankStats {
     std::uint64_t misses = 0;
 };
 
-// TODO(linebank step 2): parse one .bank file. Returns nullopt and appends a
-// named message to `errors` for a malformed file — one bad bank must never
-// stop the other nine loading, same contract as loadAllPersonas/loadAllTraits.
+// Parses one .bank file. Returns nullopt and appends a named message to
+// `errors` for a malformed file — one bad bank must never stop the other nine
+// loading, same contract as loadAllPersonas/loadAllTraits.
 std::optional<PersonaBank> parseBankFile(const std::filesystem::path& path,
                                          std::vector<std::string>* errors = nullptr);
 
@@ -75,12 +75,11 @@ class LineBank {
     // The banked reply for this player line, or nullopt to fall through to
     // the live model. Advances rotation state on a hit.
     //
-    // TODO(linebank step 2): pick the topic via bestTopic() over the
-    // speaker's topics filtered by familiarity, then choose the
-    // least-recently-used reply variant. No variant repeats until every
-    // variant for that topic has been used this session — an NPC that
-    // answers "hello" identically twice in one conversation is worse than a
-    // slow one.
+    // Picks the topic via bestTopic() over the speaker's topics filtered by
+    // familiarity, then serves the least-recently-used reply variant. No
+    // variant repeats until every variant for that topic has been used this
+    // session — an NPC that answers "hello" identically twice in one
+    // conversation is worse than a slow one.
     std::optional<std::string> lookup(const std::string& speakerId,
                                       Familiarity familiarity,
                                       const std::string& playerLine);
