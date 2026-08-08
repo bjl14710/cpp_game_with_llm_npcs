@@ -37,6 +37,7 @@ add_library(llm_npc_core STATIC
     src/core/KeyBindings.cpp
     src/core/LineBank.cpp
     src/core/LocationLog.cpp
+    src/core/MatchClock.cpp
     src/core/PieceCatalog.cpp
     src/core/RatingLog.cpp
     src/core/SandboxMap.cpp
