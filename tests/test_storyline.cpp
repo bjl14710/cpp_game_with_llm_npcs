@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Storyline.hpp"
+#include "Zones.hpp"
 #include "doctest.h"
 
 using namespace llm_npc;
@@ -289,4 +290,206 @@ TEST_CASE("a missing directory degrades to inert") {
     const std::vector<StorylineDef> stories =
         loadStorylines("/does/not/exist/storylines", &errors);
     CHECK(stories.empty());
+}
+
+// ---- validation (issue #187) ---------------------------------------------
+
+namespace {
+
+// A template that passes every rule, so each case below can break exactly one
+// thing and assert on that one error.
+StorylineDef validStoryline() {
+    StorylineDef story;
+    story.id = "the_late_delivery";
+    story.title = "The Late Delivery";
+    story.minResidents = 4;
+    story.roles = {
+        StorylineRole{"culprit", "killer", ""},
+        StorylineRole{"neighbour", "witness", ""},
+        StorylineRole{"rival", "red_herring", ""},
+    };
+    story.clues = {
+        StorylineClue{1, "bakery_block", "The back door was unlocked.", "", true},
+        StorylineClue{2, "coffee_block", "Two cups, one untouched.", "rival", false},
+    };
+    // Same zone, same half hour, different accounts — a contradiction for
+    // Journal.hpp to flag.
+    story.witnesses = {
+        StorylineWitness{"neighbour", "bakery_block", "someone left by the alley", 21.5},
+        StorylineWitness{"rival", "bakery_block", "nobody came or went", 21.6},
+    };
+    return story;
+}
+
+// The reasons for one `where`, so a case can assert on text without caring
+// about the order errors came out in.
+bool hasError(const std::vector<StorylineError>& errors, const std::string& where,
+              const std::string& reasonFragment) {
+    for (const StorylineError& error : errors) {
+        if (error.where != where) continue;
+        if (error.reason.find(reasonFragment) != std::string::npos) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("a valid template produces no errors") {
+    CHECK(validateStoryline(validStoryline(), 21).empty());
+}
+
+TEST_CASE("a gap in the chain is reported") {
+    // The chain is an argument; a gap means a step of the reasoning was cut.
+    StorylineDef story = validStoryline();
+    story.clues[1].order = 5;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues[1]", "beyond the 2 clues authored"));
+}
+
+TEST_CASE("two clues claiming the same position are reported") {
+    StorylineDef story = validStoryline();
+    story.clues[1].order = 1;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues[1]", "duplicate order 1"));
+}
+
+TEST_CASE("a non-numeric order that parsed as 0 is reported") {
+    StorylineDef story = validStoryline();
+    story.clues[0].order = 0;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues[0]", "order must be 1 or greater"));
+}
+
+TEST_CASE("an unknown zone is reported for clues and witnesses") {
+    StorylineDef story = validStoryline();
+    story.clues[0].zoneId = "bakery";  // the id is bakery_block
+    story.witnesses[0].zoneId = "";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues[0]", "unknown zone `bakery`"));
+    CHECK(hasError(errors, "witnesses[0]", "unknown zone"));
+}
+
+TEST_CASE("the streets are a valid zone") {
+    // kStreetsZoneId is a real zone, deliberately not in zonesForDowntown()
+    // because it is the complement of the nine blocks. A clue found in the
+    // street is legitimate.
+    StorylineDef story = validStoryline();
+    story.clues[0].zoneId = kStreetsZoneId;
+
+    CHECK(validateStoryline(story, 21).empty());
+}
+
+TEST_CASE("a caption over the KnownFact limit is reported") {
+    StorylineDef story = validStoryline();
+    story.clues[0].caption = std::string(141, 'x');
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues[0]", "over the 140-char KnownFact limit"));
+}
+
+TEST_CASE("witnesses that all agree are reported") {
+    // Without a contradiction there is nothing for the journal to flag and
+    // nothing to investigate.
+    StorylineDef story = validStoryline();
+    story.witnesses[1].observed = story.witnesses[0].observed;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "witnesses", "no two witnesses contradict"));
+}
+
+TEST_CASE("witnesses in different places are not a contradiction") {
+    // Two people seeing different things somewhere else is ordinary, not a
+    // disagreement. The proxy is same zone, same half hour.
+    StorylineDef story = validStoryline();
+    story.witnesses[1].zoneId = "coffee_block";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "witnesses", "no two witnesses contradict"));
+}
+
+TEST_CASE("a chain of pure red herrings is reported") {
+    StorylineDef story = validStoryline();
+    story.clues[0].pointsAtKiller = false;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues", "no clue has points_at_killer = true"));
+}
+
+TEST_CASE("a template with no killer role is reported") {
+    StorylineDef story = validStoryline();
+    story.roles[0].kind = "bystander";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "roles", "no role declares kind = killer"));
+}
+
+TEST_CASE("an unknown role kind is reported") {
+    StorylineDef story = validStoryline();
+    story.roles[1].kind = "accomplice";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "roles[1]", "unknown kind `accomplice`"));
+}
+
+TEST_CASE("a duplicate slot id is reported") {
+    StorylineDef story = validStoryline();
+    story.roles[2].slotId = "neighbour";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "roles[2]", "duplicate slot id `neighbour`"));
+}
+
+TEST_CASE("a clue citing an undeclared slot is reported") {
+    StorylineDef story = validStoryline();
+    story.clues[1].slotId = "the_butler";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "clues[1]", "cites undeclared slot `the_butler`"));
+}
+
+TEST_CASE("a template needing more residents than the roster is reported") {
+    StorylineDef story = validStoryline();
+    story.minResidents = 30;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "min_residents", "needs 30 residents but the roster has 21"));
+}
+
+TEST_CASE("an hour outside the day is reported") {
+    StorylineDef story = validStoryline();
+    story.witnesses[0].atHour = 24.0;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "witnesses[0]", "hour must be in [0, 24)"));
+}
+
+TEST_CASE("validation reports every problem, not just the first") {
+    // The behaviour validateMap has, for the reason it has it: an author
+    // fixing one error at a time through six round trips gives up.
+    StorylineDef story = validStoryline();
+    story.clues[0].zoneId = "nowhere";
+    story.clues[1].order = 9;
+    story.roles[1].kind = "accomplice";
+    story.witnesses[0].atHour = 99.0;
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(errors.size() >= 4);
+    CHECK(hasError(errors, "clues[0]", "unknown zone"));
+    CHECK(hasError(errors, "clues[1]", "beyond the"));
+    CHECK(hasError(errors, "roles[1]", "unknown kind"));
+    CHECK(hasError(errors, "witnesses[0]", "hour must be"));
+}
+
+TEST_CASE("a roster size of zero skips the roster-dependent rules") {
+    // Callers validating a template with no roster in hand — an authoring
+    // tool, a unit test — should not be told the roster is too small.
+    StorylineDef story = validStoryline();
+    story.minResidents = 30;
+
+    const auto errors = validateStoryline(story, 0);
+    CHECK_FALSE(hasError(errors, "min_residents", "but the roster has"));
 }

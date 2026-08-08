@@ -82,6 +82,31 @@ struct StorylineDef {
 std::optional<StorylineDef> parseStorylineFile(const std::filesystem::path& path,
                                                std::vector<std::string>* errors);
 
+// One structural problem with a template. Modelled on SandboxMap.hpp's
+// MapError, and specific enough to be both an author-facing message and
+// machine-readable.
+struct StorylineError {
+    std::string where;   // "clues[2]" / "witnesses[0]" / "roles[1]"
+    std::string reason;  // "unknown zone `bakery`"
+};
+
+// Every structural problem with `story`, not just the first — the same
+// behaviour validateMap has, and for the same reason: an author fixing one
+// error at a time through six round trips gives up.
+//
+// STRUCTURAL ONLY. This does not attempt to prove the clue chain narrows to a
+// unique suspect; that is constraint satisfaction, it is deliberately issue
+// #189, and it is separate precisely so this can ship without it.
+//
+// Callers FAIL CLOSED: a template with any error is not offered to the
+// generator. A broken storyline must never produce a half-built mystery.
+std::vector<StorylineError> validateStoryline(const StorylineDef& story,
+                                              int rosterSize);
+
+// The kinds a role may declare. Exposed so the validator's rule and any
+// authoring tool read from one list.
+const std::vector<std::string>& storylineRoleKinds();
+
 // Every .storyline in `dir`, sorted by filename so load order is reproducible
 // across machines (directory_iterator order is unspecified).
 //
