@@ -202,3 +202,43 @@ TEST_CASE("LlmClient omits think entirely by default") {
     REQUIRE(!bodies.empty());
     CHECK_FALSE(json::parse(bodies.back()).contains("think"));
 }
+
+// --- Line bank integration (plan: npc-line-bank, step 3) --------------------
+//
+// Bodies are intentionally empty: they assert against a submit() overload
+// that does not exist until step 3, and a scaffold must compile. Write the
+// body and drop the skip in the commit that adds the overload.
+//
+// The key assertion available here is fake.requestBodies().empty() — that is
+// how "served without touching the network" is proved, not by timing.
+
+TEST_CASE("a banked hit streams deltas and replies without reaching the backend" *
+          doctest::skip()) {
+    // Given a LineBank holding a topic that matches "hello", when submitted
+    // with that speakerId, then: the reply arrives under the returned id,
+    // at least two deltas precede it (a banked line must STREAM — dumping
+    // 200 characters in one frame reads as a different system), and
+    // fake.requestBodies() is empty.
+    // TODO(linebank step 3)
+}
+
+TEST_CASE("a banked miss reaches the backend unchanged" * doctest::skip()) {
+    // Given a line no topic matches, then the request body sent to the fake
+    // is byte-identical to the one sent with the bank disabled. This is the
+    // "behaviour is unchanged on a miss" criterion.
+    // TODO(linebank step 3)
+}
+
+TEST_CASE("submitting without a speakerId never consults the bank" *
+          doctest::skip()) {
+    // GroupSession turns and world generation pass no speakerId, so they
+    // bypass the bank BY CONSTRUCTION rather than by a flag someone can
+    // forget to set. Asserted, not assumed.
+    // TODO(linebank step 3)
+}
+
+TEST_CASE("line_bank = off reads no bank file and changes no code path" *
+          doctest::skip()) {
+    // The feature must be inert until step 8 flips it on.
+    // TODO(linebank step 3)
+}
