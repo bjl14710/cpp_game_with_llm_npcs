@@ -146,10 +146,11 @@ bool voteIsCorrect(const MysterySetup& setup, const std::string& accused) {
 // host advantage stops being theoretical the moment the answer is one keypress
 // away. A build that can host a networked match must not define this.
 //
-// It is also the second and last place in the codebase that reads
-// setup.killer — the first is voteIsCorrect above. Anywhere else it appears in
-// rendering, dialogue or networking code is a bug, and a reviewer can find them
-// all by grepping one field name.
+// One of three sanctioned readers of setup.killer, enumerated in the leak rule
+// at the top of Mystery.hpp — the others are voteIsCorrect above and
+// castStoryline in Storyline.cpp. Anywhere else it appears in rendering,
+// dialogue or networking code is a bug, and a reviewer can find them all by
+// grepping one field name.
 const std::string& revealKillerForDebug(const MysterySetup& setup) {
     return setup.killer;
 }

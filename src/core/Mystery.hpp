@@ -30,8 +30,15 @@ namespace llm_npc {
 //      shared and gossiped; only the CONSEQUENCES of the mystery go in.
 //   2. It is never serialized. WorldSnapshot carries players and NPCs, and
 //      adding mystery fields would ship the answer to every client.
-//   3. `killer` is read through voteIsCorrect() only — one place to audit, so
-//      a stray setup.killer in rendering or dialogue code stands out in review.
+//   3. `killer` has a SHORT, ENUMERATED list of readers, so a stray
+//      setup.killer in rendering, dialogue or networking code stands out in
+//      review. As of #188 the readers are:
+//        - voteIsCorrect() below, the only one that answers a question about it
+//        - castStoryline() in Storyline.cpp, which binds the killer's role slot
+//          to the resident generateMystery already chose
+//        - revealKillerForDebug(), compiled only under LLM_NPC_REVEAL_KILLER
+//      Adding a fourth is a decision, not a detail. Keep this list current —
+//      it went stale once already when casting landed.
 //
 // THE ACCEPTED v1 LIMITATION, stated plainly: with no concealment layer you can
 // walk up to the killer and ask, and they will not deny it. That is deliberate.
