@@ -42,6 +42,7 @@ add_library(llm_npc_core STATIC
     src/core/PieceCatalog.cpp
     src/core/RatingLog.cpp
     src/core/SandboxMap.cpp
+    src/core/Storyline.cpp
     src/core/TopicMatcher.cpp
     src/core/Trait.cpp
     src/core/WorldGen.cpp
