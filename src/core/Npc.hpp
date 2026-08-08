@@ -157,6 +157,27 @@ class Npc {
     // way. No-op when already Dead.
     void takeDamage(int amount);
 
+    // Enters the Dead state directly, without going through takeDamage.
+    //
+    // For the opening murder (plan: opening-murder): the victim STARTS dead,
+    // they are not killed during play. Two reasons this is its own entry point
+    // rather than takeDamage(hp()):
+    //
+    //   - Intent. There is no attacker, no damage amount and no hit; going
+    //     through the damage path to express "was already dead when the match
+    //     began" reads as a killing that happens to have no source.
+    //   - Blast radius. Damage is meant to be observed. World::updateCombat is
+    //     what emits NpcDamagedEvent, and main.cpp turns that into a floating
+    //     "<name> collapses!" callout. takeDamage alone emits nothing today, so
+    //     this is not a bug being dodged — it is a path that stays quiet even
+    //     if the damage path grows a hook later.
+    //
+    // Idempotent, and a no-op on an already-dead NPC.
+    void markDeadAtStart() {
+        hp_ = 0;
+        state_ = NpcState::Dead;
+    }
+
     NpcState combatState() const { return state_; }
     int hp() const { return hp_; }
     int hpMax() const { return hpMax_; }
