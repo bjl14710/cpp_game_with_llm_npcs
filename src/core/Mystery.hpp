@@ -105,7 +105,14 @@ bool voteIsCorrect(const MysterySetup& setup, const std::string& accused);
 //
 // Idempotent: WorldState::addFact is first-teller-wins, so seeding twice
 // commits the same ids and changes nothing.
-void seedMysteryFacts(WorldState& state, const MysterySetup& setup);
+//
+// TAKES THE ROSTER, which the plan's signature does not. "Every survivor knows
+// the death" cannot be satisfied from a MysterySetup alone — the setup names
+// the victim, the killer and any witnesses, but never the people who are merely
+// alive. Passing the roster is cheaper and far more obvious than having the
+// caller re-derive the survivor set from a list this function already needs.
+void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
+                      const std::vector<Persona>& roster);
 
 // Moves setup.bodyPosition off any collider so the body is reachable.
 //

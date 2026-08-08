@@ -1,6 +1,9 @@
 #include "Mystery.hpp"
 
+#include <cstdio>
+
 #include "Gossip.hpp"
+#include "Journal.hpp"
 #include "Zones.hpp"
 
 namespace llm_npc {
@@ -23,6 +26,28 @@ namespace {
 // match rather than the night before it.
 constexpr double kMurderHourStart = 20.0;
 constexpr double kMurderHourEnd = 24.0;
+
+// Attributed source for facts nobody in particular first said. WorldState
+// sources are otherwise "player" or a persona name; the death is common
+// knowledge on arrival and has no first teller.
+constexpr const char* kTownSource = "town";
+
+// KnownFact::content is capped at 140 chars — validateProposedFacts rejects
+// anything longer outright. Seeded content is authored by us rather than by a
+// model, so an over-length string is an authoring mistake, and dropping the
+// fact would silently lose a clue. Clamp and say so once, matching the
+// degrade-to-inert contract ConversationStore, RatingLog and LineBank use:
+// absorb the failure, one line on stderr, never throw into the game loop.
+std::string clampContent(std::string content) {
+    constexpr std::size_t kMaxContent = 140;
+    if (content.size() <= kMaxContent) return content;
+    std::fprintf(stderr,
+                 "[llm_npc] mystery: fact content over %zu chars, truncated: "
+                 "\"%.60s...\"\n",
+                 kMaxContent, content.c_str());
+    content.resize(kMaxContent);
+    return content;
+}
 
 // Deterministic, platform-stable, header-free — the same generator
 // CharacterParts.cpp uses for randomizeLook, and for the same reason: the
@@ -115,19 +140,61 @@ bool voteIsCorrect(const MysterySetup& setup, const std::string& accused) {
     return false;
 }
 
-void seedMysteryFacts(WorldState& state, const MysterySetup& setup) {
-    (void)state;
-    (void)setup;
-    // TODO(mystery step 2): commit ONE death fact — subject
-    // normalizeSubject(victim + " death"), content naming the victim and the
-    // zone but never the killer — and grant it to every survivor plus
-    // "player". Then commit each witness observation and grant it to that
-    // witness ALONE, so a non-witness cannot be asked about what they never
-    // saw.
+void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
+                      const std::vector<Persona>& roster) {
+    if (setup.victim.empty()) return;  // no mystery; nothing to tell anyone
+
+    const double now = state.number("world_time_seconds");
+
+    // ---- the death: common knowledge ------------------------------------
     //
-    // Use factIdFor(subject, content) from Gossip.hpp rather than a new hash,
-    // so a seeded fact and the same statement arriving later through
-    // conversation collapse to one id instead of contradicting each other.
+    // Names the victim and the place, never the hour and never the killer.
+    // The hour is a real clue — it is what the opening cutscene shows and what
+    // an alibi is checked against — so handing it to the whole town for free
+    // would remove the one thing that makes the testimony worth cross-checking.
+    KnownFact death;
+    death.subject = normalizeSubject(setup.victim + " death");
+    death.content = clampContent(setup.victim + " was found dead at " +
+                                 zoneName(setup.sceneZoneId) + ".");
+    death.factId = factIdFor(death.subject, death.content);
+    death.source = kTownSource;
+    death.learnedAtSeconds = now;
+    state.addFact(death);
+
+    // Everyone alive, plus the player. The victim is skipped: granting the
+    // dead knowledge of their own death is harmless but meaningless, and
+    // leaving them out keeps factsKnownBy() honest for anything that later
+    // iterates agents.
+    for (const Persona& person : roster) {
+        if (person.name == setup.victim) continue;
+        state.grantKnowledge(person.name, death.factId);
+    }
+    state.grantKnowledge("player", death.factId);
+
+    // ---- what each witness saw: private to that witness ------------------
+    //
+    // Granted to the witness ALONE. If everyone started knowing every
+    // observation there would be nothing to investigate — this grant is the
+    // difference between a mystery and a briefing.
+    for (const Witness& witness : setup.witnesses) {
+        if (witness.agent.empty()) continue;
+
+        KnownFact seen;
+        // Subject is the witness's own testimony, so two things the same
+        // person claims collide on one subject and Journal.hpp's existing
+        // contradiction check flags them. That is what the alibi layer will
+        // need, and it costs nothing to set up correctly now.
+        seen.subject = normalizeSubject(witness.agent + " testimony");
+        seen.content = clampContent(
+            witness.agent + " saw " + witness.observed + " at " +
+            zoneName(witness.sawZoneId) + " around " +
+            clockLabel(witness.atHour * 3600.0) + ".");
+        seen.factId = factIdFor(seen.subject, seen.content);
+        seen.source = witness.agent;
+        seen.learnedAtSeconds = now;
+        state.addFact(seen);
+        state.grantKnowledge(witness.agent, seen.factId);
+    }
 }
 
 void placeBodyClearOfColliders(MysterySetup& setup, const City& city) {
