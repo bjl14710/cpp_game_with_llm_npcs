@@ -225,7 +225,19 @@ int main(int argc, char** argv) {
     bindings.load(bindingsPath);
 
     // World: the downtown map plus one NPC per persona file.
-    LlmClient client(loadLlmConfig(configDir));
+    const LlmConfig llmConfig = loadLlmConfig(configDir);
+    LlmClient client(llmConfig);
+    // Authored replies for recurring topics, served locally instead of a round
+    // trip (banks/README.md). Off by default: with no bank installed every
+    // request reaches the backend exactly as it always has.
+    if (llmConfig.lineBank) {
+        auto bank = std::make_unique<LineBank>(projectRoot / "banks",
+                                               llmConfig.lineBankThreshold);
+        for (const auto& err : bank->errors()) {
+            std::cerr << "[llm_npc] line bank error: " << err << "\n";
+        }
+        client.setLineBank(std::move(bank));
+    }
     client.warmUp();  // preload the model so the first reply starts fast
     World world(City::makeDowntown());
     // Smoke runs pin the clock so day/night screenshots are deterministic.
