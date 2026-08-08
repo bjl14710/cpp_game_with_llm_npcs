@@ -35,12 +35,14 @@ add_library(llm_npc_core STATIC
     src/core/GroupSession.cpp
     src/core/HostChatRouter.cpp
     src/core/KeyBindings.cpp
+    src/core/LocationLog.cpp
     src/core/PieceCatalog.cpp
     src/core/RatingLog.cpp
     src/core/SandboxMap.cpp
     src/core/Trait.cpp
     src/core/WorldGen.cpp
     src/core/WorldGenValidate.cpp
+    src/core/Zones.cpp
     src/core/LlmBackend.cpp
     src/core/LlmClient.cpp
     src/core/OllamaBackend.cpp
