@@ -3,7 +3,11 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include "Mystery.hpp"
+#include "Persona.hpp"
 
 namespace llm_npc {
 
@@ -106,6 +110,38 @@ std::vector<StorylineError> validateStoryline(const StorylineDef& story,
 // The kinds a role may declare. Exposed so the validator's rule and any
 // authoring tool read from one list.
 const std::vector<std::string>& storylineRoleKinds();
+
+// Who actually filled each of a template's slots this match. Returned rather
+// than written into MysterySetup, because the setup is the answer sheet and
+// this is the cast list: the role layer and any authoring tool need it, and
+// neither should have to read setup.killer to get it.
+struct StorylineCast {
+    // slotId -> resident name, for every slot the template declared.
+    std::vector<std::pair<std::string, std::string>> assignments;
+
+    // The resident filling `slotId`, or empty when the slot went uncast.
+    const std::string& residentFor(const std::string& slotId) const;
+};
+
+// Fills the evidence and witness vectors generateMystery leaves empty, and
+// works out who plays each part.
+//
+// THE KILLER IS NOT CHOSEN HERE. generateMystery already picked it and
+// role-layer.md scopes that decision to there; a template's `kind = killer`
+// slot describes the part the already-chosen killer plays, and casting binds
+// that slot to setup.killer rather than picking someone. Reassigning it would
+// silently break voteIsCorrect.
+//
+// Deterministic from `seed`, for the same two reasons generateMystery is:
+// tests cannot assert on a cast without it, and the host must be able to replay
+// a match without shipping the answer. Do not pass World::rng_.
+//
+// Casts nothing and returns an empty cast when the roster is smaller than the
+// template's minResidents — a partial cast would leave clues citing residents
+// who do not exist.
+StorylineCast castStoryline(const StorylineDef& story,
+                            const std::vector<Persona>& roster,
+                            MysterySetup& setup, unsigned seed);
 
 // Every .storyline in `dir`, sorted by filename so load order is reproducible
 // across machines (directory_iterator order is unspecified).

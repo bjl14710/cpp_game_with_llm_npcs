@@ -5,6 +5,7 @@
 // to open a second file.
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -492,4 +493,198 @@ TEST_CASE("a roster size of zero skips the roster-dependent rules") {
 
     const auto errors = validateStoryline(story, 0);
     CHECK_FALSE(hasError(errors, "min_residents", "but the roster has"));
+}
+
+// ---- casting onto a roster (issue #188) ----------------------------------
+
+namespace {
+
+std::vector<Persona> castRoster() {
+    std::vector<Persona> roster;
+    for (const char* name : {"Marge Holloway", "Ray Okafor", "Yuki Tanaka",
+                             "Officer Dana Brooks", "Theo Vance", "Gus Pike"}) {
+        Persona p;
+        p.name = name;
+        p.role = "resident";
+        roster.push_back(p);
+    }
+    return roster;
+}
+
+// A setup with the victim and killer already decided, as generateMystery
+// leaves it.
+MysterySetup decidedSetup() {
+    MysterySetup setup;
+    setup.victim = "Theo Vance";
+    setup.killer = "Marge Holloway";
+    setup.sceneZoneId = "bakery_block";
+    setup.murderHour = 21.5;
+    return setup;
+}
+
+}  // namespace
+
+TEST_CASE("casting fills the evidence and witnesses generateMystery left empty") {
+    MysterySetup setup = decidedSetup();
+    REQUIRE(setup.evidence.empty());
+    REQUIRE(setup.witnesses.empty());
+
+    const StorylineCast cast =
+        castStoryline(validStoryline(), castRoster(), setup, 42u);
+
+    CHECK(setup.evidence.size() == 2);
+    CHECK(setup.witnesses.size() == 2);
+    CHECK(cast.assignments.size() == 3);
+}
+
+TEST_CASE("the same template, roster and seed cast identically") {
+    MysterySetup a = decidedSetup();
+    MysterySetup b = decidedSetup();
+
+    const StorylineCast castA = castStoryline(validStoryline(), castRoster(), a, 7u);
+    const StorylineCast castB = castStoryline(validStoryline(), castRoster(), b, 7u);
+
+    REQUIRE(castA.assignments.size() == castB.assignments.size());
+    for (std::size_t i = 0; i < castA.assignments.size(); ++i) {
+        CHECK(castA.assignments[i].first == castB.assignments[i].first);
+        CHECK(castA.assignments[i].second == castB.assignments[i].second);
+    }
+}
+
+TEST_CASE("a different seed casts different people") {
+    // Determinism without variation is a constant, which would satisfy the
+    // case above and be useless.
+    std::set<std::string> neighbours;
+    for (unsigned seed = 0; seed < 40; ++seed) {
+        MysterySetup setup = decidedSetup();
+        const StorylineCast cast =
+            castStoryline(validStoryline(), castRoster(), setup, seed);
+        neighbours.insert(cast.residentFor("neighbour"));
+    }
+    CHECK(neighbours.size() > 1);
+}
+
+TEST_CASE("the killer slot binds the killer generateMystery already chose") {
+    // role-layer.md scopes choosing the killer to #178. Reassigning it here
+    // would silently break voteIsCorrect.
+    for (unsigned seed = 0; seed < 40; ++seed) {
+        MysterySetup setup = decidedSetup();
+        const StorylineCast cast =
+            castStoryline(validStoryline(), castRoster(), setup, seed);
+
+        CHECK(cast.residentFor("culprit") == "Marge Holloway");
+        CHECK(setup.killer == "Marge Holloway");
+        CHECK(voteIsCorrect(setup, "Marge Holloway"));
+    }
+}
+
+TEST_CASE("the victim is never cast in a living role") {
+    // The dead cannot testify, and a clue citing them as a living witness
+    // would never resolve.
+    for (unsigned seed = 0; seed < 40; ++seed) {
+        MysterySetup setup = decidedSetup();
+        const StorylineCast cast =
+            castStoryline(validStoryline(), castRoster(), setup, seed);
+
+        for (const auto& [slot, resident] : cast.assignments) {
+            CHECK(resident != "Theo Vance");
+        }
+    }
+}
+
+TEST_CASE("no resident holds two slots") {
+    for (unsigned seed = 0; seed < 40; ++seed) {
+        MysterySetup setup = decidedSetup();
+        const StorylineCast cast =
+            castStoryline(validStoryline(), castRoster(), setup, seed);
+
+        std::set<std::string> seen;
+        for (const auto& [slot, resident] : cast.assignments) {
+            CHECK(seen.insert(resident).second);
+        }
+    }
+}
+
+TEST_CASE("an undersized roster casts nothing rather than partially") {
+    // A partial cast would leave clues citing residents who do not exist.
+    StorylineDef story = validStoryline();
+    story.minResidents = 10;
+
+    MysterySetup setup = decidedSetup();
+    const StorylineCast cast = castStoryline(story, castRoster(), setup, 3u);
+
+    CHECK(cast.assignments.empty());
+    CHECK(setup.evidence.empty());
+    CHECK(setup.witnesses.empty());
+}
+
+TEST_CASE("evidence keeps the authored chain order") {
+    // The parser never re-sorts and casting walks the vector as parsed, so
+    // authored order survives all the way into MysterySetup.
+    StorylineDef story = validStoryline();
+    story.clues[0].caption = "first beat";
+    story.clues[1].caption = "second beat";
+
+    MysterySetup setup = decidedSetup();
+    castStoryline(story, castRoster(), setup, 11u);
+
+    REQUIRE(setup.evidence.size() == 2);
+    CHECK(setup.evidence[0].description == "first beat");
+    CHECK(setup.evidence[1].description == "second beat");
+    CHECK(setup.evidence[0].pointsAtKiller);
+    CHECK_FALSE(setup.evidence[1].pointsAtKiller);
+}
+
+TEST_CASE("witness observations are attributed to the cast resident") {
+    MysterySetup setup = decidedSetup();
+    const StorylineCast cast =
+        castStoryline(validStoryline(), castRoster(), setup, 19u);
+
+    REQUIRE(setup.witnesses.size() == 2);
+    CHECK(setup.witnesses[0].agent == cast.residentFor("neighbour"));
+    CHECK(setup.witnesses[1].agent == cast.residentFor("rival"));
+    CHECK(setup.witnesses[0].sawZoneId == "bakery_block");
+    CHECK(setup.witnesses[0].atHour == doctest::Approx(21.5));
+}
+
+TEST_CASE("a cast storyline seeds facts that still hide the killer") {
+    // The end-to-end guard: a template's witnesses become real facts, and the
+    // leak rule survives content it did not author.
+    MysterySetup setup = decidedSetup();
+    const std::vector<Persona> roster = castRoster();
+    castStoryline(validStoryline(), roster, setup, 55u);
+
+    WorldState state;
+    seedMysteryFacts(state, setup, roster);
+
+    REQUIRE(state.facts().size() >= 3);  // one death + two testimonies
+    for (const KnownFact& fact : state.facts()) {
+        const bool namesKiller =
+            fact.content.find(setup.killer) != std::string::npos;
+        const bool aboutTheDeath =
+            fact.content.find("dead") != std::string::npos ||
+            fact.content.find("killed") != std::string::npos ||
+            fact.content.find("murder") != std::string::npos;
+        // Assigned first: doctest cannot decompose `&&` inside an assertion.
+        const bool leaks = namesKiller && aboutTheDeath;
+        CHECK_FALSE(leaks);
+    }
+}
+
+TEST_CASE("a template with no roles casts nothing") {
+    StorylineDef story = validStoryline();
+    story.roles.clear();
+
+    MysterySetup setup = decidedSetup();
+    const StorylineCast cast = castStoryline(story, castRoster(), setup, 2u);
+
+    CHECK(cast.assignments.empty());
+    CHECK(setup.evidence.empty());
+}
+
+TEST_CASE("residentFor returns empty for a slot that was never declared") {
+    MysterySetup setup = decidedSetup();
+    const StorylineCast cast =
+        castStoryline(validStoryline(), castRoster(), setup, 4u);
+    CHECK(cast.residentFor("the_butler").empty());
 }
