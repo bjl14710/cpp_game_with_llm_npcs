@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace llm_npc {
@@ -64,10 +65,12 @@ class LocationLog {
     std::vector<ZoneVisit> trailOf(const std::string& agent,
                                    double fromHour, double toHour) const;
 
-    // Closes any ongoing visit for one agent — call when they die, so a corpse
-    // does not accumulate an eternal stay.
+    // Closes any ongoing visit for one agent and stops logging them entirely —
+    // call when they die, so a corpse neither accumulates an eternal stay nor
+    // starts new ones as the body sits there being observed each frame.
     //
-    // TODO(zones step 2): implement.
+    // Permanent for the life of the log. The dead do not move, and a caller
+    // that wants an agent back should clear() and start a new match.
     void closeAgent(const std::string& agent, double worldHour);
 
     // Drops everything. New match.
@@ -81,6 +84,10 @@ class LocationLog {
     // by sorting, because observe() only ever appends or closes the last visit
     // for an agent.
     std::vector<ZoneVisit> visits_;
+
+    // Agents closeAgent() has retired. observe() ignores them, so a dead NPC
+    // still being ticked every frame cannot open a new stay.
+    std::unordered_set<std::string> closed_;
 };
 
 }  // namespace llm_npc
