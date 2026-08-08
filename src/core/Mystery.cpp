@@ -4,15 +4,14 @@
 
 #include "Gossip.hpp"
 #include "Journal.hpp"
+#include "Rng.hpp"
 #include "Zones.hpp"
 
 namespace llm_npc {
 
-// generateMystery is implemented (plan: opening-murder, step 1). Seeding, the
-// vote check and the collision search are still stubs: they write nothing,
-// answer false for everyone, and move nothing, so nothing calls this into a
-// half-built state. Fill each in and un-skip its cases in
-// tests/test_mystery.cpp in the same commit.
+// The whole of plan opening-murder is implemented here: generation (#178),
+// fact seeding (#179), body placement and starting the victim dead (#180), and
+// the vote check with its compile-gated reveal (#181).
 
 namespace {
 
@@ -77,36 +76,6 @@ std::string clampContent(std::string content) {
     return content;
 }
 
-// Deterministic, platform-stable, header-free — the same generator
-// CharacterParts.cpp uses for randomizeLook, and for the same reason: the
-// contract is "seed in, identical result out on every machine", which
-// std::mt19937 gives but does not make obvious at the call site.
-//
-// The gotcha carried over with it: xorshift cannot start at 0, so callers must
-// construct as `Rng rng{seed ? seed : 1u}`. Seed 0 is valid input to
-// generateMystery, so this is load-bearing, not a nicety.
-struct Rng {
-    unsigned state;
-    unsigned next() {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        return state;
-    }
-    // Uniform pick in [0, n).
-    std::size_t pick(std::size_t n) { return n ? next() % n : 0; }
-
-    // A fraction in [0, 1) with 1/kUnitSteps granularity.
-    //
-    // Integer-then-divide rather than a direct cast of `next()`, because the
-    // integer stays exact on every platform and the single division that
-    // follows is IEEE-defined. That keeps the cross-platform determinism
-    // contract the whole struct exists for.
-    double unit() {
-        constexpr unsigned kUnitSteps = 100000u;
-        return static_cast<double>(next() % kUnitSteps) / kUnitSteps;
-    }
-};
 
 }  // namespace
 

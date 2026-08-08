@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include "Config.hpp"  // trim
+#include "Rng.hpp"
 #include "Zones.hpp"
 
 namespace llm_npc {
@@ -324,6 +325,91 @@ std::vector<StorylineError> validateStoryline(const StorylineDef& story,
     }
 
     return errors;
+}
+
+const std::string& StorylineCast::residentFor(const std::string& slotId) const {
+    for (const auto& [slot, resident] : assignments) {
+        if (slot == slotId) return resident;
+    }
+    static const std::string kNone;
+    return kNone;
+}
+
+StorylineCast castStoryline(const StorylineDef& story,
+                            const std::vector<Persona>& roster,
+                            MysterySetup& setup, unsigned seed) {
+    StorylineCast cast;
+
+    // A partial cast would leave clues citing residents who do not exist, so
+    // an undersized roster casts NOTHING rather than as much as it can.
+    if (static_cast<int>(roster.size()) < story.minResidents) return cast;
+    if (story.roles.empty()) return cast;
+
+    // Same generator and the same seed-0 guard as generateMystery. Determinism
+    // here is not decoration: a host replaying a match has to get the same cast
+    // or the clue chain stops matching the people it names.
+    Rng rng{seed ? seed : 1u};
+
+    // Everyone eligible for a slot: alive, and not the killer, who is bound
+    // separately below. The victim is excluded because the dead cannot testify
+    // and a clue citing them as a living witness would never resolve.
+    std::vector<std::string> available;
+    for (const Persona& person : roster) {
+        if (person.name == setup.victim) continue;
+        if (person.name == setup.killer) continue;
+        available.push_back(person.name);
+    }
+
+    // Fisher-Yates over the eligible pool, then deal. One pass, no rejection,
+    // so a resident cannot draw two slots and the draw count does not vary
+    // with the seed.
+    for (std::size_t i = available.size(); i > 1; --i) {
+        std::swap(available[i - 1], available[rng.pick(i)]);
+    }
+
+    std::size_t next = 0;
+    for (const StorylineRole& role : story.roles) {
+        if (role.kind == "killer") {
+            // Bound, not chosen. generateMystery owns this.
+            cast.assignments.emplace_back(role.slotId, setup.killer);
+            continue;
+        }
+        if (next >= available.size()) {
+            // More slots than eligible residents. The validator rejects this
+            // against a known roster, so reaching it means a caller skipped
+            // validation — leave the slot uncast rather than double-book.
+            continue;
+        }
+        cast.assignments.emplace_back(role.slotId, available[next++]);
+    }
+
+    // ---- clues become evidence -------------------------------------------
+    //
+    // Authored chain order is preserved by construction: this walks the clue
+    // vector as parsed, and the parser never re-sorts it.
+    for (const StorylineClue& clue : story.clues) {
+        Evidence evidence;
+        evidence.id = story.id + "_clue_" + std::to_string(clue.order);
+        evidence.zoneId = clue.zoneId;
+        evidence.description = clue.caption;
+        evidence.pointsAtKiller = clue.pointsAtKiller;
+        setup.evidence.push_back(std::move(evidence));
+    }
+
+    // ---- witness slots become named witnesses ----------------------------
+    for (const StorylineWitness& authored : story.witnesses) {
+        const std::string& resident = cast.residentFor(authored.slotId);
+        if (resident.empty()) continue;  // uncast slot; nobody to attribute it to
+
+        Witness witness;
+        witness.agent = resident;
+        witness.sawZoneId = authored.zoneId;
+        witness.observed = authored.observed;
+        witness.atHour = authored.atHour;
+        setup.witnesses.push_back(std::move(witness));
+    }
+
+    return cast;
 }
 
 std::vector<StorylineDef> loadStorylines(const std::filesystem::path& dir,
