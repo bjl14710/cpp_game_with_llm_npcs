@@ -31,9 +31,14 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // history only once a successful reply arrives. That way a failed request
     // can be retried without polluting context with unanswered user turns.
     pendingUserLine_ = playerLine;
+    // A persisted summary means this player and this NPC have met before, so a
+    // banked greeting must not treat them as a stranger. That is the only place
+    // an authored line can contradict remembered history; see banks/README.md.
+    const Familiarity familiarity =
+        memory_.empty() ? Familiarity::First : Familiarity::Returning;
     pendingId_ =
         client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits()),
-                       history_, playerLine);
+                       history_, playerLine, persona_.name, familiarity);
     return pendingId_;
 }
 
