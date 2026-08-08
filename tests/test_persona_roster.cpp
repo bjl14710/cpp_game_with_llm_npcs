@@ -1,6 +1,13 @@
 // Self-contained roster test. At commit 6 copy this into the repo as
 // tests/test_persona_roster.cpp (no append/edit of test_persona.cpp needed).
+//
+// The DIVERSITY GATE cases at the bottom are scaffolded for the 21-resident
+// plan (.claude/plans/twenty-one-residents.md) and are skipped until it lands.
+// They exist because the existing look check below is weaker than it appears:
+// it compares the WHOLE look, so two residents differing only by palette pass
+// while reading as the same person across a plaza.
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -92,4 +99,117 @@ TEST_CASE("malformed schedule lines are named errors") {
         CHECK_FALSE(parsed.ok);
         CHECK(parsed.error.find("schedule") != std::string::npos);
     }
+}
+
+// --- Diversity gate (plan: twenty-one-residents) ----------------------------
+//
+// Skipped until the 21-resident work lands, EXCEPT the silhouette-budget case,
+// which measures the catalog rather than the roster and is true today.
+//
+// Why these exist: a player under time pressure has to tell 21 characters
+// apart. The check above ("no two wear the same look") is not enough for that
+// — it compares the whole look string, so a palette swap satisfies it while
+// two residents remain visually identical in silhouette, which is most of what
+// reads at conversational distance and in fog.
+
+namespace {
+
+// Loads the shipped roster from wherever personas/ lives relative to the test
+// binary (tests/ under make, build/ under ctest).
+std::vector<llm_npc::LoadedPersona> shippedRoster() {
+    namespace fs = std::filesystem;
+    fs::path dir = "personas";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+    std::vector<std::string> errors;
+    return llm_npc::loadAllPersonas(dir, &errors);
+}
+
+// Body + head only. This is the silhouette a player actually reads across a
+// street; palette, hair and mouth are detail that fog and distance remove.
+std::string silhouetteOf(const llm_npc::LoadedPersona& p) {
+    return p.look.part(llm_npc::PartCategory::Body) + "/" +
+           p.look.part(llm_npc::PartCategory::Head);
+}
+
+// Counts core-pack parts in one category — the pool a shipped resident may
+// draw from.
+int coreCount(llm_npc::PartCategory category) {
+    int n = 0;
+    for (const llm_npc::PartDef* def :
+         llm_npc::partsForCategory(category, "any")) {
+        if (def->pack == "core") ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("the core catalog has enough silhouettes for the planned cast") {
+    // NOT skipped: this measures the CATALOG, not the roster, so it is
+    // answerable today and it is the constraint that is invisible until
+    // counted. Six core bodies x four core heads = 24 combinations for 21
+    // residents — three spare. If a part is ever removed, this fails before
+    // anyone tries to author into a pool that cannot hold them.
+    constexpr int kPlannedCast = 21;
+    const int bodies = coreCount(llm_npc::PartCategory::Body);
+    const int heads = coreCount(llm_npc::PartCategory::Head);
+    CHECK_MESSAGE(bodies * heads >= kPlannedCast,
+                  ("core catalog offers only " + std::to_string(bodies * heads) +
+                   " body/head silhouettes for " + std::to_string(kPlannedCast) +
+                   " residents"));
+}
+
+TEST_CASE("no two residents share a body/head silhouette" * doctest::skip()) {
+    // Stricter than the whole-look check above, and the one that decides
+    // whether a player can tell the cast apart at a distance.
+    const auto roster = shippedRoster();
+    std::set<std::string> seen;
+    for (const auto& p : roster) {
+        const std::string shape = silhouetteOf(p);
+        CHECK_MESSAGE(seen.insert(shape).second,
+                      (p.id + " reuses the silhouette " + shape));
+    }
+}
+
+TEST_CASE("no two residents share a trait set" * doctest::skip()) {
+    // Distinct voice is not unit-testable; a unique trait set is the closest
+    // honest proxy, and the trait library is large enough to allow it
+    // (8 traits taken one or two at a time is 36 combinations).
+    const auto roster = shippedRoster();
+    std::set<std::string> seen;
+    for (const auto& p : roster) {
+        std::set<std::string> ids(p.persona.traitIds.begin(),
+                                  p.persona.traitIds.end());
+        std::string key;
+        for (const auto& id : ids) key += id + ",";
+        CHECK_MESSAGE(seen.insert(key).second,
+                      (p.id + " reuses the trait set " + key));
+    }
+}
+
+TEST_CASE("no two residents share a speaking style" * doctest::skip()) {
+    const auto roster = shippedRoster();
+    std::set<std::string> seen;
+    for (const auto& p : roster) {
+        CHECK_FALSE_MESSAGE(p.persona.speakingStyle.empty(),
+                            (p.id + " has no speaking style"));
+        CHECK_MESSAGE(seen.insert(p.persona.speakingStyle).second,
+                      (p.id + " reuses another resident's speaking style"));
+    }
+}
+
+TEST_CASE("the diversity gate fails on a deliberate duplicate" * doctest::skip()) {
+    // A gate that cannot fail is decoration. This proves the silhouette check
+    // above actually rejects something, by building a roster with a known
+    // collision rather than trusting the shipped cast to be correct.
+    //
+    // TODO(residents): build two LoadedPersona values sharing a body/head pair
+    // and assert the same comparison the case above uses reports a collision.
+}
+
+TEST_CASE("the roster is the full twenty-one residents" * doctest::skip()) {
+    // Flipped from 10 at the end of the plan, once the render budget holds and
+    // the eleven new residents pass the gate.
+    CHECK(shippedRoster().size() == 21);
 }
