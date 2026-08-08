@@ -1,3 +1,122 @@
+# Checkpoint — SESSION 12 (diversity gate + a catalog blocker)  <- MOST RECENT
+Session 12: 2026-08-08
+Goal: milestones #19/#20/#21 remaining queue (#156,#157,#165,#166,#170-#173)
+Status: PARTIAL — 1 completed, 3 blocked-and-labelled, 4 not reached.
+
+Completed: [#172 ee63552 -> PR #174]
+Blocked:   [#156, #157 needs-human behind #155 (nothing starts a match);
+            #173 needs-human on a CATALOG blocker, see below]
+Not reached: [#165, #166, #170, #171]
+
+## THE FINDING OF THIS SESSION
+The silhouette budget is HALF what the 21-residents plan assumed. Parts carry
+a style family (round / blocky) and lookIsValid rejects any mix, so 6 bodies x
+4 heads is 12 valid combinations, not 24:
+    3 round bodies  x 2 round heads  = 6
+    3 blocky bodies x 2 blocky heads = 6
+The current ten already use TEN of the twelve. 21 distinct silhouettes is
+unreachable from this catalog by any arrangement — independent of framerate.
+So #173 is blocked on new core parts, NOT on the render gate as the plan
+assumed. Minimum 3 new parts (round body + round head + blocky head) = 21
+exactly; 4 gives 24 with headroom. New modelling work + draw recipes; wants
+its own issue.
+
+Found by trying to fix a REAL shipped collision: barista and librarian both
+wore body_slim/head_oval. Moving barista to head_tall failed validation with
+"mix incompatible styles", which is how the family rule surfaced. Barista is
+now body_pear/head_oval (the only unused round-family pair).
+
+## Second finding
+NO shipped persona uses the structured trait library. All ten have empty
+traitIds; traits/*.trait ships eight traits nothing references. The trait-set
+gate therefore checks the free-text `traits =` line (unique 10/10), and a test
+asserts traitIds stay empty so the day someone uses them it prompts moving the
+gate to the stronger field.
+
+## Branches (pushed)
+- feature/issue-172-roster-diversity-gate -> PR #174 (base dev)
+- feature/residents-scaffold (scaffold, no PR — folded into #174's base)
+
+## Still open from earlier sessions
+- PRs awaiting review: #158-#162 (line bank), #167-#169 (match clock, zones),
+  #174 (diversity gate). Nine draft PRs total.
+- #155 question unanswered: how does a single-player match start?
+- Learning materials still not generated (0027/0026 free).
+- SECURITY: credential commit 1e0cd87 still in origin/dev history.
+
+# Checkpoint — SESSION 11 (day phases + zones)  <- MOST RECENT
+Session 11: 2026-08-07
+Goal: milestones #19 (#154-157) and #20 (#163-166)
+Status: PARTIAL — 3 of 8 done, 1 blocked on a design decision, 4 not reached.
+
+Completed: [#154 10016a1 -> PR #167, #163 c1721f3 -> PR #168,
+            #164 02029fc -> PR #169]
+Blocked:   [#155 needs-human — nothing starts a match; #156/#157 depend on it]
+Not reached: [#165, #166]
+
+## Branches (all pushed)
+- feature/issue-154-match-clock   -> PR #167 (base dev)
+- feature/zones-scaffold          -> pushed, no PR (folded into #168)
+- feature/issue-163-zones-lookup  -> PR #168 (base dev)
+- feature/issue-164-location-log  -> PR #169 (base 163's branch, STACKED)
+
+## The blocker, in one line
+#155 says "when a match is running, drive the clock" — but no issue creates
+the concept of starting a match. That is a product decision (menu entry? CLI
+flag? default mode?), not wiring, so it was not guessed at. #156 and #157
+inherit the block.
+
+## Notable
+- MatchClock had to be recreated: its scaffold was lost in session 10's
+  rebase. Implemented directly this time, 14 tests, all green first run.
+- LocationLog::closeAgent had to RETIRE an agent permanently, not just close
+  the stay. Writing the test surfaced it: the caller ticks every agent every
+  frame, so a corpse would open a fresh visit and log forever.
+- Suite ended at 241 passing / 1 skipped (llm_live) on the zones branch;
+  236 on the match-clock branch. cmake green on both.
+- Learning materials still not generated (0027/0026 free). /teach, /drill-me,
+  /terms live in the unmerged toolkit PR #146.
+- SECURITY still open: credential commit 1e0cd87 in origin/dev history.
+
+# Checkpoint — SESSION 10 (NPC line bank, milestone #18)  <- MOST RECENT
+Session 10: 2026-08-06/07
+Goal: milestone #18, issues #148-#152. Plan: .claude/plans/npc-line-bank.md
+Status: COMPLETE (5/5) — five stacked draft PRs open (base dev), all issues
+closed ai-completed.
+
+Completed: [#148 bfc661d, #149 becb193, #150 35a3113, #151 6a78734, #152 0e9d91a]
+Failed: []  Skipped: []
+PRs: #158(148)<-dev, #159(149), #160(150), #161(151), #162(152) — STACKED,
+     each based on the previous branch so each diff is one ticket only.
+
+## Session 10 deviation from sessions 5-9 precedent
+- USER DIRECTIVE mid-session: one PR per ticket, not one PR per milestone.
+  Implemented as a stacked chain. Merge bottom-up: #158 first, then #159...
+- Everything else per precedent: base dev, never main, never `git add .`,
+  local-only OVERNIGHT_REPORT.md / docs/learning/** / .claude/**.
+
+## Things found by running, not reading
+- cmake was BROKEN on entry: e67ab67 added src/core/MatchClock.cpp to
+  CMakeLists but the scaffold file is not on this branch (it belongs to
+  milestone #19). Fixed in 50c445f. NOTE: tests/Makefile globs src/core/*.cpp,
+  so `make -C tests test` stayed green the whole time — a green test suite
+  does NOT prove cmake builds.
+- ConversationStore keys by Persona::name ("Marge Holloway"), NOT file stem
+  ("baker"). refine_lines silently skipped the entire cast until fixed.
+- The real transcript corpus is 20 player lines across 8 characters, nothing
+  recurring. Bootstrapping banks from play data is not viable yet — issue #153
+  (seed ~40 topics by hand) is the actual next step, not more nightly runs.
+
+## Still open / next
+- #153 (needs-human): author the ten banks, then flip line_bank = on.
+- Milestone #19 (#154-#157, day phases) untouched. Its MatchClock scaffold was
+  lost in the rebase and needs recreating on its own branch.
+- SECURITY, UNRESOLVED: credential commit 1e0cd87 is still in origin/dev's
+  history (.claude/.claude/.credentials.json). Never rotated, never
+  force-pushed. Pre-dates this session; user's call.
+- Learning materials (lesson/drill 0027, vocab 0026) NOT generated this
+  session — see OVERNIGHT_REPORT.md.
+
 # Checkpoint — SESSION 9 (stylized character assets)  ← MOST RECENT
 Session 9 started: 2026-07-14
 Goal: milestone #17, issues #137-#143 on feature/stylized-characters
