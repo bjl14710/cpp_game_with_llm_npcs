@@ -88,6 +88,16 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
     if (auto it = kv.find("base_url"); it != kv.end()) cfg.baseUrl = it->second;
     if (auto it = kv.find("api_key_env"); it != kv.end()) cfg.apiKeyEnv = it->second;
 
+    // Line bank. Anything other than an explicit "on" leaves it off, so a
+    // typo disables the feature rather than half-enabling it.
+    if (auto it = kv.find("line_bank"); it != kv.end()) cfg.lineBank = it->second == "on";
+    if (auto it = kv.find("line_bank_threshold"); it != kv.end()) {
+        cfg.lineBankThreshold = std::stof(it->second);
+    }
+    if (auto it = kv.find("line_bank_cps"); it != kv.end()) {
+        cfg.lineBankCps = std::stoi(it->second);
+    }
+
     // Resolve the cloud API key without ever storing it in version control:
     // prefer the named environment variable, then fall back to the gitignored
     // config/secrets.cfg. Left empty (cloud disabled) when neither is set.
