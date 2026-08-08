@@ -1,5 +1,4 @@
-// Agent position history as zone intervals (plan: clue-like-zones, step 2).
-// Un-skip each in the commit that implements it.
+// Agent position history as zone intervals (issue #164).
 //
 // Positions here are chosen from the downtown block grid: block centres are at
 // -64/0/64 on each axis and blocks span +-24, so +-32 is mid-street.
@@ -20,8 +19,7 @@ constexpr float kStreetX = -32.f, kStreetZ = 0.f;
 
 }  // namespace
 
-TEST_CASE("standing still records one visit, not one per observation" *
-          doctest::skip()) {
+TEST_CASE("standing still records one visit, not one per observation") {
     // The whole point of recording transitions instead of samples. Ticking
     // every frame for 21 NPCs must not produce 30,000 rows a day.
     LocationLog log;
@@ -33,8 +31,7 @@ TEST_CASE("standing still records one visit, not one per observation" *
     CHECK(log.visits()[0].ongoing);
 }
 
-TEST_CASE("moving between zones closes one visit and opens the next" *
-          doctest::skip()) {
+TEST_CASE("moving between zones closes one visit and opens the next") {
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 9.0);
     log.observe("Marge Holloway", kStreetX, kStreetZ, 10.0);
@@ -50,8 +47,7 @@ TEST_CASE("moving between zones closes one visit and opens the next" *
     CHECK(log.visits()[2].ongoing);
 }
 
-TEST_CASE("whoWasIn returns stays that OVERLAP the window, not only contained ones" *
-          doctest::skip()) {
+TEST_CASE("whoWasIn returns stays that OVERLAP the window, not only contained ones") {
     // The case that matters: someone who arrived at 13:50 and left at 14:10
     // WAS in the bakery during 14:00-15:00, and an alibi that misses them is
     // worse than useless.
@@ -67,8 +63,7 @@ TEST_CASE("whoWasIn returns stays that OVERLAP the window, not only contained on
     CHECK(found[0].agent == "Marge Holloway");
 }
 
-TEST_CASE("whoWasIn includes an ongoing stay that began before the window" *
-          doctest::skip()) {
+TEST_CASE("whoWasIn includes an ongoing stay that began before the window") {
     // An agent who walked in at 13:00 and never left is still there at 14:30.
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 13.0);
@@ -77,8 +72,7 @@ TEST_CASE("whoWasIn includes an ongoing stay that began before the window" *
     CHECK(found[0].ongoing);
 }
 
-TEST_CASE("trailOf returns one agent's stays in chronological order" *
-          doctest::skip()) {
+TEST_CASE("trailOf returns one agent's stays in chronological order") {
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 9.0);
     log.observe("Marge Holloway", kStreetX, kStreetZ, 10.0);
@@ -91,7 +85,7 @@ TEST_CASE("trailOf returns one agent's stays in chronological order" *
     CHECK(trail[0].startHour < trail[1].startHour);
 }
 
-TEST_CASE("the player is logged like anyone else" * doctest::skip()) {
+TEST_CASE("the player is logged like anyone else") {
     // The retaliation rule means the player has to be as observable as any
     // resident — an alibi system that cannot place the player is half a system.
     LocationLog log;
@@ -101,23 +95,21 @@ TEST_CASE("the player is logged like anyone else" * doctest::skip()) {
     CHECK(trail[0].agent == "player");
 }
 
-TEST_CASE("an inverted window returns empty rather than swapping bounds" *
-          doctest::skip()) {
+TEST_CASE("an inverted window returns empty rather than swapping bounds") {
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 9.0);
     CHECK(log.whoWasIn("bakery_block", 15.0, 14.0).empty());
     CHECK(log.trailOf("Marge Holloway", 15.0, 14.0).empty());
 }
 
-TEST_CASE("an unknown zone returns empty, not an error" * doctest::skip()) {
+TEST_CASE("an unknown zone returns empty, not an error") {
     // Asking about a zone that does not exist gets "nobody", which is true.
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 9.0);
     CHECK(log.whoWasIn("no_such_zone", 0.0, 24.0).empty());
 }
 
-TEST_CASE("closeAgent ends an ongoing stay so a corpse stops accumulating" *
-          doctest::skip()) {
+TEST_CASE("closeAgent ends an ongoing stay so a corpse stops accumulating") {
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 9.0);
     log.closeAgent("Marge Holloway", 12.0);
@@ -131,7 +123,7 @@ TEST_CASE("closeAgent ends an ongoing stay so a corpse stops accumulating" *
     CHECK(log.visits().size() == 1);
 }
 
-TEST_CASE("clear empties both queries" * doctest::skip()) {
+TEST_CASE("clear empties both queries") {
     LocationLog log;
     log.observe("Marge Holloway", kBakeryX, kBakeryZ, 9.0);
     log.clear();
@@ -140,7 +132,7 @@ TEST_CASE("clear empties both queries" * doctest::skip()) {
     CHECK(log.trailOf("Marge Holloway", 0.0, 24.0).empty());
 }
 
-TEST_CASE("two agents in the same zone are both recorded" * doctest::skip()) {
+TEST_CASE("two agents in the same zone are both recorded") {
     // Co-presence is what witnessing will later be derived from, so the log
     // must keep both stays rather than collapsing them.
     LocationLog log;
