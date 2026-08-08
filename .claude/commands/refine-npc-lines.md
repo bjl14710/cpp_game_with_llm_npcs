@@ -94,6 +94,17 @@ the delta is noise.
 aid, **not** a substitute for a full run: 3 and 4 are the two gates that
 speak to quality, and a scorecard missing them is not a scorecard.
 
+Gates 3-5 need a judge. By default that is `anthropic/claude-haiku-4.5`
+via OpenRouter, keyed by `config/llm.cfg`'s `api_key_env`. Setting
+`base_url` in that file points them at any OpenAI-compatible server
+instead — including Ollama's shim, `http://localhost:11434/v1`, which
+needs no key. Do that only as a smoke test: a local judge is weaker, and
+it grades lines written by a sibling of itself. `eval_lines.py` stamps
+`judge:` on every scorecard and prints a warning banner when the judge
+was local, so a local run can never be mistaken for the gate 3/4
+evidence #153 wants before `line_bank = on`. It is also slow — on a
+CPU-only box budget minutes per line, not seconds.
+
 Save the five gate results verbatim. These are the before numbers:
 
 - Gate 1 — tag compliance (shells to `build/persona_prompt --parse`, the

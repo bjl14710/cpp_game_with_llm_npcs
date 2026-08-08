@@ -41,6 +41,7 @@ import re
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -62,6 +63,9 @@ STREAM_CPS = 220
 
 JUDGE_MODEL = "anthropic/claude-haiku-4.5"
 LIVE_MODEL = "qwen3:8b"
+# Overridable by config/llm.cfg's base_url, so the judged gates can be pointed
+# at a local OpenAI-compatible server instead of the cloud.
+DEFAULT_JUDGE_URL = "https://openrouter.ai/api/v1"
 
 # Phrases that mean the character stopped being the character.
 FOURTH_WALL = [
@@ -138,40 +142,82 @@ def ollama_chat(system, user, model=LIVE_MODEL):
     return data["message"]["content"].strip()
 
 
-def judge(prompt, budget):
-    """Ask the cloud judge one question; returns raw text.
+def _llm_cfg():
+    """config/llm.cfg as a plain dict; the first assignment of a key wins.
 
-    Uses the same provider config the game does (config/llm.cfg's api_key_env),
-    so there is one place a key is configured.
+    The judge reads the same file the game does so a provider is configured in
+    one place rather than two.
     """
-    key_env = "OPENROUTER_API_KEY"
+    values = {}
     cfg = ROOT / "config" / "llm.cfg"
     if cfg.exists():
-        for line in cfg.read_text().splitlines():
-            line = line.split("#", 1)[0].strip()
-            if line.startswith("api_key_env"):
-                key_env = line.split("=", 1)[1].strip()
-    key = os.environ.get(key_env)
-    if not key:
-        secrets = ROOT / "config" / "secrets.cfg"
-        if secrets.exists():
-            for line in secrets.read_text().splitlines():
-                line = line.split("#", 1)[0].strip()
-                if line.startswith("api_key"):
-                    key = line.split("=", 1)[1].strip()
-    if not key:
-        raise GateFailure(
-            f"no judge key: set ${key_env} or config/secrets.cfg api_key. "
-            "Use --gates 1,2,5 to score offline.")
+        for raw in cfg.read_text().splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if "=" in line:
+                key, value = (part.strip() for part in line.split("=", 1))
+                values.setdefault(key, value)
+    return values
+
+
+def _is_local(url):
+    """True for a loopback endpoint, which needs no API key and costs nothing."""
+    host = urllib.parse.urlparse(url).hostname or ""
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
+def judge_endpoint():
+    """The (base_url, model) the judged gates will use, from config/llm.cfg.
+
+    `base_url` is the same key the game uses for OpenAI-compatible providers.
+    Pointing it at Ollama's shim (http://localhost:11434/v1) runs gates 3-5
+    against a local model with no key — weaker judgement than the cloud model,
+    which is why score_bank records which judge produced a verdict.
+    `judge_model` selects the model there, since a local server has no
+    'anthropic/claude-haiku-4.5'.
+    """
+    cfg = _llm_cfg()
+    base = cfg.get("base_url", DEFAULT_JUDGE_URL).rstrip("/")
+    model = cfg.get("judge_model") or (LIVE_MODEL if _is_local(base) else JUDGE_MODEL)
+    return base, model
+
+
+def judge(prompt, budget):
+    """Ask the judge one question; returns raw text.
+
+    Uses the same provider config the game does (config/llm.cfg), so there is
+    one place an endpoint and key are configured.
+    """
+    base, model = judge_endpoint()
+    headers = {"Content-Type": "application/json"}
+
+    if not _is_local(base):
+        key_env = _llm_cfg().get("api_key_env", "OPENROUTER_API_KEY")
+        key = os.environ.get(key_env)
+        if not key:
+            secrets = ROOT / "config" / "secrets.cfg"
+            if secrets.exists():
+                for raw in secrets.read_text().splitlines():
+                    line = raw.split("#", 1)[0].strip()
+                    if line.startswith("api_key"):
+                        key = line.split("=", 1)[1].strip()
+        if not key:
+            raise GateFailure(
+                f"no judge key: set ${key_env} or config/secrets.cfg api_key. "
+                "Use --gates 1,2,5 to score offline, or point base_url at a "
+                "local OpenAI-compatible server.")
+        headers["Authorization"] = f"Bearer {key}"
 
     budget.spend(len(prompt) // 4 + 256)
-    data = _post_json("https://openrouter.ai/api/v1/chat/completions", {
-        "model": JUDGE_MODEL,
+    data = _post_json(f"{base}/chat/completions", {
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
-    }, {"Content-Type": "application/json",
-        "Authorization": f"Bearer {key}"}, timeout=120)
-    return data["choices"][0]["message"]["content"].strip()
+    }, headers, timeout=300)
+    text = data["choices"][0]["message"]["content"].strip()
+    # Reasoning models (qwen3 among them) emit a <think> trace through the
+    # OpenAI-compatible shim. It has to go before parsing: _first_int would
+    # happily read a digit out of the reasoning instead of the verdict.
+    return re.sub(r"(?s)<think>.*?</think>", "", text).strip()
 
 
 class TokenBudget:
@@ -414,6 +460,12 @@ def score_bank(bank_path, gates=ALL_GATES, token_budget=100_000, seed=1):
               and (mean_fidelity is None or mean_fidelity >= FIDELITY_MEAN_MIN)
               and (win_rate is None or win_rate >= NON_REGRESSION_WIN_RATE))
 
+    # Which judge produced gates 3-5 is part of the result, not a footnote: a
+    # local model is a weaker judge than the cloud one, and a scorecard that
+    # does not say so reads exactly like a real pass.
+    judged = bool({3, 4} & set(gates))
+    judge_base, judge_model = judge_endpoint() if judged else (None, None)
+
     return {
         "bank": _repo_relative(bank_path),
         "persona": bank["persona"],
@@ -424,6 +476,8 @@ def score_bank(bank_path, gates=ALL_GATES, token_budget=100_000, seed=1):
         "mean_fidelity": mean_fidelity,
         "ab_win_rate": win_rate,
         "tokens_spent": budget.spent,
+        "judge": f"{judge_model} @ {judge_base}" if judged else None,
+        "judge_is_local": _is_local(judge_base) if judged else False,
         "all_passed": passed,
     }
 
@@ -438,11 +492,20 @@ def write_scorecard(card, json_path, markdown_path):
         f"Gates run: {card['gates']}  ",
         f"Lines: {card['lines']}  accepted: {len(card['accepted'])}  "
         f"rejected: {len(card['rejected'])}", "",
+        f"Judge: {card.get('judge') or 'not run (offline gates only)'}", "",
         "| metric | value | gate |", "|---|---|---|",
         f"| mean fidelity | {card['mean_fidelity']} | >= {FIDELITY_MEAN_MIN} |",
         f"| A/B win-or-tie | {card['ab_win_rate']} | >= {NON_REGRESSION_WIN_RATE} |",
         f"| tokens spent | {card['tokens_spent']} | — |", "",
     ]
+    if card.get("judge_is_local"):
+        lines += [
+            "> **Judged locally.** Gates 3-5 were scored by a local model, not "
+            f"`{JUDGE_MODEL}`. A local judge is weaker and grades work produced "
+            "by a sibling of itself, so treat these as a smoke test — NOT as "
+            "the gate 3/4 evidence issue #153 asks for before flipping "
+            "`line_bank = on`.", "",
+        ]
     if card["rejected"]:
         lines += ["## Rejected", "", "| topic | reply | why |", "|---|---|---|"]
         for r in card["rejected"]:
