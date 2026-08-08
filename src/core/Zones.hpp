@@ -51,13 +51,13 @@ extern const char* const kStreetsZoneId;
 // rather than listed, because it is defined as the complement of the others.
 const std::vector<ZoneDef>& zonesForDowntown();
 
-// TODO(zones step 1): the zone containing (x, z), or kStreetsZoneId when the
-// point is between blocks or outside the world. Never returns empty.
+// The zone containing (x, z), or kStreetsZoneId when the point is between
+// blocks or outside the world. Never returns empty.
 const std::string& zoneAt(float x, float z);
 
-// TODO(zones step 1): the player-facing name for a zone id, or the id itself
-// when unknown — captions and journal entries read better as "Bakery Corner"
-// than "bakery_block".
+// The player-facing name for a zone id, or the id itself when unknown —
+// captions and journal entries read better as "Bakery Corner" than
+// "bakery_block".
 const std::string& zoneName(const std::string& zoneId);
 
 }  // namespace llm_npc

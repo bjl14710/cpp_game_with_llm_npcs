@@ -1,9 +1,9 @@
-// Named downtown zones (plan: clue-like-zones, step 1).
+// Named downtown zones (issue #163).
 //
-// One case is NOT skipped: the partition-versus-map check below tests only
-// zonesForDowntown() and City::makeDowntown, both of which already exist. It
-// is the assertion that stops a later map edit from silently mis-filing an
-// alibi, so it earns its place from the first commit.
+// The partition-versus-map check below is the load-bearing one: it is what
+// stops a later map edit silently mis-filing an alibi. The rest cover the
+// lookup itself, including the half-open boundary rule that keeps an agent on
+// a kerb from flickering between two zones every frame.
 #include <string>
 
 #include "City.hpp"
@@ -82,7 +82,7 @@ TEST_CASE("zone ids and names are unique and non-empty") {
     }
 }
 
-TEST_CASE("zones do not overlap" * doctest::skip()) {
+TEST_CASE("zones do not overlap") {
     // Half-open bounds mean adjacent blocks share an edge without overlapping.
     // A point in two zones would make zoneAt's answer order-dependent.
     const auto& zones = zonesForDowntown();
@@ -102,7 +102,7 @@ TEST_CASE("zones do not overlap" * doctest::skip()) {
     }
 }
 
-TEST_CASE("each block centre resolves to its own zone" * doctest::skip()) {
+TEST_CASE("each block centre resolves to its own zone") {
     CHECK(zoneAt(-64.f, -64.f) == "bakery_block");
     CHECK(zoneAt(0.f, -64.f) == "police_block");
     CHECK(zoneAt(64.f, -64.f) == "coffee_block");
@@ -114,23 +114,21 @@ TEST_CASE("each block centre resolves to its own zone" * doctest::skip()) {
     CHECK(zoneAt(64.f, 64.f) == "park");
 }
 
-TEST_CASE("a point between blocks is on the streets" * doctest::skip()) {
+TEST_CASE("a point between blocks is on the streets") {
     // Blocks span +-24 around their centre, so +-32 is mid-street.
     CHECK(zoneAt(-32.f, 0.f) == kStreetsZoneId);
     CHECK(zoneAt(0.f, 32.f) == kStreetsZoneId);
     CHECK(zoneAt(32.f, 32.f) == kStreetsZoneId);
 }
 
-TEST_CASE("a point outside the world is on the streets, not a crash" *
-          doctest::skip()) {
+TEST_CASE("a point outside the world is on the streets, not a crash") {
     // halfSize is 110. Out of bounds must be an answer, never empty.
     CHECK(zoneAt(500.f, 500.f) == kStreetsZoneId);
     CHECK(zoneAt(-500.f, -500.f) == kStreetsZoneId);
     CHECK_FALSE(zoneAt(500.f, 500.f).empty());
 }
 
-TEST_CASE("zone bounds are half-open, so a boundary belongs to one zone" *
-          doctest::skip()) {
+TEST_CASE("zone bounds are half-open, so a boundary belongs to one zone") {
     // The plaza spans [-24, 24). Its low edge is inside it; its high edge is
     // not. Without this an agent standing on a kerb flickers between zones
     // every frame and the log fills with phantom transitions.
@@ -138,8 +136,7 @@ TEST_CASE("zone bounds are half-open, so a boundary belongs to one zone" *
     CHECK(zoneAt(24.f, 0.f) == kStreetsZoneId);
 }
 
-TEST_CASE("zoneName resolves a display label and falls back to the id" *
-          doctest::skip()) {
+TEST_CASE("zoneName resolves a display label and falls back to the id") {
     CHECK(zoneName("bakery_block") == "Bakery Corner");
     CHECK(zoneName("plaza") == "The Plaza");
     CHECK(zoneName("no_such_zone") == "no_such_zone");
