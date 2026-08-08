@@ -94,7 +94,21 @@ MysterySetup generateMystery(const std::vector<Persona>& roster, unsigned seed);
 // True only when `accused` is the killer. THE ONLY SUPPORTED READ of
 // setup.killer — see defence 3 in the leak rule above. Comparison is exact on
 // the persona name, the same key WorldState and the roster use.
+//
+// False for an empty accusation, and false for a setup with no killer: a match
+// with no ground truth must never report a correct vote.
 bool voteIsCorrect(const MysterySetup& setup, const std::string& accused);
+
+#ifdef LLM_NPC_REVEAL_KILLER
+// Debug reveal, compiled ONLY when LLM_NPC_REVEAL_KILLER is defined at build
+// time. Never define it in a build that can host a networked match.
+//
+// A preprocessor gate rather than a config key or a runtime flag on purpose:
+// anything readable at runtime can be flipped by whoever is hosting, and that
+// turns host advantage from theoretical into one keypress. Gated out, the
+// symbol does not exist at all, so it cannot be reached by accident.
+const std::string& revealKillerForDebug(const MysterySetup& setup);
+#endif
 
 // Writes the CONSEQUENCES of the mystery onto the world bus: the death fact
 // that everyone knows, and each witness's observation granted to that witness
