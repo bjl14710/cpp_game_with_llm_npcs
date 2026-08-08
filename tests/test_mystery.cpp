@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "Journal.hpp"
 #include "LlmClient.hpp"
 #include "Mystery.hpp"
 #include "Npc.hpp"
@@ -167,36 +168,118 @@ TEST_CASE("a zone with no clear spot still returns a position" *
 
 // ---- seeding the world bus ----------------------------------------------
 
-TEST_CASE("every survivor and the player know the death" * doctest::skip()) {
-    // TODO(mystery step 2): after seedMysteryFacts, state.knows(name, deathId)
-    // holds for all three survivors and for "player". The victim is not
-    // required to know anything.
+TEST_CASE("every survivor and the player know the death") {
+    const std::vector<Persona> roster = testRoster();
+    const MysterySetup setup = generateMystery(roster, 12345u);
+    WorldState state;
+    seedMysteryFacts(state, setup, roster);
+
+    REQUIRE(state.facts().size() == 1);
+    const std::string deathId = state.facts()[0].factId;
+
+    int survivors = 0;
+    for (const Persona& person : roster) {
+        if (person.name == setup.victim) continue;
+        CHECK(state.knows(person.name, deathId));
+        ++survivors;
+    }
+    CHECK(survivors == 3);
+    CHECK(state.knows("player", deathId));
 }
 
-TEST_CASE("a non-witness does not know what a witness saw" * doctest::skip()) {
-    // TODO(mystery step 2): the observation is granted to the witness ALONE.
-    // If everyone starts knowing every observation there is nothing to
-    // investigate — this case is the difference between a mystery and a
-    // briefing.
+TEST_CASE("the death fact names the place but not the hour") {
+    // The hour is what an alibi is checked against, so handing it to the whole
+    // town for free would remove the reason to cross-check testimony at all.
+    const std::vector<Persona> roster = testRoster();
+    const MysterySetup setup = generateMystery(roster, 99u);
+    WorldState state;
+    seedMysteryFacts(state, setup, roster);
+
+    REQUIRE(state.facts().size() == 1);
+    const std::string& content = state.facts()[0].content;
+
+    CHECK(content.find(setup.victim) != std::string::npos);
+    CHECK(content.find(zoneName(setup.sceneZoneId)) != std::string::npos);
+    CHECK(content.find(clockLabel(setup.murderHour * 3600.0)) ==
+          std::string::npos);
+    CHECK(content.size() <= 140);
 }
 
-TEST_CASE("no committed fact names the killer as the killer" *
-          doctest::skip()) {
-    // TODO(mystery step 2): THE LEAK TEST. Walk state.facts() and assert no
-    // content ties setup.killer to the murder. seedMysteryFacts is the one
-    // place the host's private answer sits next to the shared bus, so this is
-    // the assertion that keeps defence 1 honest.
+TEST_CASE("a non-witness does not know what a witness saw") {
+    // The difference between a mystery and a briefing.
+    const std::vector<Persona> roster = testRoster();
+    MysterySetup setup = generateMystery(roster, 4u);
+    setup.witnesses.push_back(
+        {"Ray Okafor", "coffee_block", "someone hurrying away", 21.5});
+
+    WorldState state;
+    seedMysteryFacts(state, setup, roster);
+
+    REQUIRE(state.facts().size() == 2);
+    const KnownFact* testimony = nullptr;
+    for (const KnownFact& fact : state.facts()) {
+        if (fact.source == "Ray Okafor") testimony = &fact;
+    }
+    REQUIRE(testimony != nullptr);
+
+    CHECK(state.knows("Ray Okafor", testimony->factId));
+    CHECK_FALSE(state.knows("Yuki Tanaka", testimony->factId));
+    CHECK_FALSE(state.knows("player", testimony->factId));
+}
+
+TEST_CASE("no committed fact names the killer as the killer") {
+    // THE LEAK TEST. seedMysteryFacts is the one place the host's private
+    // answer sits next to the shared bus.
     //
-    // Note the victim's name legitimately appears in the death fact, and the
-    // killer's name may legitimately appear in an unrelated witness sighting —
-    // "saw Ray on Coffee Row" is a clue, not a leak. Assert on the pairing,
-    // not on the presence of the name.
+    // Asserts on the PAIRING, not on the presence of a name: the killer's name
+    // may legitimately appear in an unrelated sighting, and "saw Ray on Coffee
+    // Row" is a clue rather than a leak.
+    const std::vector<Persona> roster = testRoster();
+    for (unsigned seed = 0; seed < 50; ++seed) {
+        const MysterySetup setup = generateMystery(roster, seed);
+        WorldState state;
+        seedMysteryFacts(state, setup, roster);
+
+        for (const KnownFact& fact : state.facts()) {
+            const bool namesKiller =
+                fact.content.find(setup.killer) != std::string::npos;
+            const bool aboutTheDeath =
+                fact.content.find("dead") != std::string::npos ||
+                fact.content.find("killed") != std::string::npos ||
+                fact.content.find("murder") != std::string::npos;
+            const bool leaks = namesKiller && aboutTheDeath;
+            CHECK_FALSE(leaks);
+        }
+    }
 }
 
-TEST_CASE("seeding twice changes nothing" * doctest::skip()) {
-    // TODO(mystery step 2): idempotence, which comes free from
-    // WorldState::addFact being first-teller-wins. Call seedMysteryFacts
-    // twice and check facts().size() is unchanged and no timestamp moved.
+TEST_CASE("seeding twice changes nothing") {
+    // Idempotence comes free from WorldState::addFact being first-teller-wins.
+    const std::vector<Persona> roster = testRoster();
+    MysterySetup setup = generateMystery(roster, 8u);
+    setup.witnesses.push_back(
+        {"Yuki Tanaka", "plaza_block", "the lights still on", 22.0});
+
+    WorldState state;
+    state.setNumber("world_time_seconds", 1000.0);
+    seedMysteryFacts(state, setup, roster);
+
+    REQUIRE(state.facts().size() == 2);
+    const double firstStamp = state.facts()[0].learnedAtSeconds;
+
+    state.setNumber("world_time_seconds", 9999.0);
+    seedMysteryFacts(state, setup, roster);
+
+    CHECK(state.facts().size() == 2);
+    CHECK(state.facts()[0].learnedAtSeconds == doctest::Approx(firstStamp));
+}
+
+TEST_CASE("a setup with no victim seeds nothing") {
+    // A default MysterySetup means generation failed (roster too small). It
+    // must not commit a fact about nobody dying nowhere.
+    WorldState state;
+    seedMysteryFacts(state, MysterySetup{}, testRoster());
+    CHECK(state.facts().empty());
 }
 
 // ---- the answer ----------------------------------------------------------
