@@ -80,10 +80,13 @@ TEST_CASE("quaternius family: mesh parts are well-formed") {
     CHECK_FALSE(styleCompatible(*qBody, *anyEyes));
 }
 
-TEST_CASE("default pool switches to quaternius; core stays loadable") {
-    // Issue #139: randomizeLook (and therefore lookForPersona's hash
-    // fallback and the creator's draft look) generates from the mesh
-    // family only...
+TEST_CASE("default pool generates core looks; the mesh family stays loadable") {
+    // Issue #139 pointed randomizeLook (and therefore lookForPersona's hash
+    // fallback and the creator's draft look) at the mesh family. The
+    // appealing-character pass points it back at "core", because that is
+    // where the redesign landed — limbs, sclera+iris eyes, brows, warm
+    // outline ink. Every generated look is a whole core family, never a
+    // mix...
     for (const unsigned seed : {1u, 7u, 42u, 12345u, 999999u}) {
         const CharacterLook look = randomizeLook(seed);
         std::string why;
@@ -93,24 +96,25 @@ TEST_CASE("default pool switches to quaternius; core stays loadable") {
         for (int c = 0; c < kPartCategoryCount; ++c) {
             const PartDef* part = findPart(look.partIds[c]);
             REQUIRE(part);
-            CHECK(part->styleTag == "quaternius");
+            CHECK(part->pack == "core");
         }
         CHECK(assembleLook(look).ok);
     }
 
-    // ...while a look stored before the switch still validates and
-    // assembles — defaults change, nothing breaks.
-    CharacterLook core;
-    core.part(PartCategory::Body) = "body_round";
-    core.part(PartCategory::Head) = "head_round";
-    core.part(PartCategory::Eyes) = "eyes_dot";
-    core.part(PartCategory::Hair) = "hair_tuft";
-    core.part(PartCategory::Mouth) = "mouth_smile";
-    core.paletteId = "warm";
+    // ...while a stored mesh-family look still validates and assembles —
+    // defaults change, nothing breaks. The creator's body row still reaches
+    // the whole catalog.
+    CharacterLook mesh;
+    mesh.part(PartCategory::Body) = "body_q_adventurer";
+    mesh.part(PartCategory::Head) = "head_q_adventurer";
+    mesh.part(PartCategory::Eyes) = "eyes_q_dot";
+    mesh.part(PartCategory::Hair) = "hair_q_baked";
+    mesh.part(PartCategory::Mouth) = "mouth_q_smile";
+    mesh.paletteId = "warm";
     std::string why;
     CAPTURE(why);
-    CHECK(lookIsValid(core, &why));
-    CHECK(assembleLook(core).ok);
+    CHECK(lookIsValid(mesh, &why));
+    CHECK(assembleLook(mesh).ok);
 }
 
 TEST_CASE("proportion window holds for the mesh family (or new values logged)") {

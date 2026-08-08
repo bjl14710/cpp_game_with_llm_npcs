@@ -55,6 +55,11 @@ struct PartPalette {
     unsigned char skin[3];
     unsigned char hair[3];
     unsigned char outfit[3];
+    // Trousers. A separate column rather than a tint of `outfit`: trousers
+    // in the outfit color read as a jumpsuit, and a derived tint comes out
+    // muddy across the twelve palettes. Three shared tones (denim, slate,
+    // clay) deliberately unify the street.
+    unsigned char pants[3];
     // Same pack seam as PartDef (aggregate-initialized rows without a pack
     // value default to "core" via this initializer).
     std::string pack = "core";
@@ -92,6 +97,29 @@ struct AssembledLook {
     std::vector<PlacedPart> parts; // assembly order: parents before children
     float height = 0.f;            // unscaled; contract scale = target / height
 };
+
+// The renderer draws a feature part (eyes, mouth) this fraction of its own
+// declared depth in FRONT of the socket it hangs on — drawPartRecipe's `fz`.
+// Named here, not buried in the recipe, because the socket contract and the
+// recipe have to agree about where a feature actually lands: authoring a
+// feature socket means reasoning about socket.z + depth * kFeatureZPush.
+inline constexpr float kFeatureZPush = 0.35f;
+
+// How far a flat mark (a mouth) is authored PAST the skull surface, so it
+// never z-fights with the skin it is drawn on.
+inline constexpr float kMarkStandoff = 0.010f;
+
+// How far forward the drawn skull's surface reaches at local height `y`,
+// measured from the head's own centre line. This is a CONTRACT on the
+// styleTag, not a survey of the recipes: a head tagged "blocky" is drawn as
+// a box, so its face is one flat plane at half its depth at every height; a
+// head tagged "round" is drawn as the ellipsoid whose semi-axes are half its
+// declared dims, so its surface RECEDES as a feature leaves the eye line —
+// which is exactly what makes an authored-once feature z wrong once the
+// feature moves. Adding a round head means honouring that contract in
+// drawPartRecipe. Mesh heads own their own geometry and get the bounding
+// plane, which is all this can honestly say about them.
+float skullSurfaceZ(const PartDef& head, float y);
 
 // The built-in catalogs (static data, stable addresses for the process).
 const std::vector<PartDef>& partCatalog();

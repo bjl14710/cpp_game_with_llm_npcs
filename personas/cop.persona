@@ -6,7 +6,7 @@ knowledge = Knows every corner of downtown, the shop owners by name, and the usu
 spot = police
 position = 0, -36
 facing = 0
-look = body_q_soldier, head_q_soldier, eyes_q_dot, hair_q_baked, mouth_q_line, slate
+look = body_block, head_block, eyes_visor, hair_cap, mouth_neutral, slate
 armed = true
 ---
 You stand watch in front of the station on the south side of downtown,
