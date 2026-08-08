@@ -25,12 +25,7 @@ namespace {
 // A four-person roster: enough that "victim != killer" is not trivially
 // satisfied and that a survivor set is non-empty.
 //
-// [[maybe_unused]] because every case that calls it is currently skipped, and
-// -Wunused-function is an error waiting to happen otherwise. Drop the attribute
-// once the generation cases are live. (First use of [[maybe_unused]] in this
-// codebase — the alternative, calling it from a live case, would mean asserting
-// against a stub and passing for the wrong reason.)
-[[maybe_unused]] std::vector<Persona> testRoster() {
+std::vector<Persona> testRoster() {
     std::vector<Persona> roster;
     for (const char* name : {"Marge Holloway", "Ray Okafor", "Yuki Tanaka",
                              "Officer Dana Brooks"}) {
@@ -53,47 +48,105 @@ LlmClient& idleClient() {
 
 // ---- generation: determinism --------------------------------------------
 
-TEST_CASE("the same roster and seed produce an identical setup" *
-          doctest::skip()) {
-    // TODO(mystery step 1): generate twice with seed 12345 and compare victim,
-    // killer, sceneZoneId, murderHour and bodyPosition. This is the property
-    // every other assertion in this file leans on — without it, "given seed X
-    // the victim is Y" cannot be written at all.
+TEST_CASE("the same roster and seed produce an identical setup") {
+    // The property every other assertion here leans on. Without it, "given
+    // seed X the victim is Y" cannot be written at all.
+    const MysterySetup a = generateMystery(testRoster(), 12345u);
+    const MysterySetup b = generateMystery(testRoster(), 12345u);
+
+    CHECK(a.victim == b.victim);
+    CHECK(a.killer == b.killer);
+    CHECK(a.sceneZoneId == b.sceneZoneId);
+    CHECK(a.murderHour == doctest::Approx(b.murderHour));
+    CHECK(a.bodyPosition.x == doctest::Approx(b.bodyPosition.x));
+    CHECK(a.bodyPosition.z == doctest::Approx(b.bodyPosition.z));
 }
 
-TEST_CASE("seed 0 produces a valid setup" * doctest::skip()) {
-    // TODO(mystery step 1): the xorshift gotcha. A generator seeded 0 stays 0
-    // forever, so the implementation must construct Rng{seed ? seed : 1u}.
-    // Seed 0 is legitimate caller input, so assert victim and killer are both
-    // non-empty here rather than documenting the constraint.
+TEST_CASE("a different seed produces a different setup") {
+    // Determinism without variation is a constant, which would satisfy the
+    // case above and be useless. This is the other half of the contract.
+    const MysterySetup a = generateMystery(testRoster(), 1u);
+    const MysterySetup b = generateMystery(testRoster(), 2u);
+
+    const bool differs = a.victim != b.victim || a.killer != b.killer ||
+                         a.sceneZoneId != b.sceneZoneId ||
+                         a.murderHour != b.murderHour;
+    CHECK(differs);
 }
 
-TEST_CASE("victim and killer are different roster members" * doctest::skip()) {
-    // TODO(mystery step 1): both names appear in the roster, and they differ.
-    // Run it over a spread of seeds — a single seed passing proves nothing
-    // about the pick, and victim == killer is the failure that would make the
-    // whole mystery incoherent rather than merely wrong.
+TEST_CASE("seed 0 produces a valid setup") {
+    // The xorshift gotcha: a generator seeded 0 stays 0 forever, so the
+    // implementation constructs Rng{seed ? seed : 1u}. Seed 0 is legitimate
+    // caller input, so this is asserted rather than documented.
+    const MysterySetup setup = generateMystery(testRoster(), 0u);
+
+    CHECK_FALSE(setup.victim.empty());
+    CHECK_FALSE(setup.killer.empty());
+    CHECK_FALSE(setup.sceneZoneId.empty());
+    CHECK(setup.victim != setup.killer);
 }
 
-TEST_CASE("a hundred seeds produce more than one victim" * doctest::skip()) {
-    // TODO(mystery step 1): guards against a generator that is deterministic
-    // AND constant, which would pass every case above. Collect victims across
-    // 100 seeds into a std::set and require size() > 1.
+TEST_CASE("victim and killer are different roster members") {
+    const std::vector<Persona> roster = testRoster();
+    std::set<std::string> names;
+    for (const Persona& p : roster) names.insert(p.name);
+
+    // A spread of seeds: one seed passing proves nothing about the pick, and
+    // victim == killer is the failure that makes the mystery incoherent rather
+    // than merely wrong.
+    for (unsigned seed = 0; seed < 200; ++seed) {
+        const MysterySetup setup = generateMystery(roster, seed);
+        CHECK(setup.victim != setup.killer);
+        CHECK(names.count(setup.victim) == 1);
+        CHECK(names.count(setup.killer) == 1);
+    }
 }
 
-TEST_CASE("a roster smaller than two fails rather than inventing a killer" *
-          doctest::skip()) {
-    // TODO(mystery step 1): a one-person roster cannot satisfy
-    // victim != killer. The setup comes back empty so match start can fail
-    // loudly; it must never make one person both the victim and the killer.
+TEST_CASE("a hundred seeds produce more than one victim") {
+    // Guards against a generator that is deterministic AND constant.
+    std::set<std::string> victims;
+    for (unsigned seed = 0; seed < 100; ++seed) {
+        victims.insert(generateMystery(testRoster(), seed).victim);
+    }
+    CHECK(victims.size() > 1);
+}
+
+TEST_CASE("a roster smaller than two fails rather than inventing a killer") {
+    const MysterySetup none = generateMystery({}, 7u);
+    CHECK(none.victim.empty());
+    CHECK(none.killer.empty());
+
+    std::vector<Persona> alone;
+    Persona solo;
+    solo.name = "Marge Holloway";
+    alone.push_back(solo);
+
+    const MysterySetup one = generateMystery(alone, 7u);
+    // Empty, so match start can fail loudly. Never one person as both.
+    CHECK(one.victim.empty());
+    CHECK(one.killer.empty());
 }
 
 // ---- generation: the scene ----------------------------------------------
 
-TEST_CASE("the body sits inside the scene zone" * doctest::skip()) {
-    // TODO(mystery step 1): zoneAt(bodyPosition.x, bodyPosition.z) equals
-    // setup.sceneZoneId. The scene zone and the body position are generated
-    // separately, so this is the case that catches them drifting apart.
+TEST_CASE("the body sits inside the scene zone") {
+    // The scene zone and the body position are generated separately, so this
+    // is the case that catches them drifting apart.
+    for (unsigned seed = 0; seed < 100; ++seed) {
+        const MysterySetup setup = generateMystery(testRoster(), seed);
+        CHECK(zoneAt(setup.bodyPosition.x, setup.bodyPosition.z) ==
+              setup.sceneZoneId);
+    }
+}
+
+TEST_CASE("the murder happened the night before the match") {
+    // Day one starts at 09:00 and the town already knows, so the murder hour
+    // sits in the previous evening and never wraps past midnight.
+    for (unsigned seed = 0; seed < 100; ++seed) {
+        const MysterySetup setup = generateMystery(testRoster(), seed);
+        CHECK(setup.murderHour >= 20.0);
+        CHECK(setup.murderHour < 24.0);
+    }
 }
 
 TEST_CASE("a colliding body position is moved clear of the map" *

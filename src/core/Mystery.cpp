@@ -5,12 +5,24 @@
 
 namespace llm_npc {
 
-// Scaffolded stubs (plan: opening-murder, steps 1-2). generateMystery returns
-// an empty setup, seeding writes nothing, and voteIsCorrect answers false for
-// everyone — so nothing calls this into a half-built state. Fill these in and
-// un-skip tests/test_mystery.cpp in the same commit.
+// generateMystery is implemented (plan: opening-murder, step 1). Seeding, the
+// vote check and the collision search are still stubs: they write nothing,
+// answer false for everyone, and move nothing, so nothing calls this into a
+// half-built state. Fill each in and un-skip its cases in
+// tests/test_mystery.cpp in the same commit.
 
 namespace {
+
+// The murder happens the night BEFORE the match, so the town already knows
+// when the players arrive and MatchClock's day one can start clean at 09:00.
+//
+// The band is [20:00, 24:00) and stops short of midnight deliberately. A window
+// that wrapped past 00:00 would make every downstream comparison ("was this
+// sighting before or after the murder?") a two-case problem for no narrative
+// gain, and clockLabel would render a time that reads as the morning OF the
+// match rather than the night before it.
+constexpr double kMurderHourStart = 20.0;
+constexpr double kMurderHourEnd = 24.0;
 
 // Deterministic, platform-stable, header-free — the same generator
 // CharacterParts.cpp uses for randomizeLook, and for the same reason: the
@@ -30,25 +42,67 @@ struct Rng {
     }
     // Uniform pick in [0, n).
     std::size_t pick(std::size_t n) { return n ? next() % n : 0; }
+
+    // A fraction in [0, 1) with 1/kUnitSteps granularity.
+    //
+    // Integer-then-divide rather than a direct cast of `next()`, because the
+    // integer stays exact on every platform and the single division that
+    // follows is IEEE-defined. That keeps the cross-platform determinism
+    // contract the whole struct exists for.
+    double unit() {
+        constexpr unsigned kUnitSteps = 100000u;
+        return static_cast<double>(next() % kUnitSteps) / kUnitSteps;
+    }
 };
 
 }  // namespace
 
 MysterySetup generateMystery(const std::vector<Persona>& roster, unsigned seed) {
-    (void)roster;
-    (void)seed;
-    // TODO(mystery step 1): construct `Rng rng{seed ? seed : 1u}`, pick a
-    // victim index, then pick a killer index from the remaining roster so
-    // victim != killer without a rejection loop. Pick sceneZoneId from
-    // zonesForDowntown(), murderHour from the evening band, and a
-    // bodyPosition inside that zone's bounds. Evidence and witness COUNTS are
-    // deliberately not decided here — the storyline templates own quantity,
-    // driven by their validator rather than guessed at this layer.
+    MysterySetup setup;
+
+    // Fewer than two people cannot produce victim != killer. Returning an empty
+    // setup lets match start fail loudly; making one person both would produce
+    // a match that runs and is incoherent, which is strictly worse.
+    if (roster.size() < 2) return setup;
+
+    Rng rng{seed ? seed : 1u};
+
+    const std::size_t victimIndex = rng.pick(roster.size());
+
+    // Pick the killer from the roster MINUS the victim: draw in [0, n-1) and
+    // step over the victim's slot. No rejection loop, so the number of rng
+    // draws does not depend on the seed — which matters, because every value
+    // drawn after this point would otherwise shift.
+    std::size_t killerIndex = rng.pick(roster.size() - 1);
+    if (killerIndex >= victimIndex) ++killerIndex;
+
+    setup.victim = roster[victimIndex].name;
+    setup.killer = roster[killerIndex].name;
+
+    const std::vector<ZoneDef>& zones = zonesForDowntown();
+    const ZoneDef& scene = zones[rng.pick(zones.size())];
+    setup.sceneZoneId = scene.id;
+
+    setup.murderHour =
+        kMurderHourStart + rng.unit() * (kMurderHourEnd - kMurderHourStart);
+
+    // Uniform inside the scene zone's half-open bounds. unit() is [0, 1), so
+    // the point is always strictly below max and zoneAt agrees with
+    // sceneZoneId — the two are generated separately and a test pins that they
+    // do not drift apart.
     //
-    // Roster smaller than 2 cannot produce victim != killer. Return an empty
-    // setup and let match start fail loudly; do NOT silently make one person
-    // both.
-    return {};
+    // This spot may well be inside a building: the nine zones ARE the downtown
+    // blocks, and blocks hold solid AABBs. Clearing it needs a City, which this
+    // function deliberately does not take, so match start calls
+    // placeBodyClearOfColliders afterwards.
+    setup.bodyPosition = {
+        scene.minX + static_cast<float>(rng.unit()) * (scene.maxX - scene.minX),
+        0.f,
+        scene.minZ + static_cast<float>(rng.unit()) * (scene.maxZ - scene.minZ)};
+
+    // Evidence and witnesses stay empty. Quantity belongs to the storyline
+    // templates and their validator, not to a number guessed at this layer.
+    return setup;
 }
 
 bool voteIsCorrect(const MysterySetup& setup, const std::string& accused) {
