@@ -2,6 +2,9 @@
 build/
 tests/build/
 
+# Python bytecode — running tools/*.py (eval_lines, refine_lines) drops these
+__pycache__/
+
 # Downloaded CC0 asset packs (tools/fetch_assets.sh recreates them;
 # assets/LICENSES.md stays tracked)
 assets/models/

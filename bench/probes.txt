@@ -1,0 +1,35 @@
+# Player lines for tools/bank_probe.cpp — "would the banks serve a real player?"
+#
+# Format: Speaker Name | player line     ('#' comments and blank lines ignored)
+# Speaker must equal the `persona` in banks/*.bank, i.e. Persona::name.
+#
+# RULE: never copy a phrasing from a trigger list. A probe that repeats a
+# trigger verbatim scores 1.0 and measures nothing. Write these the way a
+# player types — contractions, question marks, sloppy capitals — because that
+# is where a lexical matcher actually fails. Every miss found in real play
+# belongs here BEFORE the trigger that fixes it, so the fix stays measured.
+
+Marge Holloway | hello
+Marge Holloway | what do you sell?
+Marge Holloway | I'm lost
+Marge Holloway | what's good?
+Marge Holloway | good morning
+Theo Park | what's good here?
+Theo Park | can I get a coffee
+Theo Park | what are you working on?
+Officer Dana Brooks | is there any crime?
+Officer Dana Brooks | I'm lost
+Gus Romano | can I get ketchup
+Gus Romano | I'm hungry
+Ms. Adaeze Obi | recommend a book
+Ms. Adaeze Obi | I'm lost
+Benny "Strings" Malone | play a song
+Benny "Strings" Malone | do you take requests?
+Ray Okafor | can I get a ride
+Ray Okafor | what's the fastest way?
+Mr. Albert Whitfield | tell me about the city
+Mr. Albert Whitfield | did you teach?
+Yuki Tanaka | what should I see?
+Yuki Tanaka | are you lost?
+Hal Jensen | how do I fix it
+Hal Jensen | what do you sell?
