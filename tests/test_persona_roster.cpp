@@ -175,20 +175,40 @@ TEST_CASE("the core catalog can seat the current roster") {
                    " residents"));
 }
 
-TEST_CASE("the core catalog can seat twenty-one residents" * doctest::skip()) {
-    // FAILS TODAY, deliberately, and this case is how that is recorded.
+TEST_CASE("the core catalog can seat twenty-one residents") {
+    // Skipped and failing until issue #175. There were 12 valid silhouettes —
+    // 3 round bodies x 2 round heads plus 3 blocky bodies x 2 blocky heads —
+    // and the ten shipped residents already wore ten of them, so 21 distinct
+    // silhouettes was unreachable by any arrangement of the catalog.
     //
-    // There are 12 valid silhouettes: 3 round bodies x 2 round heads, plus
-    // 3 blocky bodies x 2 blocky heads. The current ten already use ten of
-    // them. Twenty-one distinct silhouettes is therefore not reachable —
-    // no arrangement of the existing catalog gets there.
-    //
-    // Minimum to unblock: 3 new core parts (one round body, one round head,
-    // one blocky head) gives 4x3 + 3x3 = 21 exactly. Four new parts (one body
-    // and one head per family) gives 24 and leaves room.
-    //
-    // Un-skip once those parts exist. See the comment on issue #173.
-    CHECK(validSilhouetteCount() >= 21);
+    // #175 added one body and one head per family: 4x3 + 4x3 = 24. Three parts
+    // would have hit 21 exactly; four were specified so the cast of #173 is not
+    // authored against a budget with zero slack.
+    const int valid = validSilhouetteCount();
+    CHECK_MESSAGE(valid >= 21, ("core catalog offers " + std::to_string(valid) +
+                                " valid silhouettes"));
+}
+
+TEST_CASE("neither style family can seat the cast alone") {
+    // The trap this milestone kept falling into: bodies x heads looks like the
+    // pool and is double it, because lookIsValid rejects a round/blocky mix.
+    // A future part added to only one family would raise the total above 21
+    // while leaving one family unable to hold its share — so count per family,
+    // not just overall.
+    int roundPairs = 0;
+    int blockyPairs = 0;
+    for (const llm_npc::PartDef* body : coreParts(llm_npc::PartCategory::Body)) {
+        for (const llm_npc::PartDef* head : coreParts(llm_npc::PartCategory::Head)) {
+            if (!llm_npc::styleCompatible(*body, *head)) continue;
+            if (body->styleTag == "round") ++roundPairs;
+            if (body->styleTag == "blocky") ++blockyPairs;
+        }
+    }
+    CHECK(roundPairs + blockyPairs == validSilhouetteCount());
+    // Neither family alone reaches 21, which is why a 21-strong cast has to be
+    // split across both. Both must be able to carry roughly half.
+    CHECK(roundPairs >= 11);
+    CHECK(blockyPairs >= 11);
 }
 
 TEST_CASE("no two residents share a body/head silhouette") {
