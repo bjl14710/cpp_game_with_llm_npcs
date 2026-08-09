@@ -10,6 +10,7 @@ constexpr const char* kTypeNames[] = {
     "JoinRequest",   "Welcome",   "PlayerInput",   "WorldSnapshot",
     "ChatOpen",      "ChatLine",  "ChatDelta",     "ChatReply",
     "NpcMoodUpdate", "NpcSpeechBubble", "Disconnect",
+    "SandboxMapSync",
 };
 constexpr int kTypeCount = static_cast<int>(sizeof(kTypeNames) / sizeof(kTypeNames[0]));
 

@@ -33,6 +33,15 @@ enum class MessageType {
     NpcMoodUpdate,   // server -> all: NPC i's mood changed (bystanders see expressions)
     NpcSpeechBubble, // server -> all: NPC i said something (bystanders see the bubble)
     Disconnect,      // either direction: goodbye with a reason
+    // Host built a map in sandbox mode and pushed it to everyone already
+    // connected (plan: retire-worldgen-sandbox-mode). Payload is the host's
+    // SandboxMap::toJson(); the client runs fromJson -> validateMap ->
+    // buildCity and swaps its city.
+    //
+    // APPEND ONLY, and it has to stay that way: kTypeNames indexes by enum
+    // value, so inserting anywhere but the end silently renames every type
+    // after it and two builds would disagree about what a frame means.
+    SandboxMapSync,
 };
 
 // Wire name of a message type ("JoinRequest", "WorldSnapshot", ...).
