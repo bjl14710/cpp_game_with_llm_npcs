@@ -181,6 +181,21 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
 // this scans a fixed lattice over the scene zone and takes the clear cell
 // nearest the original, so the body stays close to where generation meant it to
 // be. Deterministic and bounded, with the zone centre as a last resort.
+// Grants `agent` every piece of evidence sitting in `zoneId`, returning how
+// many were newly learned (0 when there is nothing there, or nothing new).
+//
+// This is the other half of seeding evidence with no knowers: the facts exist
+// on the bus from match start, and walking into the zone is what turns them
+// into knowledge. Idempotent — re-entering a zone grants nothing twice, so a
+// caller may fire it on every zone change without tracking what it already
+// gave out.
+//
+// Takes the zone rather than a position because zone membership is already
+// decided elsewhere (Zones.hpp's zoneAt, and the location log), and a second
+// place deciding "is the player at the bakery" is a second place to disagree.
+int discoverEvidenceInZone(WorldState& state, const MysterySetup& setup,
+                           const std::string& zoneId, const std::string& agent);
+
 void placeBodyClearOfColliders(MysterySetup& setup, const City& city);
 
 // Puts the setup's victim into NpcState::Dead via Npc::markDeadAtStart, so the
