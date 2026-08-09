@@ -102,6 +102,19 @@ const std::vector<PartDef>& partCatalog() {
          {{"head", {0.f, 1.82f, 0.f}}}},
         {"body_broad", PartCategory::Body, "blocky", {1.14f, 1.90f, 0.58f},
          {{"head", {0.f, 1.87f, 0.f}}}},
+        // Issue #175 added one body and one head per family, taking the core
+        // silhouette pool from 12 to 24. Twelve, not the naive 24, because
+        // lookIsValid rejects a round/blocky mix — the count is the SUM per
+        // family, not bodies x heads. Ten residents already wore ten of the
+        // twelve, so #173's cast of 21 was unreachable by any arrangement.
+        //
+        // Both new bodies extend an axis the family had not used: stout is the
+        // shortest round build, lanky the tallest and narrowest blocky one.
+        // Every head socket sits 0.03 under the box top, where the neck ends.
+        {"body_stout", PartCategory::Body, "round", {1.02f, 1.78f, 0.60f},
+         {{"head", {0.f, 1.75f, 0.f}}}},
+        {"body_lanky", PartCategory::Body, "blocky", {0.84f, 2.14f, 0.46f},
+         {{"head", {0.f, 2.11f, 0.f}}}},
         // Heads (declare where eyes, hair — and later mouths — sit on THEM).
         // A feature socket is the exact LINE the feature is drawn on, not
         // the corner of a box, so eyes.y IS the eye centre: ~46% of head
@@ -147,6 +160,28 @@ const std::vector<PartDef>& partCatalog() {
          {{"eyes", {0.f, 0.53f, 0.42f}},
           {"hair", {0.f, 1.10f, 0.f}},
           {"mouth", {0.f, 0.33f, 0.47f}}}},
+        // Issue #175's two new heads. Both are the WIDE-AND-SHORT end of their
+        // family — the axis neither family had — so they read as a different
+        // face rather than a rescale of a sibling.
+        //
+        // head_wide's mouth.z is DERIVED by the rule above, not authored:
+        //     surface = skullSurfaceZ(head, 0.26) = 0.4473
+        //     mouth.z = 0.4473 - 0.068 + 0.010   = 0.389
+        // Re-derive it if the mouth line ever moves, or it becomes a muzzle —
+        // that is exactly what happened to head_round and head_oval in #104.
+        // eyes.z is 0.815 of the surface at the eye line, matching its
+        // siblings: a sclera is a ball and needs a socket to sit in.
+        {"head_wide", PartCategory::Head, "round", {1.06f, 0.92f, 1.00f},
+         {{"eyes", {0.f, 0.42f, 0.406f}},
+          {"hair", {0.f, 0.83f, 0.f}},
+          {"mouth", {0.f, 0.26f, 0.392f}}}},  // derived — see head_round
+        // head_wedge follows the blocky rule instead: one flat plane, so the
+        // mark sits at dim.z * 0.5 and a mouth floating slightly off it still
+        // reads as painted on. Sinking it to the plane would z-fight.
+        {"head_wedge", PartCategory::Head, "blocky", {1.08f, 0.92f, 0.98f},
+         {{"eyes", {0.f, 0.42f, 0.434f}},
+          {"hair", {0.f, 0.87f, 0.f}},
+          {"mouth", {0.f, 0.26f, 0.49f}}}},
         // Eyes, sized against the grown heads (recipes split pupils by the
         // declared width; the visor renders its declared box).
         {"eyes_dot", PartCategory::Eyes, "any", {0.42f, 0.13f, 0.10f}, {}},

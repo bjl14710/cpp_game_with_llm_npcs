@@ -614,12 +614,30 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         } else if (part.id == "body_broad") {
             torsoR = 0.445f;
             hipR = 0.360f;
+        } else if (part.id == "body_stout") {
+            // Short and rounded: the widest hips in the round family, so the
+            // build reads from the silhouette and not just from height.
+            torsoR = 0.405f;
+            hipR = 0.400f;
+        } else if (part.id == "body_lanky") {
+            // The narrowest build in either family. Below body_slim's 0.335
+            // deliberately — lanky is the tall-and-thin blocky counterpart,
+            // and the two never appear on the same figure.
+            torsoR = 0.340f;
+            hipR = 0.286f;
         }
         drawFigure(torsoR, hipR);
     } else if (part.id == "head_round") {
         drawEllipsoidSkull();
         drawHeadFeatures(0.485f, 0.320f, 0.460f);
-    } else if (part.id == "head_block" || part.id == "head_tall") {
+    } else if (part.id == "head_wide") {
+        // Same ellipsoid recipe, a wider and shorter box. cheekZ and noseZ
+        // track the surface, which on a squatter skull sits further forward
+        // relative to its own depth than head_round's does.
+        drawEllipsoidSkull();
+        drawHeadFeatures(0.485f, 0.334f, 0.468f);
+    } else if (part.id == "head_block" || part.id == "head_tall" ||
+               part.id == "head_wedge") {
         // The blocky family keeps its box skull; ears, cheeks and a nose
         // are what turn it from a crate into a face. A flat face puts its
         // surface further forward than a round one, hence the larger z.
