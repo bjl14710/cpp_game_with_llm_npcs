@@ -41,6 +41,7 @@ add_library(llm_npc_core STATIC
     src/core/Mystery.cpp
     src/core/PieceCatalog.cpp
     src/core/RatingLog.cpp
+    src/core/Role.cpp
     src/core/SandboxMap.cpp
     src/core/Storyline.cpp
     src/core/TopicMatcher.cpp
