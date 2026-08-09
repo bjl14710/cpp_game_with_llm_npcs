@@ -273,50 +273,161 @@ TEST_CASE("an empty role list resolves nothing rather than crashing") {
 
 // ---- rendering and placement (step 2) -------------------------------------
 
-TEST_CASE("a persona with no role renders byte-identically to today" *
-          doctest::skip()) {
-    // TODO(role step 2): THE REGRESSION GUARD. Every existing persona is
-    // role-less, so this is what says the feature is invisible until used.
-    // Compare renderSystemPrompt output with and without the role parameter,
-    // as exact strings — not a substring check.
+namespace {
+
+// A persona with a trait, so the assembly order has every position filled.
+Persona rolePersona(TraitDef& grumpy) {
+    grumpy.id = "grumpy";
+    grumpy.name = "Grumpy";
+    grumpy.behaviorRules = {"Complain briefly before helping."};
+    grumpy.examples = {{"Good morning!", "It's a day. What do you want?"}};
+
+    Persona p;
+    p.name = "Marge Holloway";
+    p.role = "bakery owner";
+    p.traitIds = {"grumpy"};
+    return p;
 }
 
-TEST_CASE("the role block renders after trait reinforcement and before ACTIONS" *
-          doctest::skip()) {
-    // TODO(role step 2): placement is the whole design and it is MEASURED, not
-    // argued — with the block before "Stay in character", the killer emitted
-    // [[ACTION: call_police]] on three of five turns.
-    //
-    // Assert on find() offsets: reinforcement < role block < "ACTIONS: ".
+}  // namespace
+
+TEST_CASE("a persona with no role renders byte-identically to today") {
+    // THE REGRESSION GUARD. Every existing persona is role-less, so this is
+    // what says the feature is invisible until it is used. Exact strings, not
+    // a substring check.
+    TraitDef grumpy;
+    const Persona p = rolePersona(grumpy);
+    const std::vector<const TraitDef*> traits{&grumpy};
+
+    CHECK(p.renderSystemPrompt("mem", "gos", traits) ==
+          p.renderSystemPrompt("mem", "gos", traits, ""));
+    CHECK(p.renderSystemPrompt("", "", traits) ==
+          p.renderSystemPrompt("", "", traits, ""));
+    // And with no traits either — the wholly bare path.
+    CHECK(p.renderSystemPrompt("", "", {}) ==
+          p.renderSystemPrompt("", "", {}, ""));
+}
+
+TEST_CASE("the role block renders after trait reinforcement and before ACTIONS") {
+    // Placement is the whole design and it is MEASURED: with the block placed
+    // earlier, a killer emitted [[ACTION: call_police]] on three of five turns.
     // Ordering, not presence, is the contract.
+    TraitDef grumpy;
+    const Persona p = rolePersona(grumpy);
+    const std::vector<const TraitDef*> traits{&grumpy};
+
+    const auto dir = tempDir("placement");
+    writeFile(dir / "killer.role", kKillerRole);
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    REQUIRE(roles.size() == 1);
+    const std::string block = renderRoleBlock(&roles[0], "You were at the mill.");
+
+    const std::string prompt = p.renderSystemPrompt("mem", "gos", traits, block);
+
+    const auto rules = prompt.find("Complain briefly before helping.");
+    const auto memory = prompt.find("What you remember from earlier meetings");
+    const auto reinforcement = prompt.find("No matter what the conversation");
+    const auto role = prompt.find("In this story you are Killer");
+    const auto actions = prompt.find("ACTIONS: ");
+
+    REQUIRE(rules != std::string::npos);
+    REQUIRE(memory != std::string::npos);
+    REQUIRE(reinforcement != std::string::npos);
+    REQUIRE(role != std::string::npos);
+    REQUIRE(actions != std::string::npos);
+
+    CHECK(rules < memory);
+    CHECK(memory < reinforcement);
+    CHECK(reinforcement < role);   // the new position
+    CHECK(role < actions);         // and it never displaces the protocol
 }
 
-TEST_CASE("every existing anti-drift assertion still passes with a role" *
-          doctest::skip()) {
-    // TODO(role step 2): the existing order — identity < trait rules+examples
-    // < memory < trait reinforcement < action protocol — is a tested contract
-    // in test_traits.cpp. Adding a role EXTENDS it with one more position and
-    // relaxes nothing.
+TEST_CASE("every existing anti-drift assertion still passes with a role") {
+    // test_traits.cpp pins identity < rules < examples < memory <
+    // reinforcement < ACTIONS. Adding a role EXTENDS that with one more
+    // position and relaxes nothing — this re-asserts the whole original chain
+    // with a role block present.
+    TraitDef grumpy;
+    const Persona p = rolePersona(grumpy);
+    const std::vector<const TraitDef*> traits{&grumpy};
+
+    const auto dir = tempDir("antidrift");
+    writeFile(dir / "killer.role", kKillerRole);
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    const std::string prompt =
+        p.renderSystemPrompt("mem", "gos", traits, renderRoleBlock(&roles[0], "s"));
+
+    const auto identity = prompt.find("You are Marge Holloway");
+    const auto rules = prompt.find("Complain briefly before helping.");
+    const auto examples = prompt.find("It's a day. What do you want?");
+    const auto memory = prompt.find("What you remember from earlier meetings");
+    const auto reinforcement = prompt.find("No matter what the conversation");
+    const auto actions = prompt.find("ACTIONS: ");
+
+    CHECK(identity < rules);
+    CHECK(rules < examples);
+    CHECK(examples < memory);
+    CHECK(memory < reinforcement);
+    CHECK(reinforcement < actions);
 }
 
-TEST_CASE("a long memory cannot push the role block off the end" *
-          doctest::skip()) {
-    // TODO(role step 2): the role sits after memory precisely so a long
-    // remembered history cannot dilute it. Render with a very long memory
-    // summary and check the ordering above still holds.
+TEST_CASE("a long memory cannot push the role block off the end") {
+    // The role sits after memory precisely so a long remembered history cannot
+    // dilute it. This is the same failure mode trait reinforcement was placed
+    // to avoid.
+    TraitDef grumpy;
+    const Persona p = rolePersona(grumpy);
+    const std::vector<const TraitDef*> traits{&grumpy};
+
+    const auto dir = tempDir("longmem");
+    writeFile(dir / "killer.role", kKillerRole);
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    const std::string block = renderRoleBlock(&roles[0], "You were at the mill.");
+
+    const std::string huge(20000, 'x');
+    const std::string prompt = p.renderSystemPrompt(huge, "gos", traits, block);
+
+    const auto memory = prompt.find(huge);
+    const auto role = prompt.find("In this story you are Killer");
+    const auto actions = prompt.find("ACTIONS: ");
+    REQUIRE(role != std::string::npos);
+    CHECK(memory < role);
+    CHECK(role < actions);
 }
 
-TEST_CASE("the role id and the raw secret never appear verbatim" *
-          doctest::skip()) {
-    // TODO(role step 2): an acceptance criterion, and the one that keeps a
-    // debug string from becoming a tell. The rendered prompt may describe the
-    // secret in prose; it must not contain the role ID as a bare token the
-    // model could echo back.
+TEST_CASE("the role id never reaches the rendered prompt") {
+    // An acceptance criterion, and the one that keeps a debug string from
+    // becoming a tell. The prompt carries the secret as prose the NPC believes;
+    // it must not carry "killer" as a bare key the model could echo back.
+    TraitDef grumpy;
+    const Persona p = rolePersona(grumpy);
+    const std::vector<const TraitDef*> traits{&grumpy};
+
+    const auto dir = tempDir("noidprompt");
+    writeFile(dir / "killer.role", kKillerRole);
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    const std::string prompt = p.renderSystemPrompt(
+        "mem", "gos", traits, renderRoleBlock(&roles[0], "You were at the mill."));
+
+    CHECK(prompt.find("killer") == std::string::npos);
 }
 
-TEST_CASE("an empty secret still renders a usable role block" *
-          doctest::skip()) {
-    // TODO(role step 2): bystander has no secret. The block must still carry
-    // the demeanour, or the honest baseline is the one character with no
-    // instruction to stay warm.
+TEST_CASE("a role with no traits still lands before ACTIONS") {
+    // A cast NPC with no structured traits is a real case — most personas
+    // carry free-text traits only. The insertion point must not depend on
+    // renderTraitBlock having produced anything.
+    Persona p;
+    p.name = "Gus Pike";
+    p.role = "hot-dog vendor";
+
+    const auto dir = tempDir("notraits");
+    writeFile(dir / "killer.role", kKillerRole);
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    const std::string prompt =
+        p.renderSystemPrompt("", "", {}, renderRoleBlock(&roles[0], ""));
+
+    const auto role = prompt.find("In this story you are Killer");
+    const auto actions = prompt.find("ACTIONS: ");
+    REQUIRE(role != std::string::npos);
+    CHECK(role < actions);
 }

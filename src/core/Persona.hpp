@@ -51,6 +51,36 @@ struct Persona {
     std::string renderSystemPrompt(const std::string& memory,
                                    const std::string& gossip,
                                    const std::vector<const TraitDef*>& traitDefs) const {
+        return renderSystemPrompt(memory, gossip, traitDefs, "");
+    }
+
+    // Full assembly plus this match's STORYLINE ROLE (plan: role-layer).
+    //
+    // `roleBlock` comes from renderRoleBlock() and is empty for every NPC that
+    // has not been cast — which is all of them outside a detective match, so an
+    // empty block must render byte-identically to the overload above. A test
+    // compares the two as exact strings.
+    //
+    // PLACEMENT IS THE WHOLE DESIGN, and it is measured rather than argued. The
+    // role block goes LAST inside the inserted section: after trait
+    // reinforcement, immediately before "ACTIONS: ". Three reasons:
+    //
+    //   - MEASURED: with the block placed earlier — before "Stay in character" —
+    //     a killer emitted [[ACTION: call_police]] on three of five
+    //     interrogation turns against qwen3:8b. A murderer summoning the police
+    //     is both a bug and a second tell. Late placement produced none.
+    //   - It is a directive, and small models weight trailing instructions most
+    //     (the same reasoning that puts the action protocol last).
+    //   - It must survive memory dilution, for the same reason trait
+    //     reinforcement does.
+    //
+    // It must NOT go after "ACTIONS: ". Those contracts are pinned by
+    // test_npc_action.cpp and stay last; this extends the assembly order with
+    // one more position and relaxes nothing.
+    std::string renderSystemPrompt(const std::string& memory,
+                                   const std::string& gossip,
+                                   const std::vector<const TraitDef*>& traitDefs,
+                                   const std::string& roleBlock) const {
         std::string prompt = renderSystemPrompt();
         std::string section = renderTraitBlock(traitDefs);
         if (!memory.empty()) {
@@ -62,6 +92,7 @@ struct Persona {
                        "relevant): " + gossip + "\n";
         }
         section += renderTraitReinforcement(traitDefs);
+        section += roleBlock;  // last in the section — see the comment above
         if (section.empty()) return prompt;
         const auto at = prompt.find("ACTIONS: ");
         if (at == std::string::npos) return prompt + section;
