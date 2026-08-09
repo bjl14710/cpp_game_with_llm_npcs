@@ -29,6 +29,7 @@ add_library(llm_npc_core STATIC
     src/core/City.cpp
     src/core/Config.cpp
     src/core/ConversationStore.cpp
+    src/core/Cutscene.cpp
     src/core/DialogueSession.cpp
     src/core/FactStore.cpp
     src/core/Gossip.cpp

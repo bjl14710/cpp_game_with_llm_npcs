@@ -28,6 +28,7 @@
 #include "CombatEvents.hpp"
 #include "Config.hpp"
 #include "ConversationStore.hpp"
+#include "Cutscene.hpp"
 #include "DialogUI.hpp"
 #include "FactStore.hpp"
 #include "Gossip.hpp"
@@ -82,7 +83,11 @@ constexpr float kPreviewKeyDegPerSec  = 90.f;   // Left/Right key rotation speed
 constexpr float kJailSeconds = 10.f;
 
 // What the main loop is currently showing.
-enum class AppMode { Playing, Dialogue, Menu, Dead, SandboxEdit };
+// Every mode here needs its own branch in the 2D overlay chain near the bottom
+// of the frame. SandboxEdit had none and fell through to menu.render(), which
+// drew the whole paused menu over the map editor (#215). A branch that draws
+// nothing is still a branch.
+enum class AppMode { Playing, Dialogue, Menu, Dead, SandboxEdit, Cutscene };
 
 // First-person pose; position is the FEET on the ground plane (y = 0).
 struct LocalPlayer {
@@ -198,18 +203,31 @@ int main(int argc, char** argv) {
     // which a headless --frames capture cannot do — so the editor had no
     // visual-QA path at all, which is how the menu-overlay bug survived.
     bool bootSandboxEdit = false;
+    // --cutscene <id>: boot straight into a named cutscene, with playback on a
+    // fixed timestep so frame N always lands at the same moment in the scene.
+    // Wall-clock playback would produce a different image on every machine and
+    // the captures would be worthless as a regression signal.
+    const char* bootCutscene = nullptr;
     // --mystery [seed]: generate a murder, cast an authored storyline onto the
     // roster and seed the resulting knowledge. Every piece of this existed and
     // nothing called any of it — src/app/ referenced none of the mystery layer,
     // so the mode was unreachable from the game (issue #220).
     bool bootMystery = false;
     unsigned mysterySeed = 20260809u;
+    int arg = 1;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
-        int arg = 3;
+        arg = 3;
         if (arg < argc && argv[arg][0] != '-') {
             screenshotPath = argv[arg++];
         }
+    }
+    // The scan runs whether or not --frames led, so every flag below works on
+    // its own. It used to sit INSIDE the --frames branch, which meant
+    // `--mystery 7`, `--cutscene opening` and `--sandbox-edit` silently did
+    // nothing unless a smoke-run prefix happened to be present — the flags
+    // were reachable only from the harness that had never needed them.
+    {
         while (arg < argc) {
             if (arg + 3 < argc && std::strcmp(argv[arg], "--camera") == 0) {
                 cameraOverride = true;
@@ -223,11 +241,16 @@ int main(int argc, char** argv) {
             } else if (std::strcmp(argv[arg], "--sandbox-edit") == 0) {
                 bootSandboxEdit = true;
                 arg += 1;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--cutscene") == 0) {
+                bootCutscene = argv[arg + 1];
+                arg += 2;
             } else if (std::strcmp(argv[arg], "--mystery") == 0) {
                 bootMystery = true;
                 arg += 1;
                 // Optional seed; a bare --mystery keeps the default so the
-                // flag is usable without one.
+                // flag is usable without one. The leading-dash check is what
+                // makes `--mystery --cutscene opening` parse correctly rather
+                // than swallowing the next flag as a seed.
                 if (arg < argc && argv[arg][0] != '-') {
                     mysterySeed = static_cast<unsigned>(
                         std::strtoul(argv[arg], nullptr, 10));
@@ -282,6 +305,16 @@ int main(int argc, char** argv) {
         std::cerr << "[llm_npc] trait error: " << err << "\n";
     }
     std::cerr << "[llm_npc] loaded " << traitLibrary.size() << " traits\n";
+
+    // Scripted camera sequences (issue #227). Degrades to inert: a missing
+    // cutscenes/ directory leaves the game entirely playable, and a cutscene
+    // that fails to load must never block a phase transition.
+    std::vector<std::string> cutsceneErrors;
+    const std::vector<CutsceneDef> cutsceneLibrary =
+        loadCutscenes(projectRoot / "cutscenes", &cutsceneErrors);
+    for (const auto& err : cutsceneErrors) {
+        std::cerr << "[llm_npc] cutscene error: " << err << "\n";
+    }
     // ONE look per NPC, index-aligned with world.npcs(). Every NPC —
     // designer persona or player-created — draws from the same shared
     // composite parts pool the creator picks from (plan:
@@ -471,6 +504,28 @@ int main(int argc, char** argv) {
 
     AppMode mode = AppMode::Playing;
     LocalPlayer player;
+    // Scripted camera playback. Pure core type: it owns no raylib and draws
+    // nothing — this layer reads pose() and hands it to beginFrame, then draws
+    // bars, fade and caption as 2D.
+    CutscenePlayer cutscene;
+    // Where the player was standing when playback started, restored on exit so
+    // a cutscene never teleports anyone.
+    LocalPlayer preCutscenePlayer;
+    AppMode preCutsceneMode = AppMode::Playing;
+    // Starts `scene` and takes over the camera. Copies the def, so a generated
+    // cutscene may be a temporary at the call site.
+    const auto playCutscene = [&](const CutsceneDef& scene) {
+        if (cutscene.active()) return;
+        preCutscenePlayer = player;
+        preCutsceneMode = (mode == AppMode::Cutscene) ? AppMode::Playing : mode;
+        cutscene.play(scene, CameraPose{Vec3{player.position.x,
+                                             player.position.y + kEyeHeight,
+                                             player.position.z},
+                                        player.yawDeg, player.pitchDeg});
+        if (!cutscene.active()) return;  // refused: no beats, or already playing
+        mode = AppMode::Cutscene;
+        EnableCursor();
+    };
     // Vertical motion state for jumping; position.y is the feet height and
     // everything downstream (camera, gun muzzle, net pose) derives from it.
     float playerVerticalSpeed = 0.f;
@@ -586,6 +641,16 @@ int main(int argc, char** argv) {
     // onto the fact bus through seedMysteryFacts, which commits nothing that
     // names the killer as the killer.
     MysterySetup mysterySetup;
+    if (bootMystery && mapFile != nullptr) {
+        // They do not compose, and the failure is silent rather than loud:
+        // --map loads its city and respawns its NPCs further down, AFTER this
+        // runs, so the victim would be seeded dead and then replaced by a
+        // living map NPC while the facts stayed on the bus. A mystery whose
+        // victim is walking around is not a mystery.
+        std::cerr << "[llm_npc] --mystery ignored: --map replaces the roster "
+                     "this mystery would be cast onto\n";
+        bootMystery = false;
+    }
     if (bootMystery) {
         // Cast onto who is actually in the world, not onto the persona files.
         // A template citing a resident who never spawned is a clue that can
@@ -958,6 +1023,20 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --cutscene <id>: boot straight into a scene so it has a visual-QA path.
+    // Fixed-step playback pins frame N to the same moment every run, which is
+    // the only reason a capture can serve as a regression signal.
+    if (bootCutscene != nullptr) {
+        const CutsceneDef* scene = findCutscene(cutsceneLibrary, bootCutscene);
+        if (scene == nullptr) {
+            std::cerr << "[llm_npc] --cutscene: no cutscene named \""
+                      << bootCutscene << "\" in cutscenes/\n";
+        } else {
+            cutscene.setFixedStep(true);
+            playCutscene(*scene);
+        }
+    }
+
     // Journal: a pure read of the shared fact store — what the player was
     // personally told, grouped by subject, conflicts pre-flagged by core.
     Menu::JournalHooks journalHooks;
@@ -1004,7 +1083,26 @@ int main(int argc, char** argv) {
         const bool joined = netClient != nullptr;  // connected, per the check above
 
         // ---- input ----
-        if (mode == AppMode::Playing) {
+        if (mode == AppMode::Cutscene) {
+            // Playback owns the camera and swallows everything else. Only skip
+            // is reachable, and only when the scene allows it.
+            if (!smokeRun && (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_ENTER) ||
+                              IsKeyPressed(KEY_ESCAPE))) {
+                cutscene.skip();
+            }
+            if (!cutscene.advance(dt)) {
+                // Restore everything playback took: the pose, the mode and the
+                // cursor. A cutscene that leaves the camera moved, the mouse
+                // swallowed or a mode stuck is worse than one that never ran.
+                player = preCutscenePlayer;
+                mode = preCutsceneMode;
+                if (mode == AppMode::Playing || mode == AppMode::Dialogue) {
+                    DisableCursor();
+                } else {
+                    EnableCursor();
+                }
+            }
+        } else if (mode == AppMode::Playing) {
             if (IsWindowFocused() && !smokeRun) applyMouseLook(player);
             if (sandboxActive && IsKeyPressed(KEY_P)) {
                 // Back from play-testing to the editor: clear the live
@@ -1852,7 +1950,15 @@ int main(int argc, char** argv) {
         renderer.setTimeOfDay(worldHour);  // sky, fog, light: one clock
         ClearBackground(renderer.skyColor());
         const bool sandboxEditing = (mode == AppMode::SandboxEdit);
-        if (sandboxEditing) {
+        const bool cutscenePlaying = (mode == AppMode::Cutscene);
+        if (cutscenePlaying) {
+            // Authored poses are eye-space; beginFrame adds kEyeHeight, so
+            // subtract it and the shot lands where the author framed it.
+            const CameraPose shot = cutscene.pose();
+            renderer.beginFrame(CameraPose{
+                Vec3{shot.position.x, shot.position.y - kEyeHeight, shot.position.z},
+                shot.yawDeg, shot.pitchDeg});
+        } else if (sandboxEditing) {
             // High tilted vantage over the pan target; beginFrame adds eye
             // height, so hand it the zoom height minus that.
             renderer.beginFrame(CameraPose{
@@ -2012,7 +2118,11 @@ int main(int argc, char** argv) {
                                             previewYaw, false, 0.f);
         }
         previewWasOpen = previewOpen;
-        if (!joined && mode != AppMode::Dead && !sandboxEditing) {
+        // No viewmodel during a cutscene: the camera is not the player's
+        // eyes any more, so a floating gun in the corner of an
+        // establishing shot reads as a rendering bug.
+        if (!joined && mode != AppMode::Dead && !sandboxEditing &&
+            !cutscenePlaying) {
             renderer.drawViewmodel(static_cast<int>(world.player().weapon),
                                    world.player().attackAnimFraction);
         }
@@ -2047,7 +2157,12 @@ int main(int argc, char** argv) {
                 18, 14.f);
         }
         // Nameplates from whichever pose source is authoritative right now.
+        //
+        // Suppressed during a cutscene, and not only for looks: the opening
+        // scene is required never to identify a living NPC, and a nameplate
+        // drifting into an establishing shot would name one outright.
         const auto plateFor = [&](const Vec3& feet, const std::string& name, Color color) {
+            if (cutscenePlaying) return;
             if (distanceXZ(player.position, feet) > kNameplateRange) return;
             Vector2 screen;
             if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
@@ -2130,6 +2245,44 @@ int main(int argc, char** argv) {
         } else if (mode == AppMode::Dialogue) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
             dialog.render();
+        } else if (mode == AppMode::Cutscene) {
+            // Letterbox, fade and caption — the whole visual vocabulary. There
+            // is no post-processing chain, so a fade is a rectangle with alpha
+            // and bars are two more. Deliberately: dissolves and colour grading
+            // are out of scope and adding them means a renderer change, which
+            // this feature is specifically built to avoid.
+            const int w = GetScreenWidth();
+            const int h = GetScreenHeight();
+            const int bars = cutscene.letterboxPx();
+            if (bars > 0) {
+                DrawRectangle(0, 0, w, bars, BLACK);
+                DrawRectangle(0, h - bars, w, bars, BLACK);
+            }
+            const float alpha = cutscene.fadeAlpha();
+            if (alpha > 0.f) {
+                // Named colours only; a cutscene file is content, not code, and
+                // an unknown name falling back to black is the safe default.
+                const std::string& tint = cutscene.fadeColour();
+                Color fade = BLACK;
+                if (tint == "white") fade = RAYWHITE;
+                else if (tint == "grey" || tint == "gray") fade = Color{90, 90, 96, 255};
+                fade.a = static_cast<unsigned char>(255.f * alpha);
+                DrawRectangle(0, 0, w, h, fade);
+            }
+            const std::string& line = cutscene.caption();
+            if (!line.empty()) {
+                // Size 20 off the usable ladder: the built-in bitmap font
+                // computes glyph spacing with integer division, so 14 through
+                // 18 space identically and only ~10 / 20 / 30 visibly differ.
+                const int size = 20;
+                const int tw = MeasureText(line.c_str(), size);
+                DrawText(line.c_str(), (w - tw) / 2, h - bars - size - 18, size,
+                         RAYWHITE);
+            }
+            if (cutscene.canSkip()) {
+                DrawText("Space to skip", 24, h - bars - 26, 10,
+                         Color{200, 200, 200, 180});
+            }
         } else if (mode == AppMode::SandboxEdit) {
             // Draw NOTHING here, and that is the whole fix.
             //
