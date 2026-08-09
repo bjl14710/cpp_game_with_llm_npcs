@@ -231,9 +231,12 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
         const bool selfTestimony = witness.about == witness.agent;
         seen.content = clampContent(
             selfTestimony
+                // ASCII only. Fact content is rendered with raylib's built-in
+                // bitmap font, which has no glyph outside ASCII 32-126 — an
+                // em-dash here reaches the Journal as a literal "?".
                 ? witness.agent + " says they were at " +
                       zoneName(witness.sawZoneId) + " around " +
-                      clockLabel(witness.atHour * 3600.0) + " — " +
+                      clockLabel(witness.atHour * 3600.0) + ", " +
                       witness.observed + "."
                 : witness.agent + " saw " + witness.observed + " at " +
                       zoneName(witness.sawZoneId) + " around " +
