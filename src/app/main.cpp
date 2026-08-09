@@ -586,8 +586,6 @@ int main(int argc, char** argv) {
     // onto the fact bus through seedMysteryFacts, which commits nothing that
     // names the killer as the killer.
     MysterySetup mysterySetup;
-    StorylineCast mysteryCast;
-    bool mysteryActive = false;
     if (bootMystery) {
         // Cast onto who is actually in the world, not onto the persona files.
         // A template citing a resident who never spawned is a clue that can
@@ -631,7 +629,7 @@ int main(int argc, char** argv) {
                 *usable[mysterySeed % usable.size()];
 
             mysterySetup = generateMystery(living, mysterySeed);
-            mysteryCast = castStoryline(chosen, living, mysterySetup, mysterySeed);
+            castStoryline(chosen, living, mysterySetup, mysterySeed);
             placeBodyClearOfColliders(mysterySetup, world.city());
             startVictimDead(world.npcs(), mysterySetup);
             seedMysteryFacts(world.state(), mysterySetup, living);
@@ -649,7 +647,6 @@ int main(int argc, char** argv) {
             // grants it to the player -> the Journal shows it, flagged against
             // any account that contradicts it.
             for (Npc& npc : world.npcs()) refreshGossip(npc);
-            mysteryActive = true;
 
             // The victim and the scene are public knowledge the moment a body
             // is found, so naming them here leaks nothing. The killer is not
@@ -664,8 +661,6 @@ int main(int argc, char** argv) {
                       << mysterySetup.evidence.size() << " clues\n";
         }
     }
-    (void)mysteryCast;   // consumed by the role layer (#199) and the vote (#221)
-    (void)mysteryActive;
 
     // Character creator: persists BOTH records (independently) and spawns
     // the new citizen immediately. Declared after the per-NPC bookkeeping
