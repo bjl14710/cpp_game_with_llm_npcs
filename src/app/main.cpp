@@ -34,6 +34,8 @@
 #include "Gossip.hpp"
 #include "GroupSession.hpp"
 #include "Journal.hpp"
+#include "Mystery.hpp"
+#include "Storyline.hpp"
 #include "DialogueSession.hpp"
 #include "HostChatRouter.hpp"
 #include "InputMap.hpp"
@@ -51,6 +53,7 @@
 #include "SandboxMap.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
+#include "Zones.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -205,12 +208,26 @@ int main(int argc, char** argv) {
     // Wall-clock playback would produce a different image on every machine and
     // the captures would be worthless as a regression signal.
     const char* bootCutscene = nullptr;
+    // --mystery [seed]: generate a murder, cast an authored storyline onto the
+    // roster and seed the resulting knowledge. Every piece of this existed and
+    // nothing called any of it — src/app/ referenced none of the mystery layer,
+    // so the mode was unreachable from the game (issue #220).
+    bool bootMystery = false;
+    unsigned mysterySeed = 20260809u;
+    int arg = 1;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
-        int arg = 3;
+        arg = 3;
         if (arg < argc && argv[arg][0] != '-') {
             screenshotPath = argv[arg++];
         }
+    }
+    // The scan runs whether or not --frames led, so every flag below works on
+    // its own. It used to sit INSIDE the --frames branch, which meant
+    // `--mystery 7`, `--cutscene opening` and `--sandbox-edit` silently did
+    // nothing unless a smoke-run prefix happened to be present — the flags
+    // were reachable only from the harness that had never needed them.
+    {
         while (arg < argc) {
             if (arg + 3 < argc && std::strcmp(argv[arg], "--camera") == 0) {
                 cameraOverride = true;
@@ -227,6 +244,18 @@ int main(int argc, char** argv) {
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--cutscene") == 0) {
                 bootCutscene = argv[arg + 1];
                 arg += 2;
+            } else if (std::strcmp(argv[arg], "--mystery") == 0) {
+                bootMystery = true;
+                arg += 1;
+                // Optional seed; a bare --mystery keeps the default so the
+                // flag is usable without one. The leading-dash check is what
+                // makes `--mystery --cutscene opening` parse correctly rather
+                // than swallowing the next flag as a seed.
+                if (arg < argc && argv[arg][0] != '-') {
+                    mysterySeed = static_cast<unsigned>(
+                        std::strtoul(argv[arg], nullptr, 10));
+                    arg += 1;
+                }
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--map") == 0) {
                 // Boot straight into a sandbox map fixture (headless smoke
                 // shots for placed pieces; the in-game entry is the menu).
@@ -603,6 +632,100 @@ int main(int argc, char** argv) {
         spawnTownRoster();
     }
     resetNpcSideArrays();
+
+    // ---- the mystery (issue #220) ----
+    //
+    // HOST-ONLY GROUND TRUTH. `mysterySetup` is the answer sheet: never written
+    // to WorldState, never serialized, never rendered. The only sanctioned read
+    // of the killer is voteIsCorrect. Everything a player can ever learn goes
+    // onto the fact bus through seedMysteryFacts, which commits nothing that
+    // names the killer as the killer.
+    MysterySetup mysterySetup;
+    if (bootMystery && mapFile != nullptr) {
+        // They do not compose, and the failure is silent rather than loud:
+        // --map loads its city and respawns its NPCs further down, AFTER this
+        // runs, so the victim would be seeded dead and then replaced by a
+        // living map NPC while the facts stayed on the bus. A mystery whose
+        // victim is walking around is not a mystery.
+        std::cerr << "[llm_npc] --mystery ignored: --map replaces the roster "
+                     "this mystery would be cast onto\n";
+        bootMystery = false;
+    }
+    if (bootMystery) {
+        // Cast onto who is actually in the world, not onto the persona files.
+        // A template citing a resident who never spawned is a clue that can
+        // never resolve.
+        std::vector<Persona> living;
+        living.reserve(world.npcs().size());
+        for (const Npc& npc : world.npcs()) living.push_back(npc.persona());
+
+        std::vector<std::string> storylineErrors;
+        const std::vector<StorylineDef> storylines =
+            loadStorylines(projectRoot / "storylines", &storylineErrors);
+        for (const auto& err : storylineErrors) {
+            std::cerr << "[llm_npc] storyline error: " << err << "\n";
+        }
+
+        // FAIL CLOSED. A template with any structural error is not offered to
+        // the generator: half a mystery is worse than none, because a player
+        // cannot tell the difference between an unsolvable case and a hard one.
+        std::vector<const StorylineDef*> usable;
+        for (const StorylineDef& story : storylines) {
+            const auto problems =
+                validateStoryline(story, static_cast<int>(living.size()));
+            if (problems.empty()) {
+                usable.push_back(&story);
+                continue;
+            }
+            std::cerr << "[llm_npc] storyline \"" << story.id
+                      << "\" rejected (" << problems.size() << " problems):\n";
+            for (const StorylineError& problem : problems) {
+                std::cerr << "    " << problem.where << ": " << problem.reason << "\n";
+            }
+        }
+
+        if (usable.empty()) {
+            std::cerr << "[llm_npc] --mystery: no usable storyline in storylines/ "
+                         "— no mystery this session\n";
+        } else {
+            // Deterministic from the seed, like everything else in this chain:
+            // a match has to be replayable without shipping the answer.
+            const StorylineDef& chosen =
+                *usable[mysterySeed % usable.size()];
+
+            mysterySetup = generateMystery(living, mysterySeed);
+            castStoryline(chosen, living, mysterySetup, mysterySeed);
+            placeBodyClearOfColliders(mysterySetup, world.city());
+            startVictimDead(world.npcs(), mysterySetup);
+            seedMysteryFacts(world.state(), mysterySetup, living);
+
+            // WITHOUT THIS THE DEMO DOES NOT WORK. refreshGossip is what puts
+            // an NPC's known facts into their prompt, and resetNpcSideArrays
+            // already ran it — before any of these facts existed. A witness
+            // would have no idea they saw anything until a gossip tick
+            // happened to reach them, which needs the fact to age past
+            // kGossipMinAgeSeconds AND a proximity roll to land.
+            //
+            // The loop that makes this a detective game is: seeded testimony
+            // -> the witness's prompt -> the player asks -> the NPC says it ->
+            // fact extraction proposes it with playerLearned -> commitFact
+            // grants it to the player -> the Journal shows it, flagged against
+            // any account that contradicts it.
+            for (Npc& npc : world.npcs()) refreshGossip(npc);
+
+            // The victim and the scene are public knowledge the moment a body
+            // is found, so naming them here leaks nothing. The killer is not
+            // printed, and must not be — stderr is the first place a curious
+            // player looks.
+            std::cerr << "[llm_npc] --mystery: \"" << chosen.title << "\" seed "
+                      << mysterySeed << " — " << mysterySetup.victim
+                      << " found dead at " << zoneName(mysterySetup.sceneZoneId)
+                      << " (" << mysterySetup.bodyPosition.x << ", "
+                      << mysterySetup.bodyPosition.z << "), "
+                      << mysterySetup.witnesses.size() << " witnesses, "
+                      << mysterySetup.evidence.size() << " clues\n";
+        }
+    }
 
     // Character creator: persists BOTH records (independently) and spawns
     // the new citizen immediately. Declared after the per-NPC bookkeeping

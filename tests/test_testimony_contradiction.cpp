@@ -38,6 +38,7 @@
 // worse bug than the one being fixed.
 //
 // An alibi needed no new field: it is testimony whose `about` is the speaker.
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -264,4 +265,82 @@ TEST_CASE("a storyline that passes validateStoryline flags a contradiction") {
         state.grantKnowledge("player", fact.factId);
     }
     CHECK(conflictingCount(journalEntries(state)) == 2);
+}
+
+// ---- the shipped content, not a fixture ------------------------------------
+
+TEST_CASE("every shipped storyline produces a flagged contradiction in play") {
+    // The guard that a fixture cannot give: the templates actually in
+    // storylines/ are run through the same chain --mystery runs (issue #220),
+    // and the journal is checked for what a player would see.
+    //
+    // A template can satisfy validateStoryline and still fail here if casting,
+    // seeding or keying drift apart. That gap is exactly what #214 was, and it
+    // survived because every test used a hand-built setup.
+    namespace fs = std::filesystem;
+    // The test binary runs from tests/ (make) or build/ (ctest); walk up to
+    // wherever storylines/ lives.
+    fs::path dir = "storylines";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+
+    std::vector<std::string> errors;
+    const std::vector<StorylineDef> shipped = loadStorylines(dir, &errors);
+    CHECK(errors.empty());
+    REQUIRE_FALSE(shipped.empty());
+
+    const std::vector<Persona> cast = roster();
+    for (const StorylineDef& story : shipped) {
+        CAPTURE(story.id);
+        REQUIRE(validateStoryline(story, static_cast<int>(cast.size())).empty());
+
+        // Several seeds: a contradiction that only survives one cast is a
+        // template that will silently produce an unsolvable match.
+        for (const unsigned seed : {1u, 7u, 4242u, 99991u}) {
+            CAPTURE(seed);
+            MysterySetup setup = generateMystery(cast, seed);
+            castStoryline(story, cast, setup, seed);
+
+            WorldState state;
+            seedMysteryFacts(state, setup, cast);
+            // A player who has interrogated everyone.
+            for (const KnownFact& fact : state.facts()) {
+                state.grantKnowledge("player", fact.factId);
+            }
+            CHECK(conflictingCount(journalEntries(state)) >= 2);
+        }
+    }
+}
+
+TEST_CASE("no shipped storyline leaks the killer into a fact a player can read") {
+    // The leak rule, checked against real content rather than a fixture. No
+    // fact may name the killer AS the killer; naming them at all is fine and
+    // necessary, since testimony is about people.
+    namespace fs = std::filesystem;
+    fs::path dir = "storylines";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+
+    const std::vector<StorylineDef> shipped = loadStorylines(dir, nullptr);
+    const std::vector<Persona> cast = roster();
+
+    for (const StorylineDef& story : shipped) {
+        CAPTURE(story.id);
+        for (const unsigned seed : {1u, 7u, 4242u, 99991u}) {
+            CAPTURE(seed);
+            MysterySetup setup = generateMystery(cast, seed);
+            castStoryline(story, cast, setup, seed);
+
+            WorldState state;
+            seedMysteryFacts(state, setup, cast);
+            for (const KnownFact& fact : state.facts()) {
+                const std::string& text = fact.content;
+                CAPTURE(text);
+                for (const char* tell : {"killer", "murderer", "the guilty",
+                                         "did it", "is the one"}) {
+                    CHECK(text.find(tell) == std::string::npos);
+                }
+            }
+        }
+    }
 }
