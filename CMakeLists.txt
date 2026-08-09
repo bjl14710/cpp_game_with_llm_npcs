@@ -38,6 +38,7 @@ add_library(llm_npc_core STATIC
     src/core/LineBank.cpp
     src/core/LocationLog.cpp
     src/core/MatchClock.cpp
+    src/core/MatchSession.cpp
     src/core/Mystery.cpp
     src/core/PieceCatalog.cpp
     src/core/RatingLog.cpp
