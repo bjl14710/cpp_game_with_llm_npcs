@@ -95,6 +95,12 @@ std::string renderRoleBlock(const RoleDef* role, const std::string& secret);
 
 // Role by id; nullptr when unknown. Unknown ids are demoted with a log at
 // spawn, exactly as unknown traitIds already are.
+//
+// RETURNS A POINTER INTO `roles`, so that vector must outlive the result.
+// `findRole(loadAllRoles(dir), "killer")` dangles the moment the statement
+// ends — bind the vector to a named variable first. This is not hypothetical:
+// it is how a test failed the first time it ran, passing the null check and
+// then reading freed memory.
 const RoleDef* findRole(const std::vector<RoleDef>& roles, const std::string& id);
 
 }  // namespace llm_npc

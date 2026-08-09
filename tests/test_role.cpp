@@ -431,3 +431,75 @@ TEST_CASE("a role with no traits still lands before ACTIONS") {
     REQUIRE(role != std::string::npos);
     CHECK(role < actions);
 }
+
+// ---- the shipped role files (issue #198) ---------------------------------
+
+TEST_CASE("the shipped roles directory loads with no errors") {
+    namespace fs = std::filesystem;
+    fs::path dir = "roles";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+
+    std::vector<std::string> errors;
+    const std::vector<RoleDef> roles = loadAllRoles(dir, &errors);
+
+    for (const std::string& error : errors) CAPTURE(error);
+    CHECK(errors.empty());
+    REQUIRE(roles.size() == 4);
+
+    // The four the plan names, in sorted order.
+    CHECK(roles[0].id == "bystander");
+    CHECK(roles[1].id == "killer");
+    CHECK(roles[2].id == "secret_keeper");
+    CHECK(roles[3].id == "witness");
+}
+
+TEST_CASE("every shipped role carries a real demeanour and examples") {
+    namespace fs = std::filesystem;
+    fs::path dir = "roles";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    REQUIRE_FALSE(roles.empty());
+
+    for (const RoleDef& role : roles) {
+        CAPTURE(role.id);
+        // The loader already rejects a missing or empty demeanour. This asserts
+        // it is a real instruction rather than a token satisfying the parser —
+        // a one-word demeanour would load and would not hold the model.
+        CHECK(role.demeanour.size() > 40);
+        CHECK_FALSE(role.directives.empty());
+        CHECK_FALSE(role.examples.empty());
+    }
+}
+
+TEST_CASE("bystander has a demeanour too") {
+    // The honest baseline is the easiest one to leave without an anti-tell
+    // line, and doing so would make it the ONLY role whose warmth is not
+    // pinned — turning the innocent default into the odd one out.
+    namespace fs = std::filesystem;
+    fs::path dir = "roles";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    // The vector must be NAMED. findRole returns a pointer INTO it, so
+    // findRole(loadAllRoles(dir), ...) dangles the moment the statement ends —
+    // which is exactly how this case failed the first time it ran.
+    const std::vector<RoleDef> roles = loadAllRoles(dir);
+    const RoleDef* bystander = findRole(roles, "bystander");
+    REQUIRE(bystander != nullptr);
+    CHECK(bystander->demeanour.find("exactly as warm") != std::string::npos);
+}
+
+TEST_CASE("every role's demeanour holds baseline warmth explicitly") {
+    // Measurement 3 is that the model defaults to hostile under a role. Each
+    // demeanour must say so in as many words; a role whose demeanour describes
+    // a mood WITHOUT pinning warmth is the failure mode this whole field
+    // exists to prevent.
+    namespace fs = std::filesystem;
+    fs::path dir = "roles";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+
+    for (const RoleDef& role : loadAllRoles(dir)) {
+        CAPTURE(role.id);
+        CHECK(role.demeanour.find("exactly as warm as you have always been") !=
+              std::string::npos);
+    }
+}
