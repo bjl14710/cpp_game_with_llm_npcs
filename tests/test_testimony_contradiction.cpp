@@ -1,58 +1,43 @@
-// Does the detective mechanic actually work end to end? (No: see below.)
+// Does the detective mechanic work end to end? These are the tests that say so.
 //
-// This file exists to force one decision before four plans are issued against
-// opposite answers to it. It runs against MERGED code only — no new production
-// code, no unbuilt dependency, no cutscene system.
+// This file was written to force a decision, and it did. It kept the answer as
+// skipped cases until #214 settled the keying; those cases are live now, and
+// they are the load-bearing ones — if they go red, the mode is not a mystery,
+// it is a walking simulator with nameplates.
 //
-// THE FINDING
-// -----------
+// WHAT WAS WRONG
+// --------------
 // `Journal.hpp` detects a contradiction as "one subject, more than one
-// content", and its inner loop BREAKS the moment the subject changes
-// (Journal.hpp:41). So two facts can only ever conflict if they share a
-// subject.
+// content", and its inner loop breaks the moment the subject changes
+// (Journal.hpp:41). Two facts can only ever conflict if they share a subject.
 //
-// `seedMysteryFacts` keys a witness fact on the SPEAKER —
-// `normalizeSubject(witness.agent + " testimony")` (Mystery.cpp:202). And
-// `castStoryline` deals a unique resident to every slot (Storyline.cpp:356-384),
-// so two witnesses are always two different agents, always two different
-// subjects.
+// `seedMysteryFacts` used to key a witness fact on the SPEAKER, and
+// `castStoryline` deals a unique resident to every slot — so two witnesses
+// were always two agents, always two subjects. **Two residents could never
+// contradict each other**, in any match, whatever the storyline authored.
 //
-// Therefore: **two residents can never contradict each other.** The journal
-// flags nothing, in every match, no matter what the storyline authors.
+// `validateStoryline` meanwhile REQUIRED a contradiction, defined as two
+// witnesses in the same zone within half an hour saying different things, and
+// a comment of mine called that "the closest structural proxy for the subject
+// collision seedMysteryFacts produces". It was not a proxy — it measured
+// something that could not produce a collision, and tests/test_storyline.cpp
+// pinned it. The wrong invariant was merged and tested. Both comments were
+// mine, from #179 and #187.
 //
-// Worse, `validateStoryline` REQUIRES every template to contain a
-// contradiction and defines it as two witnesses in the same zone within a half
-// hour saying different things (Storyline.cpp:296-306) — with a comment calling
-// it "the closest structural proxy for the subject collision seedMysteryFacts
-// produces". It is not a proxy. It measures a thing that cannot produce a
-// collision. That rule is pinned by tests/test_storyline.cpp, so the wrong
-// invariant is merged AND tested.
+// WHAT THE FIX WAS
+// ----------------
+// A testimony fact's subject is now WHO IT IS ABOUT, not who said it:
 //
-// Both comments are mine, from #179 and #187.
+//   about set    "marge_holloway_whereabouts" — two residents giving different
+//                accounts of one person collide, and both sides are flagged.
+//   about empty  "<speaker> testimony" — one resident changing their own story
+//                is still caught. Kept deliberately; see below.
 //
-// THE DECISION THIS FORCES
-// ------------------------
-// Is a testimony fact's subject the SPEAKER or the TOPIC?
+// Both keyings are live and both are tested. Speaker keying was never wrong,
+// only insufficient, and trading one case for the other would have been a
+// worse bug than the one being fixed.
 //
-//   speaker (today)  "marge_holloway_testimony"
-//                    Catches one person changing their story across a match.
-//                    Cannot catch two people disagreeing.
-//
-//   topic (proposed) "marge_holloway_whereabouts"
-//                    alibis-and-testimony.md:92-101 assumes this. Two residents
-//                    claiming different things about where Marge was collide,
-//                    and the journal flags both sides — which is the mechanic
-//                    the whole mode is built on.
-//
-// The topic keying is almost certainly right: the plan's goal sentence is
-// "interrogate three residents about the same evening, get three different
-// accounts, and see the journal flag two of them as contradicting each other".
-// That is unreachable under speaker keying.
-//
-// It is a real decision though, not a typo, so this file CHARACTERISES the
-// current behaviour rather than asserting the desired one. The desired
-// assertions are the skipped cases at the bottom — un-skip them in the commit
-// that changes the keying.
+// An alibi needed no new field: it is testimony whose `about` is the speaker.
 #include <string>
 #include <vector>
 
@@ -79,14 +64,14 @@ std::vector<Persona> roster() {
     return out;
 }
 
-// Two residents giving DIFFERENT accounts of the same moment — the exact shape
-// validateStoryline demands, and the exact shape the mode is built on.
-MysterySetup setupWithDisagreeingWitnesses() {
+// Two residents giving different accounts of the same moment, with NO `about`
+// on either — so both key on their own speaker subject.
+MysterySetup setupWithUnattributedWitnesses() {
     MysterySetup setup = generateMystery(roster(), 4242u);
     setup.witnesses.push_back(
-        {"Ray Okafor", "bakery_block", "Marge leaving by the alley door", 21.5});
+        {"Ray Okafor", "bakery_block", "Marge leaving by the alley door", 21.5, ""});
     setup.witnesses.push_back(
-        {"Yuki Tanaka", "bakery_block", "nobody came or went all evening", 21.6});
+        {"Yuki Tanaka", "bakery_block", "nobody came or went all evening", 21.6, ""});
     return setup;
 }
 
@@ -101,9 +86,9 @@ int conflictingCount(const std::vector<JournalEntry>& entries) {
 }  // namespace
 
 TEST_CASE("two residents disagreeing produces two facts on the bus") {
-    // The setup half works exactly as intended.
+    // The setup half always worked; it was the comparison that could not fire.
     const std::vector<Persona> cast = roster();
-    const MysterySetup setup = setupWithDisagreeingWitnesses();
+    const MysterySetup setup = setupWithUnattributedWitnesses();
 
     WorldState state;
     seedMysteryFacts(state, setup, cast);
@@ -112,15 +97,19 @@ TEST_CASE("two residents disagreeing produces two facts on the bus") {
     CHECK(state.facts().size() == 3);
 }
 
-TEST_CASE("CHARACTERISATION: two residents disagreeing are NOT flagged") {
-    // THE BUG, pinned so it cannot be fixed by accident and so the fix has a
-    // test that visibly flips.
+TEST_CASE("testimony about nobody in particular does not contradict") {
+    // The old bug's shape, kept as the boundary of the fix rather than deleted.
     //
-    // Ray says Marge left by the alley door. Yuki says nobody came or went.
-    // These are flatly incompatible accounts of one moment, granted to one
-    // reader — and the journal reports no conflict at all.
+    // Ray says Marge left by the alley door; Yuki says nobody came or went.
+    // Flatly incompatible to a reader — and still not flagged, because neither
+    // witness declared who they were talking about. That is correct now: an
+    // observation with no subject has nothing to be compared against, and
+    // guessing a subject out of free prose is how you get false accusations.
+    //
+    // The authoring answer is `about`, and validateStoryline rejects a template
+    // whose witnesses never use it.
     const std::vector<Persona> cast = roster();
-    const MysterySetup setup = setupWithDisagreeingWitnesses();
+    const MysterySetup setup = setupWithUnattributedWitnesses();
 
     WorldState state;
     seedMysteryFacts(state, setup, cast);
@@ -132,11 +121,9 @@ TEST_CASE("CHARACTERISATION: two residents disagreeing are NOT flagged") {
 
     const std::vector<JournalEntry> entries = journalEntries(state);
     REQUIRE(entries.size() == 3);
-
-    // Speaker keying: two subjects, so the conflict pass never compares them.
     CHECK(conflictingCount(entries) == 0);
 
-    // And here is why, stated as an assertion rather than a comment.
+    // Two speakers, two subjects — stated as an assertion, not a comment.
     std::vector<std::string> subjects;
     for (const JournalEntry& e : entries) subjects.push_back(e.fact->subject);
     CHECK(subjects[0] != subjects[1]);
@@ -148,9 +135,9 @@ TEST_CASE("the same resident changing their story IS flagged") {
     const std::vector<Persona> cast = roster();
     MysterySetup setup = generateMystery(roster(), 4242u);
     setup.witnesses.push_back(
-        {"Ray Okafor", "bakery_block", "Marge leaving by the alley", 21.5});
+        {"Ray Okafor", "bakery_block", "Marge leaving by the alley", 21.5, ""});
     setup.witnesses.push_back(
-        {"Ray Okafor", "coffee_block", "Marge at the coffee counter", 21.5});
+        {"Ray Okafor", "coffee_block", "Marge at the coffee counter", 21.5, ""});
 
     WorldState state;
     seedMysteryFacts(state, setup, cast);
@@ -162,49 +149,119 @@ TEST_CASE("the same resident changing their story IS flagged") {
     CHECK(conflictingCount(entries) == 2);  // both sides flagged
 }
 
-TEST_CASE("a storyline that PASSES validateStoryline still flags nothing" *
-          doctest::skip()) {
-    // TODO(keying): the second half of the finding, and the more damning one.
+// ---- what the keying change made true --------------------------------------
+
+TEST_CASE("two residents disagreeing about one person are flagged") {
+    // The goal sentence of alibis-and-testimony.md, and the reason `about`
+    // exists: "interrogate three residents about the same evening, get three
+    // different accounts, and see the journal flag two of them as
+    // contradicting each other".
     //
-    // validateStoryline REQUIRES a contradiction and defines it as two
-    // witnesses, same zone, within a half hour, different observations
-    // (Storyline.cpp:296-306). Build such a template, cast it, seed it, and
-    // this is what happens: the template is valid, the facts are on the bus,
-    // and journalEntries flags nothing — because castStoryline gave the two
-    // witness slots to two different residents.
-    //
-    // Skipped because it needs a full parse+validate+cast round trip and the
-    // characterisation above already makes the point at a third of the size.
-    // Un-skip it with the fix.
+    // Both facts land on `marge_holloway_whereabouts` with different content,
+    // so the conflict pass compares them and flags BOTH sides.
+    const std::vector<Persona> cast = roster();
+    MysterySetup setup = generateMystery(roster(), 4242u);
+    setup.witnesses.push_back({"Ray Okafor", "bakery_block",
+                               "Marge leaving by the alley door", 21.5,
+                               "Marge Holloway"});
+    setup.witnesses.push_back({"Yuki Tanaka", "bakery_block",
+                               "nobody came or went all evening", 21.6,
+                               "Marge Holloway"});
+
+    WorldState state;
+    seedMysteryFacts(state, setup, cast);
+    for (const KnownFact& fact : state.facts()) {
+        state.grantKnowledge("player", fact.factId);
+    }
+
+    const std::vector<JournalEntry> entries = journalEntries(state);
+    REQUIRE(entries.size() == 3);
+    CHECK(conflictingCount(entries) == 2);
+
+    // The mechanism, asserted rather than described: one shared subject.
+    std::vector<std::string> flagged;
+    for (const JournalEntry& e : entries) {
+        if (e.conflicting) flagged.push_back(e.fact->subject);
+    }
+    REQUIRE(flagged.size() == 2);
+    CHECK(flagged[0] == flagged[1]);
 }
 
-// ---- what must become true (un-skip with the keying change) ---------------
+TEST_CASE("the killer's alibi collides with a sighting of the killer") {
+    // The payoff case, and the single test that proves the detective mechanic
+    // works end to end.
+    //
+    // The killer's own account and a witness's sighting share
+    // `<killer>_whereabouts` with different content, so the journal flags the
+    // contradiction WITHOUT anything in the game marking which one is the lie
+    // — alibis-and-testimony.md:99-101. The player has to decide.
+    const std::vector<Persona> cast = roster();
+    MysterySetup setup = generateMystery(roster(), 4242u);
+    const std::string killer = setup.killer;
+    REQUIRE_FALSE(killer.empty());
 
-TEST_CASE("DESIRED: two residents disagreeing about one person are flagged" *
-          doctest::skip()) {
-    // TODO(keying): the goal sentence of alibis-and-testimony.md — "interrogate
-    // three residents about the same evening, get three different accounts, and
-    // see the journal flag two of them as contradicting each other".
-    //
-    // Under topic keying both facts land on `marge_holloway_whereabouts` with
-    // different content, and journalEntries sets conflicting = true on BOTH
-    // sides. Assert conflictingCount(entries) == 2.
-    //
-    // Note the subject has to name the person the testimony is ABOUT, which
-    // means StorylineWitness needs a field for it — `observed` is free prose
-    // today and cannot be parsed into a subject. That is the real cost of the
-    // fix and it belongs in the issue, not in this comment.
+    // An alibi is testimony whose subject is the speaker. No alibi field.
+    setup.witnesses.push_back(
+        {killer, "coffee_block", "nursing a coffee alone", 21.5, killer});
+    // Someone puts them somewhere else at the same hour.
+    const std::string other = (killer == "Gus Pike") ? "Theo Vance" : "Gus Pike";
+    setup.witnesses.push_back(
+        {other, "bakery_block", killer + " at the bakery's back door", 21.5, killer});
+
+    WorldState state;
+    seedMysteryFacts(state, setup, cast);
+    for (const KnownFact& fact : state.facts()) {
+        state.grantKnowledge("player", fact.factId);
+    }
+
+    const std::vector<JournalEntry> entries = journalEntries(state);
+    CHECK(conflictingCount(entries) == 2);
+
+    // Nothing in the data says which account is false. If this ever starts
+    // failing because a `lie` flag appeared, the game got worse, not better.
+    for (const JournalEntry& e : entries) {
+        CHECK(e.fact->content.find("lie") == std::string::npos);
+        CHECK(e.fact->content.find("false") == std::string::npos);
+    }
 }
 
-TEST_CASE("DESIRED: the killer's alibi collides with a sighting of the killer" *
-          doctest::skip()) {
-    // TODO(keying): the payoff case. The killer's own account and a witness's
-    // sighting share `<killer>_whereabouts` with different content, so the
-    // journal flags the contradiction WITHOUT anything in the game ever
-    // marking which one is the lie — alibis-and-testimony.md:99-101.
+TEST_CASE("a storyline that passes validateStoryline flags a contradiction") {
+    // The full round trip, and the half of the finding that was more damning:
+    // validateStoryline REQUIRED a contradiction it defined in terms that
+    // could never produce one, and tests pinned the demand.
     //
-    // This is the single test that would prove the detective mechanic works.
-    // Nothing currently seeds the killer's alibi: MysterySetup has no alibi
-    // field and StorylineDef has no way to express one. That gap is the other
-    // half of the issue.
+    // Now the validator's rule and the engine's keying are the same rule, so
+    // "valid template" and "journal flags something" cannot come apart.
+    StorylineDef story;
+    story.id = "keying_round_trip";
+    story.title = "Keying Round Trip";
+    story.minResidents = 4;
+    story.roles = {StorylineRole{"culprit", "killer", ""},
+                   StorylineRole{"neighbour", "witness", ""},
+                   StorylineRole{"rival", "red_herring", ""}};
+    story.clues = {StorylineClue{1, "bakery_block", "The back door was unlocked.",
+                                 "", true}};
+    story.witnesses = {
+        StorylineWitness{"neighbour", "bakery_block",
+                         "the culprit hurrying out of the alley", 21.5, "culprit"},
+        StorylineWitness{"rival", "coffee_block",
+                         "nobody near the bakery all evening", 21.6, "culprit"}};
+
+    const std::vector<Persona> cast = roster();
+    REQUIRE(validateStoryline(story, static_cast<int>(cast.size())).empty());
+
+    MysterySetup setup = generateMystery(cast, 4242u);
+    const StorylineCast dealt = castStoryline(story, cast, setup, 99u);
+    REQUIRE(setup.witnesses.size() == 2);
+    // Two different residents testifying, which is exactly the case that used
+    // to be unflaggable.
+    CHECK(setup.witnesses[0].agent != setup.witnesses[1].agent);
+    CHECK(setup.witnesses[0].about == dealt.residentFor("culprit"));
+
+    WorldState state;
+    seedMysteryFacts(state, setup, cast);
+    for (const KnownFact& fact : state.facts()) {
+        state.grantKnowledge("player", fact.factId);
+    }
+    CHECK(conflictingCount(journalEntries(state)) == 2);
 }

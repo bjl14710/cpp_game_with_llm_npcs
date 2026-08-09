@@ -64,6 +64,24 @@ struct Witness {
     std::string sawZoneId;  // a Zones.hpp id
     std::string observed;   // <= 140 chars
     double atHour = 0.0;    // world hour, [0, 24)
+
+    // WHO the testimony is about — a roster persona name, or empty.
+    //
+    // This is the field the whole detective mechanic turns on (#214).
+    // Journal.hpp flags a contradiction as "one subject, more than one
+    // content", so two accounts can only ever clash if they key to the same
+    // subject. Keying on the SPEAKER makes two residents two subjects, and
+    // they can never disagree; keying on the SUBJECT of the testimony is what
+    // lets "Ray says Marge left" and "Yuki says nobody left" collide.
+    //
+    // Empty falls back to speaker keying, which is not a degraded mode: it is
+    // how one resident changing their own story across a match is caught. An
+    // observation about no one in particular ("the back door was unlocked")
+    // legitimately has no `about`.
+    //
+    // A witness whose `about` is their own name IS an alibi. No separate alibi
+    // field exists or is needed — see seedMysteryFacts.
+    std::string about;
 };
 
 // The authoritative answer for one match. Host-only. Never serialized, never

@@ -59,6 +59,7 @@ clue = 2
 witness = neighbour
   zone = bakery_block
   hour = 21.5
+  about = rival
   observed = someone leaving by the alley door
 )";
 
@@ -98,6 +99,7 @@ TEST_CASE("a well-formed template parses into every field") {
     CHECK(story->witnesses[0].zoneId == "bakery_block");
     CHECK(story->witnesses[0].atHour == doctest::Approx(21.5));
     CHECK(story->witnesses[0].observed == "someone leaving by the alley door");
+    CHECK(story->witnesses[0].aboutSlotId == "rival");
 }
 
 TEST_CASE("clues keep the order they were authored in, not a sorted one") {
@@ -313,11 +315,14 @@ StorylineDef validStoryline() {
         StorylineClue{1, "bakery_block", "The back door was unlocked.", "", true},
         StorylineClue{2, "coffee_block", "Two cups, one untouched.", "rival", false},
     };
-    // Same zone, same half hour, different accounts — a contradiction for
-    // Journal.hpp to flag.
+    // Same `about`, different accounts — the subject collision Journal.hpp
+    // flags. Not "same zone and hour": that was the pre-#214 rule and it stood
+    // in for a collision that could not happen.
     story.witnesses = {
-        StorylineWitness{"neighbour", "bakery_block", "someone left by the alley", 21.5},
-        StorylineWitness{"rival", "bakery_block", "nobody came or went", 21.6},
+        StorylineWitness{"neighbour", "bakery_block", "someone left by the alley",
+                         21.5, "culprit"},
+        StorylineWitness{"rival", "bakery_block", "nobody came or went", 21.6,
+                         "culprit"},
     };
     return story;
 }
@@ -402,14 +407,46 @@ TEST_CASE("witnesses that all agree are reported") {
     CHECK(hasError(errors, "witnesses", "no two witnesses contradict"));
 }
 
-TEST_CASE("witnesses in different places are not a contradiction") {
-    // Two people seeing different things somewhere else is ordinary, not a
-    // disagreement. The proxy is same zone, same half hour.
+TEST_CASE("witnesses talking about different people are not a contradiction") {
+    // Two people describing two different people is ordinary, not a
+    // disagreement — and it produces two subjects, which the journal never
+    // compares. The rule is a shared `about`.
     StorylineDef story = validStoryline();
-    story.witnesses[1].zoneId = "coffee_block";
+    story.witnesses[1].aboutSlotId = "neighbour";
 
     const auto errors = validateStoryline(story, 21);
     CHECK(hasError(errors, "witnesses", "no two witnesses contradict"));
+}
+
+TEST_CASE("witnesses in different places CAN contradict") {
+    // The pre-#214 rule rejected this, and it was the rule that was wrong.
+    // Disagreeing about WHERE someone was is the most common shape a real
+    // alibi conflict takes, so two different zones must stay valid.
+    StorylineDef story = validStoryline();
+    story.witnesses[1].zoneId = "coffee_block";
+
+    CHECK(validateStoryline(story, 21).empty());
+}
+
+TEST_CASE("a witness whose `about` names no declared slot is reported") {
+    // Silently downgrading to speaker keying would make the author's intended
+    // contradiction quietly stop existing, which is exactly the failure #214
+    // was.
+    StorylineDef story = validStoryline();
+    story.witnesses[0].aboutSlotId = "nobody_by_that_name";
+
+    const auto errors = validateStoryline(story, 21);
+    CHECK(hasError(errors, "witnesses[0]", "`about` cites undeclared slot"));
+}
+
+TEST_CASE("`about = victim` resolves without being a declared slot") {
+    // The victim is picked by generateMystery and never cast, but "where was
+    // the dead man that evening" is the most obvious question in a mystery.
+    StorylineDef story = validStoryline();
+    story.witnesses[0].aboutSlotId = "victim";
+    story.witnesses[1].aboutSlotId = "victim";
+
+    CHECK(validateStoryline(story, 21).empty());
 }
 
 TEST_CASE("a chain of pure red herrings is reported") {

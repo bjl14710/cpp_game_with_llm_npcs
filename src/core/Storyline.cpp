@@ -1,7 +1,6 @@
 #include "Storyline.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -12,6 +11,9 @@
 #include "Zones.hpp"
 
 namespace llm_npc {
+
+const char* const kAboutVictim = "victim";
+
 namespace {
 
 // Splits "key = value". Returns false for a blank line, a comment, or a line
@@ -52,23 +54,32 @@ bool zoneExists(const std::string& zoneId) {
     return false;
 }
 
-// Two witnesses contradict when they place the same moment differently: same
-// zone and hour, different observation.
+// Two witnesses contradict when they say different things ABOUT THE SAME
+// PERSON: same `about`, different observation.
 //
-// This is a structural PROXY for the subject collision seedMysteryFacts
-// produces, chosen so this layer does not have to know how facts are keyed.
-// It is deliberately conservative — it can miss a contradiction expressed some
-// other way, and reporting a false "no contradiction" costs an author one
-// explicit disagreement, while a false pass would ship a mystery with nothing
-// to investigate.
+// This mirrors seedMysteryFacts exactly rather than approximating it. Facts
+// key on the testimony's subject, and Journal.hpp compares only facts sharing
+// a subject, so a shared `about` with differing content is precisely — not
+// approximately — what produces a flagged contradiction in play.
+//
+// It did not used to. Until #214 the rule was "same zone, within half an
+// hour, different observation", described in a comment of mine as "the closest
+// structural proxy for the subject collision seedMysteryFacts produces". It
+// was not a proxy: facts keyed on the SPEAKER back then, two witnesses were
+// always two speakers, and the collision it claimed to stand in for could not
+// occur. The validator demanded a contradiction the engine could never flag,
+// and tests pinned the demand. Requiring a shared subject is the fix.
+//
+// Witnesses with no `about` are skipped. They key on their own speaker
+// subject, so they genuinely cannot contradict anyone else, and counting them
+// here would re-introduce the bug in a new spelling.
 bool hasContradiction(const std::vector<StorylineWitness>& witnesses) {
     for (std::size_t i = 0; i < witnesses.size(); ++i) {
         for (std::size_t j = i + 1; j < witnesses.size(); ++j) {
             const StorylineWitness& a = witnesses[i];
             const StorylineWitness& b = witnesses[j];
-            if (a.zoneId != b.zoneId) continue;
-            // Within the same in-world half hour counts as the same moment.
-            if (std::abs(a.atHour - b.atHour) > 0.5) continue;
+            if (a.aboutSlotId.empty()) continue;
+            if (a.aboutSlotId != b.aboutSlotId) continue;
             if (a.observed != b.observed) return true;
         }
     }
@@ -171,6 +182,8 @@ std::optional<StorylineDef> parseStorylineFile(const std::filesystem::path& path
                     story.witnesses.back().observed = value;
                 } else if (key == "hour") {
                     story.witnesses.back().atHour = std::atof(value.c_str());
+                } else if (key == "about") {
+                    story.witnesses.back().aboutSlotId = value;
                 } else {
                     localErrors.push_back(name + ": unknown witness key `" + key + "`");
                 }
@@ -291,18 +304,29 @@ std::vector<StorylineError> validateStoryline(const StorylineDef& story,
         if (witness.atHour < 0.0 || witness.atHour >= 24.0) {
             add(where, "hour must be in [0, 24)");
         }
+        // `about` is optional, but an unresolvable one is always an author
+        // error: it silently downgrades the testimony to speaker keying, so
+        // the contradiction the author was writing quietly stops existing.
+        if (!witness.aboutSlotId.empty() &&
+            witness.aboutSlotId != kAboutVictim &&
+            slots.count(witness.aboutSlotId) == 0) {
+            add(where, "`about` cites undeclared slot `" + witness.aboutSlotId +
+                           "` (expected a declared slot or `" + kAboutVictim + "`)");
+        }
     }
 
     // At least one PAIR of witnesses must disagree, or there is nothing for
     // Journal.hpp's contradiction check to flag and nothing to investigate.
     //
-    // "Disagree" is same zone and hour, different observation — the closest
-    // structural proxy for the subject collision seedMysteryFacts produces,
-    // without this layer having to know how facts are keyed.
+    // "Disagree" is two witnesses with the same `about` and different
+    // observations — the same subject collision seedMysteryFacts produces, not
+    // a proxy for it. See hasContradiction for why the old zone-and-hour rule
+    // could never fire (#214).
     if (!hasContradiction(story.witnesses)) {
         add("witnesses",
-            "no two witnesses contradict each other; without a contradiction "
-            "there is nothing for the journal to flag");
+            "no two witnesses contradict each other; two witnesses need the "
+            "same `about` and different `observed` for the journal to flag "
+            "anything");
     }
 
     // ---- the cast fits ---------------------------------------------------
@@ -406,6 +430,15 @@ StorylineCast castStoryline(const StorylineDef& story,
         witness.sawZoneId = authored.zoneId;
         witness.observed = authored.observed;
         witness.atHour = authored.atHour;
+        // Resolve who the testimony is about. An unresolvable slot leaves
+        // `about` empty, which falls back to speaker keying rather than
+        // inventing a subject — validateStoryline already rejects that case,
+        // so reaching here means a hand-built template.
+        if (authored.aboutSlotId == kAboutVictim) {
+            witness.about = setup.victim;
+        } else if (!authored.aboutSlotId.empty()) {
+            witness.about = cast.residentFor(authored.aboutSlotId);
+        }
         setup.witnesses.push_back(std::move(witness));
     }
 
