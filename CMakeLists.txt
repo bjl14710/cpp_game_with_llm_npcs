@@ -6,6 +6,25 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Default to an OPTIMISED build when the caller does not choose one.
+#
+# There was no default, and CMake's own default is the empty string, which
+# means no -O flag at all. So `cmake -S . -B build && cmake --build build` —
+# exactly what tools/bench_npc_render.py's error message tells you to run —
+# produced an unoptimised binary, and every render performance number this
+# project has recorded was measured on one. The twenty-one-residents milestone
+# is scoped against 26.4 ms/frame taken that way; the same commit at -O2
+# measures ~17 ms.
+#
+# RelWithDebInfo rather than Release: symbols are worth keeping for a game that
+# is still being debugged daily, and the optimisation level is the part that
+# was missing. A caller who wants something else still passes
+# -DCMAKE_BUILD_TYPE and this does nothing.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "" FORCE)
+    message(STATUS "No CMAKE_BUILD_TYPE set — defaulting to RelWithDebInfo")
+endif()
+
 find_package(Threads REQUIRED)
 
 # raylib provides windowing, input, 3D rendering, and the 2D UI overlay
