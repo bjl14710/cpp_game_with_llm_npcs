@@ -92,4 +92,25 @@ inline Vec3 lookDirection(float yawDeg, float pitchDeg) {
     return normalize(Vec3{std::sin(yr) * cp, std::sin(pr), std::cos(yr) * cp});
 }
 
+// First-person camera pose. `position` is the FEET on the ground plane —
+// RaylibRenderer::beginFrame adds kEyeHeight to get the eye. Anything wanting
+// to place the camera at a literal height hands over that height MINUS
+// kEyeHeight, which is what the sandbox editor's vantage and cutscene playback
+// both do.
+//
+// This lives in core rather than next to the renderer because it is the
+// interface between whatever decides where the camera goes and the one place
+// that builds a Camera3D from it. Player input drives it, and so does cutscene
+// playback (Cutscene.hpp) — which is a core type and cannot include an app
+// header. Duplicating the struct so each layer owns a copy is the first step
+// toward the two drifting apart.
+//
+// Fields match the legacy Renderer3D's CameraPose, so main.cpp's movement and
+// mouse-look code carried over unchanged.
+struct CameraPose {
+    Vec3 position{};
+    float yawDeg = 0.f;
+    float pitchDeg = 0.f;
+};
+
 }  // namespace llm_npc
