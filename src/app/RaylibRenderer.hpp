@@ -15,13 +15,9 @@
 
 namespace llm_npc {
 
-// First-person camera pose — same fields as the legacy Renderer3D's
-// CameraPose so main.cpp's movement/mouse-look code carries over unchanged.
-struct CameraPose {
-    Vec3 position{};
-    float yawDeg = 0.f;
-    float pitchDeg = 0.f;
-};
+// CameraPose moved to core/Math.hpp so cutscene playback can drive the camera
+// without a core header reaching into the app layer. Math.hpp is included
+// above; nothing else about the renderer's interface changed.
 
 // Everything needed to draw one character this frame (NPC or remote player).
 struct CharacterVisual {
