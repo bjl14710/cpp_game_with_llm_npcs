@@ -515,3 +515,37 @@ TEST_CASE("a full match-start sequence leaves one body and an informed town") {
     CHECK_FALSE(city.circleIntersectsAny(setup.bodyPosition.x,
                                          setup.bodyPosition.z, 0.45f, 0.f));
 }
+
+TEST_CASE("the victim is moved to the body position, not left where they spawned") {
+    // placeBodyClearOfColliders computed a position that nothing read, so the
+    // baker died in the bakery every match whatever sceneZoneId said. "Where
+    // was the body found" is the first question of any mystery and the world
+    // has to agree with the answer.
+    const std::vector<Persona> roster = testRoster();
+    MysterySetup setup = generateMystery(roster, 11u);
+
+    std::vector<Npc> npcs;
+    for (const Persona& person : roster) {
+        Npc npc(person, idleClient());
+        // Somewhere that is definitely not the scene.
+        npc.setPlacement(Vec3{999.f, 0.f, 999.f}, 0.f, "nowhere");
+        npcs.push_back(std::move(npc));
+    }
+
+    REQUIRE(startVictimDead(npcs, setup));
+
+    const Npc* victim = nullptr;
+    for (const Npc& npc : npcs) {
+        if (npc.persona().name == setup.victim) victim = &npc;
+    }
+    REQUIRE(victim != nullptr);
+    CHECK(victim->combatState() == NpcState::Dead);
+    CHECK(victim->position().x == doctest::Approx(setup.bodyPosition.x));
+    CHECK(victim->position().z == doctest::Approx(setup.bodyPosition.z));
+
+    // Everyone else stays exactly where they were.
+    for (const Npc& npc : npcs) {
+        if (npc.persona().name == setup.victim) continue;
+        CHECK(npc.position().x == doctest::Approx(999.f));
+    }
+}

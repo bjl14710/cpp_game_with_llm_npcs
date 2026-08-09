@@ -320,6 +320,18 @@ bool startVictimDead(std::vector<Npc>& npcs, const MysterySetup& setup) {
     for (Npc& npc : npcs) {
         if (npc.persona().name != setup.victim) continue;
         npc.markDeadAtStart();
+        // AND MOVE THEM TO THE SCENE. Marking the victim dead where they
+        // happened to spawn leaves the body at their persona's placement —
+        // the baker dead in the bakery every single match, whatever
+        // sceneZoneId says. generateMystery always sets bodyPosition (it is
+        // derived from the scene zone, never left defaulted) and
+        // placeBodyClearOfColliders then nudges it off any collider, so this
+        // is safe to apply unconditionally.
+        //
+        // Without it placeBodyClearOfColliders computes a position nothing
+        // reads, and "where was the body found" — the first question of any
+        // mystery — has an answer the world does not agree with.
+        npc.setPlacement(setup.bodyPosition, npc.facingDeg(), npc.spotId());
         return true;
     }
     // The victim is not in the world. The caller should treat this as a failed
