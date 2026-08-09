@@ -190,6 +190,11 @@ int main(int argc, char** argv) {
     float cameraX = 0.f, cameraZ = 0.f, cameraYaw = 180.f;
     float hourOverride = -1.f;
     const char* mapFile = nullptr;  // --map: boot into a sandbox fixture
+    // --sandbox-edit: boot --map straight into the EDITOR rather than
+    // play mode. Without it the editor is only reachable by pressing P,
+    // which a headless --frames capture cannot do — so the editor had no
+    // visual-QA path at all, which is how the menu-overlay bug survived.
+    bool bootSandboxEdit = false;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
         int arg = 3;
@@ -206,6 +211,9 @@ int main(int argc, char** argv) {
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--hour") == 0) {
                 hourOverride = std::strtof(argv[arg + 1], nullptr);
                 arg += 2;
+            } else if (std::strcmp(argv[arg], "--sandbox-edit") == 0) {
+                bootSandboxEdit = true;
+                arg += 1;
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--map") == 0) {
                 // Boot straight into a sandbox map fixture (headless smoke
                 // shots for placed pieces; the in-game entry is the menu).
@@ -836,6 +844,14 @@ int main(int argc, char** argv) {
             std::cerr << "[llm_npc] --map: loaded '" << bootMap.name << "' ("
                       << world.city().buildings().size() << " solid pieces, "
                       << world.npcs().size() << " NPCs)\n";
+            if (bootSandboxEdit) {
+                sandboxNpcSources.clear();
+                for (const auto& loaded : roster) {
+                    sandboxNpcSources.push_back("persona:" + loaded.id);
+                }
+                mode = AppMode::SandboxEdit;
+                EnableCursor();
+            }
         }
     }
 
@@ -2011,6 +2027,20 @@ int main(int argc, char** argv) {
         } else if (mode == AppMode::Dialogue) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
             dialog.render();
+        } else if (mode == AppMode::SandboxEdit) {
+            // Draw NOTHING here, and that is the whole fix.
+            //
+            // SandboxEdit had no branch in this chain, so it fell through to
+            // the final else and ran menu.render() — which opens with a
+            // full-screen dim rect at alpha 170 plus a page title and has no
+            // early-out. The entire paused menu rendered over the editor every
+            // frame. You could still pan and place pieces behind it, which is
+            // why it read as "the map won't go away" rather than as a stuck
+            // menu.
+            //
+            // The editor's own HUD is already drawn further up, with the other
+            // world-space overlays (search `if (sandboxEditing)` above the
+            // nameplates). It does not belong here.
         } else {
             menu.render();
         }
@@ -2024,10 +2054,15 @@ int main(int argc, char** argv) {
             DrawText("Asset packs missing - run tools/fetch_assets.sh for the full look", 24,
                      GetScreenHeight() - 40, 18, Color{255, 225, 130, 255});
         }
+        // AFTER EndDrawing, not before. raylib batches 2D draw calls and
+        // flushes them at EndDrawing; TakeScreenshot reads the framebuffer
+        // directly. Called before the flush it captures the 3D scene and NONE
+        // of the pending UI — so every HUD, menu and overlay was silently
+        // missing from every capture, and visual QA of anything 2D was blind.
+        EndDrawing();
         if (screenshotPath && maxFrames >= 0 && frames >= maxFrames) {
             TakeScreenshot(screenshotPath);
         }
-        EndDrawing();
     }
 
 shutdown:
