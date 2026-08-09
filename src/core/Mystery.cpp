@@ -31,17 +31,17 @@ constexpr double kMurderHourEnd = 24.0;
 // knowledge on arrival and has no first teller.
 constexpr const char* kTownSource = "town";
 
-// KnownFact::content is capped at 140 chars — validateProposedFacts rejects
-// anything longer outright. Seeded content is authored by us rather than by a
-// model, so an over-length string is an authoring mistake, and dropping the
-// fact would silently lose a clue. Clamp and say so once, matching the
-// degrade-to-inert contract ConversationStore, RatingLog and LineBank use:
-// absorb the failure, one line on stderr, never throw into the game loop.
-// The NPC collision circle. Npc.cpp has this as kNpcRadius but inside an
-// anonymous namespace, so it is not reachable from here. Duplicated with this
-// comment rather than guessed at: a body placed on a radius the NPCs do not
-// use is a body they can stand inside. If one of these ever changes, change
-// both.
+// The NPC collision circle, duplicated rather than guessed at: a body placed on
+// a radius the NPCs do not use is a body they can stand inside.
+//
+// This value exists FOUR times in the codebase and has already diverged, so
+// "change both" is not sufficient guidance:
+//   Npc.cpp:14        kNpcRadius  0.45f   anonymous namespace
+//   Mystery.cpp       kBodyRadius 0.45f   here
+//   SandboxMap.cpp:18 kBodyRadius 0.45f   anonymous namespace
+//   World.cpp:66      kNpcRadius  0.4f    function-local, projectile hit tests
+// None is reachable from the others. If the collision circle changes, the first
+// three move together and World.cpp's is a separate decision.
 constexpr float kBodyRadius = 0.45f;
 
 // Grid resolution for the placement search. 24 steps over a 48-unit block is a
@@ -65,6 +65,12 @@ bool collides(const City& city, float x, float z) {
     return city.circleIntersectsAny(x, z, kBodyRadius, 0.f);
 }
 
+// KnownFact::content is capped at 140 chars — validateProposedFacts rejects
+// anything longer outright. Seeded content is authored by us rather than by a
+// model, so an over-length string is an authoring mistake, and dropping the
+// fact would silently lose a clue. Clamp and say so once, matching the
+// degrade-to-inert contract ConversationStore, RatingLog and LineBank use:
+// absorb the failure, one line on stderr, never throw into the game loop.
 std::string clampContent(std::string content) {
     constexpr std::size_t kMaxContent = 140;
     if (content.size() <= kMaxContent) return content;
@@ -75,7 +81,6 @@ std::string clampContent(std::string content) {
     content.resize(kMaxContent);
     return content;
 }
-
 
 }  // namespace
 
@@ -146,10 +151,11 @@ bool voteIsCorrect(const MysterySetup& setup, const std::string& accused) {
 // host advantage stops being theoretical the moment the answer is one keypress
 // away. A build that can host a networked match must not define this.
 //
-// It is also the second and last place in the codebase that reads
-// setup.killer — the first is voteIsCorrect above. Anywhere else it appears in
-// rendering, dialogue or networking code is a bug, and a reviewer can find them
-// all by grepping one field name.
+// One of three sanctioned readers of setup.killer, enumerated in the leak rule
+// at the top of Mystery.hpp — the others are voteIsCorrect above and
+// castStoryline in Storyline.cpp. Anywhere else it appears in rendering,
+// dialogue or networking code is a bug, and a reviewer can find them all by
+// grepping one field name.
 const std::string& revealKillerForDebug(const MysterySetup& setup) {
     return setup.killer;
 }
