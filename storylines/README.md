@@ -52,6 +52,7 @@ clue = 2
 witness = neighbour
   zone = bakery_block
   hour = 21.5
+  about = culprit
   observed = someone leaving by the alley door
 ```
 
@@ -71,6 +72,52 @@ witness = neighbour
 | `witness` | starts a witness | The role slot doing the seeing. |
 | `observed` | witness | What they claim to have seen. |
 | `hour` | witness | World hour, 0–24. |
+| `about` | witness | **Who the testimony is about**: another slot id, or the literal `victim`. Optional, but see below. |
+
+## Why `about` is the key that makes a mystery a mystery
+
+`Journal.hpp` flags a contradiction as *one subject, more than one content*, so
+two accounts can only ever clash if they land on the same subject. `about` is
+what decides that subject.
+
+| `about` | Fact subject | Catches |
+|---|---|---|
+| set | `<that person> whereabouts` | two residents disagreeing about one person |
+| omitted | `<speaker> testimony` | one resident changing their own story |
+
+Both are real and both are tested. But **a template whose witnesses never set
+`about` cannot produce a disagreement between two people**, because two speakers
+are two subjects — and `validateStoryline` rejects it for exactly that reason.
+
+This is not a style preference; it is issue #214. Before it, facts keyed on the
+speaker unconditionally, the validator demanded a contradiction defined as *same
+zone, within half an hour, different observation*, and that shape could never
+produce a subject collision. The validator required something the engine could
+not deliver, and the tests pinned the requirement. The rule now is the engine's
+own rule: **same `about`, different `observed`.**
+
+### An alibi is testimony about yourself
+
+There is no `alibi` key and there does not need to be. A slot naming itself in
+`about` produces a fact on its own whereabouts subject, so the speaker's account
+and anyone's sighting of them collide automatically:
+
+```
+witness = culprit
+  zone = coffee_block
+  hour = 21.5
+  about = culprit
+  observed = nursing a coffee alone
+
+witness = neighbour
+  zone = bakery_block
+  hour = 21.5
+  about = culprit
+  observed = the culprit at the bakery's back door
+```
+
+Both land on `<killer> whereabouts`, the journal flags both sides, and nothing
+anywhere records which one is the lie. The player decides. That is the game.
 
 ## Why `clue` carries an explicit order
 

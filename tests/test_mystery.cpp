@@ -279,7 +279,7 @@ TEST_CASE("a non-witness does not know what a witness saw") {
     const std::vector<Persona> roster = testRoster();
     MysterySetup setup = generateMystery(roster, 4u);
     setup.witnesses.push_back(
-        {"Ray Okafor", "coffee_block", "someone hurrying away", 21.5});
+        {"Ray Okafor", "coffee_block", "someone hurrying away", 21.5, ""});
 
     WorldState state;
     seedMysteryFacts(state, setup, roster);
@@ -327,7 +327,7 @@ TEST_CASE("seeding twice changes nothing") {
     const std::vector<Persona> roster = testRoster();
     MysterySetup setup = generateMystery(roster, 8u);
     setup.witnesses.push_back(
-        {"Yuki Tanaka", "plaza_block", "the lights still on", 22.0});
+        {"Yuki Tanaka", "plaza_block", "the lights still on", 22.0, ""});
 
     WorldState state;
     state.setNumber("world_time_seconds", 1000.0);

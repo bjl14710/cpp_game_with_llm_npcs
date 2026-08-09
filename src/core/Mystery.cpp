@@ -201,15 +201,43 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
         if (witness.agent.empty()) continue;
 
         KnownFact seen;
-        // Subject is the witness's own testimony, so two things the same
-        // person claims collide on one subject and Journal.hpp's existing
-        // contradiction check flags them. That is what the alibi layer will
-        // need, and it costs nothing to set up correctly now.
-        seen.subject = normalizeSubject(witness.agent + " testimony");
+        // The subject is WHO the testimony is about, falling back to the
+        // speaker when it is about no one in particular.
+        //
+        // This choice is the detective mechanic (#214). Journal.hpp flags
+        // "one subject, more than one content", so only facts sharing a
+        // subject can ever be compared:
+        //
+        //   about set    -> "<person> whereabouts". Two residents giving
+        //                   different accounts of one person collide, and both
+        //                   sides are flagged. This is the case the mode is
+        //                   built on, and it is why `about` exists.
+        //   about empty  -> "<speaker> testimony". One resident changing their
+        //                   own story is still caught. Not a fallback so much
+        //                   as the other half of the mechanic.
+        //
+        // An alibi needs no special handling: a witness whose `about` is their
+        // own name lands on their own whereabouts subject, so their account
+        // and any sighting of them collide automatically. Nothing marks which
+        // one is the lie — deliberately.
+        const std::string topic = witness.about.empty()
+                                      ? witness.agent + " testimony"
+                                      : witness.about + " whereabouts";
+        seen.subject = normalizeSubject(topic);
+        // Self-testimony reads as a claim, not a sighting — "saw themselves"
+        // is nonsense, and an alibi is the one testimony a player should hear
+        // in the speaker's own voice. "they" throughout: the roster has no
+        // pronoun field and inventing one from a name would misgender people.
+        const bool selfTestimony = witness.about == witness.agent;
         seen.content = clampContent(
-            witness.agent + " saw " + witness.observed + " at " +
-            zoneName(witness.sawZoneId) + " around " +
-            clockLabel(witness.atHour * 3600.0) + ".");
+            selfTestimony
+                ? witness.agent + " says they were at " +
+                      zoneName(witness.sawZoneId) + " around " +
+                      clockLabel(witness.atHour * 3600.0) + " — " +
+                      witness.observed + "."
+                : witness.agent + " saw " + witness.observed + " at " +
+                      zoneName(witness.sawZoneId) + " around " +
+                      clockLabel(witness.atHour * 3600.0) + ".");
         seen.factId = factIdFor(seen.subject, seen.content);
         seen.source = witness.agent;
         seen.learnedAtSeconds = now;

@@ -61,7 +61,27 @@ struct StorylineWitness {
     std::string zoneId;
     std::string observed;
     double atHour = 0.0;
+
+    // WHO this testimony is about: another declared slotId, the literal
+    // `victim`, or empty. Casting resolves it to a resident name and
+    // seedMysteryFacts keys the fact on it (#214) — which is the only reason
+    // two residents can ever be seen to disagree.
+    //
+    // A slot naming ITSELF here is an alibi. That is the whole mechanism; no
+    // `alibi = ` key exists, because an alibi is just testimony whose subject
+    // is the speaker.
+    //
+    // `victim` is spelled as a literal rather than being a slot because the
+    // victim is chosen by generateMystery, never cast — but "where was the
+    // dead man that evening" is the most obvious question in any mystery, so
+    // templates need to be able to ask it.
+    std::string aboutSlotId;
 };
+
+// The literal `about` value that resolves to the match's victim rather than to
+// a declared slot. Exposed so the parser, the validator and casting read one
+// spelling.
+extern const char* const kAboutVictim;
 
 // One authored mystery.
 struct StorylineDef {
