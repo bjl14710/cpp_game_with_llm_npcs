@@ -642,3 +642,155 @@ TEST_CASE("the shipped opening.cutscene parses and fits the Intro budget") {
         }
     }
 }
+
+// ---- the win montage (issue #234) ------------------------------------------
+
+#include "Montage.hpp"
+
+namespace {
+
+CutsceneDef winTemplate() {
+    CutsceneDef scene;
+    scene.id = "win";
+    const auto beat = [](const char* id, const char* caption, bool positioned) {
+        CutsceneBeat b;
+        b.id = id;
+        b.caption = caption;
+        b.hold = 1.f;
+        if (positioned) {
+            b.pose.position = Vec3{-9.f, 4.5f, 9.f};
+            b.hasPosition = true;
+        }
+        return b;
+    };
+    scene.beats = {beat("open", "It was {killer}.", true),
+                   beat("found_title", "Here is how you knew.", false),
+                   beat("found", "{zone} - {clue}", true),
+                   beat("missed_title", "And what you walked past.", false),
+                   beat("missed", "{zone} - {clue}", true),
+                   beat("away", "They are led away.", true)};
+    return scene;
+}
+
+MontagePlan planWith(int found, int missed) {
+    MontagePlan plan;
+    for (int i = 0; i < found; ++i) {
+        plan.found.push_back(
+            ClueStep{"bakery_block", "found clue " + std::to_string(i), "f", i + 1});
+    }
+    for (int i = 0; i < missed; ++i) {
+        plan.missed.push_back(
+            ClueStep{"coffee_block", "missed clue " + std::to_string(i), "m", i + 10});
+    }
+    return plan;
+}
+
+std::vector<std::string> beatIds(const CutsceneDef& scene) {
+    std::vector<std::string> ids;
+    for (const CutsceneBeat& b : scene.beats) ids.push_back(b.id);
+    return ids;
+}
+
+}  // namespace
+
+TEST_CASE("the montage emits one beat per clue, found before missed") {
+    const CutsceneDef built =
+        buildWinCutscene(winTemplate(), planWith(3, 2), "Marge Holloway");
+
+    CHECK(beatIds(built) == std::vector<std::string>{
+                                "open", "found_title", "found_1", "found_2",
+                                "found_3", "missed_title", "missed_10",
+                                "missed_11", "away"});
+}
+
+TEST_CASE("an empty missed list drops its title too") {
+    // A "there was more" card over nothing is worse than no card, and a group
+    // that swept the board has earned not being told about an empty beat.
+    const CutsceneDef built =
+        buildWinCutscene(winTemplate(), planWith(2, 0), "Marge Holloway");
+
+    const std::vector<std::string> ids = beatIds(built);
+    for (const std::string& id : ids) {
+        CAPTURE(id);
+        CHECK(id.rfind("missed", 0) != 0);
+    }
+    CHECK(ids.back() == "away");  // no dangling transition
+}
+
+TEST_CASE("an empty found list still plays, and so does an empty plan") {
+    // Winning on a hunch is a legitimate way to win.
+    const CutsceneDef noneFound =
+        buildWinCutscene(winTemplate(), planWith(0, 2), "Marge Holloway");
+    CHECK(beatIds(noneFound) ==
+          std::vector<std::string>{"open", "found_title", "missed_title",
+                                   "missed_10", "missed_11", "away"});
+
+    const CutsceneDef nothing =
+        buildWinCutscene(winTemplate(), MontagePlan{}, "Marge Holloway");
+    CHECK(beatIds(nothing) == std::vector<std::string>{"open", "found_title", "away"});
+}
+
+TEST_CASE("each clue beat cuts to its own zone") {
+    MontagePlan plan;
+    plan.found = {ClueStep{"bakery_block", "a", "f1", 1},
+                  ClueStep{"plaza_block", "b", "f2", 2}};
+    const CutsceneDef built = buildWinCutscene(winTemplate(), plan, "Marge Holloway");
+
+    const Vec3 bakery = zoneCentre("bakery_block");
+    const Vec3 plaza = zoneCentre("plaza_block");
+    REQUIRE(built.beats.size() == 5);
+    CHECK(built.beats[2].pose.position.x == doctest::Approx(-9.f + bakery.x));
+    CHECK(built.beats[3].pose.position.x == doctest::Approx(-9.f + plaza.x));
+    CHECK(built.beats[2].pose.position.x != doctest::Approx(built.beats[3].pose.position.x));
+}
+
+TEST_CASE("captions carry the clue, the zone and the killer") {
+    MontagePlan plan;
+    plan.found = {ClueStep{"bakery_block", "The back door was unlocked.", "f", 1}};
+    const CutsceneDef built = buildWinCutscene(winTemplate(), plan, "Marge Holloway");
+
+    CHECK(built.beats[0].caption == "It was Marge Holloway.");
+    CHECK(built.beats[2].caption ==
+          zoneName("bakery_block") + " - The back door was unlocked.");
+}
+
+TEST_CASE("the montage keeps chain order and never regroups by zone") {
+    // Two clues in one zone with a third between them: a sort would move them
+    // together and the argument would stop being an argument.
+    MontagePlan plan;
+    plan.found = {ClueStep{"bakery_block", "first", "a", 1},
+                  ClueStep{"coffee_block", "second", "b", 2},
+                  ClueStep{"bakery_block", "third", "c", 3}};
+    const CutsceneDef built = buildWinCutscene(winTemplate(), plan, "X");
+
+    CHECK(built.beats[2].caption.find("first") != std::string::npos);
+    CHECK(built.beats[3].caption.find("second") != std::string::npos);
+    CHECK(built.beats[4].caption.find("third") != std::string::npos);
+}
+
+TEST_CASE("a long chain is truncated at the phase budget, not overrun") {
+    CutsceneDef built = buildWinCutscene(winTemplate(), planWith(20, 20), "X");
+    REQUIRE(built.duration() > 15.f);
+    truncateToBudget(built, 15.f);
+    CHECK(built.duration() <= doctest::Approx(15.f));
+}
+
+TEST_CASE("the shipped win.cutscene parses and is ASCII") {
+    namespace fs = std::filesystem;
+    fs::path dir = "cutscenes";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+
+    std::vector<std::string> errors;
+    const std::vector<CutsceneDef> shipped = loadCutscenes(dir, &errors);
+    CHECK(errors.empty());
+
+    const CutsceneDef* win = findCutscene(shipped, "win");
+    REQUIRE(win != nullptr);
+    CHECK(beatIds(*win) == std::vector<std::string>{"open", "found_title", "found",
+                                                    "missed_title", "missed", "away"});
+    for (const CutsceneBeat& beat : win->beats) {
+        CAPTURE(beat.caption);
+        for (const char c : beat.caption) CHECK(static_cast<unsigned char>(c) <= 126u);
+    }
+}

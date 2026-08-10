@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Math.hpp"
+#include "Montage.hpp"
 
 namespace llm_npc {
 
@@ -148,6 +149,32 @@ void truncateToBudget(CutsceneDef& scene, float budgetSeconds);
 CutsceneDef buildOpeningCutscene(const CutsceneDef& templateDef,
                                  const std::string& sceneZoneId,
                                  double murderHour, Vec3 bodyPosition);
+
+// Builds the win montage from a template and a MontagePlan (issue #234).
+//
+// The flashback problem solves itself: the cutscene system reads the LIVE
+// world and cannot replay past state, but THE PLACES STILL EXIST. Each beat
+// cuts to the zone where a clue was, with that clue's text as the caption.
+// Real locations, real chain, zero new machinery.
+//
+// The template drives the structure through PROTOTYPE BEATS, so shot
+// composition stays data-driven and the count of clues does not:
+//
+//   beat = found     repeated once per plan.found step
+//   beat = missed    repeated once per plan.missed step
+//
+// Any other beat id is emitted once, in place. A beat whose id begins with
+// "missed" is dropped entirely when nothing was missed, so a clean sweep does
+// not play a "there was more" title over an empty montage.
+//
+// Prototype captions may use {clue} for the step's text and {zone} for its
+// display name. Every caption may use {killer}.
+//
+// THIS IS THE ONE CUTSCENE ALLOWED TO NAME THE KILLER. It plays after
+// MatchOver, which is the only message that carries the name. Everywhere
+// earlier still must not, and buildOpeningCutscene above cannot.
+CutsceneDef buildWinCutscene(const CutsceneDef& templateDef,
+                             const MontagePlan& plan, const std::string& killer);
 
 // Drives a cutscene's camera, fade and captions over time.
 //
