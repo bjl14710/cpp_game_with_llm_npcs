@@ -65,4 +65,16 @@ const std::string& zoneName(const std::string& zoneId) {
     return zoneId;
 }
 
+Vec3 zoneCentre(const std::string& zoneId) {
+    for (const ZoneDef& zone : zonesForDowntown()) {
+        if (zone.id != zoneId) continue;
+        return Vec3{(zone.minX + zone.maxX) * 0.5f, 0.f,
+                    (zone.minZ + zone.maxZ) * 0.5f};
+    }
+    // Unknown id, or the streets — which span everything not in a block and
+    // so have no meaningful centre. The origin is the plaza's doorstep, which
+    // is at least somewhere a camera can stand.
+    return Vec3{};
+}
+
 }  // namespace llm_npc

@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "Math.hpp"
+
 namespace llm_npc {
 
 // Named regions of downtown (plan: clue-like-zones).
@@ -59,5 +61,13 @@ const std::string& zoneAt(float x, float z);
 // captions and journal entries read better as "Bakery Corner" than
 // "bakery_block".
 const std::string& zoneName(const std::string& zoneId);
+
+// The centre of a zone on the XZ plane, y = 0. Returns the origin for an
+// unknown id, including the streets, which have no bounds to average.
+//
+// Exists because Mystery.cpp already keeps a private findZone and the win
+// montage needs the same lookup to aim a camera at a clue's location. A third
+// private copy is how three of them start disagreeing.
+Vec3 zoneCentre(const std::string& zoneId);
 
 }  // namespace llm_npc

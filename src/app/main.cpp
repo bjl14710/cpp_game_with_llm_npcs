@@ -34,6 +34,7 @@
 #include "Gossip.hpp"
 #include "GroupSession.hpp"
 #include "Journal.hpp"
+#include "Montage.hpp"
 #include "Mystery.hpp"
 #include "Storyline.hpp"
 #include "DialogueSession.hpp"
@@ -1046,16 +1047,34 @@ int main(int argc, char** argv) {
     // --cutscene <id>: boot straight into a scene so it has a visual-QA path.
     // Fixed-step playback pins frame N to the same moment every run, which is
     // the only reason a capture can serve as a regression signal.
+    // The win montage is built AT THE MOMENT OF THE WIN, not at match start:
+    // it splits the clue chain by what the player actually learned, and that
+    // is still changing right up to the vote. Held as a lambda rather than a
+    // value for exactly that reason.
+    const auto buildWinNow = [&]() -> CutsceneDef {
+        const CutsceneDef* tmpl = findCutscene(cutsceneLibrary, "win");
+        if (tmpl == nullptr || mysterySetup.killer.empty()) return CutsceneDef{};
+        const std::vector<ClueStep> chain = solutionChain(mysterySetup);
+        const MontagePlan plan = buildMontage(chain, world.state(), "player");
+        // Naming the killer is correct HERE and nowhere earlier: this plays
+        // after the answer is already out.
+        return buildWinCutscene(*tmpl, plan, mysterySetup.killer);
+    };
+
     if (bootCutscene != nullptr) {
-        // The opening is GENERATED per match, so playing the raw template
-        // would show a player the literal text "{hour}". Prefer the built one
-        // whenever there is a mystery; fall back to the template so the scene
-        // is still framable without one.
+        // Both of these are GENERATED per match, so playing the raw template
+        // would show a player the literal text "{hour}" or "{clue}" — which is
+        // exactly what shipped in #230 before a capture caught it. Prefer the
+        // built one; fall back to the template so a scene is still framable
+        // without a mystery.
         const bool wantsOpening = std::strcmp(bootCutscene, "opening") == 0;
+        const bool wantsWin = std::strcmp(bootCutscene, "win") == 0;
+        CutsceneDef generatedWin;
+        if (wantsWin) generatedWin = buildWinNow();
         const CutsceneDef* scene =
-            (wantsOpening && !matchOpening.beats.empty())
-                ? &matchOpening
-                : findCutscene(cutsceneLibrary, bootCutscene);
+            (wantsOpening && !matchOpening.beats.empty()) ? &matchOpening
+            : (wantsWin && !generatedWin.beats.empty())   ? &generatedWin
+                                                          : findCutscene(cutsceneLibrary, bootCutscene);
         if (scene == nullptr) {
             std::cerr << "[llm_npc] --cutscene: no cutscene named \""
                       << bootCutscene << "\" in cutscenes/\n";

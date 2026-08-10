@@ -334,6 +334,56 @@ CutsceneDef buildOpeningCutscene(const CutsceneDef& templateDef,
     return out;
 }
 
+namespace {
+
+// One montage beat: the prototype, aimed at a clue's zone.
+CutsceneBeat clueBeat(const CutsceneBeat& prototype, const ClueStep& step,
+                      const std::string& killer) {
+    CutsceneBeat beat = prototype;
+    beat.id = prototype.id + "_" + std::to_string(step.order);
+    if (beat.hasPosition) {
+        // Authored as an offset from the zone centre, so one framing serves
+        // all nine zones — the same trick the opening uses with the body.
+        beat.pose.position = beat.pose.position + zoneCentre(step.zoneId);
+    }
+    substitute(beat.caption, "{clue}", step.caption);
+    substitute(beat.caption, "{zone}", zoneName(step.zoneId));
+    substitute(beat.caption, "{killer}", killer);
+    return beat;
+}
+
+}  // namespace
+
+CutsceneDef buildWinCutscene(const CutsceneDef& templateDef,
+                             const MontagePlan& plan, const std::string& killer) {
+    CutsceneDef out = templateDef;
+    out.beats.clear();
+
+    for (const CutsceneBeat& prototype : templateDef.beats) {
+        if (prototype.id == "found") {
+            for (const ClueStep& step : plan.found) {
+                out.beats.push_back(clueBeat(prototype, step, killer));
+            }
+            continue;
+        }
+        if (prototype.id == "missed") {
+            for (const ClueStep& step : plan.missed) {
+                out.beats.push_back(clueBeat(prototype, step, killer));
+            }
+            continue;
+        }
+        // Anything announcing the missed beat goes with it. A "there was more"
+        // title over nothing is worse than no title, and a group that swept
+        // the board has earned not being told about a beat that is empty.
+        if (plan.missed.empty() && prototype.id.rfind("missed", 0) == 0) continue;
+
+        CutsceneBeat beat = prototype;
+        substitute(beat.caption, "{killer}", killer);
+        out.beats.push_back(std::move(beat));
+    }
+    return out;
+}
+
 void CutscenePlayer::play(const CutsceneDef& scene, const CameraPose& from) {
     if (active_) {
         std::fprintf(stderr,
