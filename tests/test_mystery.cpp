@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "City.hpp"
+#include "Gossip.hpp"  // factIdFor
 #include "Journal.hpp"
 #include "LlmClient.hpp"
 #include "Mystery.hpp"
@@ -548,4 +549,155 @@ TEST_CASE("the victim is moved to the body position, not left where they spawned
         if (npc.persona().name == setup.victim) continue;
         CHECK(npc.position().x == doctest::Approx(999.f));
     }
+}
+
+// ---- evidence: knowledge nobody starts with (issue #218) -------------------
+
+namespace {
+
+// A setup carrying three clues across two zones.
+MysterySetup setupWithEvidence() {
+    MysterySetup setup = generateMystery(testRoster(), 4242u);
+    setup.evidence = {
+        Evidence{"unlocked_door", "bakery_block",
+                 "The bakery's back door was unlocked all evening.", true},
+        Evidence{"two_cups", "coffee_block",
+                 "Two cups on the counter, one untouched.", false},
+        Evidence{"torn_ledger", "bakery_block",
+                 "A delivery ledger with the last entry torn out.", true},
+    };
+    return setup;
+}
+
+}  // namespace
+
+TEST_CASE("evidence is committed to the bus and known by absolutely nobody") {
+    // The difference between a clue existing and a clue being found, which is
+    // the entire activity of searching a town.
+    const std::vector<Persona> roster = testRoster();
+    const MysterySetup setup = setupWithEvidence();
+
+    WorldState state;
+    seedMysteryFacts(state, setup, roster);
+
+    // One death fact plus three clues; no witnesses in this setup.
+    CHECK(state.facts().size() == 4);
+
+    const std::string doorId = factIdFor(
+        evidenceFactSubject(setup.evidence[0]), evidenceFactContent(setup.evidence[0]));
+    REQUIRE(state.findFact(doorId) != nullptr);
+
+    // Nobody at all — every resident, and the player.
+    for (const Persona& person : roster) {
+        CAPTURE(person.name);
+        CHECK_FALSE(state.knows(person.name, doorId));
+    }
+    CHECK_FALSE(state.knows("player", doorId));
+}
+
+TEST_CASE("a red herring commits identically to a real clue") {
+    // pointsAtKiller is host-only truth. If the bus treated the two
+    // differently the answer would leak through the shape of the data.
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+
+    const KnownFact* real = state.findFact(factIdFor(
+        evidenceFactSubject(setup.evidence[0]), evidenceFactContent(setup.evidence[0])));
+    const KnownFact* herring = state.findFact(factIdFor(
+        evidenceFactSubject(setup.evidence[1]), evidenceFactContent(setup.evidence[1])));
+    REQUIRE(real != nullptr);
+    REQUIRE(herring != nullptr);
+    CHECK(real->source == herring->source);
+    CHECK(real->learnedAtSeconds == doctest::Approx(herring->learnedAtSeconds));
+}
+
+TEST_CASE("entering a zone grants the evidence in it, and only that evidence") {
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+
+    CHECK(discoverEvidenceInZone(state, setup, "bakery_block", "player") == 2);
+
+    const std::string cupsId = factIdFor(
+        evidenceFactSubject(setup.evidence[1]), evidenceFactContent(setup.evidence[1]));
+    CHECK_FALSE(state.knows("player", cupsId));  // coffee_block, not visited
+
+    CHECK(discoverEvidenceInZone(state, setup, "coffee_block", "player") == 1);
+    CHECK(state.knows("player", cupsId));
+}
+
+TEST_CASE("discovery is idempotent, so a caller can fire it every zone change") {
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+
+    CHECK(discoverEvidenceInZone(state, setup, "bakery_block", "player") == 2);
+    CHECK(discoverEvidenceInZone(state, setup, "bakery_block", "player") == 0);
+    CHECK(discoverEvidenceInZone(state, setup, "bakery_block", "player") == 0);
+}
+
+TEST_CASE("discovery is per agent") {
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+
+    discoverEvidenceInZone(state, setup, "bakery_block", "player_0");
+    const std::string doorId = factIdFor(
+        evidenceFactSubject(setup.evidence[0]), evidenceFactContent(setup.evidence[0]));
+    CHECK(state.knows("player_0", doorId));
+    CHECK_FALSE(state.knows("player_1", doorId));
+}
+
+TEST_CASE("a zone with no evidence, an empty zone and an empty agent are all no-ops") {
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+
+    CHECK(discoverEvidenceInZone(state, setup, "plaza_block", "player") == 0);
+    CHECK(discoverEvidenceInZone(state, setup, "", "player") == 0);
+    CHECK(discoverEvidenceInZone(state, setup, "bakery_block", "") == 0);
+}
+
+TEST_CASE("discovery never invents a fact that was never seeded") {
+    // Reaching here means seedMysteryFacts did not run. Committing the fact
+    // anyway would paper over that and make the failure invisible.
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;  // nothing seeded
+
+    CHECK(discoverEvidenceInZone(state, setup, "bakery_block", "player") == 0);
+    CHECK(state.facts().empty());
+}
+
+TEST_CASE("discovered evidence shows up in the journal") {
+    // The end-to-end point: an undiscovered clue is invisible, and finding it
+    // puts a readable line in front of the player.
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+
+    // The death is public the moment a body is found, so the journal opens
+    // with exactly that and nothing else. The clues are on the bus but belong
+    // to nobody, which is what makes them findable rather than given.
+    REQUIRE(journalEntries(state).size() == 1);
+
+    discoverEvidenceInZone(state, setup, "bakery_block", "player");
+
+    const std::vector<JournalEntry> entries = journalEntries(state);
+    bool sawLedger = false;
+    for (const JournalEntry& entry : entries) {
+        if (entry.fact->content.find("delivery ledger") != std::string::npos) {
+            sawLedger = true;
+        }
+    }
+    CHECK(sawLedger);
+}
+
+TEST_CASE("seeding evidence twice is idempotent") {
+    const MysterySetup setup = setupWithEvidence();
+    WorldState state;
+    seedMysteryFacts(state, setup, testRoster());
+    const std::size_t after_first = state.facts().size();
+    seedMysteryFacts(state, setup, testRoster());
+    CHECK(state.facts().size() == after_first);
 }

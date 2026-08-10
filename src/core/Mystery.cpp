@@ -243,6 +243,31 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
     }
     state.grantKnowledge("player", death.factId);
 
+    // ---- physical evidence: knowledge NOBODY starts with -----------------
+    //
+    // Committed to the bus with no knowers at all. That is not an oversight
+    // and not a degenerate case — it is what grantKnowledge is for. A clue
+    // exists in the world from the first frame; it becomes knowledge only when
+    // someone finds it, and the gap between those two things is the entire
+    // activity of searching a town.
+    //
+    // pointsAtKiller decides NOTHING here. A red herring commits identically
+    // to a real clue, because the flag is host-only truth and a fact bus that
+    // treated them differently would leak the answer through the shape of the
+    // data rather than its content.
+    for (const Evidence& evidence : setup.evidence) {
+        if (evidence.id.empty()) continue;
+
+        KnownFact clue;
+        clue.subject = evidenceFactSubject(evidence);
+        clue.content = evidenceFactContent(evidence);
+        clue.factId = factIdFor(clue.subject, clue.content);
+        clue.source = kTownSource;
+        clue.learnedAtSeconds = now;
+        state.addFact(clue);
+        // No grantKnowledge. Deliberately, and the tests assert the absence.
+    }
+
     // ---- what each witness saw: private to that witness ------------------
     //
     // Granted to the witness ALONE. If everyone started knowing every
@@ -260,6 +285,29 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
         state.addFact(seen);
         state.grantKnowledge(witness.agent, seen.factId);
     }
+}
+
+int discoverEvidenceInZone(WorldState& state, const MysterySetup& setup,
+                           const std::string& zoneId, const std::string& agent) {
+    if (zoneId.empty() || agent.empty()) return 0;
+
+    int learned = 0;
+    for (const Evidence& evidence : setup.evidence) {
+        if (evidence.zoneId != zoneId) continue;
+
+        const std::string factId = factIdFor(evidenceFactSubject(evidence),
+                                             evidenceFactContent(evidence));
+        // The fact must already be on the bus; this grants knowledge of it and
+        // never invents one. A zone holding evidence that was never seeded
+        // means seedMysteryFacts did not run, and silently committing it here
+        // would paper over that.
+        if (state.findFact(factId) == nullptr) continue;
+        if (state.knows(agent, factId)) continue;
+
+        state.grantKnowledge(agent, factId);
+        ++learned;
+    }
+    return learned;
 }
 
 void placeBodyClearOfColliders(MysterySetup& setup, const City& city) {
