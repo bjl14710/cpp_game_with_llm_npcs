@@ -226,7 +226,10 @@ bool NetServer::handshake(Connection& conn) {
     auto msg = decodeMessage(joinPayload);
     if (!msg || msg->type != MessageType::JoinRequest) return false;
 
-    const int version = msg->payload.value("version", -1);
+    // Every read below crosses the trust boundary: these bytes came off a
+    // socket. readInt/readString fall back on a type clash instead of
+    // throwing out of the connection thread and killing the host (#245).
+    const int version = readInt(msg->payload, "version", -1);
     if (version != kNetProtocolVersion) {
         sendOn(conn, MessageType::Welcome,
                {{"accepted", false},
@@ -236,7 +239,7 @@ bool NetServer::handshake(Connection& conn) {
         return false;
     }
     if (!settings_.joinCode.empty() &&
-        msg->payload.value("code", std::string{}) != settings_.joinCode) {
+        readString(msg->payload, "code") != settings_.joinCode) {
         sendOn(conn, MessageType::Welcome,
                {{"accepted", false}, {"reason", "wrong join code"}});
         return false;
@@ -258,7 +261,8 @@ bool NetServer::handshake(Connection& conn) {
             }
         }
         if (assigned != -1) {
-            conn.name = msg->payload.value("name", "player" + std::to_string(assigned));
+            conn.name = readString(msg->payload, "name",
+                                   "player" + std::to_string(assigned));
             conn.playerId = assigned;  // set under the lock; playerCount sees it
             std::lock_guard<std::mutex> poseLock(conn.poseMutex);
             conn.pose.playerId = assigned;
@@ -308,10 +312,11 @@ void NetServer::handleMessage(Connection& conn, const NetMessage& msg) {
     switch (msg.type) {
         case MessageType::PlayerInput: {
             std::lock_guard<std::mutex> lock(conn.poseMutex);
-            if (msg.payload.contains("pos")) {
+            if (msg.payload.is_object() && msg.payload.contains("pos")) {
                 conn.pose.position = vec3FromJson(msg.payload["pos"]);
             }
-            conn.pose.facingDeg = msg.payload.value("facing", conn.pose.facingDeg);
+            conn.pose.facingDeg =
+                readFloat(msg.payload, "facing", conn.pose.facingDeg);
             break;
         }
         case MessageType::ChatOpen:
@@ -319,8 +324,8 @@ void NetServer::handleMessage(Connection& conn, const NetMessage& msg) {
             ChatEvent ev;
             ev.playerId = conn.playerId;
             ev.open = (msg.type == MessageType::ChatOpen);
-            ev.npcIndex = msg.payload.value("npc", -1);
-            ev.text = msg.payload.value("text", std::string{});
+            ev.npcIndex = readInt(msg.payload, "npc", -1);
+            ev.text = readString(msg.payload, "text");
             std::lock_guard<std::mutex> lock(chatMutex_);
             chatEvents_.push_back(std::move(ev));
             break;

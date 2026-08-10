@@ -1,5 +1,7 @@
 #include "NetMessage.hpp"
 
+#include <string>
+
 namespace llm_npc {
 
 namespace {
@@ -14,6 +16,33 @@ constexpr const char* kTypeNames[] = {
 constexpr int kTypeCount = static_cast<int>(sizeof(kTypeNames) / sizeof(kTypeNames[0]));
 
 }  // namespace
+
+bool readBool(const nlohmann::json& j, const char* key, bool fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_boolean()) ? it->get<bool>() : fallback;
+}
+
+int readInt(const nlohmann::json& j, const char* key, int fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_number_integer()) ? it->get<int>() : fallback;
+}
+
+float readFloat(const nlohmann::json& j, const char* key, float fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    // is_number covers int and float: a peer sending 3 where 3.0 was expected
+    // is well-formed, and rejecting it would be pedantry with a crash budget.
+    return (it != j.end() && it->is_number()) ? it->get<float>() : fallback;
+}
+
+std::string readString(const nlohmann::json& j, const char* key,
+                       const std::string& fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_string()) ? it->get<std::string>() : fallback;
+}
 
 const char* messageTypeToString(MessageType type) {
     return kTypeNames[static_cast<int>(type)];
@@ -49,9 +78,9 @@ nlohmann::json vec3ToJson(const Vec3& v) {
 
 Vec3 vec3FromJson(const nlohmann::json& j) {
     Vec3 v;
-    v.x = j.value("x", 0.f);
-    v.y = j.value("y", 0.f);
-    v.z = j.value("z", 0.f);
+    v.x = readFloat(j, "x", 0.f);
+    v.y = readFloat(j, "y", 0.f);
+    v.z = readFloat(j, "z", 0.f);
     return v;
 }
 
@@ -64,10 +93,10 @@ nlohmann::json playerPoseToJson(const PlayerPose& p) {
 
 PlayerPose playerPoseFromJson(const nlohmann::json& j) {
     PlayerPose p;
-    p.playerId = j.value("id", -1);
-    p.name = j.value("name", std::string{});
-    if (j.contains("pos")) p.position = vec3FromJson(j["pos"]);
-    p.facingDeg = j.value("facing", 0.f);
+    p.playerId = readInt(j, "id", -1);
+    p.name = readString(j, "name");
+    if (j.is_object() && j.contains("pos")) p.position = vec3FromJson(j["pos"]);
+    p.facingDeg = readFloat(j, "facing", 0.f);
     return p;
 }
 
@@ -81,11 +110,11 @@ nlohmann::json netNpcPoseToJson(const NetNpcPose& n) {
 
 NetNpcPose netNpcPoseFromJson(const nlohmann::json& j) {
     NetNpcPose n;
-    n.npcIndex = j.value("i", -1);
-    if (j.contains("pos")) n.position = vec3FromJson(j["pos"]);
-    n.facingDeg = j.value("facing", 0.f);
-    n.mood = j.value("mood", 0);
-    n.behavior = j.value("behavior", 0);
+    n.npcIndex = readInt(j, "i", -1);
+    if (j.is_object() && j.contains("pos")) n.position = vec3FromJson(j["pos"]);
+    n.facingDeg = readFloat(j, "facing", 0.f);
+    n.mood = readInt(j, "mood", 0);
+    n.behavior = readInt(j, "behavior", 0);
     return n;
 }
 
