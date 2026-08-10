@@ -12,8 +12,18 @@ constexpr const char* kTypeNames[] = {
     "JoinRequest",   "Welcome",   "PlayerInput",   "WorldSnapshot",
     "ChatOpen",      "ChatLine",  "ChatDelta",     "ChatReply",
     "NpcMoodUpdate", "NpcSpeechBubble", "Disconnect",
+    "VoteOpen",      "VoteNominate", "VoteState",  "VoteConfirm",
+    "VoteResolved",  "MatchOver",
 };
 constexpr int kTypeCount = static_cast<int>(sizeof(kTypeNames) / sizeof(kTypeNames[0]));
+
+// messageTypeToString indexes this array by enum value with no bounds check,
+// so a type added to the enum without a name here reads one past the end and
+// corrupts the protocol quietly. Caught at COMPILE time rather than by a test
+// somebody has to remember to run.
+static_assert(kTypeCount == kMessageTypeCount,
+              "kTypeNames is missing a row for a MessageType — add the name "
+              "next to the enum entry, in the same position");
 
 }  // namespace
 
@@ -116,6 +126,71 @@ NetNpcPose netNpcPoseFromJson(const nlohmann::json& j) {
     n.mood = readInt(j, "mood", 0);
     n.behavior = readInt(j, "behavior", 0);
     return n;
+}
+
+nlohmann::json voteStateToJson(const VoteStateMsg& v) {
+    nlohmann::json confirmations = nlohmann::json::array();
+    for (const auto& [playerId, agreed] : v.confirmations) {
+        confirmations.push_back({{"id", playerId}, {"ok", agreed}});
+    }
+    return {{"nominee", v.nominee},
+            {"nominator", v.nominator},
+            {"confirmations", std::move(confirmations)}};
+}
+
+VoteStateMsg voteStateFromJson(const nlohmann::json& j) {
+    VoteStateMsg v;
+    v.nominee = readString(j, "nominee");
+    v.nominator = readInt(j, "nominator", -1);
+    // Every field is read totally, with a default — a truncated or hostile
+    // payload must produce an empty ballot, not an exception in the network
+    // thread. `.get<>()` on a missing key throws; `.value()` does not.
+    if (j.contains("confirmations") && j["confirmations"].is_array()) {
+        for (const auto& entry : j["confirmations"]) {
+            if (!entry.is_object()) continue;
+            v.confirmations.emplace_back(readInt(entry, "id", -1),
+                                         readBool(entry, "ok", false));
+        }
+    }
+    return v;
+}
+
+nlohmann::json voteResolvedToJson(const VoteResolvedMsg& v) {
+    // Ints on the wire for the enum, the same convention NetNpcPose uses for
+    // mood and behavior.
+    return {{"outcome", static_cast<int>(v.outcome)},
+            {"accused", v.accused},
+            {"nominator", v.nominator},
+            {"killed", v.playerKilled}};
+}
+
+VoteResolvedMsg voteResolvedFromJson(const nlohmann::json& j) {
+    VoteResolvedMsg v;
+    const int outcome =
+        readInt(j, "outcome", static_cast<int>(VoteOutcome::NoAccusation));
+    // An out-of-range outcome from a newer or hostile peer degrades to
+    // NoAccusation, which is the only value that kills nobody. Casting a
+    // garbage int straight into the enum and switching on it is how a bad
+    // frame gets to execute a player.
+    v.outcome = (outcome >= static_cast<int>(VoteOutcome::NoAccusation) &&
+                 outcome <= static_cast<int>(VoteOutcome::Wrong))
+                    ? static_cast<VoteOutcome>(outcome)
+                    : VoteOutcome::NoAccusation;
+    v.accused = readString(j, "accused");
+    v.nominator = readInt(j, "nominator", -1);
+    v.playerKilled = readInt(j, "killed", -1);
+    return v;
+}
+
+nlohmann::json matchOverToJson(const MatchOverMsg& m) {
+    return {{"killer", m.killer}, {"won", m.playersWon}};
+}
+
+MatchOverMsg matchOverFromJson(const nlohmann::json& j) {
+    MatchOverMsg m;
+    m.killer = readString(j, "killer");
+    m.playersWon = readBool(j, "won", false);
+    return m;
 }
 
 }  // namespace llm_npc

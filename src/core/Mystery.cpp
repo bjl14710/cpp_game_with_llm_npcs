@@ -161,6 +161,57 @@ const std::string& revealKillerForDebug(const MysterySetup& setup) {
 }
 #endif
 
+std::string witnessFactSubject(const Witness& witness) {
+    // WHO the testimony is about, falling back to the speaker when it is about
+    // no one in particular.
+    //
+    // This choice IS the detective mechanic (#214). Journal.hpp flags "one
+    // subject, more than one content", so only facts sharing a subject can
+    // ever be compared:
+    //
+    //   about set    -> "<person> whereabouts". Two residents giving different
+    //                   accounts of one person collide, and both sides are
+    //                   flagged. This is the case the mode is built on.
+    //   about empty  -> "<speaker> testimony". One resident changing their own
+    //                   story is still caught. Not a fallback so much as the
+    //                   other half of the mechanic.
+    //
+    // An alibi needs no special handling: a witness whose `about` is their own
+    // name lands on their own whereabouts subject, so their account and any
+    // sighting of them collide automatically. Nothing marks which is the lie.
+    return normalizeSubject(witness.about.empty()
+                                ? witness.agent + " testimony"
+                                : witness.about + " whereabouts");
+}
+
+std::string witnessFactContent(const Witness& witness) {
+    // Self-testimony reads as a claim, not a sighting — "saw themselves" is
+    // nonsense, and an alibi is the one testimony a player should hear in the
+    // speaker's own voice. "they" throughout: the roster has no pronoun field
+    // and inventing one from a name would misgender people.
+    //
+    // ASCII only. Fact content is rendered with raylib's built-in bitmap font,
+    // which has no glyph outside ASCII 32-126 — an em-dash here reaches the
+    // Journal as a literal "?".
+    const bool selfTestimony = witness.about == witness.agent;
+    return clampContent(
+        selfTestimony
+            ? witness.agent + " says they were at " + zoneName(witness.sawZoneId) +
+                  " around " + clockLabel(witness.atHour * 3600.0) + ", " +
+                  witness.observed + "."
+            : witness.agent + " saw " + witness.observed + " at " +
+                  zoneName(witness.sawZoneId) + " around " +
+                  clockLabel(witness.atHour * 3600.0) + ".");
+}
+
+std::string evidenceFactSubject(const Evidence& evidence) {
+    return normalizeSubject(evidence.id);
+}
+
+std::string evidenceFactContent(const Evidence& evidence) {
+    return clampContent(evidence.description);
+}
+
 void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
                       const std::vector<Persona>& roster) {
     if (setup.victim.empty()) return;  // no mystery; nothing to tell anyone
@@ -192,6 +243,31 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
     }
     state.grantKnowledge("player", death.factId);
 
+    // ---- physical evidence: knowledge NOBODY starts with -----------------
+    //
+    // Committed to the bus with no knowers at all. That is not an oversight
+    // and not a degenerate case — it is what grantKnowledge is for. A clue
+    // exists in the world from the first frame; it becomes knowledge only when
+    // someone finds it, and the gap between those two things is the entire
+    // activity of searching a town.
+    //
+    // pointsAtKiller decides NOTHING here. A red herring commits identically
+    // to a real clue, because the flag is host-only truth and a fact bus that
+    // treated them differently would leak the answer through the shape of the
+    // data rather than its content.
+    for (const Evidence& evidence : setup.evidence) {
+        if (evidence.id.empty()) continue;
+
+        KnownFact clue;
+        clue.subject = evidenceFactSubject(evidence);
+        clue.content = evidenceFactContent(evidence);
+        clue.factId = factIdFor(clue.subject, clue.content);
+        clue.source = kTownSource;
+        clue.learnedAtSeconds = now;
+        state.addFact(clue);
+        // No grantKnowledge. Deliberately, and the tests assert the absence.
+    }
+
     // ---- what each witness saw: private to that witness ------------------
     //
     // Granted to the witness ALONE. If everyone started knowing every
@@ -201,52 +277,37 @@ void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
         if (witness.agent.empty()) continue;
 
         KnownFact seen;
-        // The subject is WHO the testimony is about, falling back to the
-        // speaker when it is about no one in particular.
-        //
-        // This choice is the detective mechanic (#214). Journal.hpp flags
-        // "one subject, more than one content", so only facts sharing a
-        // subject can ever be compared:
-        //
-        //   about set    -> "<person> whereabouts". Two residents giving
-        //                   different accounts of one person collide, and both
-        //                   sides are flagged. This is the case the mode is
-        //                   built on, and it is why `about` exists.
-        //   about empty  -> "<speaker> testimony". One resident changing their
-        //                   own story is still caught. Not a fallback so much
-        //                   as the other half of the mechanic.
-        //
-        // An alibi needs no special handling: a witness whose `about` is their
-        // own name lands on their own whereabouts subject, so their account
-        // and any sighting of them collide automatically. Nothing marks which
-        // one is the lie — deliberately.
-        const std::string topic = witness.about.empty()
-                                      ? witness.agent + " testimony"
-                                      : witness.about + " whereabouts";
-        seen.subject = normalizeSubject(topic);
-        // Self-testimony reads as a claim, not a sighting — "saw themselves"
-        // is nonsense, and an alibi is the one testimony a player should hear
-        // in the speaker's own voice. "they" throughout: the roster has no
-        // pronoun field and inventing one from a name would misgender people.
-        const bool selfTestimony = witness.about == witness.agent;
-        seen.content = clampContent(
-            selfTestimony
-                // ASCII only. Fact content is rendered with raylib's built-in
-                // bitmap font, which has no glyph outside ASCII 32-126 — an
-                // em-dash here reaches the Journal as a literal "?".
-                ? witness.agent + " says they were at " +
-                      zoneName(witness.sawZoneId) + " around " +
-                      clockLabel(witness.atHour * 3600.0) + ", " +
-                      witness.observed + "."
-                : witness.agent + " saw " + witness.observed + " at " +
-                      zoneName(witness.sawZoneId) + " around " +
-                      clockLabel(witness.atHour * 3600.0) + ".");
+        seen.subject = witnessFactSubject(witness);
+        seen.content = witnessFactContent(witness);
         seen.factId = factIdFor(seen.subject, seen.content);
         seen.source = witness.agent;
         seen.learnedAtSeconds = now;
         state.addFact(seen);
         state.grantKnowledge(witness.agent, seen.factId);
     }
+}
+
+int discoverEvidenceInZone(WorldState& state, const MysterySetup& setup,
+                           const std::string& zoneId, const std::string& agent) {
+    if (zoneId.empty() || agent.empty()) return 0;
+
+    int learned = 0;
+    for (const Evidence& evidence : setup.evidence) {
+        if (evidence.zoneId != zoneId) continue;
+
+        const std::string factId = factIdFor(evidenceFactSubject(evidence),
+                                             evidenceFactContent(evidence));
+        // The fact must already be on the bus; this grants knowledge of it and
+        // never invents one. A zone holding evidence that was never seeded
+        // means seedMysteryFacts did not run, and silently committing it here
+        // would paper over that.
+        if (state.findFact(factId) == nullptr) continue;
+        if (state.knows(agent, factId)) continue;
+
+        state.grantKnowledge(agent, factId);
+        ++learned;
+    }
+    return learned;
 }
 
 void placeBodyClearOfColliders(MysterySetup& setup, const City& city) {

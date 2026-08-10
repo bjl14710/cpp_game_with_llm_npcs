@@ -48,6 +48,25 @@ GAME = ROOT / "build" / "cpp_game_with_llm_npcs"
 BASELINE_MS = 26.4
 
 
+def build_type():
+    """Whatever CMAKE_BUILD_TYPE the binary under test was configured with.
+
+    Reported on every run because it silently invalidates comparisons. The
+    project had no default, so CMake's empty-string default applied and
+    `cmake --build build` produced an UNOPTIMISED binary — which is how the
+    26.4 ms/frame baseline above was measured. The same commit at -O2 measures
+    around 17 ms. A number without its build type is not a measurement.
+    """
+    cache = ROOT / "build" / "CMakeCache.txt"
+    if not cache.exists():
+        return "unknown (no CMakeCache.txt)"
+    for line in cache.read_text(errors="replace").splitlines():
+        if line.startswith("CMAKE_BUILD_TYPE:"):
+            value = line.split("=", 1)[1].strip()
+            return value if value else "EMPTY — unoptimised, no -O flag"
+    return "unknown"
+
+
 def timed_run(frames, camera, hour):
     """Wall-clock seconds for a bounded run. Returns None if the game failed."""
     cmd = [str(GAME), "--frames", str(frames),
@@ -76,6 +95,9 @@ def main(argv=None):
     parser.add_argument("--camera", nargs=3, type=float, default=[0, 30, 180],
                         metavar=("X", "Z", "YAW"))
     parser.add_argument("--hour", type=float, default=12.0)
+    parser.add_argument("--repeats", type=int, default=3,
+                        help="measurement passes; the median is reported "
+                             "(default 3, because a single pass is not a number)")
     parser.add_argument("--gate", type=float, default=None,
                         help=f"fail if marginal ms/frame exceeds this "
                              f"(the plan's gate is {BASELINE_MS})")
@@ -89,21 +111,38 @@ def main(argv=None):
     personas = len(list((ROOT / "personas").glob("*.persona")))
     print(f"roster: {personas} persona file(s)")
 
-    print(f"  timing {args.short} frames...")
-    short = timed_run(args.short, args.camera, args.hour)
-    print(f"  timing {args.long} frames...")
-    long_ = timed_run(args.long, args.camera, args.hour)
-    if short is None or long_ is None:
-        return 2
+    print(f"  build      {build_type()}")
 
-    marginal_ms = (long_ - short) / (args.long - args.short) * 1000.0
-    startup_s = short - args.short * marginal_ms / 1000.0
+    samples = []
+    for i in range(args.repeats):
+        label = f"  [{i + 1}/{args.repeats}]"
+        print(f"{label} timing {args.short} frames...")
+        short = timed_run(args.short, args.camera, args.hour)
+        print(f"{label} timing {args.long} frames...")
+        long_ = timed_run(args.long, args.camera, args.hour)
+        if short is None or long_ is None:
+            return 2
+        ms = (long_ - short) / (args.long - args.short) * 1000.0
+        samples.append((ms, short))
+        print(f"{label} {short:6.2f} s / {long_:6.2f} s  ->  {ms:5.1f} ms/frame")
+
+    # MEDIAN, not mean. A single scheduling hiccup or a display waking from
+    # sleep produces an outlier large enough to swamp the effect being measured
+    # — one observed run reported a NEGATIVE marginal cost because the 900-frame
+    # pass happened to be faster than the 300-frame one.
+    ordered = sorted(s[0] for s in samples)
+    marginal_ms = ordered[len(ordered) // 2]
+    spread = ordered[-1] - ordered[0]
+    startup_s = min(s[1] for s in samples) - args.short * marginal_ms / 1000.0
     fps = 1000.0 / marginal_ms if marginal_ms > 0 else float("inf")
 
-    print(f"\n  {args.short:>4} frames  {short:6.2f} s")
-    print(f"  {args.long:>4} frames  {long_:6.2f} s")
-    print(f"\n  marginal   {marginal_ms:.1f} ms/frame  ({fps:.1f} fps)")
+    print(f"\n  marginal   {marginal_ms:.1f} ms/frame  ({fps:.1f} fps)   median of {args.repeats}")
+    print(f"  spread     {spread:.1f} ms  (slowest minus fastest)")
     print(f"  startup    {startup_s:.1f} s")
+    # A gate is meaningless when the noise is wider than the thing being gated.
+    if args.repeats > 1 and spread > abs(marginal_ms) * 0.15:
+        print(f"  WARNING    spread is {spread / abs(marginal_ms) * 100:.0f}% of the "
+              f"measurement — treat any comparison finer than that as noise")
     if personas:
         print(f"  per NPC    {marginal_ms / personas:.2f} ms/frame "
               f"(crude: assumes all cost is per-NPC)")

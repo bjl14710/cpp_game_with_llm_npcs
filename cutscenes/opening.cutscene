@@ -1,0 +1,54 @@
+# The opening: what the town wakes up to.
+#
+# It does NOT depict the murder. The cutscene system drives the camera over the
+# live world and excludes character animation, so there is no way to stage a
+# figure crossing a window — and that is the better version anyway. You cannot
+# accidentally reveal a killer you never render.
+#
+# Camera positions are OFFSETS FROM THE BODY. buildOpeningCutscene translates
+# them to wherever the scene landed this match, so this one set of framing
+# works for all nine downtown zones.
+#
+# {zone} and {hour} are substituted per match. Both narrow the field without
+# identifying anyone, which is exactly what a re-watchable opening should carry:
+# a player who goes back and notices the clock read 21:40 has found a real clue
+# that constrains every alibi they hear afterwards.
+#
+# Captions are ASCII only. The built-in bitmap font has glyphs for 32-126 and
+# renders anything else as "?".
+name = The Morning After
+skippable = after_first
+letterbox = 90
+
+# Wide and high, looking down at the street. The body is somewhere below and
+# not yet legible - the town before you know what happened in it.
+beat = establish
+  camera = -14.0, 9.0, 14.0
+  yaw = 135
+  pitch = -26
+  hold = 2.5
+  ease = smooth
+  caption = {zone}. Tuesday morning.
+  fade_in = 1.2
+
+# Down and in. Still no faces: only the place, and the hour that matters.
+beat = approach
+  camera = -5.0, 3.2, 5.0
+  yaw = 135
+  pitch = -14
+  hold = 2.5
+  ease = smooth
+  caption = Sometime around {hour} last night, someone died here.
+
+# Close, low, on the body. Held rather than moved - the shot has arrived.
+beat = the_body
+  camera = -2.2, 1.5, 2.2
+  yaw = 135
+  pitch = -22
+  hold = 2.0
+  ease = smooth
+  caption = Nobody is saying what they saw.
+
+beat = out
+  hold = 1.2
+  fade_out = 1.0
