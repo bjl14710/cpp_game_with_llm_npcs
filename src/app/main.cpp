@@ -215,6 +215,10 @@ int main(int argc, char** argv) {
     // so the mode was unreachable from the game (issue #220).
     bool bootMystery = false;
     unsigned mysterySeed = 20260809u;
+    // --menu <page>: boot straight into a menu page. Every page but Main is
+    // reached by clicking, which a headless --frames capture cannot do, so
+    // none of them has ever been photographed (#216).
+    const char* bootMenuPage = nullptr;
     int arg = 1;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
@@ -242,6 +246,9 @@ int main(int argc, char** argv) {
             } else if (std::strcmp(argv[arg], "--sandbox-edit") == 0) {
                 bootSandboxEdit = true;
                 arg += 1;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--menu") == 0) {
+                bootMenuPage = argv[arg + 1];
+                arg += 2;
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--cutscene") == 0) {
                 bootCutscene = argv[arg + 1];
                 arg += 2;
@@ -1061,6 +1068,19 @@ int main(int argc, char** argv) {
         return buildWinCutscene(*tmpl, plan, mysterySetup.killer);
     };
 
+    if (bootMenuPage != nullptr) {
+        const auto page = Menu::pageFromName(bootMenuPage);
+        if (!page) {
+            std::cerr << "[llm_npc] --menu: unknown page \"" << bootMenuPage
+                      << "\" (main, controls, multiplayer, creator, journal, "
+                         "sandbox, model)\n";
+        } else {
+            menu.showPage(*page);
+            mode = AppMode::Menu;
+            EnableCursor();
+        }
+    }
+
     if (bootCutscene != nullptr) {
         // Both of these are GENERATED per match, so playing the raw template
         // would show a player the literal text "{hour}" or "{clue}" — which is
@@ -1082,10 +1102,16 @@ int main(int argc, char** argv) {
             cutscene.setFixedStep(true);
             playCutscene(*scene);
         }
-    } else if (!matchOpening.beats.empty()) {
+    } else if (!matchOpening.beats.empty() && bootMenuPage == nullptr) {
         // A mystery starts with its opening. Smoke runs included: a scene
         // nobody ever captures is a scene nobody ever checks, which is how the
         // map editor shipped with a menu drawn over it (#215).
+        //
+        // Unless --menu asked for a page. This block runs after the --menu
+        // block and playCutscene takes the mode, so without the guard an
+        // explicit request is silently overridden — every one of the first
+        // seven --menu captures came back showing the opening instead. An
+        // explicit flag beats an automatic one.
         if (smokeRun) cutscene.setFixedStep(true);
         playCutscene(matchOpening);
     }
@@ -2214,8 +2240,15 @@ int main(int argc, char** argv) {
         // Suppressed during a cutscene, and not only for looks: the opening
         // scene is required never to identify a living NPC, and a nameplate
         // drifting into an establishing shot would name one outright.
+        //
+        // Suppressed with a menu open too. Nameplates are drawn before the
+        // menu's backdrop, which dims them without hiding them, so they came
+        // through the Journal's text as a second layer of words at the same
+        // size. Found on the first capture the Journal has ever had (#216) —
+        // no test would have shown it, and nobody had looked.
+        const bool menuOpen = (mode == AppMode::Menu);
         const auto plateFor = [&](const Vec3& feet, const std::string& name, Color color) {
-            if (cutscenePlaying) return;
+            if (cutscenePlaying || menuOpen) return;
             if (distanceXZ(player.position, feet) > kNameplateRange) return;
             Vector2 screen;
             if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
@@ -2245,7 +2278,10 @@ int main(int argc, char** argv) {
         }
 
         // Combat callouts float above their NPC like temporary nameplates.
+        // Combat callouts are nameplates by another name and sit in the same
+        // layer, so they come through a menu the same way.
         for (const auto& callout : callouts) {
+            if (cutscenePlaying || menuOpen) break;
             if (callout.npcIndex < 0 ||
                 callout.npcIndex >= static_cast<int>(world.npcs().size())) continue;
             const Npc& npc = world.npcs()[static_cast<std::size_t>(callout.npcIndex)];
