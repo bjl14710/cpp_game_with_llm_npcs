@@ -1,6 +1,7 @@
 // Tests for NetMessage encode/decode — the JSON wire protocol for
 // multiplayer (plan: .claude/plans/multiplayer-and-aws-deploy.md).
 #include <string>
+#include <vector>
 
 #include "NetMessage.hpp"
 #include "doctest.h"
@@ -243,4 +244,103 @@ TEST_CASE("appending the vote types did not renumber the existing ones") {
     CHECK(static_cast<int>(MessageType::Disconnect) == 10);
     CHECK(static_cast<int>(MessageType::VoteOpen) == 11);
     CHECK(static_cast<int>(MessageType::MatchOver) == kMessageTypeCount - 1);
+}
+
+// ---- the trust boundary (issue #245) ---------------------------------------
+//
+// Every existing test in this file sends well-formed JSON, which is exactly
+// why the throwing path survived: it was never entered. These cases send
+// payloads a hostile or merely mismatched peer would send.
+
+TEST_CASE("a wrong-typed field never throws out of a decoder") {
+    // The reported crash, at the layer that caused it:
+    //     {"type": "PlayerInput", "facing": "north"}
+    // NetServer read `facing` with value(), which throws when the key is
+    // present with the wrong type, and there is no try/catch in the whole
+    // connection path — so this terminated the host.
+    nlohmann::json hostile;
+    hostile["facing"] = "north";
+    hostile["id"] = "one";
+    hostile["name"] = 17;
+    hostile["mood"] = nlohmann::json::array();
+    hostile["pos"] = "somewhere";
+
+    // Each of these used to throw; each must now fall back.
+    CHECK(llm_npc::readFloat(hostile, "facing", 1.5f) == doctest::Approx(1.5f));
+    CHECK(llm_npc::readInt(hostile, "id", -1) == -1);
+    CHECK(llm_npc::readString(hostile, "name") == "");
+    CHECK(llm_npc::readInt(hostile, "mood", 0) == 0);
+
+    const PlayerPose pose = llm_npc::playerPoseFromJson(hostile);
+    CHECK(pose.playerId == -1);
+    CHECK(pose.name.empty());
+    CHECK(pose.facingDeg == doctest::Approx(0.f));
+
+    const NetNpcPose npc = llm_npc::netNpcPoseFromJson(hostile);
+    CHECK(npc.npcIndex == -1);
+    CHECK(npc.mood == 0);
+}
+
+TEST_CASE("a non-object payload is absorbed rather than indexed") {
+    // decodeMessage rejects these, but the helpers are called from places that
+    // already hold a sub-object, so they have to stand alone.
+    for (const nlohmann::json junk :
+         {nlohmann::json(nullptr), nlohmann::json(3), nlohmann::json("text"),
+          nlohmann::json::array({1, 2, 3})}) {
+        CHECK(llm_npc::readInt(junk, "id", -7) == -7);
+        CHECK(llm_npc::readString(junk, "name", "fallback") == "fallback");
+        CHECK(llm_npc::readBool(junk, "ok", true));
+        CHECK(llm_npc::readFloat(junk, "facing", 2.5f) == doctest::Approx(2.5f));
+        CHECK(llm_npc::playerPoseFromJson(junk).playerId == -1);
+        CHECK(llm_npc::netNpcPoseFromJson(junk).npcIndex == -1);
+        CHECK(llm_npc::vec3FromJson(junk).x == doctest::Approx(0.f));
+    }
+}
+
+TEST_CASE("null fields fall back rather than converting") {
+    // JSON null is its own type, and get<std::string>() on it throws too.
+    nlohmann::json nulls;
+    for (const char* key : {"id", "name", "facing", "ok", "pos"}) {
+        nulls[key] = nullptr;
+    }
+    CHECK(llm_npc::readInt(nulls, "id", -1) == -1);
+    CHECK(llm_npc::readString(nulls, "name", "x") == "x");
+    CHECK(llm_npc::readFloat(nulls, "facing", 9.f) == doctest::Approx(9.f));
+    CHECK(llm_npc::readBool(nulls, "ok", true));
+    CHECK(llm_npc::playerPoseFromJson(nulls).name.empty());
+}
+
+TEST_CASE("an integer where a float was expected is accepted, not rejected") {
+    // A peer sending 3 where 3.0 was expected is well-formed. Rejecting it
+    // would be pedantry paid for with a crash budget.
+    nlohmann::json j;
+    j["facing"] = 90;  // integer
+    CHECK(llm_npc::readFloat(j, "facing", 0.f) == doctest::Approx(90.f));
+}
+
+TEST_CASE("every message type survives a hostile payload of every shape") {
+    // The sweep: for each type, four payload shapes that a well-behaved peer
+    // would never send. The requirement is only that nothing throws — the
+    // connection may well be dropped, but the process must not die.
+    const std::vector<nlohmann::json> shapes = {
+        nlohmann::json::object(),
+        nlohmann::json::object({{"facing", "north"}, {"id", "one"}, {"name", 4}}),
+        nlohmann::json::object({{"pos", 7}, {"confirmations", 3}, {"outcome", "x"}}),
+        nlohmann::json::object({{"killer", nullptr}, {"won", "yes"}, {"npc", 1.5}}),
+    };
+    for (int i = 0; i < kMessageTypeCount; ++i) {
+        for (const nlohmann::json& shape : shapes) {
+            CAPTURE(messageTypeToString(static_cast<MessageType>(i)));
+            CAPTURE(shape.dump());
+            const auto decoded =
+                decodeMessage(encodeMessage(static_cast<MessageType>(i), shape));
+            REQUIRE(decoded.has_value());
+            // Everything a handler would pull off this payload.
+            CHECK_NOTHROW(llm_npc::playerPoseFromJson(decoded->payload));
+            CHECK_NOTHROW(llm_npc::netNpcPoseFromJson(decoded->payload));
+            CHECK_NOTHROW(voteStateFromJson(decoded->payload));
+            CHECK_NOTHROW(voteResolvedFromJson(decoded->payload));
+            CHECK_NOTHROW(matchOverFromJson(decoded->payload));
+        }
+    }
 }
