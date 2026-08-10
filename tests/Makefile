@@ -4,8 +4,10 @@
 # primary way to build and run unit tests there. It compiles every
 # src/core/*.cpp plus every tests/test_*.cpp into one doctest binary.
 #
-#   make -C tests test     # build + run all tests
-#   make -C tests clean    # remove build artifacts
+#   make -C tests test         # build + run all tests
+#   make -C tests build        # compile without running
+#   make -C tests portability  # assert the macOS deployment floor still holds
+#   make -C tests clean        # remove build artifacts
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++20 -g -O0 -pthread -Wall -Wextra
@@ -58,25 +60,45 @@ build: $(TARGET)
 portability:
 	@../scripts/check-portability-floor.sh
 
+# Each recipe creates its own output directory with `mkdir -p $(@D)` rather
+# than depending order-only on a `$(BUILD):` rule.
+#
+# There used to be such a rule, and it could never run. `BUILD := build` makes
+# `build` a real directory target, but `build` is also the phony alias for
+# "compile without running". Asking make for `build` therefore matched the
+# phony declaration, which made the order-only prerequisite look circular:
+#
+#     make: Circular build/core_City.o <- build dependency dropped.
+#     error: unable to open output file 'build/core_City.o': No such file or directory
+#
+# Make dropped the prerequisite, the mkdir never ran, and every compile failed
+# on a missing directory. `make -C tests test` sidestepped it by reaching the
+# objects through $(TARGET) instead of through the colliding name, which is why
+# this survived unnoticed — `build` is also undocumented in the header above.
+#
+# Removing the directory target removes the collision outright, rather than
+# renaming one side of it and leaving `make build` to silently produce an empty
+# directory. $(@D) is make's built-in "directory part of the target".
 $(TARGET): $(CORE_OBJS) $(TEST_OBJS) $(SQLITE_OBJ)
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(SQLITE_OBJ): ../external/sqlite3.c | $(BUILD)
+$(SQLITE_OBJ): ../external/sqlite3.c
+	@mkdir -p $(@D)
 	$(CC) -O1 $(MACOS_MIN) -c $< -o $@
 
 # -MMD -MP emits .d header-dependency files next to each object so editing a
 # header (e.g. changing the Npc class layout) recompiles every dependent
 # object instead of leaving stale, ABI-mismatched ones behind.
-$(BUILD)/core_%.o: ../src/core/%.cpp | $(BUILD)
+$(BUILD)/core_%.o: ../src/core/%.cpp
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
-$(BUILD)/%.o: %.cpp | $(BUILD)
+$(BUILD)/%.o: %.cpp
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
 -include $(wildcard $(BUILD)/*.d)
-
-$(BUILD):
-	mkdir -p $(BUILD)
 
 clean:
 	rm -rf $(BUILD)
