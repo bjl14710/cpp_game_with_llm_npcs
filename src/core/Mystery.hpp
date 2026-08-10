@@ -151,6 +151,20 @@ const std::string& revealKillerForDebug(const MysterySetup& setup);
 // the victim, the killer and any witnesses, but never the people who are merely
 // alive. Passing the roster is cheaper and far more obvious than having the
 // caller re-derive the survivor set from a list this function already needs.
+// How a mystery fact is keyed and worded. Exposed because more than one place
+// needs to agree on it, and the last time two places built the same subject
+// independently they disagreed and silently disabled the detective mechanic
+// (#214). Anything that needs a mystery fact's id computes it as
+// factIdFor(<thing>FactSubject(x), <thing>FactContent(x)) rather than
+// reconstructing the strings.
+//
+// Consumers: seedMysteryFacts (commits them) and solutionChain in Montage.hpp
+// (matches them). Issue #218 must seed evidence through the evidence pair.
+std::string witnessFactSubject(const Witness& witness);
+std::string witnessFactContent(const Witness& witness);
+std::string evidenceFactSubject(const Evidence& evidence);
+std::string evidenceFactContent(const Evidence& evidence);
+
 void seedMysteryFacts(WorldState& state, const MysterySetup& setup,
                       const std::vector<Persona>& roster);
 
