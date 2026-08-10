@@ -17,14 +17,16 @@ constexpr const char* kTypeNames[] = {
 };
 constexpr int kTypeCount = static_cast<int>(sizeof(kTypeNames) / sizeof(kTypeNames[0]));
 
-// TYPE-CHECKED field reads.
-//
-// nlohmann's j.value(key, default) returns the default only when the key is
-// MISSING. When the key is present with the wrong type it THROWS — so
-// {"nominee": 17} from a hostile or buggy peer raises out of the decode path
-// instead of yielding an empty ballot, which in a network thread is a remote
-// crash rather than a parse error. Found by a test that fed the decoders
-// wrong-typed fields on purpose.
+// messageTypeToString indexes this array by enum value with no bounds check,
+// so a type added to the enum without a name here reads one past the end and
+// corrupts the protocol quietly. Caught at COMPILE time rather than by a test
+// somebody has to remember to run.
+static_assert(kTypeCount == kMessageTypeCount,
+              "kTypeNames is missing a row for a MessageType — add the name "
+              "next to the enum entry, in the same position");
+
+}  // namespace
+
 bool readBool(const nlohmann::json& j, const char* key, bool fallback) {
     if (!j.is_object()) return fallback;
     const auto it = j.find(key);
@@ -37,21 +39,20 @@ int readInt(const nlohmann::json& j, const char* key, int fallback) {
     return (it != j.end() && it->is_number_integer()) ? it->get<int>() : fallback;
 }
 
-std::string readString(const nlohmann::json& j, const char* key) {
-    if (!j.is_object()) return {};
+float readFloat(const nlohmann::json& j, const char* key, float fallback) {
+    if (!j.is_object()) return fallback;
     const auto it = j.find(key);
-    return (it != j.end() && it->is_string()) ? it->get<std::string>() : std::string{};
+    // is_number covers int and float: a peer sending 3 where 3.0 was expected
+    // is well-formed, and rejecting it would be pedantry with a crash budget.
+    return (it != j.end() && it->is_number()) ? it->get<float>() : fallback;
 }
 
-// messageTypeToString indexes this array by enum value with no bounds check,
-// so a type added to the enum without a name here reads one past the end and
-// corrupts the protocol quietly. Caught at COMPILE time rather than by a test
-// somebody has to remember to run.
-static_assert(kTypeCount == kMessageTypeCount,
-              "kTypeNames is missing a row for a MessageType — add the name "
-              "next to the enum entry, in the same position");
-
-}  // namespace
+std::string readString(const nlohmann::json& j, const char* key,
+                       const std::string& fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_string()) ? it->get<std::string>() : fallback;
+}
 
 const char* messageTypeToString(MessageType type) {
     return kTypeNames[static_cast<int>(type)];
@@ -87,9 +88,9 @@ nlohmann::json vec3ToJson(const Vec3& v) {
 
 Vec3 vec3FromJson(const nlohmann::json& j) {
     Vec3 v;
-    v.x = j.value("x", 0.f);
-    v.y = j.value("y", 0.f);
-    v.z = j.value("z", 0.f);
+    v.x = readFloat(j, "x", 0.f);
+    v.y = readFloat(j, "y", 0.f);
+    v.z = readFloat(j, "z", 0.f);
     return v;
 }
 
@@ -102,10 +103,10 @@ nlohmann::json playerPoseToJson(const PlayerPose& p) {
 
 PlayerPose playerPoseFromJson(const nlohmann::json& j) {
     PlayerPose p;
-    p.playerId = j.value("id", -1);
-    p.name = j.value("name", std::string{});
-    if (j.contains("pos")) p.position = vec3FromJson(j["pos"]);
-    p.facingDeg = j.value("facing", 0.f);
+    p.playerId = readInt(j, "id", -1);
+    p.name = readString(j, "name");
+    if (j.is_object() && j.contains("pos")) p.position = vec3FromJson(j["pos"]);
+    p.facingDeg = readFloat(j, "facing", 0.f);
     return p;
 }
 
@@ -119,11 +120,11 @@ nlohmann::json netNpcPoseToJson(const NetNpcPose& n) {
 
 NetNpcPose netNpcPoseFromJson(const nlohmann::json& j) {
     NetNpcPose n;
-    n.npcIndex = j.value("i", -1);
-    if (j.contains("pos")) n.position = vec3FromJson(j["pos"]);
-    n.facingDeg = j.value("facing", 0.f);
-    n.mood = j.value("mood", 0);
-    n.behavior = j.value("behavior", 0);
+    n.npcIndex = readInt(j, "i", -1);
+    if (j.is_object() && j.contains("pos")) n.position = vec3FromJson(j["pos"]);
+    n.facingDeg = readFloat(j, "facing", 0.f);
+    n.mood = readInt(j, "mood", 0);
+    n.behavior = readInt(j, "behavior", 0);
     return n;
 }
 

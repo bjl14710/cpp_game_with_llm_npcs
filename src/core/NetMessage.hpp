@@ -99,6 +99,25 @@ std::string encodeMessage(MessageType type, nlohmann::json payload);
 // the connection rather than guessing (see plan: malformed-frame edge case).
 std::optional<NetMessage> decodeMessage(const std::string& bytes);
 
+// TOTAL field reads for anything that crosses the trust boundary.
+//
+// nlohmann's j.value(key, default) returns the default only when the key is
+// MISSING. When the key is present with the WRONG TYPE it throws — and there
+// is no try/catch anywhere in NetServer.cpp or NetClient.cpp, so an uncaught
+// json::type_error out of a connection thread terminates the process.
+//
+//     {"type": "PlayerInput", "facing": "north"}
+//
+// was a one-message remote kill of the host from any connected client (#245).
+//
+// These check the type and fall back instead. Use them for EVERY field read
+// from a decoded payload; `value()` is only safe on JSON this process built.
+bool readBool(const nlohmann::json& j, const char* key, bool fallback);
+int readInt(const nlohmann::json& j, const char* key, int fallback);
+float readFloat(const nlohmann::json& j, const char* key, float fallback);
+std::string readString(const nlohmann::json& j, const char* key,
+                       const std::string& fallback = {});
+
 // Vec3 <-> JSON helpers shared by snapshot encoding: {"x":..,"y":..,"z":..}.
 nlohmann::json vec3ToJson(const Vec3& v);
 Vec3 vec3FromJson(const nlohmann::json& j);

@@ -131,14 +131,16 @@ bool NetClient::connect(const std::string& host, int port,
         socket_ = kInvalidSocket;
         return false;
     }
-    if (!welcome->payload.value("accepted", false)) {
-        setError(welcome->payload.value("reason", std::string{"join refused"}));
+    // A malicious or mismatched HOST can send these, so they get the same
+    // treatment as anything a client sends (#245).
+    if (!readBool(welcome->payload, "accepted", false)) {
+        setError(readString(welcome->payload, "reason", "join refused"));
         closeSocket(socket_);
         socket_ = kInvalidSocket;
         return false;
     }
 
-    playerId_ = welcome->payload.value("playerId", -1);
+    playerId_ = readInt(welcome->payload, "playerId", -1);
     setRecvTimeoutMs(socket_, 0);  // reader blocks until data or shutdown
     connected_ = true;
     readerThread_ = std::thread([this] { readerLoop(); });
@@ -210,7 +212,7 @@ void NetClient::readerLoop() {
             [&](const std::string& frame) {
                 if (auto msg = decodeMessage(frame)) {
                     if (msg->type == MessageType::Disconnect) {
-                        setError(msg->payload.value("reason", std::string{"host closed"}));
+                        setError(readString(msg->payload, "reason", "host closed"));
                         connected_ = false;
                         return;
                     }
