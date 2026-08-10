@@ -2,6 +2,7 @@
 
 #include <cctype>
 
+#include "AsciiText.hpp"
 #include "json.hpp"
 
 namespace llm_npc {
@@ -50,7 +51,10 @@ std::vector<ProposedFact> validateProposedFacts(const std::string& json) {
         }
         ProposedFact fact;
         fact.subject = normalizeSubject(item["subject"].get<std::string>());
-        fact.content = item["content"].get<std::string>();
+        // Same boundary treatment as dialogue: facts are model-authored and
+        // end up rendered in the Journal, so a curly apostrophe here becomes a
+        // '?' in front of the player.
+        fact.content = toRenderableAscii(item["content"].get<std::string>());
         const std::string direction = item["direction"].get<std::string>();
         if (direction == "player_learned") {
             fact.playerLearned = true;

@@ -48,6 +48,24 @@ inline Vec3 normalize(const Vec3& v) {
     return v * (1.f / len);
 }
 
+// Unit-length direction from `from` to `to` ON THE GROUND PLANE, y always 0.
+// Returns a zero vector when the two are vertically stacked or coincident.
+//
+// THE ONE WAY A GROUND CREATURE STEERS. Using normalize() on a difference of
+// two world positions puts the vertical gap into the step, and every mover in
+// this codebase then hands that step to City::resolveMovement, which ends with
+// `pos.y = to.y` and writes it through. Nothing clamps it afterwards, so an NPC
+// following a jumping player climbs into the air and an NPC fleeing a player
+// on a roof burrows into the ground — permanently, because the drift
+// accumulates.
+//
+// It is the same disagreement the moonwalk bug was: the distance test beside
+// each of those steps already used distanceXZ, so the code was half-horizontal
+// and half not. Pair this with distanceXZ and they agree.
+inline Vec3 steerXZ(const Vec3& from, const Vec3& to) {
+    return normalize(Vec3{to.x - from.x, 0.f, to.z - from.z});
+}
+
 // Distance between two points, ignoring the vertical (y) axis. Used for
 // ground-plane queries like "is the player near this NPC".
 inline float distanceXZ(const Vec3& a, const Vec3& b) {

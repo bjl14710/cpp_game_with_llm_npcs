@@ -222,6 +222,22 @@ class Npc {
         if (state_ != NpcState::Dead) state_ = NpcState::Idle;
     }
 
+    // Plants this NPC on the ground. THE ONE AUTHORITY over an NPC's
+    // vertical position.
+    //
+    // Movement code drives horizontal motion only (see steerXZ) and this owns
+    // the rest. Splitting those two is what let an NPC following a jumping
+    // player climb into the air: the step carried the vertical gap,
+    // City::resolveMovement wrote it through with `pos.y = to.y`, and nothing
+    // put it back.
+    //
+    // Ground is 0 because there is nowhere else an NPC can legally be.
+    // Buildings are solid axis-aligned boxes with no interiors and
+    // resolveMovement refuses to let anyone inside one, so no NPC can stand on
+    // a surface above the plane. If they ever climb, this is the single line
+    // that changes — which is the point of it being one line in one place.
+    void snapToGround() { position_.y = 0.f; }
+
     // Derives facing from the actual displacement since `prevPosition` —
     // the ONE source of truth for "which way am I moving", called once per
     // frame after every mover (behaviors AND combat) has run. Reorients

@@ -1,5 +1,7 @@
 #include "Npc.hpp"
 
+#include "AsciiText.hpp"
+
 #include <cmath>
 #include <utility>
 
@@ -57,7 +59,16 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
     // Pull every directive tag out of the reply before it is shown or
     // remembered, so tags never appear in the transcript or future context,
     // and route them into behavior/gesture/mood state.
-    std::string content = reply.content;
+    // Fold typographic punctuation the moment model text enters the game.
+    // A model writing natural dialogue reaches for a curly apostrophe and the
+    // built-in font has no glyph for it, so "don't" reaches the screen as
+    // "don?t" — see AsciiText.hpp for why that is a font substitution and not
+    // the encoding bug it looks like.
+    //
+    // Done HERE, at the boundary, rather than at each draw call: the same
+    // string goes to the dialogue box, the transcript, the speech bubble, the
+    // network and SQLite, and folding it once means those cannot disagree.
+    std::string content = toRenderableAscii(reply.content);
     const Directives directives = parseDirectives(content);
     applyAction(directives.action);
     if (directives.hasMood) {
@@ -152,7 +163,7 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city,
         case NpcAction::Follow: {
             faceToward(playerPos);
             if (dist > kFollowStop) {
-                const Vec3 step = normalize(playerPos - position_) * (kNpcWalk * dt);
+                const Vec3 step = steerXZ(position_, playerPos) * (kNpcWalk * dt);
                 position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
             }
             break;
@@ -160,7 +171,7 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city,
         case NpcAction::Arrest: {
             faceToward(playerPos);
             if (dist > kCatchRadius) {
-                const Vec3 step = normalize(playerPos - position_) * (kNpcRun * dt);
+                const Vec3 step = steerXZ(position_, playerPos) * (kNpcRun * dt);
                 position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
             } else {
                 behavior_ = NpcAction::Stop;  // caught: settle and hold
@@ -172,7 +183,7 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city,
             const float homeDist = distanceXZ(position_, homePosition_);
             if (homeDist > kHomeSnapRadius) {
                 faceToward(homePosition_);
-                const Vec3 step = normalize(homePosition_ - position_) * (kNpcWalk * dt);
+                const Vec3 step = steerXZ(position_, homePosition_) * (kNpcWalk * dt);
                 position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
             } else {
                 behavior_ = NpcAction::None;  // back at post
@@ -201,7 +212,7 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city,
                 schedule_[static_cast<std::size_t>(active)].position;
             if (distanceXZ(position_, target) > kHomeSnapRadius) {
                 faceToward(target);
-                const Vec3 step = normalize(target - position_) * (kNpcWalk * dt);
+                const Vec3 step = steerXZ(position_, target) * (kNpcWalk * dt);
                 position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
             }
             break;

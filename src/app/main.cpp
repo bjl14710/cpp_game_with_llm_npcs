@@ -71,6 +71,9 @@ constexpr float kPlayerRadius = 0.45f;   // collision circle on the ground
 constexpr float kGravity = 22.f;         // units per second^2
 constexpr float kJumpSpeed = 8.0f;       // takeoff speed, units per second
 constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
+// Signage carries further than nameplates: a sign is how you find a place
+// you cannot see yet, whereas a nameplate is for someone you are near.
+constexpr float kSignageRange = 90.f;
 constexpr float kNameplateRange = 28.f;  // how far name tags stay visible
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
@@ -1686,11 +1689,15 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
         }
-        // Facing derives from actual motion once every mover has run —
-        // behaviors and combat both; see Npc::deriveFacingFromMotion.
+        // Facing and grounding both derive from the finished frame, once every
+        // mover has run — behaviors and combat both. Facing has always been
+        // here; grounding joins it because it is the same kind of rule, and
+        // this is the only point where no mover is going to touch the NPC
+        // again this frame.
         if (mode != AppMode::Menu && !joined) {
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 world.npcs()[i].deriveFacingFromMotion(npcLastPos[i], dt);
+                world.npcs()[i].snapToGround();
             }
         }
 
@@ -2289,6 +2296,35 @@ int main(int argc, char** argv) {
                 "P play | Esc save+exit",
                 18, 14.f);
         }
+        // ---- building signage (issue #166) ----
+        //
+        // DATA-DRIVEN, and it already was: Building::name has carried "sign /
+        // label text; empty for filler and obstacles" since the city was
+        // authored, and nothing ever drew it. Sandbox pieces become Buildings
+        // through the same path, so a map placed in the editor gets signage
+        // with no code change — which is the requirement.
+        //
+        // Screen-space text rather than geometry in the world. The renderer is
+        // deliberately untouched, it matches the nameplate treatment already
+        // used for residents, and a 3D sign would need a font atlas to look
+        // like anything (#236).
+        if (mode != AppMode::Menu && !cutscenePlaying) {
+            for (const Building& building : world.city().buildings()) {
+                if (building.name.empty()) continue;  // filler and obstacles
+                const Vec3 centre{(building.minX + building.maxX) * 0.5f, 0.f,
+                                  (building.minZ + building.maxZ) * 0.5f};
+                // Ranged like nameplates, and for the same reason: thirty
+                // labels stacked on the horizon is noise, not information.
+                if (distanceXZ(player.position, centre) > kSignageRange) continue;
+                Vector2 screen;
+                // Anchored just above the roof so the sign reads as belonging
+                // to the building rather than floating in front of it.
+                const Vec3 above{centre.x, building.height + 1.2f, centre.z};
+                if (!renderer.worldToScreen(above, screen)) continue;
+                drawNameplate(building.name, screen, Color{255, 232, 170, 255});
+            }
+        }
+
         // Nameplates from whichever pose source is authoritative right now.
         //
         // Suppressed during a cutscene, and not only for looks: the opening
