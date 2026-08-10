@@ -503,3 +503,129 @@ TEST_CASE("every role's demeanour holds baseline warmth explicitly") {
               std::string::npos);
     }
 }
+
+// ---- carrying a role on an NPC (issue #199) --------------------------------
+
+#include "FakeOllama.hpp"
+#include "LlmClient.hpp"
+#include "Npc.hpp"
+
+using llm_npc_test::FakeOllama;
+
+namespace {
+
+// The shipped roles, held in a NAMED vector. findRole returns a pointer into
+// it, so `findRole(loadAllRoles(dir), ...)` dangles the moment the statement
+// ends — which is how a test in this file failed the first time it ran.
+std::vector<RoleDef> shippedRoles() {
+    namespace fs = std::filesystem;
+    fs::path dir = "roles";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+    return loadAllRoles(dir, nullptr);
+}
+
+Persona rolePersona() {
+    Persona p;
+    p.name = "Marge Holloway";
+    p.role = "baker";
+    p.knowledgeBoundary = "Knows the bakery and its regulars.";
+    return p;
+}
+
+}  // namespace
+
+TEST_CASE("an NPC with no role renders exactly the prompt it did before") {
+    // The regression guard for every NPC in the game that is not in a mystery.
+    const Persona persona = rolePersona();
+    const std::string before =
+        persona.renderSystemPrompt("", "", std::vector<const TraitDef*>{});
+    const std::string after = persona.renderSystemPrompt(
+        "", "", std::vector<const TraitDef*>{}, renderRoleBlock(nullptr, ""));
+    CHECK(before == after);
+}
+
+TEST_CASE("an assigned role reaches the prompt, after traits and before ACTIONS") {
+    const std::vector<RoleDef> roles = shippedRoles();
+    const RoleDef* killer = findRole(roles, "killer");
+    REQUIRE(killer != nullptr);
+
+    const Persona persona = rolePersona();
+    const std::string prompt = persona.renderSystemPrompt(
+        "", "", std::vector<const TraitDef*>{},
+        renderRoleBlock(killer, "You were at the bakery, not the coffee house."));
+
+    REQUIRE_FALSE(killer->directives.empty());
+    const auto rolePos = prompt.find(killer->directives.front());
+    const auto actionsPos = prompt.find("ACTIONS: ");
+    REQUIRE(rolePos != std::string::npos);
+    REQUIRE(actionsPos != std::string::npos);
+    CHECK(rolePos < actionsPos);  // the ACTIONS contract is not relaxed
+    CHECK(prompt.find("You were at the bakery, not the coffee house.") !=
+          std::string::npos);
+}
+
+TEST_CASE("an unknown role id is demoted, not substituted") {
+    // Substituting for an unknown killer role would produce a match with two
+    // killers or none, and nothing downstream would notice.
+    const std::vector<RoleDef> roles = shippedRoles();
+    CHECK(findRole(roles, "arsonist") == nullptr);
+
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(rolePersona(), client);
+    npc.setRoleRegistry(&roles);
+    npc.setRole("arsonist", "I did not do it.");
+
+    CHECK(npc.resolvedRole() == nullptr);
+    CHECK(npc.secret() == "I did not do it.");  // carried, not lost
+
+    // And the rendered block is EMPTY — the secret does not reach the prompt
+    // on its own. That is the safe demotion, not an oversight: the directives
+    // are what tell the model to protect a secret, so a secret without them is
+    // one it will happily volunteer the first time anybody asks. Losing the
+    // whole block costs a role; keeping just the secret would hand the answer
+    // out.
+    const std::string block = renderRoleBlock(npc.resolvedRole(), npc.secret());
+    CHECK(block.empty());
+}
+
+TEST_CASE("an NPC with no registry resolves to no role rather than crashing") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(rolePersona(), client);
+    npc.setRole("killer", "a secret");  // registry never installed
+    CHECK(npc.resolvedRole() == nullptr);
+}
+
+TEST_CASE("a role assigned to an NPC resolves through the registry") {
+    const std::vector<RoleDef> roles = shippedRoles();
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(rolePersona(), client);
+    npc.setRoleRegistry(&roles);
+    npc.setRole("witness", "I saw someone by the alley door.");
+
+    const RoleDef* resolved = npc.resolvedRole();
+    REQUIRE(resolved != nullptr);
+    CHECK(resolved->id == "witness");
+    CHECK(npc.roleId() == "witness");
+}
+
+TEST_CASE("the secret is never in the NPC's visible state") {
+    // Roles are never shown to a player. The secret lives in the prompt and
+    // in nothing a UI reads — history, gossip and memory must all stay clean.
+    const std::vector<RoleDef> roles = shippedRoles();
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(rolePersona(), client);
+    npc.setRoleRegistry(&roles);
+    npc.setRole("killer", "You were at the bakery, not the coffee house.");
+
+    CHECK(npc.history().empty());
+    CHECK(npc.gossip().empty());
+    CHECK(npc.memory().empty());
+    // The persona a UI would render carries nothing about it either.
+    CHECK(npc.persona().knowledgeBoundary.find("bakery, not the coffee") ==
+          std::string::npos);
+}

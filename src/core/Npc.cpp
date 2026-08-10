@@ -37,7 +37,8 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     const Familiarity familiarity =
         memory_.empty() ? Familiarity::First : Familiarity::Returning;
     pendingId_ =
-        client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits()),
+        client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits(),
+                                                   renderRoleBlock(resolvedRole(), secret_)),
                        history_, playerLine, persona_.name, familiarity);
     return pendingId_;
 }
@@ -243,6 +244,15 @@ void Npc::takeDamage(int amount) {
         return;
     }
     state_ = persona_.armed ? NpcState::Hostile : NpcState::Fleeing;
+}
+
+const RoleDef* Npc::resolvedRole() const {
+    if (roleId_.empty() || roleRegistry_ == nullptr) return nullptr;
+    // findRole returns nullptr for an unknown id; the spawn site logs it, the
+    // same division of labour resolvedTraits uses. Rendering with a nullptr
+    // role yields a block carrying only the secret, so an unknown id costs the
+    // directives and nothing else — it never invents a part.
+    return findRole(*roleRegistry_, roleId_);
 }
 
 std::vector<const TraitDef*> Npc::resolvedTraits() const {
