@@ -10,6 +10,7 @@
 #include "Math.hpp"
 #include "NpcAction.hpp"
 #include "Persona.hpp"
+#include "Role.hpp"
 #include "Schedule.hpp"
 
 namespace llm_npc {
@@ -150,6 +151,38 @@ class Npc {
     std::vector<const TraitDef*> resolvedTraits() const;
     const std::string& gossip() const { return gossip_; }
 
+    // --- Role layer (issue #199) -------------------------------------------
+    //
+    // The per-match part this NPC plays and the one thing they are hiding.
+    // ASSIGNED, never chosen here: generateMystery picks the killer (#178) and
+    // castStoryline deals every other slot (#188). This carries what it is
+    // handed and resolves the id, nothing more.
+    //
+    // NEVER SHOWN TO A PLAYER. No UI, no journal line, no debug overlay reads
+    // these — the whole mechanic is that the town looks the same whoever did
+    // it. The secret reaches the model inside the system prompt; keeping it
+    // out of the transcript is the prompt's job, and test coverage says so.
+    void setRole(std::string roleId, std::string secret) {
+        roleId_ = std::move(roleId);
+        secret_ = std::move(secret);
+    }
+    const std::string& roleId() const { return roleId_; }
+    const std::string& secret() const { return secret_; }
+
+    // Installs the shared role library. Mirrors setTraitRegistry exactly,
+    // including the lifetime rule: the vector must outlive the NPC.
+    void setRoleRegistry(const std::vector<RoleDef>* registry) {
+        roleRegistry_ = registry;
+    }
+
+    // roleId_ resolved against the registry, or nullptr.
+    //
+    // DEMOTE AND LOG, the same contract unknown traitIds have. Never a crash,
+    // and never a silent substitution — substituting for an unknown killer
+    // role would produce a match with two killers, or none, and nothing
+    // downstream would notice.
+    const RoleDef* resolvedRole() const;
+
     // --- Combat interface --------------------------------------------------
 
     // Reduces hp by `amount` (clamped at 0). Transitions state: armed NPCs
@@ -218,6 +251,9 @@ class Npc {
     // when no traits are in play. Resolution happens per prompt so the
     // registry can be shared by every NPC without copies.
     const std::vector<TraitDef>* traitRegistry_ = nullptr;
+    const std::vector<RoleDef>* roleRegistry_ = nullptr;
+    std::string roleId_;
+    std::string secret_;
     std::string gossip_;  // facts heard around town (may be empty)
 
     Vec3 position_{};
