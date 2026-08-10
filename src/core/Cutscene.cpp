@@ -6,6 +6,8 @@
 #include <fstream>
 
 #include "Config.hpp"  // trim
+#include "Journal.hpp"  // clockLabel
+#include "Zones.hpp"   // zoneName
 
 namespace llm_npc {
 namespace {
@@ -287,6 +289,49 @@ void truncateToBudget(CutsceneDef& scene, float budgetSeconds) {
         kept.push_back(std::move(beat));
     }
     scene.beats = std::move(kept);
+}
+
+namespace {
+
+// Replaces every occurrence of `token` in `text`. A loop rather than one
+// find/replace because a caption may legitimately name the zone twice.
+void substitute(std::string& text, const std::string& token,
+                const std::string& value) {
+    std::size_t at = text.find(token);
+    while (at != std::string::npos) {
+        text.replace(at, token.size(), value);
+        at = text.find(token, at + value.size());
+    }
+}
+
+}  // namespace
+
+CutsceneDef buildOpeningCutscene(const CutsceneDef& templateDef,
+                                 const std::string& sceneZoneId,
+                                 double murderHour, Vec3 bodyPosition) {
+    CutsceneDef out = templateDef;
+
+    // clockLabel takes world SECONDS; murderHour is an hour in [0, 24).
+    const std::string hour = clockLabel(murderHour * 3600.0);
+    const std::string& place = zoneName(sceneZoneId);
+
+    for (CutsceneBeat& beat : out.beats) {
+        // Authored positions are offsets from the body, so the same framing
+        // works wherever the scene lands. Only translated when the beat
+        // actually set a position — a beat inheriting the previous pose must
+        // keep inheriting it, and translating an unset (0,0,0) would silently
+        // turn "hold here" into "cut to the body".
+        if (beat.hasPosition) {
+            beat.pose.position = beat.pose.position + bodyPosition;
+        }
+        // Yaw and pitch are absolute. The body sits at a known offset from
+        // every authored position, so an authored angle frames it identically
+        // in any zone — and auto-aiming at the body would quietly override
+        // shots deliberately composed to look away from it.
+        substitute(beat.caption, "{zone}", place);
+        substitute(beat.caption, "{hour}", hour);
+    }
+    return out;
 }
 
 void CutscenePlayer::play(const CutsceneDef& scene, const CameraPose& from) {

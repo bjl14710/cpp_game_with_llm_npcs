@@ -119,6 +119,36 @@ const CutsceneDef* findCutscene(const std::vector<CutsceneDef>& all,
 // is how an author finds out.
 void truncateToBudget(CutsceneDef& scene, float budgetSeconds);
 
+// Builds the per-match opening cutscene from a template (issue #230).
+//
+// THE SIGNATURE IS THE SAFETY MECHANISM. It takes the three fields it needs
+// and nothing else — never the whole MysterySetup — so the killer is not in
+// scope at the call site and a reviewer can confirm the leak rule by reading
+// the declaration. If this ever grows a MysterySetup parameter, that is the
+// bug, whatever the body does with it.
+//
+// It CANNOT DEPICT THE MURDER. Cutscenes drive the camera over the live world
+// and explicitly exclude character animation, so there is no way to stage a
+// figure crossing a window. It establishes the AFTERMATH instead, which is the
+// better version anyway: inherently leak-safe because you cannot accidentally
+// reveal a killer you never render, family-friendly by implication rather than
+// depiction, and the scene already exists because the victim starts dead and
+// dead NPCs already render collapsed.
+//
+// The template authors shots as OFFSETS FROM THE BODY, so one set of authored
+// framing works for any scene zone. Captions may contain two tokens:
+//
+//     {zone}   the scene zone's display name, e.g. "The Plaza"
+//     {hour}   the murder hour as HH:MM
+//
+// Both are safe to show: they narrow the field without identifying anyone.
+// What is never safe is a living NPC's face, body, palette, gait or clothing,
+// or a figure count that can be matched to a person — none of which this
+// function can produce, because it only moves a camera.
+CutsceneDef buildOpeningCutscene(const CutsceneDef& templateDef,
+                                 const std::string& sceneZoneId,
+                                 double murderHour, Vec3 bodyPosition);
+
 // Drives a cutscene's camera, fade and captions over time.
 //
 // PURE: owns no raylib types and draws nothing. The app layer reads pose() and
