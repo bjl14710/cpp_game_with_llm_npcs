@@ -71,6 +71,21 @@ constexpr float kPlayerRadius = 0.45f;   // collision circle on the ground
 constexpr float kGravity = 22.f;         // units per second^2
 constexpr float kJumpSpeed = 8.0f;       // takeoff speed, units per second
 constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
+// Where a sign hangs on a building: just above the awning, not on the roof.
+//
+// Roof height was the obvious choice and it is wrong. You cannot see the top
+// of a sixteen-metre building from twenty metres away at eye level, so the
+// police station's sign projected clean off the top of the frame at exactly
+// the distance you stand at to talk to the officer. Real shop signage sits at
+// fascia height for the same reason, and these buildings already have awnings
+// there, so it reads as part of the storefront.
+//
+// Short structures keep their own clearance: the hot dog cart is three metres
+// tall and a six-metre sign would float unattached above it.
+inline float signHeightFor(const Building& b) {
+    return std::fmin(b.height + 1.2f, 6.f);
+}
+
 // Signage carries further than nameplates: a sign is how you find a place
 // you cannot see yet, whereas a nameplate is for someone you are near.
 constexpr float kSignageRange = 90.f;
@@ -2309,19 +2324,54 @@ int main(int argc, char** argv) {
         // used for residents, and a 3D sign would need a font atlas to look
         // like anything (#236).
         if (mode != AppMode::Menu && !cutscenePlaying) {
+            // Nearest first, so that when two signs would land on the same
+            // spot the one you are walking toward is the one you get.
+            std::vector<std::pair<float, const Building*>> signs;
             for (const Building& building : world.city().buildings()) {
                 if (building.name.empty()) continue;  // filler and obstacles
-                const Vec3 centre{(building.minX + building.maxX) * 0.5f, 0.f,
-                                  (building.minZ + building.maxZ) * 0.5f};
+                // Anchor on the point of the FOOTPRINT nearest the player, not
+                // the centroid. A deep building seen head-on projects its
+                // centroid behind the roof edge you are actually looking at,
+                // which stamped "City Police Station" across its own top-floor
+                // windows — the 40x40 police block was the only one big enough
+                // to show it. Clamping to the near face puts the sign on the
+                // face you can see, whatever the footprint.
+                const Vec3 anchor{clampf(player.position.x, building.minX, building.maxX),
+                                  signHeightFor(building),
+                                  clampf(player.position.z, building.minZ, building.maxZ)};
                 // Ranged like nameplates, and for the same reason: thirty
                 // labels stacked on the horizon is noise, not information.
-                if (distanceXZ(player.position, centre) > kSignageRange) continue;
+                const float range = distanceXZ(player.position, anchor);
+                if (range > kSignageRange) continue;
+                signs.push_back({range, &building});
+            }
+            std::sort(signs.begin(), signs.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            std::vector<Vector2> placed;
+            for (const auto& [range, building] : signs) {
+                const Vec3 anchor{clampf(player.position.x, building->minX, building->maxX),
+                                  signHeightFor(*building),
+                                  clampf(player.position.z, building->minZ, building->maxZ)};
                 Vector2 screen;
-                // Anchored just above the roof so the sign reads as belonging
-                // to the building rather than floating in front of it.
-                const Vec3 above{centre.x, building.height + 1.2f, centre.z};
-                if (!renderer.worldToScreen(above, screen)) continue;
-                drawNameplate(building.name, screen, Color{255, 232, 170, 255});
+                if (!renderer.worldToScreen(anchor, screen)) continue;
+                // Two landmarks on the same bearing project to the same pixels
+                // however far apart they are in depth, and two labels drawn on
+                // top of each other are not a label. Gus's Hot Dogs sits at the
+                // origin and the police station 60 units due south of it, so
+                // this is reachable by standing still and looking, not a corner
+                // case. Nearest wins; the other is simply not drawn.
+                bool collides = false;
+                for (const Vector2& taken : placed) {
+                    if (std::fabs(taken.x - screen.x) < 140.f &&
+                        std::fabs(taken.y - screen.y) < 20.f) {
+                        collides = true;
+                        break;
+                    }
+                }
+                if (collides) continue;
+                placed.push_back(screen);
+                drawNameplate(building->name, screen, Color{255, 232, 170, 255});
             }
         }
 

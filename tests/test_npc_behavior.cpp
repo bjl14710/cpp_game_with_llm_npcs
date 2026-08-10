@@ -379,7 +379,12 @@ TEST_CASE("an NPC following a JUMPING player stays on the ground") {
         // A player bouncing between the ground and the top of a jump.
         playerPos.y = (frame % 40 < 20) ? 1.6f : 0.f;
         npc.update(1.f / 60.f, playerPos, city, 12.f);
-        npc.snapToGround();
+        // Deliberately NO snapToGround here. It runs every frame in
+        // production and would erase the drift before it accumulated, so a
+        // test that called it would pass with the bug reverted — which is
+        // exactly what behaviour QA caught this test doing. Without the net,
+        // this fails the moment any of the six sites goes back to a 3D
+        // normalize. The net has its own test below.
         CAPTURE(frame);
         REQUIRE(npc.position().y == doctest::Approx(0.f));
     }
@@ -406,8 +411,7 @@ TEST_CASE("an NPC following a player on a ROOF gathers below, never climbs") {
     const Vec3 onARoof{28.f, 9.f, 28.f};  // nine metres up
     for (int frame = 0; frame < 400; ++frame) {
         npc.update(1.f / 60.f, onARoof, city, 12.f);
-        npc.snapToGround();
-        CAPTURE(frame);
+        CAPTURE(frame);  // no snapToGround: see the note above
         REQUIRE(npc.position().y == doctest::Approx(0.f));
     }
 }

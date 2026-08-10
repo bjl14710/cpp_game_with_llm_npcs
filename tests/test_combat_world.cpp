@@ -145,7 +145,7 @@ TEST_CASE("a FLEEING npc does not burrow away from a player above it") {
 
     for (int frame = 0; frame < 300; ++frame) {
         world.updateCombat(1.f / 60.f);
-        world.npcs()[0].snapToGround();
+        // No snapToGround: it would erase the drift this is looking for.
         CAPTURE(frame);
         REQUIRE(world.npcs()[0].position().y == doctest::Approx(0.f));
     }
@@ -165,7 +165,7 @@ TEST_CASE("a HOSTILE npc does not levitate toward a player above it") {
 
     for (int frame = 0; frame < 300; ++frame) {
         world.updateCombat(1.f / 60.f);
-        world.npcs()[0].snapToGround();
+        // No snapToGround: it would erase the drift this is looking for.
         CAPTURE(frame);
         REQUIRE(world.npcs()[0].position().y == doctest::Approx(0.f));
     }
