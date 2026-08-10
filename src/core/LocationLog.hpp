@@ -47,21 +47,18 @@ class LocationLog {
     // hour, not the wrapped 0-24 clock hour, or a stay across midnight becomes
     // two out-of-order intervals.
     //
-    // TODO(zones step 2): implement.
     void observe(const std::string& agent, float x, float z, double worldHour);
 
     // Everyone whose stay in `zoneId` OVERLAPS [fromHour, toHour]. Overlap, not
     // containment: someone who arrived at 13:50 and left at 14:10 was in the
     // bakery during 14:00-15:00 and must be returned.
     //
-    // TODO(zones step 2): implement.
     std::vector<ZoneVisit> whoWasIn(const std::string& zoneId,
                                     double fromHour, double toHour) const;
 
     // Where `agent` was across the window, in chronological order — their
     // alibi, in the order they would tell it.
     //
-    // TODO(zones step 2): implement.
     std::vector<ZoneVisit> trailOf(const std::string& agent,
                                    double fromHour, double toHour) const;
 
@@ -72,6 +69,16 @@ class LocationLog {
     // Permanent for the life of the log. The dead do not move, and a caller
     // that wants an agent back should clear() and start a new match.
     void closeAgent(const std::string& agent, double worldHour);
+
+    // Has `agent` been retired by closeAgent? O(1).
+    //
+    // Exists so a caller can skip re-closing a corpse every frame: closeAgent
+    // scans back through visits_ to find the agent's newest entry, and that
+    // walk gets longer as other agents keep appending, so calling it 60 times
+    // a second per dead NPC is quietly quadratic over a match.
+    bool retired(const std::string& agent) const {
+        return closed_.count(agent) != 0;
+    }
 
     // Drops everything. New match.
     void clear();

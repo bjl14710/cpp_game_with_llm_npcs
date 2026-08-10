@@ -142,3 +142,57 @@ TEST_CASE("two agents in the same zone are both recorded") {
     const auto found = log.whoWasIn("bakery_block", 9.0, 10.0);
     CHECK(found.size() == 2);
 }
+
+// ---- the game-loop wiring (issue #165) -------------------------------------
+
+TEST_CASE("retired reports whether an agent has been closed") {
+    LocationLog log;
+    log.observe("Marge Holloway", 0.f, 0.f, 9.0);
+    CHECK_FALSE(log.retired("Marge Holloway"));
+    CHECK_FALSE(log.retired("nobody at all"));
+
+    log.closeAgent("Marge Holloway", 10.0);
+    CHECK(log.retired("Marge Holloway"));
+}
+
+TEST_CASE("the corpse pattern: close once, then keep ticking harmlessly") {
+    // What main.cpp does every frame. The body is still observed by the loop
+    // after death, so the guard has to survive being run repeatedly.
+    LocationLog log;
+    log.observe("Hal Jensen", 0.f, 0.f, 9.0);
+    log.observe("Hal Jensen", 0.f, 0.f, 9.5);
+
+    log.closeAgent("Hal Jensen", 10.0);
+    const std::size_t afterDeath = log.visits().size();
+
+    // 200 frames of the loop running over a corpse.
+    for (int frame = 0; frame < 200; ++frame) {
+        if (!log.retired("Hal Jensen")) {
+            log.closeAgent("Hal Jensen", 10.0 + frame * 0.01);
+        }
+        log.observe("Hal Jensen", 0.f, 0.f, 10.0 + frame * 0.01);
+    }
+
+    // No new stays, and the closing time is the moment of death — not the
+    // last frame the body happened to be looked at.
+    CHECK(log.visits().size() == afterDeath);
+    const auto trail = log.trailOf("Hal Jensen", 0.0, 24.0);
+    REQUIRE_FALSE(trail.empty());
+    CHECK_FALSE(trail.back().ongoing);
+    CHECK(trail.back().endHour == doctest::Approx(10.0));
+}
+
+TEST_CASE("the player is logged like anyone else") {
+    // The retaliation rule means a player has to be as observable as any
+    // resident. An alibi system that cannot place the player is half a system.
+    LocationLog log;
+    log.observe("player", 0.f, 0.f, 9.0);
+    log.observe("player", -64.f, -64.f, 9.5);
+    log.observe("player", 0.f, 0.f, 10.0);
+
+    const auto trail = log.trailOf("player", 0.0, 24.0);
+    REQUIRE(trail.size() == 3);
+    CHECK(trail[0].agent == "player");
+    CHECK(trail[0].zoneId != trail[1].zoneId);
+    CHECK(trail[2].zoneId == trail[0].zoneId);  // came back
+}

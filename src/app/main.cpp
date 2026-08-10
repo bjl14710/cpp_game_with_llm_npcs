@@ -41,6 +41,7 @@
 #include "InputMap.hpp"
 #include "KeyBindings.hpp"
 #include "LlmClient.hpp"
+#include "LocationLog.hpp"
 #include "Math.hpp"
 #include "Menu.hpp"
 #include "NetClient.hpp"
@@ -1095,6 +1096,10 @@ int main(int argc, char** argv) {
     bool previewWasOpen = false;  // detects the frame the Creator page opens
     bool previewDragging = false;  // latched at press: is this a preview drag or a control click?
 
+    // Where every agent has been this session (issue #165). Ground truth,
+    // written every frame and read by nothing yet.
+    LocationLog locationLog;
+
     // Gossip propagation cadence (real seconds between ticks) and its rng
     // (seeded for reproducible town behavior in a session).
     float gossipTickTimer = 0.f;
@@ -1669,6 +1674,81 @@ int main(int argc, char** argv) {
                 world.npcs()[i].deriveFacingFromMotion(npcLastPos[i], dt);
             }
         }
+
+        // ---- where everyone has been (issue #165) ----
+        //
+        // OBSERVATION ONLY. Nothing in the game reads this yet; it is the
+        // substrate the alibi questions will be asked of, and producing the
+        // data is a separate change from consuming it. The log never
+        // influences movement, schedules or rendering.
+        //
+        // The player is logged under "player" like anyone else. The
+        // retaliation rule means a player has to be as observable as any
+        // resident — an alibi system that cannot place the player is half a
+        // system.
+        //
+        // Not ticked during the menu or a sandbox edit: someone rearranging a
+        // map is not an agent with an alibi, and recording them would put a
+        // building-placement session into the evidence.
+        if (mode != AppMode::Menu && mode != AppMode::SandboxEdit) {
+            // The same worldHour the rest of the frame uses. Reading the clock
+            // a second time here would let an agent's trail disagree with the
+            // timestamps on the facts it is meant to corroborate.
+            for (const Npc& npc : world.npcs()) {
+                if (npc.combatState() == NpcState::Dead) {
+                    // Close the stay rather than skipping it, or a corpse
+                    // accumulates one visit that never ends and every "who was
+                    // in the bakery" answer names the dead.
+                    //
+                    // Guarded on retired() because closeAgent walks back
+                    // through visits_ to find the agent's newest entry, and
+                    // that walk lengthens as everyone else keeps appending.
+                    if (!locationLog.retired(npc.persona().name)) {
+                        locationLog.closeAgent(npc.persona().name, worldHour);
+                    }
+                    continue;
+                }
+                locationLog.observe(npc.persona().name, npc.position().x,
+                                    npc.position().z, worldHour);
+            }
+            locationLog.observe("player", player.position.x, player.position.z,
+                                worldHour);
+        }
+
+#ifdef LLM_NPC_TRAIL_DUMP
+        // Trail dump for the nearest resident, so the wiring above can be
+        // checked by a human before anything depends on the data.
+        //
+        // COMPILE-GATED, not a config key or a runtime toggle — the same
+        // treatment revealKillerForDebug gets, and for a weaker but real
+        // version of the same reason: a trail is not the answer, but it is
+        // every resident's exact movements, and a host who can read it at
+        // will has an advantage no player can see. F9 is unbound; F1 and F2
+        // are the only function keys the game uses.
+        if (IsKeyPressed(KEY_F9)) {
+            const Npc* nearest = nullptr;
+            float best = 1e9f;
+            for (const Npc& npc : world.npcs()) {
+                const float d = distanceXZ(player.position, npc.position());
+                if (d < best) {
+                    best = d;
+                    nearest = &npc;
+                }
+            }
+            if (nearest != nullptr) {
+                const auto trail =
+                    locationLog.trailOf(nearest->persona().name, 0.0, 24.0);
+                std::cerr << "[llm_npc] trail for " << nearest->persona().name
+                          << " (" << trail.size() << " stays):\n";
+                for (const ZoneVisit& visit : trail) {
+                    std::cerr << "    " << zoneName(visit.zoneId) << "  "
+                              << visit.startHour << " -> "
+                              << (visit.ongoing ? 24.0 : visit.endHour)
+                              << (visit.ongoing ? "  (still there)" : "") << "\n";
+                }
+            }
+        }
+#endif
 
         for (auto& callout : callouts) callout.ttl -= dt;
         callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
