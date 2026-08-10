@@ -641,6 +641,9 @@ int main(int argc, char** argv) {
     // onto the fact bus through seedMysteryFacts, which commits nothing that
     // names the killer as the killer.
     MysterySetup mysterySetup;
+    // This match's generated opening. Empty beats means no mystery, or no
+    // template on disk; both are survivable and neither blocks the match.
+    CutsceneDef matchOpening;
     if (bootMystery && mapFile != nullptr) {
         // They do not compose, and the failure is silent rather than loud:
         // --map loads its city and respawns its NPCs further down, AFTER this
@@ -712,6 +715,23 @@ int main(int argc, char** argv) {
             // grants it to the player -> the Journal shows it, flagged against
             // any account that contradicts it.
             for (Npc& npc : world.npcs()) refreshGossip(npc);
+
+            // Build THIS match's opening from the authored template (#230).
+            // Held for the whole match rather than rebuilt on demand, because
+            // the Journal will replay it (#231) and a player who went back to
+            // re-read the clock has to see the same clock.
+            //
+            // Only three fields cross this call, and that is the leak defence:
+            // the killer is not in scope at the call site, so a reviewer can
+            // check the rule by reading the line.
+            if (const CutsceneDef* tmpl = findCutscene(cutsceneLibrary, "opening")) {
+                matchOpening = buildOpeningCutscene(*tmpl, mysterySetup.sceneZoneId,
+                                                    mysterySetup.murderHour,
+                                                    mysterySetup.bodyPosition);
+            } else {
+                std::cerr << "[llm_npc] --mystery: no cutscenes/opening.cutscene "
+                             "— starting without the opening\n";
+            }
 
             // The victim and the scene are public knowledge the moment a body
             // is found, so naming them here leaks nothing. The killer is not
@@ -1027,7 +1047,15 @@ int main(int argc, char** argv) {
     // Fixed-step playback pins frame N to the same moment every run, which is
     // the only reason a capture can serve as a regression signal.
     if (bootCutscene != nullptr) {
-        const CutsceneDef* scene = findCutscene(cutsceneLibrary, bootCutscene);
+        // The opening is GENERATED per match, so playing the raw template
+        // would show a player the literal text "{hour}". Prefer the built one
+        // whenever there is a mystery; fall back to the template so the scene
+        // is still framable without one.
+        const bool wantsOpening = std::strcmp(bootCutscene, "opening") == 0;
+        const CutsceneDef* scene =
+            (wantsOpening && !matchOpening.beats.empty())
+                ? &matchOpening
+                : findCutscene(cutsceneLibrary, bootCutscene);
         if (scene == nullptr) {
             std::cerr << "[llm_npc] --cutscene: no cutscene named \""
                       << bootCutscene << "\" in cutscenes/\n";
@@ -1035,6 +1063,12 @@ int main(int argc, char** argv) {
             cutscene.setFixedStep(true);
             playCutscene(*scene);
         }
+    } else if (!matchOpening.beats.empty()) {
+        // A mystery starts with its opening. Smoke runs included: a scene
+        // nobody ever captures is a scene nobody ever checks, which is how the
+        // map editor shipped with a menu drawn over it (#215).
+        if (smokeRun) cutscene.setFixedStep(true);
+        playCutscene(matchOpening);
     }
 
     // Journal: a pure read of the shared fact store — what the player was

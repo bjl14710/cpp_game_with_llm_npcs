@@ -478,3 +478,167 @@ TEST_CASE("a cutscene inside its budget is untouched") {
     truncateToBudget(scene, 0.f);
     CHECK(scene.beats.size() == 2);
 }
+
+// ---- the generated opening (issue #230) ------------------------------------
+
+#include "Mystery.hpp"
+#include "Zones.hpp"
+
+namespace {
+
+CutsceneDef openingTemplate() {
+    CutsceneDef scene;
+    scene.id = "opening";
+    scene.skippable = Skippable::AfterFirst;
+    CutsceneBeat wide;
+    wide.id = "establish";
+    wide.pose.position = Vec3{-14.f, 9.f, 14.f};
+    wide.hasPosition = true;
+    wide.pose.yawDeg = 135.f;
+    wide.hasYaw = true;
+    wide.hold = 2.5f;
+    wide.caption = "{zone}. Tuesday morning.";
+    CutsceneBeat close;
+    close.id = "the_body";
+    close.pose.position = Vec3{-2.f, 1.5f, 2.f};
+    close.hasPosition = true;
+    close.hold = 2.f;
+    close.caption = "Sometime around {hour} last night, someone died here.";
+    CutsceneBeat out;
+    out.id = "out";  // inherits its pose deliberately
+    out.hold = 1.f;
+    out.caption = "{zone} again, and {zone} still.";
+    scene.beats = {wide, close, out};
+    return scene;
+}
+
+std::vector<Persona> openingRoster() {
+    std::vector<Persona> out;
+    for (const char* name : {"Marge Holloway", "Ray Okafor", "Yuki Tanaka",
+                             "Officer Dana Brooks", "Theo Vance", "Gus Pike"}) {
+        Persona p;
+        p.name = name;
+        p.role = "resident";
+        out.push_back(p);
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("the opening translates authored offsets onto the body") {
+    const Vec3 body{40.f, 0.f, -12.f};
+    const CutsceneDef built =
+        buildOpeningCutscene(openingTemplate(), "plaza_block", 21.5, body);
+
+    REQUIRE(built.beats.size() == 3);
+    CHECK(built.beats[0].pose.position.x == doctest::Approx(-14.f + 40.f));
+    CHECK(built.beats[0].pose.position.z == doctest::Approx(14.f - 12.f));
+    CHECK(built.beats[1].pose.position.x == doctest::Approx(-2.f + 40.f));
+
+    // Angles are absolute: the body sits at a known offset from every authored
+    // position, so an authored angle frames it identically in any zone.
+    CHECK(built.beats[0].pose.yawDeg == doctest::Approx(135.f));
+}
+
+TEST_CASE("a beat that inherits its pose is not translated into one") {
+    // Translating an unset (0,0,0) would silently turn "hold here" into "cut
+    // to the body" — a shot the author never wrote.
+    const CutsceneDef built = buildOpeningCutscene(openingTemplate(), "plaza_block",
+                                                   21.5, Vec3{40.f, 0.f, -12.f});
+    CHECK_FALSE(built.beats[2].hasPosition);
+    CHECK(built.beats[2].pose.position.x == doctest::Approx(0.f));
+}
+
+TEST_CASE("captions carry the zone name and the hour") {
+    const CutsceneDef built = buildOpeningCutscene(openingTemplate(), "plaza_block",
+                                                   21.5, Vec3{});
+    CHECK(built.beats[0].caption == zoneName("plaza_block") + ". Tuesday morning.");
+    CHECK(built.beats[1].caption ==
+          "Sometime around 21:30 last night, someone died here.");
+    // Every occurrence, not just the first: a caption may name the place twice.
+    const std::string& place = zoneName("plaza_block");
+    CHECK(built.beats[2].caption == place + " again, and " + place + " still.");
+}
+
+TEST_CASE("two different scene zones produce two different shots") {
+    // The whole reason the template authors offsets rather than positions.
+    const CutsceneDef a = buildOpeningCutscene(openingTemplate(), "plaza_block",
+                                               21.5, Vec3{40.f, 0.f, -12.f});
+    const CutsceneDef b = buildOpeningCutscene(openingTemplate(), "bakery_block",
+                                               21.5, Vec3{-64.f, 0.f, -64.f});
+    CHECK(a.beats[0].pose.position.x != doctest::Approx(b.beats[0].pose.position.x));
+    CHECK(a.beats[0].caption != b.beats[0].caption);
+}
+
+TEST_CASE("LEAK: nothing generated derives from the killer, across many seeds") {
+    // The signature already makes this true by construction — buildOpeningCutscene
+    // cannot read a field it was never handed. Asserted anyway, because the
+    // thing being defended is that the signature STAYS that way: if someone
+    // later passes the whole MysterySetup "for convenience", this goes red.
+    const std::vector<Persona> roster = openingRoster();
+    for (unsigned seed = 1; seed <= 60; ++seed) {
+        CAPTURE(seed);
+        const MysterySetup setup = generateMystery(roster, seed);
+        const CutsceneDef built =
+            buildOpeningCutscene(openingTemplate(), setup.sceneZoneId,
+                                 setup.murderHour, setup.bodyPosition);
+
+        for (const CutsceneBeat& beat : built.beats) {
+            CAPTURE(beat.caption);
+            CHECK(beat.caption.find(setup.killer) == std::string::npos);
+            // The victim is safe to name and the template does not, but a
+            // future edit that named them would be fine; the killer never is.
+            for (const char* tell : {"killer", "murderer", "did it"}) {
+                CHECK(beat.caption.find(tell) == std::string::npos);
+            }
+        }
+    }
+}
+
+TEST_CASE("the opening is a pure function of the three fields it takes") {
+    // Same scene, same hour, same body, different killer -> identical cutscene.
+    // This is the property a reviewer actually cares about, and it survives
+    // even if the function's internals change.
+    const std::vector<Persona> roster = openingRoster();
+    MysterySetup a = generateMystery(roster, 3u);
+    MysterySetup b = a;
+    b.killer = (a.killer == "Gus Pike") ? "Theo Vance" : "Gus Pike";
+    REQUIRE(a.killer != b.killer);
+
+    const CutsceneDef ca = buildOpeningCutscene(openingTemplate(), a.sceneZoneId,
+                                                a.murderHour, a.bodyPosition);
+    const CutsceneDef cb = buildOpeningCutscene(openingTemplate(), b.sceneZoneId,
+                                                b.murderHour, b.bodyPosition);
+
+    REQUIRE(ca.beats.size() == cb.beats.size());
+    for (std::size_t i = 0; i < ca.beats.size(); ++i) {
+        CHECK(ca.beats[i].caption == cb.beats[i].caption);
+        CHECK(ca.beats[i].pose.position.x == doctest::Approx(cb.beats[i].pose.position.x));
+        CHECK(ca.beats[i].hold == doctest::Approx(cb.beats[i].hold));
+    }
+}
+
+TEST_CASE("the shipped opening.cutscene parses and fits the Intro budget") {
+    namespace fs = std::filesystem;
+    fs::path dir = "cutscenes";
+    for (int i = 0; i < 4 && !fs::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(fs::exists(dir));
+
+    std::vector<std::string> errors;
+    const std::vector<CutsceneDef> shipped = loadCutscenes(dir, &errors);
+    CHECK(errors.empty());
+
+    const CutsceneDef* opening = findCutscene(shipped, "opening");
+    REQUIRE(opening != nullptr);
+    CHECK(opening->skippable == Skippable::AfterFirst);
+    CHECK(opening->duration() <= 10.0f);  // an opening nobody wants to skip
+
+    // Every caption is ASCII: the built-in font renders nothing else.
+    for (const CutsceneBeat& beat : opening->beats) {
+        CAPTURE(beat.caption);
+        for (const char c : beat.caption) {
+            CHECK(static_cast<unsigned char>(c) <= 126u);
+        }
+    }
+}
