@@ -67,6 +67,15 @@ LIVE_MODEL = "qwen3:8b"
 # at a local OpenAI-compatible server instead of the cloud.
 DEFAULT_JUDGE_URL = "https://openrouter.ai/api/v1"
 
+# Request timeouts, chosen by where the request goes. A cloud judge answers in
+# seconds, so a short timeout there catches a genuinely hung server. A local
+# model on CPU can take many minutes for the same prompt — measured at ~4.4
+# tokens/sec on a 4-core box — and a timeout shorter than the hardware turns a
+# slow gate into "cannot evaluate", which fails the whole bank closed. The
+# timeout should catch a hung server, not punish a slow one.
+REMOTE_TIMEOUT_S = 120
+LOCAL_TIMEOUT_S = 900
+
 # Phrases that mean the character stopped being the character.
 FOURTH_WALL = [
     "as an ai", "language model", "i'm an ai", "i am an ai", "openai",
@@ -138,7 +147,7 @@ def ollama_chat(system, user, model=LIVE_MODEL):
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "stream": False, "think": False, "options": {"temperature": 0.8},
-    }, {"Content-Type": "application/json"}, timeout=180)
+    }, {"Content-Type": "application/json"}, timeout=LOCAL_TIMEOUT_S)
     return data["message"]["content"].strip()
 
 
@@ -212,7 +221,7 @@ def judge(prompt, budget):
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
-    }, headers, timeout=300)
+    }, headers, timeout=LOCAL_TIMEOUT_S if _is_local(base) else REMOTE_TIMEOUT_S)
     text = data["choices"][0]["message"]["content"].strip()
     # Reasoning models (qwen3 among them) emit a <think> trace through the
     # OpenAI-compatible shim. It has to go before parsing: _first_int would

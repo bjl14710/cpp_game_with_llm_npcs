@@ -11,6 +11,7 @@ turns gates 3-5 into an exception, and an unstripped reasoning trace turns a
 first.
 """
 
+import os
 import sys
 import tempfile
 import unittest
@@ -86,6 +87,7 @@ class JudgeCallTest(unittest.TestCase):
         def post(url, payload, headers, timeout):
             seen["url"] = url
             seen["headers"] = headers
+            seen["timeout"] = timeout
             return {"choices": [{"message": {"content": content}}]}
 
         eval_lines._post_json = post
@@ -105,6 +107,24 @@ class JudgeCallTest(unittest.TestCase):
         verdict = eval_lines.judge("score", eval_lines.TokenBudget(10_000))
         self.assertEqual(verdict, "4")
         self.assertEqual(eval_lines._first_int(verdict, 1, 5), 4)
+
+    def test_a_local_judge_gets_the_patient_timeout(self):
+        # A local model on CPU takes minutes per call. Timing out sooner than
+        # the hardware turns a slow gate into GateFailure, which fails the
+        # whole bank closed for no reason but impatience.
+        seen = self.fake_post("4")
+        eval_lines.judge("score", eval_lines.TokenBudget(10_000))
+        self.assertEqual(seen["timeout"], eval_lines.LOCAL_TIMEOUT_S)
+
+    def test_a_remote_judge_keeps_the_short_timeout(self):
+        (eval_lines.ROOT / "config" / "llm.cfg").write_text(
+            "base_url = https://openrouter.ai/api/v1\n"
+            "api_key_env = A_KEY_FOR_THIS_TEST\n")
+        os.environ["A_KEY_FOR_THIS_TEST"] = "x"
+        self.addCleanup(os.environ.pop, "A_KEY_FOR_THIS_TEST", None)
+        seen = self.fake_post("4")
+        eval_lines.judge("score", eval_lines.TokenBudget(10_000))
+        self.assertEqual(seen["timeout"], eval_lines.REMOTE_TIMEOUT_S)
 
     def test_missing_key_on_a_remote_judge_fails_closed(self):
         (eval_lines.ROOT / "config" / "llm.cfg").write_text(
