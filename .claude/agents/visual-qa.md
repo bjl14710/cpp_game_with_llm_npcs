@@ -41,6 +41,54 @@ not to trust that passing unit tests means it looks right.
    `docs/qa/screenshots/<ticket-slug>/`) and report that path so it can be
    linked from OVERNIGHT_REPORT.md.
 
+## Captures include the 2D layer. They did not always.
+
+`TakeScreenshot` was called before `EndDrawing()` until #215/#216. raylib
+batches 2D draw calls and flushes at `EndDrawing`, so every capture taken
+before that fix contained the 3D scene and **none** of the HUD, menus,
+dialogue, journal or cutscene overlay.
+
+Two consequences that still matter:
+
+- **An old screenshot in `docs/qa/` is not evidence about UI.** It could not
+  have shown any. The 3D conclusions in those captures stand — geometry,
+  silhouettes, proportions all rendered correctly — but nothing 2D was ever
+  actually looked at.
+- **If a capture comes back with no UI at all, suspect the harness, not the
+  feature.** That symptom cost a full debugging detour once: a magenta
+  full-screen probe suggested the draw branch was dead, and only a stderr
+  probe proved it was running.
+
+## Reaching a UI state headlessly
+
+`--frames N shot.png` cannot press keys, so anything reached by pressing a
+key had no visual-QA path and therefore was never checked. That is exactly
+how a full-screen menu shipped drawn over the map editor. Boot flags exist
+for the states that would otherwise be unreachable:
+
+```
+--menu <page>      main | controls | multiplayer | creator | journal | sandbox | model
+--sandbox-edit     the map editor (otherwise only via P)
+--cutscene <id>    a named cutscene, on a fixed timestep
+--mystery [seed]   generate and seed a murder
+```
+
+**If a state you need has no flag, add one rather than skipping the check.**
+An unreachable state is an unverified one, and this project has shipped two
+bugs that way.
+
+Note that an explicit `--menu` beats the automatic opening cutscene; combining
+flags that both take the mode is worth an actual look at the capture, not an
+assumption about which wins.
+
+## Text is ASCII only
+
+The built-in bitmap font has glyphs for ASCII 32-126 and nothing else, so an
+em-dash or a curly quote renders as a literal `?`. Read captions and HUD text
+in the capture rather than trusting the source string. Glyph spacing is also
+computed with integer division, so sizes 14-18 are pixel-identical — only
+roughly 10 / 20 / 30 visibly differ.
+
 ## Output format
 
 Report exactly:

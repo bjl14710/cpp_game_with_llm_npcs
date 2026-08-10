@@ -142,8 +142,26 @@ class Menu {
     // Draws the menu over the dimmed frame.
     void render() const;
 
-   private:
+    // The menu's pages, by the name --menu takes on the command line.
+    //
+    // Public only so a smoke run can open one. Every page but Main is
+    // reachable in play by clicking, which a headless --frames capture cannot
+    // do — so none of them had a visual-QA path, and that is precisely how a
+    // full-screen menu shipped drawn over the map editor (#215) and how every
+    // UI capture in this project's history turned out to be missing its UI
+    // (#216).
     enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model };
+
+    // Opens `page` directly. Intended for --menu; play reaches pages by
+    // clicking, and nothing about that path changes.
+    void showPage(Page page) { page_ = page; }
+
+    // The Page for a command-line name ("journal", "controls", ...), or
+    // nullopt. Kept beside the enum so a page added without a name is a
+    // visible omission rather than a silent one.
+    static std::optional<Page> pageFromName(const std::string& name);
+
+   private:
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
