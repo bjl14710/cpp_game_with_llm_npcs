@@ -39,3 +39,6 @@ config/secrets.cfg
 # editor droppings inside the tracked dirs
 .claude/**/*~
 .claude/**/.*.un~
+
+# Frame-budget reports (issue #257) — generated per run, machine-specific
+docs/reports/

@@ -1,5 +1,7 @@
 #include "RaylibRenderer.hpp"
 
+#include "profiling/scope_timer.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -1006,6 +1008,7 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // The hull is thin: at 1.06 the rim was roughly a centimetre of ink
     // around every part at world scale, which cracked the figure into
     // pieces instead of drawing it.
+    PROF_SCOPE_N("render.char.outline_pass");
     constexpr float kHullScale = 1.035f;
     const RecipeColors outlineColors = flatColors(kOutlineColor);
     rlDrawRenderBatchActive();

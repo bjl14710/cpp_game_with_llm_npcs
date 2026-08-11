@@ -43,6 +43,7 @@
 #include "KeyBindings.hpp"
 #include "LlmClient.hpp"
 #include "LocationLog.hpp"
+#include "profiling/scope_timer.h"
 #include "Math.hpp"
 #include "Menu.hpp"
 #include "NetClient.hpp"
@@ -1152,6 +1153,7 @@ int main(int argc, char** argv) {
 
     long frames = 0;
     while (!WindowShouldClose() && (maxFrames < 0 || frames++ < maxFrames)) {
+        PROF_SPAN_BEGIN("sim");
         const float dt = std::fmin(0.03f, GetFrameTime());
 
         // A dropped link falls back to solo play; the menu status explains.
@@ -1632,6 +1634,7 @@ int main(int argc, char** argv) {
         // NPC behaviors keep running during dialogue, freeze in the menu;
         // joined clients never simulate (the host's snapshots are truth).
         if (mode != AppMode::Menu && !joined) {
+            PROF_SCOPE_N("sim.npc_ai");
             for (Npc& npc : world.npcs()) {
                 // Combat movement (flee/hostile/dead) owns non-Idle NPCs;
                 // conversational behaviors would fight it.
@@ -1646,6 +1649,7 @@ int main(int argc, char** argv) {
         // gates, at most one fact per pair per tick. Knowledge only ever
         // flips on the shared bus — there is no NPC-to-NPC message channel.
         if (!joined) {
+            PROF_SCOPE_N("sim.gossip");
             gossipTickTimer += dt;
             if (gossipTickTimer >= 15.f) {
                 gossipTickTimer = 0.f;
@@ -1736,6 +1740,7 @@ int main(int argc, char** argv) {
         // map is not an agent with an alibi, and recording them would put a
         // building-placement session into the evidence.
         if (mode != AppMode::Menu && mode != AppMode::SandboxEdit) {
+            PROF_SCOPE_N("sim.location_log");
             // The same worldHour the rest of the frame uses. Reading the clock
             // a second time here would let an agent's trail disagree with the
             // timestamps on the facts it is meant to corroborate.
@@ -2105,7 +2110,9 @@ int main(int argc, char** argv) {
         }
 
         // ---- render ----
-        BeginDrawing();
+        PROF_SPAN_END();  // closes "sim"
+        PROF_SPAN_BEGIN("render.3d");
+        { PROF_SCOPE_N("render.begin"); BeginDrawing(); }
         renderer.setTimeOfDay(worldHour);  // sky, fog, light: one clock
         ClearBackground(renderer.skyColor());
         const bool sandboxEditing = (mode == AppMode::SandboxEdit);
@@ -2128,7 +2135,9 @@ int main(int argc, char** argv) {
             renderer.beginFrame(
                 CameraPose{player.position, player.yawDeg, player.pitchDeg});
         }
-        renderer.drawCity(world.city());
+        PROF_SPAN_END();  // "render.3d" resumes after the camera block
+        PROF_SPAN_BEGIN("render.3d.draw");
+        { PROF_SCOPE_N("render.city"); renderer.drawCity(world.city()); }
         if (sandboxEditing) {
             // Placed NPCs render as their real composite looks so the
             // editor shows the cast, not markers.
@@ -2190,6 +2199,7 @@ int main(int argc, char** argv) {
                 }
             }
         } else {
+            PROF_SCOPE_N("render.characters");
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 const Npc& npc = world.npcs()[i];
                 const bool walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
@@ -2285,7 +2295,9 @@ int main(int argc, char** argv) {
             renderer.drawViewmodel(static_cast<int>(world.player().weapon),
                                    world.player().attackAnimFraction);
         }
-        renderer.endFrame();
+        { PROF_SCOPE_N("render.end3d"); renderer.endFrame(); }
+        PROF_SPAN_END();  // closes "render.3d.draw"
+        PROF_SPAN_BEGIN("render.ui2d");
 
         // ---- 2D overlay ----
         if (worldgenStatusTtl > 0.f) {
@@ -2484,13 +2496,32 @@ int main(int argc, char** argv) {
         // directly. Called before the flush it captures the 3D scene and NONE
         // of the pending UI — so every HUD, menu and overlay was silently
         // missing from every capture, and visual QA of anything 2D was blind.
-        EndDrawing();
+        PROF_SPAN_END();  // closes "render.ui2d"
+
+        // present is NOT work — it is the frame limiter.
+        //
+        // FLAG_VSYNC_HINT plus SetTargetFPS(60) mean EndDrawing blocks until
+        // the next vblank and then raylib sleeps to pace the loop. So this
+        // scope absorbs all the slack: it is LARGE when the frame is cheap and
+        // SHRINKS as real work grows. Reading it as a cost inverts the truth.
+        //
+        // It is measured precisely so it can be excluded. "sim + render.3d +
+        // render.ui2d" is the number to compare against the 16.67 ms budget;
+        // wall-clock frame time cannot answer that question at all, which is
+        // why tools/bench_npc_render.py has been reporting the cap.
+        { PROF_SCOPE_N("present"); EndDrawing(); }
         if (screenshotPath && maxFrames >= 0 && frames >= maxFrames) {
             TakeScreenshot(screenshotPath);
         }
+        PROF_FRAME();
     }
 
 shutdown:
+    // Profiling dump (issue #257). No-op unless ENABLE_PROFILING is defined.
+    // Path is overridable so a measurement run does not collide with another.
+    PROF_DUMP(std::getenv("LLM_NPC_PROF_JSON") ? std::getenv("LLM_NPC_PROF_JSON")
+                                               : "/tmp/prof.json");
+
     // Transcripts with unsaved turns persist on quit; their summary refresh
     // happens at the next conversation close (summarizing here would block
     // shutdown on the LLM).
