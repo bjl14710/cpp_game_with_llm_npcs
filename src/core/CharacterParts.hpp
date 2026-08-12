@@ -109,6 +109,39 @@ inline constexpr float kFeatureZPush = 0.35f;
 // never z-fights with the skin it is drawn on.
 inline constexpr float kMarkStandoff = 0.010f;
 
+// ---- The vertical face budget ----
+// A feature part is drawn CENTRED ON ITS LINE and is NOT bounded by its
+// declared box: the sclera is stretched past it, a spectacle lens is wider
+// again, and the brows clear it entirely. So localSize.y cannot answer "how
+// much face does this eye eat" — these can, and they are the recipes' own
+// numbers, named here for exactly the reason kFeatureZPush is: the socket
+// contract and the recipe have to agree, and the eye and mouth sockets are
+// the pair that has to fit two features BETWEEN them.
+inline constexpr float kEyeBallRadius = 0.60f;    // sclera radius / eye height
+inline constexpr float kEyeBallSquashY = 1.05f;   // ...then stretched this much
+inline constexpr float kLensRadius = 0.66f;       // the spectacle disc, unsquashed
+inline constexpr float kLidHalfHeight = 0.225f;   // a closed lid's bar
+inline constexpr float kAngryEyeDrop = 0.15f;     // angry eyes hang low, then
+inline constexpr float kAngryEyeRadius = 0.52f;   // ...are smaller for it
+inline constexpr float kMouthDiscRadius = 0.42f;  // the flattened-sphere mouths
+inline constexpr float kSmileDotRise = 0.15f;     // the smile's raised end dots
+inline constexpr float kSmileDotRadius = 0.30f;
+
+// Bare skin a face keeps between its lowest eye and its highest mouth.
+// NOT a collision epsilon: features that merely fail to intersect still
+// read as one crowded blob with the nose lost inside it. This is the
+// visible band, and it is what the two socket lines are spaced to buy.
+inline constexpr float kFaceGapMin = 0.040f;
+
+// How far the drawn eyes reach BELOW the eye line, and the drawn mouth
+// ABOVE the mouth line. CONTRACTS on the recipes in the same sense as
+// skullSurfaceZ: a new eye or mouth part either draws within what these
+// say, or teaches them its shape — otherwise it silently overruns the
+// budget the head's sockets were spaced for. Mesh families are exempt
+// (their face is one decal, not marks), and get the declared box.
+float eyeDropY(const PartDef& eyes);
+float mouthRiseY(const PartDef& mouth);
+
 // How far forward the drawn skull's surface reaches at local height `y`,
 // measured from the head's own centre line. This is a CONTRACT on the
 // styleTag, not a survey of the recipes: a head tagged "blocky" is drawn as

@@ -71,6 +71,29 @@ float skullSurfaceZ(const PartDef& head, float y) {
     return halfDepth * std::sqrt(1.f - t * t);
 }
 
+float eyeDropY(const PartDef& eyes) {
+    const float h = eyes.localSize.y;
+    if (!eyes.meshName.empty()) return h * 0.5f;  // a decal, not marks
+    // One branch per recipe that does NOT draw the shared pair of balls.
+    if (eyes.id == "eyes_sleepy") return h * kLidHalfHeight;
+    if (eyes.id == "eyes_visor") return h * 0.5f;  // draws its declared box
+    // The spectacle DISC is what reaches lowest, not the eye behind it.
+    if (eyes.id == "eyes_glasses") return h * kLensRadius;
+    if (eyes.id == "eyes_angry")
+        return h * (kAngryEyeDrop + kAngryEyeRadius * kEyeBallSquashY);
+    return h * kEyeBallRadius * kEyeBallSquashY;
+}
+
+float mouthRiseY(const PartDef& mouth) {
+    const float h = mouth.localSize.y;
+    if (!mouth.meshName.empty()) return h * 0.5f;
+    // The smile's end dots are RAISED off its bar — the bar itself sits low.
+    if (mouth.id == "mouth_smile") return h * (kSmileDotRise + kSmileDotRadius);
+    if (mouth.id == "mouth_open" || mouth.id == "mouth_o")
+        return h * kMouthDiscRadius;
+    return h * 0.5f;  // a bar drawn in its declared box
+}
+
 const std::vector<PartDef>& partCatalog() {
     // All positions are in each part's own local space, anchor at
     // bottom-center. Two style families plus "any" parts; sockets are
@@ -104,9 +127,26 @@ const std::vector<PartDef>& partCatalog() {
          {{"head", {0.f, 1.87f, 0.f}}}},
         // Heads (declare where eyes, hair — and later mouths — sit on THEM).
         // A feature socket is the exact LINE the feature is drawn on, not
-        // the corner of a box, so eyes.y IS the eye centre: ~46% of head
+        // the corner of a box, so eyes.y IS the eye centre: ~48% of head
         // height on every skull. Eyes above a head's midline read adult,
         // then alien.
+        // The two feature LINES are spaced, not authored independently: the
+        // eyes and the mouth are both drawn between them, so the room they
+        // need is what sets the distance —
+        //     mouth.y = eyes.y - (maxEyeDropY + maxMouthRiseY + kFaceGapMin)
+        // over every part the head's styleTag admits, which comes to 0.274
+        // and is spaced at 0.275. That distance is ABSOLUTE, not a fraction
+        // of the head: one shared pool of eyes and mouths hangs on all four
+        // skulls at one size, so a taller head simply gets to carry its
+        // mouth higher (20% of its height on head_round, 24% on head_tall)
+        // rather than every head repeating the same ratio.
+        // The appealing-character pass is what made this bite: it grew the
+        // eyes — a spectacle lens is a third of a head-height across — while
+        // leaving the sockets 0.18 apart, so 30 of the 120 combinations drew
+        // the mouth INSIDE the eyes and 70 left no skin worth the name, with
+        // the nose bead lost between them. Three shipped residents wore one
+        // (barista, hotdog, tourist). Same class of defect as the mouth-z
+        // muzzle below: a number authored once, and a neighbour moved.
         // eyes.z sits a little INSIDE the skull surface at that line (~88%
         // of the way out) so the flattened sclera reads as an eye set in a
         // face rather than a ball stuck on one. It is pulled in less on the
@@ -132,21 +172,21 @@ const std::vector<PartDef>& partCatalog() {
         // face is one flat plane, so a mark floating off it still reads as
         // painted on, and sinking it to the plane would z-fight instead.
         {"head_round", PartCategory::Head, "round", {0.98f, 0.98f, 0.98f},
-         {{"eyes", {0.f, 0.45f, 0.40f}},
+         {{"eyes", {0.f, 0.47f, 0.40f}},
           {"hair", {0.f, 0.88f, 0.f}},
-          {"mouth", {0.f, 0.27f, 0.380f}}}},
+          {"mouth", {0.f, 0.195f, 0.3333f}}}},
         {"head_block", PartCategory::Head, "blocky", {1.00f, 1.00f, 1.00f},
-         {{"eyes", {0.f, 0.46f, 0.44f}},
+         {{"eyes", {0.f, 0.48f, 0.44f}},
           {"hair", {0.f, 0.95f, 0.f}},
-          {"mouth", {0.f, 0.28f, 0.50f}}}},
+          {"mouth", {0.f, 0.205f, 0.50f}}}},
         {"head_oval", PartCategory::Head, "round", {0.90f, 1.10f, 0.90f},
-         {{"eyes", {0.f, 0.51f, 0.36f}},
+         {{"eyes", {0.f, 0.53f, 0.36f}},
           {"hair", {0.f, 1.02f, 0.f}},
-          {"mouth", {0.f, 0.31f, 0.347f}}}},  // derived — see head_round
+          {"mouth", {0.f, 0.255f, 0.3218f}}}},  // derived — see head_round
         {"head_tall", PartCategory::Head, "blocky", {0.94f, 1.16f, 0.94f},
-         {{"eyes", {0.f, 0.53f, 0.42f}},
+         {{"eyes", {0.f, 0.55f, 0.42f}},
           {"hair", {0.f, 1.10f, 0.f}},
-          {"mouth", {0.f, 0.33f, 0.47f}}}},
+          {"mouth", {0.f, 0.275f, 0.47f}}}},
         // Eyes, sized against the grown heads (recipes split pupils by the
         // declared width; the visor renders its declared box).
         {"eyes_dot", PartCategory::Eyes, "any", {0.42f, 0.13f, 0.10f}, {}},

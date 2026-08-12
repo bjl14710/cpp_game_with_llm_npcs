@@ -464,9 +464,11 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     // between a doll and a character. The sclera is FLATTENED front-to-back
     // so a big eye sits IN the face instead of bulging off it, while the
     // iris and spark stay proud of it. `side` mirrors the spark so both
-    // eyes catch the same light.
+    // eyes catch the same light. The vertical stretch is why an eye is NOT
+    // bounded by its declared box, and so why the face budget has to ask
+    // core's eyeDropY() how much room it really eats.
     auto drawEye = [&](float x, float y, float z, float r, float side) {
-        squashed({x, y, z}, 1.f, 1.05f, 0.60f,
+        squashed({x, y, z}, 1.f, kEyeBallSquashY, 0.60f,
                  [&] { DrawSphere({x, y, z}, r, c.sclera); });
         const Vector3 iris{x, y, z + r * 0.45f};
         squashed(iris, 1.f, 1.f, 0.62f,
@@ -484,8 +486,9 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         // Floored on the eye's own height as well: the tall styles (round,
         // star) build a sclera taller than the width-derived rise, and the
         // bar came down on top of the eye.
-        const float rise =
-            std::max(dim.x * 0.28f, dim.y * 0.63f + dim.x * 0.06f);
+        const float rise = std::max(
+            dim.x * 0.28f,
+            dim.y * kEyeBallRadius * kEyeBallSquashY + dim.x * 0.06f);
         for (const float side : {-1.f, 1.f}) {
             DrawCube({at.x + side * dx * 1.15f, fy + rise, fz + dim.z * 0.10f},
                      dim.x * 0.33f, dim.x * 0.076f, dim.z * 0.70f, c.hair);
@@ -721,13 +724,15 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         // Two low lids. A closed lid is a lash line, not a hole, so it is
         // iris-toned rather than the old near-black.
         const float dx = dim.x * 0.5f - dim.y * 0.5f;
-        DrawCube({at.x - dx, fy, fz}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.iris);
-        DrawCube({at.x + dx, fy, fz}, dim.y * 1.6f, dim.y * 0.45f, dim.z, c.iris);
+        DrawCube({at.x - dx, fy, fz}, dim.y * 1.6f, dim.y * kLidHalfHeight * 2.f,
+                 dim.z, c.iris);
+        DrawCube({at.x + dx, fy, fz}, dim.y * 1.6f, dim.y * kLidHalfHeight * 2.f,
+                 dim.z, c.iris);
         drawBrows(dx);
     } else if (part.id == "eyes_wink") {
         // One open eye, one closed lid.
         const float dx = dim.x * 0.5f - dim.y * 0.5f;
-        drawEye(at.x - dx, fy, fz, dim.y * 0.60f, -1.f);
+        drawEye(at.x - dx, fy, fz, dim.y * kEyeBallRadius, -1.f);
         DrawCube({at.x + dx, fy, fz}, dim.y * 1.5f, dim.y * 0.4f, dim.z, c.iris);
         drawBrows(dx);
     } else if (part.id == "eyes_glasses") {
@@ -740,7 +745,7 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         for (const float side : {-1.f, 1.f}) {
             const Vector3 lens{at.x + side * dx, fy, fz + dim.z * 0.05f};
             squashed(lens, 1.f, 1.f, 0.20f,
-                     [&] { DrawSphere(lens, dim.y * 0.66f, c.dark); });
+                     [&] { DrawSphere(lens, dim.y * kLensRadius, c.dark); });
             drawEye(at.x + side * dx, fy, fz + dim.z * 0.12f, dim.y * 0.54f,
                     side);
         }
@@ -751,18 +756,20 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         // Eyes under a heavy single brow bar — this branch already does the
         // brow job deliberately, so drawBrows stays out of it.
         const float dx = dim.x * 0.5f - dim.y * 0.5f;
-        drawEye(at.x - dx, fy - dim.y * 0.15f, fz, dim.y * 0.52f, -1.f);
-        drawEye(at.x + dx, fy - dim.y * 0.15f, fz, dim.y * 0.52f, 1.f);
+        drawEye(at.x - dx, fy - dim.y * kAngryEyeDrop, fz, dim.y * kAngryEyeRadius,
+                -1.f);
+        drawEye(at.x + dx, fy - dim.y * kAngryEyeDrop, fz, dim.y * kAngryEyeRadius,
+                1.f);
         DrawCube({at.x, fy + dim.x * 0.24f, fz + dim.z * 0.10f}, dim.x * 0.94f,
                  dim.x * 0.09f, dim.z * 0.70f, c.hair);
     } else if (part.id == "mouth_smile") {
         // A wide low bar with raised end dots reads as an upturned smile.
         DrawCube({at.x, fy - dim.y * 0.20f, fz}, dim.x * 0.68f,
                  dim.y * 0.38f, dim.z, c.mouth);
-        DrawSphere({at.x - dim.x * 0.42f, fy + dim.y * 0.15f, fz},
-                   dim.y * 0.30f, c.mouth);
-        DrawSphere({at.x + dim.x * 0.42f, fy + dim.y * 0.15f, fz},
-                   dim.y * 0.30f, c.mouth);
+        DrawSphere({at.x - dim.x * 0.42f, fy + dim.y * kSmileDotRise, fz},
+                   dim.y * kSmileDotRadius, c.mouth);
+        DrawSphere({at.x + dim.x * 0.42f, fy + dim.y * kSmileDotRise, fz},
+                   dim.y * kSmileDotRadius, c.mouth);
     } else if (part.id == "mouth_open" || part.id == "mouth_o") {
         // A flattened sphere: tall ellipse (open) or small ring (o). Kept
         // flat, but nudged forward so its FRONT lands where the cube mouths
@@ -771,11 +778,11 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         // two reach only 0.020-0.033 of their own accord, so on a round
         // skull, whose surface is derived for the full depth, the small "o"
         // ended up INSIDE the head and survived on tessellation slop alone.
-        const float reach = dim.x * 0.42f * 0.30f;
+        const float reach = dim.x * kMouthDiscRadius * 0.30f;
         rlPushMatrix();
         rlTranslatef(at.x, fy, fz + dim.z * 0.5f - reach);
         rlScalef(1.f, dim.y / dim.x, 0.30f);
-        DrawSphere({0.f, 0.f, 0.f}, dim.x * 0.42f, c.mouth);
+        DrawSphere({0.f, 0.f, 0.f}, dim.x * kMouthDiscRadius, c.mouth);
         rlPopMatrix();
     } else if (part.id == "mouth_neutral") {
         DrawCube({at.x, fy, fz}, dim.x, dim.y, dim.z, c.mouth);
@@ -786,8 +793,8 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
         } else {
             // Two eyes split across the part's declared width.
             const float dx = dim.x * 0.5f - dim.y * 0.5f;
-            drawEye(at.x - dx, fy, fz, dim.y * 0.60f, -1.f);
-            drawEye(at.x + dx, fy, fz, dim.y * 0.60f, 1.f);
+            drawEye(at.x - dx, fy, fz, dim.y * kEyeBallRadius, -1.f);
+            drawEye(at.x + dx, fy, fz, dim.y * kEyeBallRadius, 1.f);
             drawBrows(dx);
         }
     } else if (part.category == PartCategory::Mouth) {

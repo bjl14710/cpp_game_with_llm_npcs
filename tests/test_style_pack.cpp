@@ -128,6 +128,46 @@ TEST_CASE("round skulls wear the mouth ON the face, not out in front of it") {
     }
 }
 
+TEST_CASE("a face keeps bare skin between its lowest eye and its highest mouth") {
+    // Regression for the crowded face. The eye and mouth LINES are one
+    // budget, not two independent numbers: every eye the head admits and
+    // every mouth is drawn between them. The appealing-character pass grew
+    // the eyes — a spectacle lens is a third of a head-height across —
+    // without re-spacing the sockets, so 30 of the 120 combinations drew the
+    // mouth inside the eyes and 70 left no skin worth the name, with the
+    // nose bead lost between them; barista, hotdog and tourist all shipped
+    // wearing one.
+    //
+    // Scoped to core: a mesh head wears its face as one decal (issue #140)
+    // and never draws these marks at all.
+    int checked = 0;
+    for (const PartDef* head : partsForCategory(PartCategory::Head, "any")) {
+        if (head->pack != "core") continue;
+        const auto eyes = head->sockets.find("eyes");
+        const auto mouth = head->sockets.find("mouth");
+        REQUIRE_MESSAGE(eyes != head->sockets.end(), head->id);
+        REQUIRE_MESSAGE(mouth != head->sockets.end(), head->id);
+        for (const PartDef* e :
+             partsForCategory(PartCategory::Eyes, head->styleTag)) {
+            if (e->pack != "core") continue;
+            for (const PartDef* m :
+                 partsForCategory(PartCategory::Mouth, head->styleTag)) {
+                if (m->pack != "core") continue;
+                const float gap = (eyes->second.y - eyeDropY(*e)) -
+                                  (mouth->second.y + mouthRiseY(*m));
+                CAPTURE(head->id);
+                CAPTURE(e->id);
+                CAPTURE(m->id);
+                CHECK(gap >= kFaceGapMin);
+                ++checked;
+            }
+        }
+    }
+    // The pools are what make this worth pinning: the shipped roster wears
+    // ten of these, the creator and randomizeLook can reach all of them.
+    CHECK(checked >= 100);
+}
+
 TEST_CASE("catalog growth floors: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes>=12") {
     // Step 5. The roster test keeps the ten shipped looks valid and
     // pairwise-distinct; this pins the pool floors so a future cleanup
