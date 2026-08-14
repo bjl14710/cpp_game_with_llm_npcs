@@ -327,3 +327,104 @@ TEST_CASE("schedules: midnight-wrapping ranges and edge hours") {
     CHECK(activeScheduleIndex(schedule, 5.99f) == 0); // end-exclusive
     CHECK(activeScheduleIndex(schedule, 15.f) == -1); // gap: nothing active
 }
+
+// ---- NPCs stay on the ground (bug 3) ---------------------------------------
+//
+// An NPC following a jumping player used to climb into the air, and one
+// fleeing a player on a roof used to burrow. The cause was a split authority:
+// the step came from a THREE-dimensional normalize while the distance test
+// beside it used distanceXZ, so the vertical gap entered the movement,
+// City::resolveMovement wrote it through with `pos.y = to.y`, and nothing put
+// it back. The drift accumulated and never recovered.
+
+TEST_CASE("steerXZ never produces vertical motion, however high the target") {
+    // The primitive the fix rests on. Directly comparable to distanceXZ, which
+    // every one of these movers already used for its distance test.
+    const Vec3 ground{0.f, 0.f, 0.f};
+    for (const float height : {0.f, 1.7f, 12.f, -8.f, 100.f}) {
+        CAPTURE(height);
+        const Vec3 step = steerXZ(ground, Vec3{3.f, height, 4.f});
+        CHECK(step.y == doctest::Approx(0.f));
+        CHECK(length(step) == doctest::Approx(1.f));
+        // Direction on the plane is unaffected by how high the target is.
+        CHECK(step.x == doctest::Approx(0.6f));
+        CHECK(step.z == doctest::Approx(0.8f));
+    }
+}
+
+TEST_CASE("steerXZ on a vertically stacked pair yields no motion, not a nan") {
+    const Vec3 step = steerXZ(Vec3{5.f, 0.f, 5.f}, Vec3{5.f, 20.f, 5.f});
+    CHECK(step.x == doctest::Approx(0.f));
+    CHECK(step.y == doctest::Approx(0.f));
+    CHECK(step.z == doctest::Approx(0.f));
+}
+
+TEST_CASE("an NPC following a JUMPING player stays on the ground") {
+    // The reported symptom. The player's y is their feet height and rises
+    // while jumping, so before the fix the follow step carried it upward every
+    // frame for as long as the player kept jumping.
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(testPersona(), client);
+    // (8, 8) is open ground. (0, 0) is INSIDE a building in makeDowntown, and
+    // an NPC placed there cannot move at all — resolveMovement refuses every
+    // step, so a movement test starting there passes by being stuck.
+    npc.setPlacement(Vec3{8.f, 0.f, 8.f}, 0.f, "plaza");
+    instruct(npc, "On your six. [[ACTION: follow]]");
+    REQUIRE(npc.behavior() == NpcAction::Follow);
+
+    const City city = City::makeDowntown();
+    Vec3 playerPos{28.f, 0.f, 28.f};
+    for (int frame = 0; frame < 400; ++frame) {
+        // A player bouncing between the ground and the top of a jump.
+        playerPos.y = (frame % 40 < 20) ? 1.6f : 0.f;
+        npc.update(1.f / 60.f, playerPos, city, 12.f);
+        // Deliberately NO snapToGround here. It runs every frame in
+        // production and would erase the drift before it accumulated, so a
+        // test that called it would pass with the bug reverted — which is
+        // exactly what behaviour QA caught this test doing. Without the net,
+        // this fails the moment any of the six sites goes back to a 3D
+        // normalize. The net has its own test below.
+        CAPTURE(frame);
+        REQUIRE(npc.position().y == doctest::Approx(0.f));
+    }
+    // It moved horizontally, so this is not passing by standing still. Measured
+    // from the start rather than as distance-to-player: a building between the
+    // two will legitimately stop it short, and that is not what is under test.
+    CAPTURE(npc.position().x);
+    CAPTURE(npc.position().z);
+    CHECK(distanceXZ(npc.position(), Vec3{8.f, 0.f, 8.f}) > 1.f);
+}
+
+TEST_CASE("an NPC following a player on a ROOF gathers below, never climbs") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(testPersona(), client);
+    // (8, 8) is open ground. (0, 0) is INSIDE a building in makeDowntown, and
+    // an NPC placed there cannot move at all — resolveMovement refuses every
+    // step, so a movement test starting there passes by being stuck.
+    npc.setPlacement(Vec3{8.f, 0.f, 8.f}, 0.f, "plaza");
+    instruct(npc, "On your six. [[ACTION: follow]]");
+    REQUIRE(npc.behavior() == NpcAction::Follow);
+
+    const City city = City::makeDowntown();
+    const Vec3 onARoof{28.f, 9.f, 28.f};  // nine metres up
+    for (int frame = 0; frame < 400; ++frame) {
+        npc.update(1.f / 60.f, onARoof, city, 12.f);
+        CAPTURE(frame);  // no snapToGround: see the note above
+        REQUIRE(npc.position().y == doctest::Approx(0.f));
+    }
+}
+
+TEST_CASE("snapToGround recovers an NPC that is already off the ground") {
+    // A save, a hand-built fixture, or any future mover that forgets. The
+    // authority is unconditional, so one frame is enough.
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(testPersona(), client);
+    npc.setPlacement(Vec3{4.f, 37.f, 4.f}, 0.f, "plaza");
+    npc.snapToGround();
+    CHECK(npc.position().y == doctest::Approx(0.f));
+    CHECK(npc.position().x == doctest::Approx(4.f));  // horizontal untouched
+    CHECK(npc.position().z == doctest::Approx(4.f));
+}
