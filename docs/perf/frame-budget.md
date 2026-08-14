@@ -1,117 +1,113 @@
 # Frame Budget — where the time actually goes
 
-Status: **NOT YET MEASURED.** This is the skeleton for phase 3 of
-`.claude/plans/cpp20-upgrade.md`. Every number below is a placeholder marked
-`TBD`. Do not cite this document until the TBDs are gone.
+Status: **MEASURED** 2026-08-14 (timing and memory), superseding the
+2026-08-10 timing pass whose headline attribution carried an instrumentation
+bug (corrected below — the conclusions survived, the magnitude did not).
 
-The point of this file is that the answer is currently **not known**. Two
-plausible explanations are recorded below so they can be tested, not so they
-can be assumed.
-
----
-
-## Resolve this first: the recorded baseline is contradicted
-
-Two places in the repo disagree, and both are load-bearing for the
-twenty-one-residents milestone.
-
-| Source | Claim |
-|---|---|
-| `tools/bench_npc_render.py` docstring | 26.4 ms/frame at 10 personas, 35.3 at 21, ~0.81 ms per NPC, measured 2026-08-07 on an M1 Pro |
-| `CMakeLists.txt:9-26` | every recorded render number was measured on an **unoptimised** build; the same commit at `-O2` measures **~17 ms** |
-
-CMake now defaults to `RelWithDebInfo`, so a run today does not measure the
-same thing the docstring describes. **The 0.81 ms/NPC figure inherits the same
-problem** and cannot be trusted either.
-
-- [ ] Re-measure on `RelWithDebInfo` and record it here.
-- [ ] Correct or annotate the `bench_npc_render.py` docstring so the stale
-      figure stops being quoted. It is currently the most-cited number in the
-      project and it was taken without `-O`.
-- [ ] State whether the twenty-one-residents gate (26.4 ms) still means
-      anything, given it was set against an unoptimised build.
+Budget: **16.67 ms** (60 fps). A budget is a deadline, not an average — the
+verdicts below are on p99, with the mean for context.
 
 ---
+
+## The contradiction at the top of the old skeleton, resolved
+
+The two recorded baselines disagreed because **both were wrong, differently**:
+
+| Source | Claim | What it actually was |
+|---|---|---|
+| `tools/bench_npc_render.py` (old docstring) | 26.4 ms/frame at 10 personas | Real, but measured on an **unoptimised** build (CMake had no default build type) |
+| `CMakeLists.txt` note | same commit at `-O2` ≈ 17 ms | **The frame limiter.** `FLAG_VSYNC_HINT` + `SetTargetFPS(60)` pin wall-clock near 16.67 ms whenever the work fits — wall-clock cannot see the real cost on a healthy build |
+
+- [x] Re-measured on `RelWithDebInfo` — via frame **work** (span samples from
+      the `ENABLE_PROFILING` build), not wall-clock. Numbers below.
+- [x] `bench_npc_render.py` corrected — issue #266 rewrote it to measure
+      work by default and to say out loud when a wall-clock result is the cap.
+- [x] The twenty-one-residents gate re-derived — the 26.4 figure means
+      nothing; the real gate arithmetic is on #173 (short version: ~0.95 ms
+      of character rendering per resident ⇒ 21 ≈ 20 ms ⇒ gated on #170).
 
 ## Method
 
-Fill in exactly what was run, so this is reproducible rather than anecdotal.
+- Build: `RelWithDebInfo`, C++20, Apple clang, arm64 (M1 Pro), macOS
+- Instrumentation: `src/profiling/scope_timer.h` via
+  `cmake -B build-prof -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_PROFILING=ON`
+- Workload: 10 wandering town residents, `--hour 12`, `--frames 900`,
+  cameras `--camera 0 30 180` (far) and `--camera 0 13 180` (near)
+- Protocol: **3 runs, median reported**, spread checked (≤0.67 ms on frame
+  means). Frame work = sum of the per-frame span samples for
+  `sim` + `render.3d` + `render.3d.draw` + `render.ui2d`. `present`
+  (EndDrawing) is **excluded**: under vsync it is slack that shrinks as work
+  grows — reading it as cost inverts the truth.
+- Dates/commits: baseline at dev `898931b`; "after" is PR #268
+  (`feature/issue-171-outline-skip-at-range`).
 
-- Build type: `TBD` (must be `RelWithDebInfo` or `Release` — say which)
-- Command: `python3 tools/bench_npc_render.py --short 300 --long 900`
-- Frame counts: **quote 300/900.** The script's own docstring warns that
-  120/360 reports 17.8 ms where 300/900 reports 26.4 ms on the same build,
-  because early frames carry shader compilation. The subtraction cancels
-  startup, not warm-up. Comparing across different counts is how the earlier
-  baseline went wrong.
-- Machine: `TBD`
-- Resident count: `TBD`
-- Profiler: `TBD` (`/usr/bin/sample <pid> 10 -file out.sample`, or Instruments
-  Time Profiler)
+## Measured baseline — frame work, ms
 
-## Measured baseline
-
-| Residents | ms/frame | fps | startup |
-|---|---|---|---|
-| TBD | TBD | TBD | TBD |
-
-Marginal cost per NPC: `TBD` ms.
-
-## Cost attribution
-
-Ranked, from the profiler. Percentages of a frame, not of each other.
-
-| Rank | Site | ms/frame | % | Scales with |
+| Workload | dev `898931b` | after #171 gate | p99 before → after | frames over 16.67 before → after |
 |---|---|---|---|---|
-| TBD | TBD | TBD | TBD | TBD |
+| far (z=30) | 13.39 mean | **9.90** | 18.02 → 14.22 | 11/900 → 4/900 |
+| near (z=13) | 13.51 mean | **10.18** | 17.41 → 12.31 | 13/900 → **0/900** |
 
-## Hypotheses under test
+## Cost attribution (dev `898931b`, far camera, corrected)
 
-Recorded before measuring so the result can contradict them. **If the profile
-supports neither, say so plainly and report what it actually shows.**
+| Rank | Site | ms/frame | % of budget | Scales with |
+|---|---|---|---|---|
+| 1 | inverted-hull outline pass (both character paths) | ≈5.0 | ≈30% | residents in view |
+| 2 | base character draw (pose, recipes/meshes, decal) | ≈8.0 | ≈48% | residents in view |
+| 3 | `present` (frame limiter slack — not work) | 3.55 | — | inversely with work |
+| 4 | city (all ~85 immediate-mode draws) | 0.34 | 2.0% | fixed |
+| 5 | UI 2D | 0.04 | 0.2% | fixed |
+| 6 | simulation, all of it (AI + gossip + location log) | 0.01 | 0.1% | residents |
 
-### H1 — immediate-mode city geometry (fixed cost)
+**Correction recorded here on purpose:** the 08-10 report attributed
+12.44 ms (74.6% of budget, "96% of character rendering") to the outline
+pass. That scope had no enclosing braces, so its RAII timer ran to the end
+of `drawCompositeCharacter` and swallowed the base draw and face decal. The
+fix (in PR #268) brackets exactly the hull pass; the split above is derived
+from the gated A/B (outline removed at range = 3.5 ms + still-in-range
+outline = 1.5 ms).
 
-`src/app/RaylibRenderer.cpp` makes ~85 draw calls, many `DrawCube`,
-`DrawCylinder` and their `Wires` variants, for streets, plazas, buildings,
-fountains and lamps. raylib's 3D shape helpers upload geometry on every call
-with no batching, and the city is static — it is rebuilt from scratch each
-frame.
+## Hypotheses — verdicts
 
-- Predicts: cost roughly **flat** in NPC count.
-- If true, the fix is baking static geometry into meshes once, and it is
-  unrelated to the resident count.
-- Verdict: `TBD`
+### H1 — immediate-mode city geometry (fixed cost): **REFUTED**
 
-### H2 — characters drawn twice (scales with residents)
+0.34 ms/frame, 2% of budget, flat in resident count. Baking static geometry
+into meshes would buy nothing measurable. Drop the idea, do not defer it.
 
-Each character appears to be drawn twice: `DrawModelEx` at
-`RaylibRenderer.cpp:331`, then a per-mesh rim pass via `DrawMesh` at `:350`.
+### H2 — characters drawn twice (scales with residents): **CONFIRMED**
 
-- Predicts: cost **linear** in NPC count, and consistent with a per-NPC
-  marginal figure.
-- If true, this gates the twenty-one-residents milestone directly.
-- Verdict: `TBD`
+Character rendering was ~13 ms of a 13.4 ms frame, ~0.5 ms of which was the
+outline pass being issued per part per resident (corrected magnitude:
+≈5 ms/frame across ten). #171 gates it beyond 25 units; what remains is the
+~0.8–0.9 ms/resident base draw, which is #170's territory.
 
-## Memory
+## Memory (measured 2026-08-14, same build family, display held awake¹)
 
-Not measured by anything in the project today, and named explicitly in the
-request that produced this work — so it gets a section rather than being
-quietly dropped.
+| Metric | Value | How taken |
+|---|---|---|
+| Peak footprint, 10 residents, 900 frames | **623 MB** (max RSS 423 MB) | `/usr/bin/time -l`, `peak memory footprint` |
+| Peak footprint, 0 residents (empty `--map`), 900 frames | 559 MB (max RSS 386 MB) | same |
+| Growth per additional resident | **≈6.4 MB** (64 MB / 10 — roster average, not marginal) | delta of the two rows above |
+| Growth across run length | **none**: 609 → 623 → 622 MB at 300/900/1800 frames | three bounded runs |
+| Per-frame allocation growth | **none**: malloc heap 68,744 nodes / 98.43 MB → 68,068 / 98.37 MB across ~900 frames mid-run (net −61 KB) | two `heap` snapshots 15 s apart on a live 3000-frame run |
+| Largest consumer | graphics memory, not malloc: the malloc heap is ~94 MB of the ~620 MB footprint; the rest is HiDPI+MSAA framebuffers and GPU-uploaded meshes/textures. Within malloc, the 2 KB size class dominates (27,296 nodes ≈ 54 MB), consistent with CPU-side mesh/skinning data behind `Assets`' `Model` maps | `heap` size-class table |
 
-- [ ] Resident set size at 10 residents, after startup settles: `TBD`
-- [ ] Growth per additional resident: `TBD`
-- [ ] Whether per-frame allocation is happening at all (`heap`/Instruments
-      Allocations, or `MallocStackLogging`): `TBD`
-- [ ] Largest single consumer (likely model/texture data — `Assets.hpp` holds
-      several `unordered_map<std::string, Model>`): `TBD`
+**Not measured:** the per-frame malloc *churn rate* (allocations made and
+freed within a frame). The net-zero heap and flat footprint bound its
+*leak* consequence at zero, but a hot loop can still pay malloc time while
+netting nothing; counting that needs `malloc_history`/Instruments
+Allocations and was not sampled. The steady 2.5 KB[8128] + 2 KB[27296]
+populations suggest stable pools, not churn, but that is inference, not
+measurement.
 
-Note for whoever measures this: per-frame *allocation* is the interesting
-number, not peak footprint. A steady 400 MB is fine; 400 KB churned every
-frame is not.
+¹ Methodology trap, recorded because it burned this measurement's first
+attempt: with the display asleep, footprint collapses to ~198 MB — the
+window never gets real backing stores and the numbers describe a game that
+is not rendering. Wrap every run in `caffeinate -dimsu`.
 
 ## What this document does NOT contain
 
-**No fixes.** Deciding what to do about the numbers is a separate plan, written
-once the numbers exist. Optimising before this file is filled in is the exact
-mistake that produced the contradiction at the top of it.
+**No fixes.** Deciding what to do about the numbers is a separate plan,
+written once the numbers exist. The follow-ups that exist as of this
+writing: #170 (cull whole characters — top item), #265 (batch the hull
+pass, bounded at 1.5–1.9 ms), #266 (bench tool), #173 (gate arithmetic).
