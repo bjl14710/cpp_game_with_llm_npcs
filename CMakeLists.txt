@@ -58,6 +58,17 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "No CMAKE_BUILD_TYPE set — defaulting to RelWithDebInfo")
 endif()
 
+# Frame-budget instrumentation (issue #257). OFF by default and compiles to
+# nothing when off — src/profiling/scope_timer.h expands every macro to
+# ((void)0), so a release build carries no timer, no atomic and no allocation.
+#
+# Deliberately not Tracy. Tracy is the better profiler, and it is also a new
+# network-fetched dependency; CLAUDE.md says to ask first. The chrono fallback
+# answers #257 with nothing new in the build.
+#
+#   cmake -S . -B build-prof -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_PROFILING=ON
+option(ENABLE_PROFILING "Scoped frame-budget timers (issue #257)" OFF)
+
 find_package(Threads REQUIRED)
 
 # raylib provides windowing, input, 3D rendering, and the 2D UI overlay
@@ -147,6 +158,9 @@ target_link_libraries(cpp_game_with_llm_npcs
         llm_npc_core
         raylib
 )
+if(ENABLE_PROFILING)
+    target_compile_definitions(cpp_game_with_llm_npcs PRIVATE ENABLE_PROFILING)
+endif()
 
 # Prints a persona's exact system prompt — feeds the model benchmark
 # (tools/bench_npc_models.py) from the same code path the game uses.
