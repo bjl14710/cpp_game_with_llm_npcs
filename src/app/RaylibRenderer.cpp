@@ -117,6 +117,29 @@ void drawFountain(const Building& b, float worldHeight) {
                  10, kStoneDark);
 }
 
+// Range gate for the inverted-hull outline passes (issue #171). At today's
+// kHullScale (1.035) the rim is roughly half a centimetre of ink at world
+// scale — the oft-quoted "centimetre" was measured at the old 1.06 hull.
+// Half a centimetre at 70-degree fovy on the 720-high backbuffer drops
+// under one device pixel by ~5 m of view distance at 2x HiDPI; at 25 it is
+// around a fifth of a pixel, fogged toward the horizon like everything
+// else. #257 measured the pass as the frame's single biggest line item,
+// spent mostly on rims that project to nothing. Past this range the
+// character draws normally and only the hull is skipped. kTalkRadius is
+// 3.5, so a resident you can talk to keeps its ink with a 7x margin, and
+// the toggle happens where the rim is already sub-pixel — there is nothing
+// visible to pop.
+//
+// True 3D distance, not distanceXZ: the sandbox editor and cutscene cameras
+// fly well above eye height, and it is the real eye-to-figure distance that
+// decides how big the rim projects. (Math.hpp's pair-with-distanceXZ note is
+// about steering agreeing with its own distance tests, which this is not.)
+constexpr float kOutlineMaxDistance = 25.f;
+bool outlineWithinRange(const Camera3D& camera, const Vec3& at) {
+    const Vec3 eye{camera.position.x, camera.position.y, camera.position.z};
+    return distanceSquared(eye, at) < kOutlineMaxDistance * kOutlineMaxDistance;
+}
+
 }  // namespace
 
 RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {}
@@ -338,8 +361,11 @@ void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
     // out along their world-space normals, solid rim color) with FRONT
     // faces culled so only the silhouette band survives. The batch drains
     // before each cull switch, exactly like the primitive hull; the CPU-
-    // skinned vertices are already posed from the draw above.
-    if (const Material* rim = assets_.outlineMaterial()) {
+    // skinned vertices are already posed from the draw above. Skipped at
+    // range (issue #171) where the rim is sub-pixel — see outlineWithinRange.
+    if (const Material* rim = outlineWithinRange(camera_, visual.position)
+                                  ? assets_.outlineMaterial()
+                                  : nullptr) {
         const Matrix local = MatrixMultiply(
             MatrixScale(s, s, s),
             MatrixRotate(Vector3{0.f, 1.f, 0.f}, visual.facingDeg * DEG2RAD));
@@ -1008,44 +1034,54 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // The hull is thin: at 1.06 the rim was roughly a centimetre of ink
     // around every part at world scale, which cracked the figure into
     // pieces instead of drawing it.
-    PROF_SCOPE_N("render.char.outline_pass");
-    constexpr float kHullScale = 1.035f;
-    const RecipeColors outlineColors = flatColors(kOutlineColor);
-    rlDrawRenderBatchActive();
-    rlSetCullFace(RL_CULL_FACE_FRONT);
-    for (const PlacedPart& placed : assembled.parts) {
-        // Outlines belong on the silhouette, not on the features: ringing
-        // every eye and mouth is what produced the webbed, cracked look.
-        // (Face-decal families have no eye/mouth geometry to hull either.)
-        if (placed.part->category == PartCategory::Eyes ||
-            placed.part->category == PartCategory::Mouth) {
-            continue;
-        }
-        const Vec3 at = placed.position * s;
-        // Mesh-backed parts rim through the normal-inflate outline shader
-        // (issue #138's mesh technique) — the scale hull is for primitive
-        // recipes, whose shapes have no per-vertex normals to inflate by.
-        if (!placed.part->meshName.empty()) {
-            if (const Assets::PartMeshes* pm =
-                    assets_.partMeshes(placed.part->meshName)) {
-                if (const Material* rim = assets_.outlineMaterial()) {
-                    drawPartMeshes(*pm, at, s, rim);
-                }
+    //
+    // The whole pass is skipped at range (issue #171): #257 measured it as
+    // the frame's single biggest line item (~5 ms of a 16.67 ms budget at
+    // ten residents), and past kOutlineMaxDistance the rim it buys is
+    // sub-pixel. Skipping the block skips BOTH cull-face switches,
+    // so the state is left exactly as found (RL_CULL_FACE_BACK). The PROF
+    // scope sits inside the braces so it times the hull pass alone — not,
+    // as before, everything from here to the end of the function.
+    if (outlineWithinRange(camera_, position)) {
+        PROF_SCOPE_N("render.char.outline_pass");
+        constexpr float kHullScale = 1.035f;
+        const RecipeColors outlineColors = flatColors(kOutlineColor);
+        rlDrawRenderBatchActive();
+        rlSetCullFace(RL_CULL_FACE_FRONT);
+        for (const PlacedPart& placed : assembled.parts) {
+            // Outlines belong on the silhouette, not on the features: ringing
+            // every eye and mouth is what produced the webbed, cracked look.
+            // (Face-decal families have no eye/mouth geometry to hull either.)
+            if (placed.part->category == PartCategory::Eyes ||
+                placed.part->category == PartCategory::Mouth) {
                 continue;
             }
-            // Unresolved mesh: its fallback box outlines like any recipe.
+            const Vec3 at = placed.position * s;
+            // Mesh-backed parts rim through the normal-inflate outline shader
+            // (issue #138's mesh technique) — the scale hull is for primitive
+            // recipes, whose shapes have no per-vertex normals to inflate by.
+            if (!placed.part->meshName.empty()) {
+                if (const Assets::PartMeshes* pm =
+                        assets_.partMeshes(placed.part->meshName)) {
+                    if (const Material* rim = assets_.outlineMaterial()) {
+                        drawPartMeshes(*pm, at, s, rim);
+                    }
+                    continue;
+                }
+                // Unresolved mesh: its fallback box outlines like any recipe.
+            }
+            const Vec3 dim = placed.part->localSize * s;
+            const float cy = at.y + dim.y * 0.5f;
+            rlPushMatrix();  // inflate about the part's center, not the feet
+            rlTranslatef(at.x, cy, at.z);
+            rlScalef(kHullScale, kHullScale, kHullScale);
+            rlTranslatef(-at.x, -cy, -at.z);
+            drawPartRecipe(*placed.part, at, dim, outlineColors);
+            rlPopMatrix();
         }
-        const Vec3 dim = placed.part->localSize * s;
-        const float cy = at.y + dim.y * 0.5f;
-        rlPushMatrix();  // inflate about the part's center, not the feet
-        rlTranslatef(at.x, cy, at.z);
-        rlScalef(kHullScale, kHullScale, kHullScale);
-        rlTranslatef(-at.x, -cy, -at.z);
-        drawPartRecipe(*placed.part, at, dim, outlineColors);
-        rlPopMatrix();
+        rlDrawRenderBatchActive();
+        rlSetCullFace(RL_CULL_FACE_BACK);
     }
-    rlDrawRenderBatchActive();
-    rlSetCullFace(RL_CULL_FACE_BACK);
 
     for (const PlacedPart& placed : assembled.parts) {
         // Anchor and size in world units — the contract scale is applied
