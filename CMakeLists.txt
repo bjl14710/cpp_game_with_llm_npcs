@@ -2,9 +2,42 @@ cmake_minimum_required(VERSION 3.20)
 # C is for the vendored SQLite amalgamation (external/sqlite3.c).
 project(cpp_game_with_llm_npcs LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Deployment floor, and the reason it is written down rather than assumed.
+#
+# Plan: .claude/plans/cpp20-upgrade.md.
+#
+# Two C++20 library features are gated behind Apple availability annotations
+# and are a COMPILE ERROR below macOS 13.3, not a graceful fallback:
+#
+#     std::format / std::format_to
+#     std::to_chars / std::from_chars for float and double
+#
+# Neither is adopted here. std::format measured 1.7-2.3x SLOWER than the
+# "a" + std::to_string(x) concatenation it would replace (Apple's libc++ ships
+# an unoptimised <format>), and the whole string-formatting budget is ~0.014 ms
+# of a frame, so there is nothing to buy with the portability.
+#
+# Without an explicit target CMake defaults to the host SDK, which means a
+# std::format call added on a machine running 14.x compiles silently and fails
+# only for somebody on 12.x — with no signal until they try. Setting the floor
+# turns that into a build error naming the version.
+#
+# 11.0 is the first Apple-silicon release, so it costs nothing on any arm64
+# machine while keeping a wide Intel range. Everything else in C++20 that this
+# project uses — starts_with/ends_with, map::contains, designated initialisers,
+# <span>, <ranges>, std::ssize, heterogeneous lookup, and INTEGER to_chars —
+# is verified clean all the way down to 10.15.
+#
+# scripts/check-portability-floor.sh asserts this is still true, and
+# `make -C tests portability` runs it.
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING
+        "Minimum macOS. Keeps std::format and float to_chars unavailable on purpose." FORCE)
+endif()
 
 # Default to an OPTIMISED build when the caller does not choose one.
 #
