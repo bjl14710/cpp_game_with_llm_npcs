@@ -433,21 +433,43 @@ def create_draft_pr(repo, title: str, body: str,
     }
 ```
 
-### Close an Issue Automatically When PR Merges
+### Closing the Issue When the PR Merges — READ THIS FIRST
 
-Include a closing keyword in the PR body and GitHub closes the issue
-automatically when the PR is merged:
+GitHub only honours closing keywords (`Closes`, `Fixes`, `Resolves`) when
+the PR's base is the repo's **DEFAULT branch**. In this repo every feature
+PR targets `dev`, so the keyword **silently does nothing** — it reads as a
+cross-reference and nothing more. This is not hypothetical: no issue in
+this repo had ever auto-closed, and a 2026-08 audit found six issues whose
+work was long since merged still sitting open in the queue (#165 #166 #199
+#216 #256 #258), plus four of thirty "ready" issues that were already
+built. An open queue that lies is worse than no queue.
+
+So: **after a PR merges to dev, close its issue by hand, with evidence.**
+
+```python
+def close_merged_issue(repo, issue_number: int, merge_commit: str,
+                       pr_number: int, evidence: str = ""):
+    """
+    Close an issue whose implementing PR has merged to dev, leaving an
+    evidence trail. Call ONLY after verifying the merge commit is on
+    origin/dev — a file merely existing is not proof the work is done
+    (a scaffold with no caller looks identical to a finished feature).
+    """
+    issue = repo.get_issue(issue_number)
+    issue.create_comment(
+        f"Closing: merged to `dev` via PR #{pr_number} "
+        f"(merge commit {merge_commit}). {evidence}")
+    issue.edit(state="closed")
+```
+
+`Closes #N` in the PR body is still worth writing — as a visible
+cross-reference linking PR to issue — just never as the close mechanism:
 
 ```python
 def make_pr_body(mr_description: str, closes_issue: int) -> str:
     """
-    Append a closing reference to a PR body so the issue closes on merge.
-
-    closing_keywords: Closes, Fixes, Resolves (case-insensitive)
-
-    Example:
-        body = make_pr_body(description_text, closes_issue=42)
-        # PR body ends with: "Closes #42"
+    Append an issue reference to a PR body. On a dev-based PR this LINKS
+    the issue; it does NOT close it — use close_merged_issue after merge.
     """
     return f"{mr_description}\n\n---\nCloses #{closes_issue}"
 ```
@@ -468,7 +490,13 @@ def mark_in_progress(repo, issue_number: int, branch: str):
 
 def mark_completed(repo, issue_number: int,
                    pr_number: int, pr_url: str, branch: str):
-    """Called when Claude opens a draft PR for the issue."""
+    """Called when Claude opens a draft PR for the issue.
+
+    NOTE: this does not end the issue's life. Because PRs here base on
+    dev, `Closes #N` never fires — once the owner merges the PR, call
+    close_merged_issue (see the PR section above) or the issue sits open
+    forever looking like unfinished work.
+    """
     replace_label(repo, issue_number, "ai-in-progress", "ai-completed")
     add_comment(repo, issue_number,
         f"Implemented overnight. Draft PR: #{pr_number} ({pr_url})\n"
