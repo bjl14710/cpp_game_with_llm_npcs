@@ -78,6 +78,20 @@ inline bool sphereFullyBehind(const Vec3& eye, const Vec3& forward,
     return dot(center - eye, forward) < -radius * length(forward);
 }
 
+// Screen-space HUD label de-collision (issue #274): two text labels whose
+// anchors sit closer than the clear box on both axes garble into each other.
+// The box is FIXED-SIZE on purpose, not measured from the text: one
+// reservation whatever the string, so placement cannot oscillate as a
+// nameplate's activity suffix changes length frame to frame. Strict < on
+// both axes — anchors exactly a clearance apart do not collide, matching
+// the strict-< convention of every other gate in this file. Callers: the
+// single shared placed-labels pass in main.cpp (nameplates claim first,
+// signage takes what is left).
+inline bool labelBoxesOverlap(float ax, float ay, float bx, float by,
+                              float clearX, float clearY) {
+    return std::fabs(ax - bx) < clearX && std::fabs(ay - by) < clearY;
+}
+
 // Unit-length copy of v; returns v unchanged when its length is ~zero.
 inline Vec3 normalize(const Vec3& v) {
     const float len = length(v);
