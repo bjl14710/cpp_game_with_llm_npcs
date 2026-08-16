@@ -66,6 +66,57 @@ TEST_CASE("fogOpaqueDistance is where exp2 fog crosses one 8-bit step") {
     CHECK(fogOpaqueDistance(0.012f) == doctest::Approx(d * 0.5f));
 }
 
+// Criterion (issue #272): sphereFullyBehind is the behind-camera reject —
+// it may fire only when the WHOLE bounding sphere is strictly behind the
+// camera plane, because a fired reject skips the draw entirely and a wrong
+// fire is a figure missing from the screen edge.
+TEST_CASE("sphereFullyBehind rejects only spheres wholly behind the plane") {
+    const Vec3 eye{0.f, 1.7f, 0.f};
+    const Vec3 forward{0.f, 0.f, -1.f};  // looking down -Z, unit length
+    constexpr float r = 3.5f;            // kNpcBehindMargin in the renderer
+    // Straight behind, beyond the margin: rejected.
+    CHECK(sphereFullyBehind(eye, forward, Vec3{0.f, 0.f, 10.f}, r));
+    // Behind but straddling the plane (closer than the margin): drawn.
+    CHECK_FALSE(sphereFullyBehind(eye, forward, Vec3{0.f, 0.f, 3.f}, r));
+    // Exactly at the margin: the strict < keeps the boundary sphere drawn.
+    CHECK_FALSE(sphereFullyBehind(eye, forward, Vec3{0.f, 1.7f, 3.5f}, r));
+    // In front: drawn, however far to the side (half-space, not a cone).
+    CHECK_FALSE(sphereFullyBehind(eye, forward, Vec3{0.f, 0.f, -5.f}, r));
+    CHECK_FALSE(sphereFullyBehind(eye, forward, Vec3{80.f, 0.f, -0.1f}, r));
+    // Exactly beside the eye (on the plane): drawn.
+    CHECK_FALSE(sphereFullyBehind(eye, forward, Vec3{50.f, 1.7f, 0.f}, r));
+}
+
+// Criterion (issue #272): the verdict must not depend on the forward
+// vector's magnitude (the renderer passes target - position and must not
+// care whether that happens to be unit length), and a degenerate zero
+// forward must fail SAFE — nothing rejected, everything drawn.
+TEST_CASE("sphereFullyBehind is scale-invariant in forward and fails safe") {
+    const Vec3 eye{2.f, 1.7f, -8.f};
+    const Vec3 forward{0.6f, 0.f, 0.8f};  // unit 3-4-5 direction
+    const Vec3 behind = eye - forward * 10.f;
+    const Vec3 inFront = eye + forward * 10.f;
+    for (const float scale : {0.001f, 1.f, 250.f}) {
+        CHECK(sphereFullyBehind(eye, forward * scale, behind, 3.5f));
+        CHECK_FALSE(sphereFullyBehind(eye, forward * scale, inFront, 3.5f));
+    }
+    CHECK_FALSE(sphereFullyBehind(eye, Vec3{0.f, 0.f, 0.f}, behind, 3.5f));
+}
+
+// Criterion (issue #272 constraints): the renderer's 3.5 margin must bound
+// everything a GATED figure can put on screen, measured from its feet
+// anchor. The literals duplicate the app sources (emote billboard at
+// y 2.45 size 0.55, composite hull kHullScale 1.035 on a <= ~1.9
+// assembled body, pack outlines a fixed 0.022 normal push) because the
+// no-graphics suite can't include app files — same accepted tradeoff as
+// the fog-density literal above. The viewmodel's 1.14 rim is camera-local
+// and never gated, so it is deliberately absent here.
+TEST_CASE("the behind-camera margin bounds every drawn extent") {
+    constexpr float margin = 3.5f;
+    CHECK(2.45f + 0.55f * 0.5f < margin);    // emote billboard top
+    CHECK(1.9f * 1.035f + 0.022f < margin);  // hulled composite body
+}
+
 // Criterion (issue #170 constraints): the cull radius (opaque distance plus
 // its 2% margin) sits far beyond both the talk radius — the NPC you are
 // talking to is mathematically un-cullable — and the town's worst-case
