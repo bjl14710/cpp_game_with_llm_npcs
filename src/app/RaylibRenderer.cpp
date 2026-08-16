@@ -158,6 +158,41 @@ bool npcWithinDrawRange(const Camera3D& camera, const Vec3& at) {
     return distanceSquared(eye, at) < kNpcCullRadius * kNpcCullRadius;
 }
 
+// Behind-camera reject (issue #272): skip figures whose whole bounding
+// sphere sits behind the camera plane — at any town vantage a good share
+// of residents are behind the eye, and they were costing full assembly,
+// CPU skinning and draw for zero pixels. The margin bounds everything a
+// GATED figure can put on screen, measured from its feet anchor: bodies
+// are height-normalised to 1.8 (an assembled composite stays under ~1.9),
+// the gated outline passes add kHullScale 1.035x (composite) or a fixed
+// 0.022-unit normal push (pack meshes) — the viewmodel's 1.14 rim is
+// camera-local and never gated — and the tallest extent is the emote
+// billboard, centered at 2.45 with size 0.55 -> top at ~2.73. One entry
+// in that list is an asset-content assumption, not code: a pack animation
+// (death fall, cheer) can push vertices past the bind-pose box the 1.8
+// normalisation is measured from. 3.5 gives a pose ~1.9x the normalised
+// height of reach from the anchor, which covers any humanoid pose in the
+// current packs — revisit alongside any character-pack swap. (3.5
+// equalling kTalkRadius is coincidence: lateral drawn extent and the
+// "press T" range are unrelated, do not merge them.) Two properties the
+// margin does NOT need to buy, stated so nobody "fixes" them later:
+//   - Turn rate: the test runs every frame against the same camera_ that
+//     draws the frame (beginFrame's target - position IS the crosshair's
+//     authoritative lookDirection, issue #91) — there is no stale frame
+//     for a fast mouse turn to expose, at any turn speed.
+//   - The dialogue NPC: a sphere fully behind the plane cannot contribute
+//     a pixel, whoever owns it, so "never cull the NPC you are talking
+//     to" holds by construction — facing them is the only way to see
+//     them, and then they are in front of the plane, not rejected.
+constexpr float kNpcBehindMargin = 3.5f;
+bool npcBehindCamera(const Camera3D& camera, const Vec3& at) {
+    const Vec3 eye{camera.position.x, camera.position.y, camera.position.z};
+    const Vec3 forward{camera.target.x - camera.position.x,
+                       camera.target.y - camera.position.y,
+                       camera.target.z - camera.position.z};
+    return sphereFullyBehind(eye, forward, at, kNpcBehindMargin);
+}
+
 constexpr float kOutlineMaxDistance = 25.f;
 bool outlineWithinRange(const Camera3D& camera, const Vec3& at) {
     const Vec3 eye{camera.position.x, camera.position.y, camera.position.z};
@@ -337,10 +372,13 @@ void RaylibRenderer::drawCity(const City& city) {
 }
 
 void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
-    // Fully fogged -> not drawn (issue #170; see kNpcCullRadius). Before
-    // characterFor so a culled NPC also skips clip selection and CPU
-    // skinning — all of it is render-only work.
-    if (!npcWithinDrawRange(camera_, visual.position)) return;
+    // Fully fogged (issue #170) or behind the camera (issue #272) -> not
+    // drawn. Before characterFor so a culled NPC also skips clip selection
+    // and CPU skinning — all of it is render-only work.
+    if (!npcWithinDrawRange(camera_, visual.position) ||
+        npcBehindCamera(camera_, visual.position)) {
+        return;
+    }
     const Assets::CharacterAsset* character =
         assets_.characterFor(visual.variantSeed, visual.police);
     if (!character) {
@@ -983,10 +1021,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
                                             bool walking, float phase, NpcFace face,
                                             bool dead) {
-    // Fully fogged -> not drawn (issue #170; see kNpcCullRadius). Before
-    // assembleLook so a culled figure also skips assembly, palette lookups
-    // and the modular CPU pose — all of it is render-only work.
-    if (!npcWithinDrawRange(camera_, position)) return;
+    // Fully fogged (issue #170) or behind the camera (issue #272) -> not
+    // drawn. Before assembleLook so a culled figure also skips assembly,
+    // palette lookups and the modular CPU pose — all of it is render-only
+    // work.
+    if (!npcWithinDrawRange(camera_, position) ||
+        npcBehindCamera(camera_, position)) {
+        return;
+    }
     const AssembledLook assembled = assembleLook(look);
     if (!assembled.ok) {
         // Invalid/stale look: the same marker cylinder the pack path uses.

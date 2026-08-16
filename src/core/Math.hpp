@@ -62,6 +62,22 @@ inline float fogOpaqueDistance(float density) {
     return std::sqrt(std::log(255.f)) / density;
 }
 
+// Conservative behind-camera reject (issue #272): true only when the whole
+// bounding sphere (center, radius) lies strictly behind the plane through
+// `eye` with outward normal `forward`. Everything a perspective camera can
+// see lies in front of that plane, so a rejected sphere could not have
+// contributed a pixel — the test can only ever skip invisible work, never
+// clip a visible one. Half-space only, deliberately NOT the full frustum
+// cone: the cheap plane test already removes the dominant case (figures
+// behind the eye) and cannot be wrong at the screen edges, where a cone
+// test with a mis-sized margin would clip shoulders. `forward` need not be
+// unit length — the margin is scaled by it, and a degenerate zero forward
+// rejects nothing (0 < 0 is false), which fails safe: the figure draws.
+inline bool sphereFullyBehind(const Vec3& eye, const Vec3& forward,
+                              const Vec3& center, float radius) {
+    return dot(center - eye, forward) < -radius * length(forward);
+}
+
 // Unit-length copy of v; returns v unchanged when its length is ~zero.
 inline Vec3 normalize(const Vec3& v) {
     const float len = length(v);
