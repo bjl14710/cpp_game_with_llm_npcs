@@ -41,6 +41,15 @@ inline Vec3 cross(const Vec3& a, const Vec3& b) {
 // Euclidean length.
 inline float length(const Vec3& v) { return std::sqrt(dot(v, v)); }
 
+// Squared Euclidean distance — for comparing against a squared threshold
+// (range gates like the outline cutoff in issue #171), where length()'s
+// sqrt buys nothing. Full 3D on purpose: pair with distanceXZ only when the
+// test must agree with ground-plane steering, which a view-distance check
+// must not.
+inline float distanceSquared(const Vec3& a, const Vec3& b) {
+    return dot(a - b, a - b);
+}
+
 // Unit-length copy of v; returns v unchanged when its length is ~zero.
 inline Vec3 normalize(const Vec3& v) {
     const float len = length(v);
