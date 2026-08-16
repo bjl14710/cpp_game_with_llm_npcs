@@ -46,3 +46,35 @@ TEST_CASE("squared-threshold gate flips exactly at the radius") {
     CHECK(distanceSquared(eye, centre) < r * r);
     CHECK_FALSE(distanceSquared(eye, edge) < r * r);
 }
+
+// Criterion (issue #170): at fogOpaqueDistance the fog mix leaves less than
+// one 8-bit step of the surface's own color, and just inside it leaves more
+// — the property the NPC cull radius is derived from. Checked against the
+// shader's exact formula, 1 - exp(-(d * density)^2), at the shipped density.
+TEST_CASE("fogOpaqueDistance is where exp2 fog crosses one 8-bit step") {
+    constexpr float density = 0.006f;  // Assets::kFogDensity (app header not
+                                       // includable in the no-graphics suite)
+    const float d = fogOpaqueDistance(density);
+    CHECK(d == doctest::Approx(392.4f).epsilon(0.01));
+    const auto survives = [&](float dist) {
+        const float x = dist * density;
+        return std::exp(-x * x);  // the figure's surviving contribution
+    };
+    CHECK(survives(d) <= 1.f / 255.f + 1e-6f);
+    CHECK(survives(d * 0.9f) > 1.f / 255.f);
+    // Deeper density ⇒ nearer opacity, monotonically.
+    CHECK(fogOpaqueDistance(0.012f) == doctest::Approx(d * 0.5f));
+}
+
+// Criterion (issue #170 constraints): the cull radius (opaque distance plus
+// its 2% margin) sits far beyond both the talk radius — the NPC you are
+// talking to is mathematically un-cullable — and the town's worst-case
+// eye-to-figure distance (city halfSize 110 ⇒ corner-to-corner ~311), so in
+// the shipped city no visible resident is ever culled.
+TEST_CASE("the derived cull radius clears dialogue and the whole town") {
+    const float cull = fogOpaqueDistance(0.006f) * 1.02f;
+    CHECK(cull > 392.4f);                  // exceeds full haze: no popping
+    CHECK(cull / 3.5f > 100.f);            // talk radius margin, two orders
+    const float townDiagonal = std::sqrt(2.f) * 2.f * 110.f;
+    CHECK(cull > townDiagonal);            // nothing in town ever culled
+}

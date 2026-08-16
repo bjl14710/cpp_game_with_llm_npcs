@@ -183,7 +183,7 @@ Assets::Assets(const std::string& assetsDir) {
         // density is tuned so the plaza (~40 units) stays crisp and the far
         // city edge (~150+) visibly hazes.
         const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
-        const float density = 0.006f;
+        const float density = kFogDensity;  // single source: Assets.hpp (issue #170)
         const float light = 1.f;
         SetShaderValue(fogShader_, fogColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogDensity"),
@@ -203,7 +203,7 @@ Assets::Assets(const std::string& assetsDir) {
         celColorLoc_ = GetShaderLocation(celShader_, "fogColor");
         celLightLoc_ = GetShaderLocation(celShader_, "lightLevel");
         const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
-        const float density = 0.006f;
+        const float density = kFogDensity;  // single source: Assets.hpp (issue #170)
         const float light = 1.f;
         SetShaderValue(celShader_, celColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(celShader_, GetShaderLocation(celShader_, "fogDensity"),
@@ -226,7 +226,7 @@ Assets::Assets(const std::string& assetsDir) {
         const float width = 0.022f;
         const float rim[4] = {32.f / 255.f, 30.f / 255.f, 38.f / 255.f, 1.f};
         const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
-        const float density = 0.006f;
+        const float density = kFogDensity;  // single source: Assets.hpp (issue #170)
         SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "outlineWidth"),
                        &width, SHADER_UNIFORM_FLOAT);
         SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "outlineColor"),

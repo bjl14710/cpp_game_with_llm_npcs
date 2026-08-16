@@ -34,6 +34,15 @@ class Assets {
     // the "run tools/fetch_assets.sh" notice and primitives are drawn.
     bool loaded() const { return loaded_; }
 
+    // The one fog density every atmosphere shader is driven with (fog, cel,
+    // outline — all three read this same value). Public and singular on
+    // purpose: the NPC cull radius (issue #170) is DERIVED from it via
+    // fogOpaqueDistance(), so tuning the haze automatically moves the cull
+    // and the two cannot drift apart and cause visible popping. It used to
+    // be three identical locals in Assets.cpp, which is exactly the drift
+    // waiting to happen.
+    static constexpr float kFogDensity = 0.006f;
+
     // How an entity's model maps into world space — the size CONTRACT that
     // makes relative scale independent of any specific asset's native
     // dimensions (swap the art pack, keep the sizes):
