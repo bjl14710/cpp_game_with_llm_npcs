@@ -91,6 +91,12 @@ inline float signHeightFor(const Building& b) {
 // you cannot see yet, whereas a nameplate is for someone you are near.
 constexpr float kSignageRange = 90.f;
 constexpr float kNameplateRange = 28.f;  // how far name tags stay visible
+// One HUD text label reserves this much screen around its anchor (half
+// extents, issue #274). Nameplates and signage share the ONE clearance and
+// the one placed-label list — the 140x20 box the signage pass already used,
+// now the law for every label on the text layer.
+constexpr float kLabelClearX = 140.f;
+constexpr float kLabelClearY = 20.f;
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 // Creator preview rotation (issue #93). Player-driven only; after this idle
@@ -2349,6 +2355,91 @@ int main(int argc, char** argv) {
                 "P play | Esc save+exit",
                 18, 14.f);
         }
+        // ---- HUD text labels: one collision pass (issue #274) ----
+        //
+        // Nameplates and building signage share one screen and one pixel
+        // font, so they share ONE placed-label list. Nameplates claim their
+        // boxes first — the person in front of you is information; the sign
+        // is still there when they walk on — and signage takes what is left.
+        // A label that loses its spot is simply not drawn that frame: no
+        // nudging, no stacking. Before this list each pass de-collided only
+        // among itself, and a resident standing in front of a signed
+        // building rendered their name THROUGH the sign — both illegible
+        // (found by #170's visual QA).
+        const bool menuOpen = (mode == AppMode::Menu);
+        std::vector<Vector2> placedLabels;
+        const auto claimLabelSpot = [&](const Vector2& screen) {
+            for (const Vector2& taken : placedLabels) {
+                if (labelBoxesOverlap(screen.x, screen.y, taken.x, taken.y,
+                                      kLabelClearX, kLabelClearY)) {
+                    return false;
+                }
+            }
+            placedLabels.push_back(screen);
+            return true;
+        };
+
+        // Nameplates from whichever pose source is authoritative right now.
+        //
+        // Suppressed during a cutscene, and not only for looks: the opening
+        // scene is required never to identify a living NPC, and a nameplate
+        // drifting into an establishing shot would name one outright.
+        //
+        // Suppressed with a menu open too. Nameplates are drawn before the
+        // menu's backdrop, which dims them without hiding them, so they came
+        // through the Journal's text as a second layer of words at the same
+        // size. Found on the first capture the Journal has ever had (#216) —
+        // no test would have shown it, and nobody had looked.
+        //
+        // Collected, then placed nearest-first — the same rule the signs
+        // use — so two residents shoulder to shoulder show the nearer name
+        // instead of garbling both.
+        struct PlateCandidate {
+            float range;
+            Vector2 screen;
+            std::string text;
+            Color color;
+        };
+        std::vector<PlateCandidate> plates;
+        const auto plateFor = [&](const Vec3& feet, std::string name, Color color) {
+            if (cutscenePlaying || menuOpen) return;
+            const float range = distanceXZ(player.position, feet);
+            if (range > kNameplateRange) return;
+            Vector2 screen;
+            if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
+            plates.push_back({range, screen, std::move(name), color});
+        };
+        if (joined) {
+            for (const auto& netNpc : netNpcs) {
+                if (netNpc.npcIndex < 0 ||
+                    netNpc.npcIndex >= static_cast<int>(world.npcs().size())) continue;
+                plateFor(netNpc.position,
+                         world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().name,
+                         WHITE);
+            }
+        } else {
+            for (const Npc& npc : world.npcs()) {
+                // Nameplate carries the schedule activity ("Marge - baking
+                // bread") so the routine reads at a glance.
+                plateFor(npc.position(),
+                         npc.activity().empty()
+                             ? npc.persona().name
+                             : npc.persona().name + " - " + npc.activity(),
+                         WHITE);
+            }
+        }
+        for (const auto& remote : remotePlayers) {
+            plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
+        }
+        std::sort(plates.begin(), plates.end(),
+                  [](const PlateCandidate& a, const PlateCandidate& b) {
+                      return a.range < b.range;
+                  });
+        for (const PlateCandidate& plate : plates) {
+            if (!claimLabelSpot(plate.screen)) continue;
+            drawNameplate(plate.text, plate.screen, plate.color);
+        }
+
         // ---- building signage (issue #166) ----
         //
         // DATA-DRIVEN, and it already was: Building::name has carried "sign /
@@ -2386,7 +2477,6 @@ int main(int argc, char** argv) {
             std::sort(signs.begin(), signs.end(),
                       [](const auto& a, const auto& b) { return a.first < b.first; });
 
-            std::vector<Vector2> placed;
             for (const auto& [range, building] : signs) {
                 const Vec3 anchor{clampf(player.position.x, building->minX, building->maxX),
                                   signHeightFor(*building),
@@ -2398,66 +2488,20 @@ int main(int argc, char** argv) {
                 // top of each other are not a label. Gus's Hot Dogs sits at the
                 // origin and the police station 60 units due south of it, so
                 // this is reachable by standing still and looking, not a corner
-                // case. Nearest wins; the other is simply not drawn.
-                bool collides = false;
-                for (const Vector2& taken : placed) {
-                    if (std::fabs(taken.x - screen.x) < 140.f &&
-                        std::fabs(taken.y - screen.y) < 20.f) {
-                        collides = true;
-                        break;
-                    }
-                }
-                if (collides) continue;
-                placed.push_back(screen);
+                // case. Nearest wins — and a nameplate that claimed the spot
+                // first beats any sign; the loser is simply not drawn.
+                if (!claimLabelSpot(screen)) continue;
                 drawNameplate(building->name, screen, Color{255, 232, 170, 255});
             }
         }
 
-        // Nameplates from whichever pose source is authoritative right now.
-        //
-        // Suppressed during a cutscene, and not only for looks: the opening
-        // scene is required never to identify a living NPC, and a nameplate
-        // drifting into an establishing shot would name one outright.
-        //
-        // Suppressed with a menu open too. Nameplates are drawn before the
-        // menu's backdrop, which dims them without hiding them, so they came
-        // through the Journal's text as a second layer of words at the same
-        // size. Found on the first capture the Journal has ever had (#216) —
-        // no test would have shown it, and nobody had looked.
-        const bool menuOpen = (mode == AppMode::Menu);
-        const auto plateFor = [&](const Vec3& feet, const std::string& name, Color color) {
-            if (cutscenePlaying || menuOpen) return;
-            if (distanceXZ(player.position, feet) > kNameplateRange) return;
-            Vector2 screen;
-            if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
-            drawNameplate(name, screen, color);
-        };
-        if (joined) {
-            for (const auto& netNpc : netNpcs) {
-                if (netNpc.npcIndex < 0 ||
-                    netNpc.npcIndex >= static_cast<int>(world.npcs().size())) continue;
-                plateFor(netNpc.position,
-                         world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().name,
-                         WHITE);
-            }
-        } else {
-            for (const Npc& npc : world.npcs()) {
-                // Nameplate carries the schedule activity ("Marge - baking
-                // bread") so the routine reads at a glance.
-                plateFor(npc.position(),
-                         npc.activity().empty()
-                             ? npc.persona().name
-                             : npc.persona().name + " - " + npc.activity(),
-                         WHITE);
-            }
-        }
-        for (const auto& remote : remotePlayers) {
-            plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
-        }
-
         // Combat callouts float above their NPC like temporary nameplates.
         // Combat callouts are nameplates by another name and sit in the same
-        // layer, so they come through a menu the same way.
+        // layer, so they come through a menu the same way. Deliberately
+        // OUTSIDE the shared placed-label pass (issue #274): a callout is
+        // transient combat information — it must neither be blanked by a
+        // nearby name nor blank one, and its anchor already sits 0.45 world
+        // units above the nameplate line.
         for (const auto& callout : callouts) {
             if (cutscenePlaying || menuOpen) break;
             if (callout.npcIndex < 0 ||
