@@ -50,6 +50,18 @@ inline float distanceSquared(const Vec3& a, const Vec3& b) {
     return dot(a - b, a - b);
 }
 
+// The distance at which exponential-squared fog of the given density fully
+// hides a surface on an 8-bit framebuffer (issue #170). The shaders mix
+// toward the fog color by 1 - exp(-(d * density)^2); once the surviving
+// contribution exp(-(d * density)^2) drops below one 8-bit step (1/255),
+// mixing the surface in changes no pixel:
+//     exp(-(d * density)^2) <= 1/255   =>   d >= sqrt(ln 255) / density
+// The NPC cull radius is DERIVED from this so retuning the haze moves the
+// cull with it — a hand-picked radius is the popping bug waiting to happen.
+inline float fogOpaqueDistance(float density) {
+    return std::sqrt(std::log(255.f)) / density;
+}
+
 // Unit-length copy of v; returns v unchanged when its length is ~zero.
 inline Vec3 normalize(const Vec3& v) {
     const float len = length(v);

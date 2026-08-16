@@ -134,6 +134,30 @@ void drawFountain(const Building& b, float worldHeight) {
 // fly well above eye height, and it is the real eye-to-figure distance that
 // decides how big the rim projects. (Math.hpp's pair-with-distanceXZ note is
 // about steering agreeing with its own distance tests, which this is not.)
+// NPC cull radius (issue #170): past this distance the figure is not drawn
+// at all. DERIVED, not picked — fogOpaqueDistance() gives the range where
+// the fog mix leaves less than one 8-bit step of the figure's own color
+// (~392 units at today's kFogDensity of 0.006), and the 1.02 margin keeps
+// the cull strictly BEYOND full haze, so what gets culled was already
+// invisible and popping is impossible by construction. Three consequences
+// worth stating:
+//   - Today's city (halfSize 110, max eye-to-figure ~311) never reaches
+//     this radius: in the town every resident always draws, and the win
+//     only materialises on larger sandbox maps. That is correct, not a
+//     missed optimisation — closer figures are still visible through the
+//     haze, and culling a visible resident is a real artifact.
+//   - The NPC the player talks to can never be culled: kTalkRadius is 3.5,
+//     over 100x inside the radius.
+//   - Culling here affects RENDERING ONLY. Simulation, schedules, gossip
+//     and the location log all run in World, untouched by this file.
+// const, not constexpr like the file's other k-constants: fogOpaqueDistance
+// needs std::sqrt/std::log, which libc++ does not provide as constexpr.
+const float kNpcCullRadius = fogOpaqueDistance(Assets::kFogDensity) * 1.02f;
+bool npcWithinDrawRange(const Camera3D& camera, const Vec3& at) {
+    const Vec3 eye{camera.position.x, camera.position.y, camera.position.z};
+    return distanceSquared(eye, at) < kNpcCullRadius * kNpcCullRadius;
+}
+
 constexpr float kOutlineMaxDistance = 25.f;
 bool outlineWithinRange(const Camera3D& camera, const Vec3& at) {
     const Vec3 eye{camera.position.x, camera.position.y, camera.position.z};
@@ -313,6 +337,10 @@ void RaylibRenderer::drawCity(const City& city) {
 }
 
 void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
+    // Fully fogged -> not drawn (issue #170; see kNpcCullRadius). Before
+    // characterFor so a culled NPC also skips clip selection and CPU
+    // skinning — all of it is render-only work.
+    if (!npcWithinDrawRange(camera_, visual.position)) return;
     const Assets::CharacterAsset* character =
         assets_.characterFor(visual.variantSeed, visual.police);
     if (!character) {
@@ -955,6 +983,10 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
                                             bool walking, float phase, NpcFace face,
                                             bool dead) {
+    // Fully fogged -> not drawn (issue #170; see kNpcCullRadius). Before
+    // assembleLook so a culled figure also skips assembly, palette lookups
+    // and the modular CPU pose — all of it is render-only work.
+    if (!npcWithinDrawRange(camera_, position)) return;
     const AssembledLook assembled = assembleLook(look);
     if (!assembled.ok) {
         // Invalid/stale look: the same marker cylinder the pack path uses.
