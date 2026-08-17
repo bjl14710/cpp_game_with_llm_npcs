@@ -804,15 +804,27 @@ int main(int argc, char** argv) {
         if (!traitId.empty()) loaded.persona.traitIds.push_back(traitId);
         loaded.spotId = "plaza";
         loaded.facingDeg = 180.f;
-        // First clear standing spot on rings around the plaza center.
+        // First clear standing spot on rings around the plaza center. A spot
+        // must clear the city AND every standing NPC: the scan order is
+        // deterministic, so checking city geometry alone lands every new
+        // custom on the identical tile (issue #278).
         loaded.position = Vec3{0.f, 0.f, -10.f};
+        const auto spotIsFree = [&world](const Vec3& spot) {
+            if (world.city().circleIntersectsAny(spot.x, spot.z, 0.7f)) return false;
+            for (const Npc& other : world.npcs()) {
+                const float dx = other.position().x - spot.x;
+                const float dz = other.position().z - spot.z;
+                if (dx * dx + dz * dz < 1.4f * 1.4f) return false;
+            }
+            return true;
+        };
         for (const float radius : {8.f, 11.f, 14.f, 17.f}) {
             bool placed = false;
             for (int step = 0; step < 12 && !placed; ++step) {
                 const float angle = degToRad(static_cast<float>(step) * 30.f);
                 const Vec3 spot{std::sin(angle) * radius, 0.f,
                                 std::cos(angle) * radius};
-                if (!world.city().circleIntersectsAny(spot.x, spot.z, 0.7f)) {
+                if (spotIsFree(spot)) {
                     loaded.position = spot;
                     placed = true;
                 }
