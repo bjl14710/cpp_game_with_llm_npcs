@@ -1,0 +1,105 @@
+"""Append GLOSSARY/PROGRESS entries for learning sets 0011-0014 and make
+one commit per issue on the current branch (stack tip)."""
+import json
+import re
+import subprocess
+import sys
+
+JOURNAL = ("/Users/brandonlee/.claude/projects/-Users-brandonlee-development-repos"
+           "-products-silmulator/676ac7d9-0d03-4ff4-996c-6c603b22fcac/subagents/"
+           "workflows/wf_efb66984-bd6/journal.jsonl")
+ROOT = "/Users/brandonlee/development/repos/products/silmulator/Silmulator/Silmulator"
+REPO = "/Users/brandonlee/development/repos/products/silmulator/Silmulator"
+LEARN = f"{ROOT}/docs/learning"
+
+META = {
+    "0011": dict(issue=20, session=5, concept_head="Clock trees: why reported frequency must follow the selected source",
+                 commit="701853d",
+                 covered=["The FR5994 clock tree: CSCTL2 source muxes (SELM/SELS vs SELA source sets), CSCTL3 dividers /1../32",
+                          "Fixed-rate internal sources: VLO ~9.4 kHz, MODCLK ~4.8 MHz, LFMODCLK = MODCLK/128",
+                          "Derived-value queries: FREQUENCY? walks source -> base -> divider instead of echoing DCO",
+                          "The silent-lie bug class: a frequency query that ignores the mux poisons timer/UART math downstream"]),
+    "0012": dict(issue=21, session=6, concept_head="PxREN semantics: one enable bit whose direction lives in another register",
+                 commit="4cb71a1",
+                 covered=["Register repurposing: PxOUT is drive level for outputs, pull direction for REN-enabled inputs (Table 12-1)",
+                          "Inexpressible states: independent pullup/pulldown masks allowed both pulls on one pin — structurally impossible now",
+                          "Derived views (pullup/pulldown as @property over REN+OUT) and deprecated aliases that compose real registers",
+                          "Pull-aware input reads for undriven pins; pin-index 0-7 validation"]),
+    "0013": dict(issue=22, session=7, concept_head="MSP430X: 20-bit registers on a 16-bit-looking ISA",
+                 commit="07f1f69",
+                 covered=["CPUX widens R0-R15 to 20 bits and the address space to 1 MB while 16-bit encodings run unchanged",
+                          "Write masking width asserts which CPU you model: & 0xFFFF vs & 0xFFFFF is a one-digit, whole-CPU difference",
+                          "PC validation: even, <= 0xFFFFF — an odd PC has no silicon state",
+                          "Reset is a vector fetch (0xFFFE little-endian word, default 0x4000), not a jump to a constant"]),
+    "0014": dict(issue=23, session=8, concept_head="Password-protected registers and PUC semantics on MSP430",
+                 commit="fa7c595/5e2ba08/615b4e1",
+                 covered=["WDTPW: every WDTCTL write carries 0x5A in the upper byte or triggers an immediate PUC — protection by reset, not by error flag",
+                          "The BOR/POR/PUC reset hierarchy and what a PUC restores (PC from vector, GIE cleared, peripherals defaulted)",
+                          "I2C trust boundary: per-address buffers, NACK for unknown addresses, 10-bit UCSLA10 addressing, standard-mode frequency set",
+                          "Minimal interrupt wiring: GIE-gated VECTOR? vs ungated FLAG?, fixed Table 9-4 vector priorities, no asynchronous firing"]),
+}
+
+
+def sh(*args: str) -> str:
+    """Run a command in the repo root and return stdout, failing loudly."""
+    r = subprocess.run(args, cwd=REPO, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"FAILED: {' '.join(args)}\n{r.stderr}")
+    return r.stdout.strip()
+
+
+def lesson_title(path: str) -> str:
+    """Extract the <title> text from a lesson HTML file."""
+    with open(path) as f:
+        m = re.search(r"<title>(.*?)</title>", f.read(), re.S)
+    return m.group(1).strip() if m else path.rsplit("/", 1)[-1]
+
+
+results = {}
+for line in open(JOURNAL):
+    d = json.loads(line)
+    if d.get("type") != "result":
+        continue
+    r = d["result"]
+    num = r["files_written"][0].split("/")[-1][:4]
+    results[num] = r
+
+for num in ("0011", "0012", "0013", "0014"):
+    r, m = results[num], META[num]
+    lesson = next(p for p in r["files_written"] if "/lessons/" in p)
+    drill = next(p for p in r["files_written"] if "/drills/" in p)
+    vocab = next(p for p in r["files_written"] if "/vocab/" in p)
+    slug = lesson.rsplit("/", 1)[-1]
+    n_terms = r["glossary_rows"].count("\n| ") + 1
+
+    with open(f"{LEARN}/GLOSSARY.md", "a") as f:
+        f.write(r["glossary_rows"].rstrip() + "\n")
+
+    entry = (
+        f"### Session {m['session']} (2026-07-15, overnight — issue #{m['issue']})\n"
+        f"**Lesson:** [{num} — {lesson_title(lesson)}](lessons/{slug})\n"
+        f"**Concept taught:** {m['concept_head']}. Grounded in commit {m['commit']}.\n"
+        f"**Covered:**\n" + "".join(f"- {c}\n" for c in m["covered"]) +
+        f"**Files created:**\n"
+        f"- lessons/{slug}\n- drills/{drill.rsplit('/', 1)[-1]}\n"
+        f"- vocab/{vocab.rsplit('/', 1)[-1]} ({n_terms} terms)\n"
+        f"- GLOSSARY.md — appended the {n_terms} vocab terms\n"
+        f"**Engagement:** Autonomous overnight session — no interactive knowledge checks run; drill scores pending user run.\n"
+        f"**Noted gaps:** pending\n"
+    )
+    progress = open(f"{LEARN}/PROGRESS.md").read()
+    anchor = "## Suggested Next Lessons"
+    progress = progress.replace(anchor, entry + "\n" + anchor, 1)
+    with open(f"{LEARN}/PROGRESS.md", "w") as f:
+        f.write(progress)
+
+    rel = "Silmulator/docs/learning"
+    sh("git", "add", f"{rel}/lessons/{slug}", f"{rel}/drills/{drill.rsplit('/', 1)[-1]}",
+       f"{rel}/vocab/{vocab.rsplit('/', 1)[-1]}", f"{rel}/GLOSSARY.md", f"{rel}/PROGRESS.md")
+    msg = (f"docs(learning): add lesson, drill and vocab for "
+           f"{m['concept_head'].split(':')[0]} (from issue #{m['issue']})"
+           f"\n\nCo-Authored-By: Claude Fable 5 <noreply@anthropic.com>")
+    sh("git", "commit", "-m", msg)
+    print(f"{num}: committed {sh('git', 'rev-parse', '--short', 'HEAD')}")
+
+print("DONE")

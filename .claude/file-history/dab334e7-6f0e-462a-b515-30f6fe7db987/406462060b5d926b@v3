@@ -1,0 +1,187 @@
+"""Tests for the Strategy Arena orchestrator: state store, filter, live tick,
+and the comparison report. All offline — synthetic frames, tmp_path SQLite."""
+import pandas as pd
+import pytest
+
+from analyze_equity import compare_strategies
+from strategies.daily import DailySignal, DailyStrategy
+from strategy_arena import ArenaState, live_tick, passes_filter
+
+
+class AlwaysLong(DailyStrategy):
+    """Test double: long every bar once warmed up (warmup_bars=2)."""
+
+    name = "always-long"
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Constant +1 with fixed confidence."""
+        return DailySignal(position=1, confidence=1.0, reason="always long")
+
+
+@pytest.fixture
+def state(tmp_path):
+    """Fresh arena DB per test."""
+    return ArenaState(str(tmp_path / "arena.db"))
+
+
+# ---------------------------------------------------------------------------
+# Filter bar
+# ---------------------------------------------------------------------------
+
+def test_filter_passes_lenient_bar():
+    """Positive Sharpe and tolerable drawdown clear the universal bar."""
+    assert passes_filter({"Sharpe": 0.4, "MaxDD": -0.12}, min_sharpe=0.0, max_dd=-0.30)
+
+
+def test_filter_rejects_negative_sharpe_or_deep_drawdown():
+    """Either clause failing excludes the strategy; missing metrics exclude too."""
+    assert not passes_filter({"Sharpe": -0.1, "MaxDD": -0.05}, 0.0, -0.30)
+    assert not passes_filter({"Sharpe": 1.2, "MaxDD": -0.45}, 0.0, -0.30)
+    assert not passes_filter({}, 0.0, -0.30)
+
+
+# ---------------------------------------------------------------------------
+# ArenaState
+# ---------------------------------------------------------------------------
+
+def test_record_backtest_upserts_status(state):
+    """Re-running a backtest overwrites the verdict instead of duplicating."""
+    state.record_backtest("meanrev", "EXCLUDED", {"Sharpe": -0.2, "CAGR": -0.01, "MaxDD": -0.4})
+    state.record_backtest("meanrev", "PASS", {"Sharpe": 0.5, "CAGR": 0.06, "MaxDD": -0.1})
+    assert state.statuses() == {"meanrev": "PASS"}
+
+
+def test_append_ledger_is_idempotent(state):
+    """Inserting the same (strategy, date) rows twice keeps a single copy."""
+    rows = [("2026-07-01", 1000.0), ("2026-07-02", 1010.0)]
+    trades = [("2026-07-01", "AAA", 1, 0.9, 1.0, 0.01, "test")]
+    assert state.append_ledger("s", rows, trades) == 2
+    assert state.append_ledger("s", rows, trades) == 0
+    n_eq = state.conn.execute("SELECT COUNT(*) FROM equity").fetchone()[0]
+    n_tr = state.conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+    assert (n_eq, n_tr) == (2, 1)
+    assert state.last_equity("s") == ("2026-07-02", 1010.0)
+
+
+def test_gap_logged_once_per_strategy_day(state):
+    """Gap logging is keyed on (strategy, date) — retries don't duplicate."""
+    state.log_gap("s", "2026-07-01", "yfinance timeout")
+    state.log_gap("s", "2026-07-01", "yfinance timeout (retry)")
+    assert state.conn.execute("SELECT COUNT(*) FROM gaps").fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# live_tick: seed, idempotency, auto-backfill
+# ---------------------------------------------------------------------------
+
+def test_live_tick_seeds_then_reruns_as_noop_then_backfills(state, make_ohlcv):
+    """The acceptance triple: first run seeds the ledger, a same-day rerun is
+    a no-op, and extending the data backfills exactly the missed days with
+    multiplicatively-chained equity (no return lost at run boundaries)."""
+    closes5 = [100, 102, 104, 106, 108]
+    data = {"AAA": make_ohlcv(closes5)}
+
+    added = live_tick(state, "s", AlwaysLong(), data, top_n=1,
+                      capital=1000.0, trade_cost_bps=0.0)
+    # 5 bars minus the provisional final bar -> 4 stored days
+    assert added == 4
+    _, eq_last = state.last_equity("s")
+    assert eq_last == pytest.approx(1000.0 * closes5[4] / closes5[1])
+
+    # same data, same day -> nothing new
+    assert live_tick(state, "s", AlwaysLong(), data, top_n=1,
+                     capital=1000.0, trade_cost_bps=0.0) == 0
+
+    # two more bars arrive (e.g. the arena missed a day) -> exactly 2 backfilled
+    closes7 = closes5 + [110, 112]
+    data7 = {"AAA": make_ohlcv(closes7)}
+    assert live_tick(state, "s", AlwaysLong(), data7, top_n=1,
+                     capital=1000.0, trade_cost_bps=0.0) == 2
+    _, eq_final = state.last_equity("s")
+    # continuous ledger equals buy-and-hold from the first traded bar
+    assert eq_final == pytest.approx(1000.0 * closes7[6] / closes7[1])
+
+
+def test_live_tick_records_trades_only_for_new_dates(state, make_ohlcv):
+    """Trade rows land once per (strategy, date, ticker) across reruns."""
+    data = {"AAA": make_ohlcv([100, 102, 104, 106])}
+    live_tick(state, "s", AlwaysLong(), data, 1, 1000.0, 0.0)
+    live_tick(state, "s", AlwaysLong(), data, 1, 1000.0, 0.0)
+    trades = state.conn.execute("SELECT date, ticker FROM trades ORDER BY date").fetchall()
+    assert len(trades) == len(set(trades))
+    assert all(t == ("AAA",) or t[1] == "AAA" for t in trades)
+
+
+def test_live_tick_empty_data_logs_gap(state):
+    """A dead data feed becomes a gap row, not a crash."""
+    assert live_tick(state, "s", AlwaysLong(), {}, 1, 1000.0, 0.0) == 0
+    assert state.conn.execute("SELECT COUNT(*) FROM gaps").fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# compare_strategies report
+# ---------------------------------------------------------------------------
+
+def test_compare_strategies_shows_excluded_and_divergence(state, make_ohlcv):
+    """The report keeps EXCLUDED strategies visible and computes live-vs-
+    backtest Sharpe divergence plus win rate for live strategies."""
+    state.record_backtest("winner", "PASS", {"Sharpe": 1.0, "CAGR": 0.2, "MaxDD": -0.1})
+    state.record_backtest("loser", "EXCLUDED", {"Sharpe": -0.5, "CAGR": -0.1, "MaxDD": -0.5})
+    live_tick(state, "winner", AlwaysLong(),
+              {"AAA": make_ohlcv([100, 102, 104, 106, 108, 110])},
+              top_n=1, capital=1000.0, trade_cost_bps=0.0)
+
+    table = compare_strategies(state.conn).set_index("strategy")
+    assert set(table.index) == {"winner", "loser"}
+
+    loser = table.loc["loser"]
+    assert loser["status"] == "EXCLUDED"
+    assert loser["trades"] == 0
+    assert loser["backtest_sharpe"] == pytest.approx(-0.5)
+
+    winner = table.loc["winner"]
+    assert winner["status"] == "PASS"
+    assert winner["trades"] > 0
+    assert winner["win_rate"] == 1.0  # monotonic uptrend, always long
+    assert winner["sharpe_divergence"] == pytest.approx(
+        winner["live_sharpe"] - winner["backtest_sharpe"])
+
+
+# ---------------------------------------------------------------------------
+# Sizing mode persistence (screened configuration, reused by live)
+# ---------------------------------------------------------------------------
+
+def test_sizing_mode_defaults_to_equal_for_legacy_strategy(state):
+    """A strategy never screened under this feature reads back as 'equal'."""
+    assert state.sizing_mode("never-screened") == "equal"
+
+
+def test_sizing_mode_persists_and_is_reused(state):
+    """record_backtest stores the sizing mode; sizing_mode reads it back."""
+    state.record_backtest("s", "PASS", {"Sharpe": 0.5, "CAGR": 0.1, "MaxDD": -0.1},
+                          sizing="conf_vol")
+    assert state.sizing_mode("s") == "conf_vol"
+    # re-screening under a different mode updates it, not duplicates
+    state.record_backtest("s", "PASS", {"Sharpe": 0.6, "CAGR": 0.1, "MaxDD": -0.1},
+                          sizing="equal")
+    assert state.sizing_mode("s") == "equal"
+
+
+def test_arena_db_migration_adds_sizing_column_in_place(tmp_path):
+    """A pre-existing arena.db (created before the sizing column existed)
+    upgrades in place with no data loss."""
+    import sqlite3
+
+    db_path = str(tmp_path / "legacy_arena.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE strategies (name TEXT PRIMARY KEY, status TEXT NOT NULL, "
+        "backtest_sharpe REAL, backtest_cagr REAL, backtest_maxdd REAL, updated TEXT)"
+    )
+    conn.execute("INSERT INTO strategies VALUES ('old', 'PASS', 0.5, 0.1, -0.1, '2026-01-01')")
+    conn.commit()
+    conn.close()
+
+    upgraded = ArenaState(db_path)
+    assert upgraded.statuses() == {"old": "PASS"}
+    assert upgraded.sizing_mode("old") == "equal"  # backfilled default, no crash

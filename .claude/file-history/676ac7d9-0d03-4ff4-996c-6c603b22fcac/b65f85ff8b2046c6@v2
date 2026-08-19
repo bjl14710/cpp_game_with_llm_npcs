@@ -1,0 +1,102 @@
+"""Drive the real Silmulator app: add two blocks via toolbar clicks,
+drag-connect their ports with synthetic mouse events, screenshot the result."""
+import sys
+
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QPushButton
+
+from silmulator.gui.main_window import MainWindow
+
+OUT = sys.argv[1] if len(sys.argv) > 1 else "."
+
+
+def pump(app, ms=150):
+    QTest.qWait(ms)
+    app.processEvents()
+
+
+def send_mouse(view, etype, scene_pos, button, buttons):
+    viewport = view.viewport()
+    view_pt = view.mapFromScene(scene_pos)
+    event = QMouseEvent(
+        etype, QPointF(view_pt), QPointF(viewport.mapToGlobal(view_pt)),
+        button, buttons, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, event)
+
+
+def main():
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    pump(app, 400)
+
+    # --- Add two blocks by clicking the real toolbar buttons, like a user ---
+    buttons = {b.text(): b for b in win.findChildren(QPushButton)}
+    QTest.mouseClick(buttons["Oscilloscope"], Qt.MouseButton.LeftButton)
+    pump(app)
+    QTest.mouseClick(buttons["Power Supply"], Qt.MouseButton.LeftButton)
+    pump(app)
+
+    blocks = win.canvas.blocks
+    print(f"blocks on canvas: {[b.device_type for b in blocks]}")
+    assert len(blocks) == 2, "toolbar clicks did not add 2 blocks"
+
+    win.canvas_view.fit_all()
+    pump(app)
+
+    src = blocks[0].ports[0]
+    dst = blocks[1].ports[0]
+    view = win.canvas_view
+
+    # --- Drag from src port to dst port through the real view event path ---
+    send_mouse(view, QEvent.Type.MouseButtonPress, src.scenePos(),
+               Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    pump(app)
+    mid = (src.scenePos() + dst.scenePos()) / 2
+    send_mouse(view, QEvent.Type.MouseMove, mid,
+               Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    pump(app)
+    win.grab().save(f"{OUT}/1_mid_drag.png")  # rubber wire should be visible
+
+    send_mouse(view, QEvent.Type.MouseMove, dst.scenePos(),
+               Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    pump(app)
+    send_mouse(view, QEvent.Type.MouseButtonRelease, dst.scenePos(),
+               Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    pump(app, 300)
+    win.grab().save(f"{OUT}/2_connected.png")
+
+    print(f"src.connected_to is dst: {src.connected_to is dst}")
+    print(f"status bar: {win._block_count_label.text()}")
+    print(f"console log:\n{win._console._output.toPlainText()}")
+
+    # --- Drag the PSU block by its title bar (real mouse path) and confirm
+    # the wire follows it visibly ---
+    psu = blocks[1]
+    grab_pt = psu.scenePos() + QPointF(psu.boundingRect().width() / 2, 8)
+    send_mouse(view, QEvent.Type.MouseButtonPress, grab_pt,
+               Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    pump(app)
+    for step in range(1, 6):
+        send_mouse(view, QEvent.Type.MouseMove,
+                   grab_pt + QPointF(-40 * step, -16 * step),
+                   Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+        pump(app, 50)
+    end_pt = grab_pt + QPointF(-200, -80)
+    send_mouse(view, QEvent.Type.MouseButtonRelease, end_pt,
+               Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+    pump(app, 300)
+    win.grab().save(f"{OUT}/3_block_moved.png")
+    print(f"psu moved to: {psu.scenePos()}")
+    wire = next(iter(win.canvas._wires.values()))
+    print(f"wire line p2: {wire.line().p2()}, dst port at: {dst.scenePos()}")
+
+    win.close()
+    print("OK")
+
+
+if __name__ == "__main__":
+    main()

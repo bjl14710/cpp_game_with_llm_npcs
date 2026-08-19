@@ -1,0 +1,165 @@
+# Plan: Strategy Arena (Multi-Strategy Paper-Trading Comparison)
+Date: 2026-07-05
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea (one paragraph)
+A pluggable strategy framework where trading strategies of any kind — ML/GBM,
+technical-indicator, candlestick-pattern, and mean-reversion/breakout — share one
+common daily-bar interface. Every strategy is backtested through the same
+walk-forward methodology to screen out clear losers; survivors then paper-trade
+"live" side by side for months, with each day's results persisted to a local
+SQLite store. One report shows every strategy's metrics next to each other,
+unranked, so Brandon picks the winner himself before any real capital is involved.
+
+## Goal
+Brandon can select strategies to run, have them auto-screened by backtest, then
+watch the survivors trade in parallel with fake money and compare real
+performance side-by-side via one command.
+
+## Decisions Made (were open questions)
+- **Interface:** a NEW daily-bar `DailyStrategy` ABC lives alongside the existing
+  intraday `BaseStrategy` in `strategies/`. The intraday stack
+  (`strategies/base.py`, `paper_engine.py`, `intraday_sim.py`) is NOT modified.
+  Existing `EngulfingStrategy` is reused through a thin daily adapter.
+- **Backtest filter:** one universal, lenient bar for all strategies —
+  `Sharpe > 0.0` AND `MaxDD > -30%` over the backtest window. Both thresholds
+  configurable via CLI (`--min_sharpe`, `--max_dd`). The filter only removes
+  clear losers; the live arena does the real comparison.
+- **Missed days:** auto backfill. Every live run replays all bars since the last
+  recorded date per strategy. All strategies are deterministic given data, so a
+  missed week self-heals. This means the live loop IS an incremental backtest
+  over newly available bars plus persisted state — one code path, no drift
+  between "live" and "backfill" logic.
+- **Starting capital:** equal per strategy (default $100,000, `--capital` flag).
+  Independent ledgers, no shared pool.
+
+## Out of Scope (this version)
+- Real-money execution — still gated behind `rh-exec --no_dry_run`, untouched
+- Strategy parameter auto-tuning / hyperparameter search
+- Intraday/tick-level strategies in the arena — daily bars only (the existing
+  intraday PaperEngine stack stays as-is, separate)
+- Automatic strategy retirement — human picks the winner
+- Blended capital allocation across strategies
+- `webapp/` dashboard page — phase 2, listed as a stretch issue only
+
+## Already Exists (reuse, don't rebuild)
+- `strategies/base.py` — intraday 2-bar `BaseStrategy` + `Signal`. Keep as-is.
+- `strategies/engulfing.py` — engulfing pattern logic. Reuse via daily adapter.
+- `strategies/paper_engine.py` — intraday engine. Not used by the arena; leave alone.
+- `scripts/morning_runner.py` — daily pipeline runner; gains one call into `arena-run live`.
+- `walkforward_sim.py` — `simulate_walkforward()` (GBM-coupled), `parse_tickers`,
+  `meanvar_long_only/long_short`, `compute_returns`. Keep GBM path working unchanged.
+- `analyze_equity.py` — `compute_metrics(eq: pd.Series) -> dict`. Extend, don't replace.
+- `paper_trading_sim.py` — `build_features`, `fetch_history`. Consumed by the GBM adapter.
+
+## Affected Areas
+- New: `strategies/daily.py` — `DailyStrategy` ABC + `DailySignal` dataclass:
+  `generate_signal(df: pd.DataFrame) -> DailySignal(position, confidence, reason)`
+  where `df` is the full daily OHLCV history up to and including the decision bar;
+  `position` in {-1, 0, +1} (target direction), plus a `warmup_bars` property so
+  the harness knows the minimum history each strategy needs.
+- New: `strategies/candlestick_daily.py` — adapter running `EngulfingStrategy`
+  on the last two daily bars of the window.
+- New: `strategies/technical.py` — RSI / MACD / MA-crossover strategy (pandas only,
+  no new deps — compute indicators inline).
+- New: `strategies/mean_reversion.py` — z-score mean-reversion / breakout strategy.
+- New: `strategies/gbm_adapter.py` — wraps a saved model bundle
+  (`{"model", "features"}` joblib) behind `DailyStrategy`; uses
+  `build_features` from `paper_trading_sim.py`; predicted return sign → position,
+  magnitude → confidence. Model itself unchanged.
+- New: `strategies/registry.py` — name → constructor map so strategies are
+  selectable by CLI string (`--strategies gbm,engulfing,technical,meanrev`).
+- `walkforward_sim.py` — add `run_strategy_walkforward(strategy, tickers, start,
+  end, top_n, capital, trade_cost_bps) -> (equity_df, blotter_df)`: a generic
+  per-date loop that asks the strategy for signals per ticker, holds the top_n
+  by confidence equal-weighted, applies next-day realized returns. The existing
+  GBM-specific `simulate_walkforward()` is untouched (backward compatible);
+  the GBM adapter routes through the new generic loop for arena runs.
+- New: `strategy_arena.py` (entry point `arena-run` in `pyproject.toml`) with
+  subcommands:
+  - `arena-run backtest` — run all selected strategies through the generic
+    walk-forward, print pass/fail vs the filter bar, persist results
+  - `arena-run live` — for each surviving strategy: load state, backfill all
+    bars since last recorded date, append trades/equity to SQLite, optionally
+    echo intended orders through `rh-exec` dry-run
+  - `arena-run report` — side-by-side comparison table
+- New: `arena_state/arena.db` — SQLite via stdlib `sqlite3` (no new dependency).
+  Tables: `strategies` (name, status, filter metrics), `trades` (strategy, date,
+  ticker, side, qty, price, reason), `equity` (strategy, date, equity),
+  `gaps` (strategy, date, cause).
+- `analyze_equity.py` — add `compare_strategies(conn) -> pd.DataFrame` producing
+  one row per strategy: Sharpe, CAGR, MaxDD, win rate, total trades, plus
+  `backtest_sharpe` and live-minus-backtest divergence column. Existing
+  `compute_metrics` reused per strategy; win rate / trade count computed from
+  the trades table.
+- `pyproject.toml` — add `arena-run = "strategy_arena:main"` script entry.
+- `scripts/morning_runner.py` — one added step invoking the live arena tick.
+- New tests: `tests/test_daily_strategies.py`, `tests/test_strategy_walkforward.py`,
+  `tests/test_arena_state.py`, `tests/test_arena_filter.py`,
+  `tests/test_compare_strategies.py` — all offline, using CSVs from `data/` or
+  synthetic frames; mock `yfinance.download` per repo rule.
+
+## Implementation Order
+Each step is independently committable and leaves the suite green.
+
+1. **`strategies/daily.py`** — `DailyStrategy` ABC + `DailySignal` + tests.
+   Everything else depends on this contract.
+2. **Rule-based strategies** — `candlestick_daily.py` (adapter over existing
+   `EngulfingStrategy`), `technical.py`, `mean_reversion.py`, plus `registry.py`.
+   Each tested against fixed synthetic OHLCV frames with known expected signals.
+3. **GBM adapter** — `strategies/gbm_adapter.py` over a tiny throwaway bundle
+   fixture (train a 5-tree GBM on synthetic data in the test, don't ship a model).
+4. **Generic walk-forward** — `run_strategy_walkforward()` in `walkforward_sim.py`;
+   test that a hard-coded always-long strategy reproduces buy-and-hold equity on
+   a synthetic series, and that GBM-adapter output is sane on cached CSVs.
+5. **Filter step** — pass/fail vs universal bar, `--min_sharpe`/`--max_dd` flags;
+   failures logged and persisted with their metrics (visible, not dropped).
+6. **Arena state + live loop** — SQLite schema, backfill-since-last-date logic,
+   `arena-run live`, gap logging, optional `rh-exec` dry-run echo, morning_runner hook.
+7. **Comparison report** — `compare_strategies()` in `analyze_equity.py` +
+   `arena-run report`; includes live-vs-backtest divergence column.
+8. **(Stretch)** `webapp/` arena page reading `arena.db` — only if 1–7 land clean.
+
+## Acceptance Criteria
+- [ ] All 4 strategy types implement `DailyStrategy` and are selectable via
+      `arena-run --strategies gbm,engulfing,technical,meanrev`
+- [ ] `run_strategy_walkforward()` backtests any `DailyStrategy`; existing
+      `walkforward-sim` CLI behavior is unchanged
+- [ ] `arena-run backtest` produces one table with all selected strategies'
+      backtest metrics, with explicit PASS/FAIL per the filter bar
+- [ ] Filtered-out strategies appear in the report marked excluded — never
+      silently dropped
+- [ ] `arena-run live` run twice on the same day is idempotent (no duplicate
+      trades/equity rows); run after N missed days backfills exactly N bars
+- [ ] `arena-run report` prints one side-by-side table: Sharpe, CAGR, MaxDD,
+      win rate, total trades, backtest-vs-live divergence per strategy
+- [ ] Intraday stack untouched: `tests/test_intraday_sim.py`,
+      `test_engulfing.py`, `test_paper_trading.py` pass unmodified
+- [ ] No live API calls in tests; no new third-party dependencies
+- [ ] Tests pass: `uv run pytest tests/ -v`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Strategy returns no actionable signal for a day | `DailySignal(position=0, ...)` — a hold, never an error |
+| Two strategies pick the same ticker same day | Fine — independent ledgers, no shared capital |
+| Strategy fails the backtest filter | Logged + persisted with metrics; excluded from live loop; still shown in report as EXCLUDED |
+| yfinance gap / API failure during live run | That strategy-day recorded in `gaps` table, arena continues with other strategies; next run's backfill retries it |
+| History shorter than `warmup_bars` | Strategy is skipped for that ticker with a logged reason, not crashed |
+| `arena-run live` executed twice same day | Idempotent — last-recorded-date check makes second run a no-op |
+| Live performance diverges sharply from backtest | Not auto-handled — divergence is its own report column (overfitting signal) |
+| Corrupt/missing `arena.db` | `live` refuses to run and says how to re-init; `backtest` always works (stateless) |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(strategies): DailyStrategy interface + DailySignal` — `strategies/daily.py`, registry, tests
+2. `feat(strategies): daily engulfing adapter, technical, mean-reversion strategies` — 3 rule-based impls vs synthetic fixtures
+3. `feat(strategies): GBM model-bundle adapter behind DailyStrategy` — no model changes
+4. `feat(backtest): generic run_strategy_walkforward in walkforward_sim.py` — GBM CLI path unchanged
+5. `feat(arena): arena-run backtest + universal filter bar` — pass/fail table, configurable thresholds
+6. `feat(arena): SQLite arena_state + live loop with auto-backfill` — idempotent daily tick, morning_runner hook
+7. `feat(reporting): multi-strategy comparison table in analyze_equity.py` — includes live-vs-backtest divergence
+8. `feat(webapp): arena comparison page (stretch)` — read-only view over arena.db

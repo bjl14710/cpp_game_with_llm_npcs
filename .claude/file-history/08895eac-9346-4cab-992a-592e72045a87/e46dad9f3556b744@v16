@@ -1,0 +1,41 @@
+# Performance notes
+
+Two kinds of artifact live here:
+
+- **`NN-*.md`** — point-in-time writeups of a specific optimization
+  (`01-flat-book.md`, `02-microstructure-signals.md`). Frozen snapshots:
+  the numbers belong to the hardware and code of the day they were written.
+- **`history.csv`** — performance as a *time series*. One row per bench run,
+  fingerprinted by host so numbers are only ever compared within the same
+  machine. See below.
+
+## Tracking latency over time
+
+Before performance-sensitive work, run:
+
+```bash
+python3 scripts/bench_history.py          # runs bench_main + bench_main_flat
+```
+
+It runs each bench K times (best-of-K, default K=5) over the deterministic
+synthetic 100k-add workload, appends one row per bench to `history.csv`, and
+prints a pass/regress verdict against the recent history **for the same host,
+bench, and workload**. Regression (mean > median-of-last-5 by >20%) exits 1;
+insufficient history or a clean run exits 0; a build or parse failure exits 2.
+
+Useful flags: `--check-only` (judge without appending), `--threshold 0.15`,
+`--runs 10`, `--history <path>`.
+
+The comparison uses **mean** only: on macOS the timer granularity quantizes
+the percentiles (p50 reads 0, p99 lands on 1000-ns steps), so mean is the one
+stable statistic. All fields are still recorded for platforms where the
+percentiles are meaningful.
+
+To have the check run automatically before every `git push`:
+
+```bash
+bash scripts/install_bench_hook.sh        # idempotent; bypass with --no-verify
+```
+
+The hook is pre-push (not pre-commit — the benches take ~10s×K) and blocks
+only on a real regression; a broken toolchain prints and lets the push through.

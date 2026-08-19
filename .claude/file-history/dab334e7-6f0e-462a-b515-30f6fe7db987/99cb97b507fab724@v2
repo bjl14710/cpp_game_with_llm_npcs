@@ -1,0 +1,122 @@
+# Plan: Market Regime Classifier & Strategy Gating
+Date: 2026-07-07
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+A deterministic, rule-based classifier runs once per trading day, labels the
+market as `trending`, `mean_reverting`, or `high_vol` from a benchmark proxy
+(SPY, falling back to the cross-sectional mean return — the same pattern
+`walkforward_sim`'s risk overlay already uses), and each `DailyStrategy`
+declares which regimes it's built for. On a day whose regime a strategy isn't
+compatible with, that strategy is gated to a hold — never traded — both in
+backtest and in the live arena. A 2-candle reversal strategy and a momentum
+strategy stop fighting for the same book on the same day.
+
+## Goal
+The arena stops running mean-reversion and momentum strategies against each
+other in a regime where one of them is known to be a bad fit, and the report
+shows which regime was active and who got gated out.
+
+## Design Decisions (made now — no blocking ambiguity, documented for review)
+- **Classifier is rule-based, not ML.** Two rules, in order: (1) rolling
+  20-day annualized vol of the benchmark proxy > `vol_threshold` (default
+  0.35) ⇒ `high_vol`, checked first because a volatile market overrides trend
+  questions entirely. (2) Otherwise, lag-1 autocorrelation of daily returns
+  over a 60-day window: `> +0.05` ⇒ `trending`, `< -0.05` ⇒ `mean_reverting`,
+  else ⇒ `neutral` (a 4th state — gates nothing; ambiguous days shouldn't
+  silently favor one style). Deterministic, no training, no new dependency —
+  matches the project's existing GaussianMixture-based stress overlay in
+  spirit but stays simple enough to unit test exactly.
+- **Benchmark proxy reuses the existing pattern**: SPY's returns if present
+  in the fetched data, else the cross-sectional mean return across fetched
+  tickers (`walkforward_sim.py`'s `risk_overlay` already does exactly this).
+- **Gating is a class-level allowlist, defaulting to "compatible with
+  everything."** `DailyStrategy.compatible_regimes` is a frozenset attribute;
+  the base default is all four regimes (`trending`, `mean_reverting`,
+  `high_vol`, `neutral`) so existing strategies keep trading in every regime
+  until explicitly restricted — no silent behavior change on upgrade.
+  Restrictions set per the user's own example: `DailyEngulfingStrategy` →
+  `{mean_reverting, neutral}` (a 2-candle reversal pattern is a mean-reversion
+  bet), `TechnicalStrategy` → `{trending, neutral}` (MA/MACD confluence is a
+  momentum bet), `MeanReversionStrategy` → `{mean_reverting, neutral}`,
+  `GBMStrategy` → all four (the model already conditions on price/vol
+  features; it isn't a single-regime bet by construction).
+- **Gated days are logged, not silent.** A `regime_log` table records
+  (date, regime) once per arena run; a gated (strategy, date) produces a
+  `HOLD`-equivalent — same code path as "no signal today" — so nothing
+  downstream needs a new state, but the arena's blotter can be cross-referenced
+  against `regime_log` to see why a strategy sat out.
+
+## Out of Scope (this version)
+- ML/HMM-based regime detection (the existing GaussianMixture stress overlay
+  in `walkforward_sim` is a separate subsystem and stays untouched)
+- Per-ticker regimes (one regime per day, market-wide, matching the existing
+  risk-overlay proxy pattern)
+- User-configurable regime taxonomies beyond the fixed four states
+- Regime-conditional position sizing (separate from the position-sizing plan;
+  gating is binary trade/don't-trade, not a sizing multiplier)
+
+## Affected Areas
+- New: `regime.py` — `classify_regime(market_returns: pd.Series, vol_window=20,
+  trend_window=60, vol_threshold=0.35, autocorr_threshold=0.05) -> str`;
+  `market_proxy_returns(raw: Dict[str, pd.DataFrame], end_date) -> pd.Series`
+  (SPY-or-mean, extracted/reused from `walkforward_sim.py`'s inline logic so
+  both the risk overlay and the regime classifier share one implementation).
+- `strategies/daily.py` — `DailyStrategy.compatible_regimes: frozenset[str]`
+  class attribute, default = all four states.
+- `strategies/candlestick_daily.py`, `technical.py`, `mean_reversion.py` —
+  set `compatible_regimes` per the mapping above. `gbm_adapter.py` unchanged
+  (inherits the all-regimes default).
+- `walkforward_sim.py` — `run_strategy_walkforward` gains an optional
+  `regime_series: pd.Series | None` (date-indexed); when provided, a
+  candidate is dropped pre-ranking if today's regime isn't in the strategy's
+  `compatible_regimes`.
+- `strategy_arena.py` — `_SCHEMA` gains `regime_log` table
+  (date PK, regime); `cmd_backtest`/`cmd_live` compute the regime series once
+  over the fetched window/tick, pass it through, and record it.
+- New tests: `tests/test_regime.py`, gating cases appended to
+  `tests/test_strategy_walkforward.py`.
+
+## Implementation Order
+1. `regime.py` + market-proxy extraction/reuse + unit tests on synthetic
+   return series engineered to hit each of the four states.
+2. `compatible_regimes` attribute + per-strategy assignments + gating in
+   `run_strategy_walkforward` (regime_series optional — omitting it preserves
+   today's ungated behavior exactly, regression-pinned).
+3. Arena wiring: `regime_log` table/migration, backtest/live compute-and-pass,
+   idempotency check (same-day regime recompute doesn't duplicate the log row).
+
+## Acceptance Criteria
+- [ ] A benchmark series with high rolling vol classifies `high_vol`
+      regardless of autocorrelation
+- [ ] A trending synthetic series (strong positive lag-1 autocorrelation,
+      low vol) classifies `trending`; the mirror (negative autocorrelation)
+      classifies `mean_reverting`
+- [ ] `DailyEngulfingStrategy` produces no trades on a `trending`-classified
+      day even when its raw pattern would otherwise fire; `TechnicalStrategy`
+      is gated on `mean_reverting` days
+- [ ] Omitting `regime_series` reproduces current `run_strategy_walkforward`
+      output exactly (regression-pinned)
+- [ ] `arena-run backtest`/`live` record one `regime_log` row per date, no
+      duplicates on rerun
+- [ ] No SPY in fetched data ⇒ falls back to cross-sectional mean proxy
+      without error
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Fewer than `trend_window` bars of proxy history | Classified `neutral` (insufficient evidence, gates nothing) |
+| No tickers with `Close` data at all | Regime step skipped entirely for that date; no gating applied, logged once |
+| A strategy with an empty `compatible_regimes` set | Treated as a config error — raises at construction, not a silent always-gated strategy |
+| Regime flips day to day (whipsaw) | No smoothing/hysteresis in this version — each day is classified independently; documented limitation |
+| `neutral` regime | Every strategy trades — it is the "no strong signal, don't gate" state, not a fifth restrictive bucket |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(regime): classify_regime + shared market-proxy extraction` — pure classifier + unit tests
+2. `feat(strategies): compatible_regimes attribute + per-strategy assignments` — contract change, all-regimes default
+3. `feat(arena): regime gating in run_strategy_walkforward + regime_log persistence` — backtest/live wiring

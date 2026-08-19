@@ -28,16 +28,22 @@
 #include "CombatEvents.hpp"
 #include "Config.hpp"
 #include "ConversationStore.hpp"
+#include "Cutscene.hpp"
 #include "DialogUI.hpp"
 #include "FactStore.hpp"
 #include "Gossip.hpp"
 #include "GroupSession.hpp"
 #include "Journal.hpp"
+#include "Montage.hpp"
+#include "Mystery.hpp"
+#include "Storyline.hpp"
 #include "DialogueSession.hpp"
 #include "HostChatRouter.hpp"
 #include "InputMap.hpp"
 #include "KeyBindings.hpp"
 #include "LlmClient.hpp"
+#include "LocationLog.hpp"
+#include "profiling/scope_timer.h"
 #include "Math.hpp"
 #include "Menu.hpp"
 #include "NetClient.hpp"
@@ -50,6 +56,7 @@
 #include "SandboxMap.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
+#include "Zones.hpp"
 #include "World.hpp"
 
 namespace fs = std::filesystem;
@@ -65,7 +72,31 @@ constexpr float kPlayerRadius = 0.45f;   // collision circle on the ground
 constexpr float kGravity = 22.f;         // units per second^2
 constexpr float kJumpSpeed = 8.0f;       // takeoff speed, units per second
 constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
+// Where a sign hangs on a building: just above the awning, not on the roof.
+//
+// Roof height was the obvious choice and it is wrong. You cannot see the top
+// of a sixteen-metre building from twenty metres away at eye level, so the
+// police station's sign projected clean off the top of the frame at exactly
+// the distance you stand at to talk to the officer. Real shop signage sits at
+// fascia height for the same reason, and these buildings already have awnings
+// there, so it reads as part of the storefront.
+//
+// Short structures keep their own clearance: the hot dog cart is three metres
+// tall and a six-metre sign would float unattached above it.
+inline float signHeightFor(const Building& b) {
+    return std::fmin(b.height + 1.2f, 6.f);
+}
+
+// Signage carries further than nameplates: a sign is how you find a place
+// you cannot see yet, whereas a nameplate is for someone you are near.
+constexpr float kSignageRange = 90.f;
 constexpr float kNameplateRange = 28.f;  // how far name tags stay visible
+// One HUD text label reserves this much screen around its anchor (half
+// extents, issue #274). Nameplates and signage share the ONE clearance and
+// the one placed-label list — the 140x20 box the signage pass already used,
+// now the law for every label on the text layer.
+constexpr float kLabelClearX = 140.f;
+constexpr float kLabelClearY = 20.f;
 constexpr float kMouseSensitivity = 0.12f;
 constexpr float kMaxPitchDeg = 75.f;
 // Creator preview rotation (issue #93). Player-driven only; after this idle
@@ -79,7 +110,11 @@ constexpr float kPreviewKeyDegPerSec  = 90.f;   // Left/Right key rotation speed
 constexpr float kJailSeconds = 10.f;
 
 // What the main loop is currently showing.
-enum class AppMode { Playing, Dialogue, Menu, Dead, SandboxEdit };
+// Every mode here needs its own branch in the 2D overlay chain near the bottom
+// of the frame. SandboxEdit had none and fell through to menu.render(), which
+// drew the whole paused menu over the map editor (#215). A branch that draws
+// nothing is still a branch.
+enum class AppMode { Playing, Dialogue, Menu, Dead, SandboxEdit, Cutscene };
 
 // First-person pose; position is the FEET on the ground plane (y = 0).
 struct LocalPlayer {
@@ -195,12 +230,40 @@ int main(int argc, char** argv) {
     float cameraEye = -1.f;    // feet height override (<0 = leave at ground)
     float hourOverride = -1.f;
     const char* mapFile = nullptr;  // --map: boot into a sandbox fixture
+    // --sandbox-edit: boot --map straight into the EDITOR rather than
+    // play mode. Without it the editor is only reachable by pressing P,
+    // which a headless --frames capture cannot do — so the editor had no
+    // visual-QA path at all, which is how the menu-overlay bug survived.
+    bool bootSandboxEdit = false;
+    // --cutscene <id>: boot straight into a named cutscene, with playback on a
+    // fixed timestep so frame N always lands at the same moment in the scene.
+    // Wall-clock playback would produce a different image on every machine and
+    // the captures would be worthless as a regression signal.
+    const char* bootCutscene = nullptr;
+    // --mystery [seed]: generate a murder, cast an authored storyline onto the
+    // roster and seed the resulting knowledge. Every piece of this existed and
+    // nothing called any of it — src/app/ referenced none of the mystery layer,
+    // so the mode was unreachable from the game (issue #220).
+    bool bootMystery = false;
+    unsigned mysterySeed = 20260809u;
+    // --menu <page>: boot straight into a menu page. Every page but Main is
+    // reached by clicking, which a headless --frames capture cannot do, so
+    // none of them has ever been photographed (#216).
+    const char* bootMenuPage = nullptr;
+    int arg = 1;
     if (argc >= 3 && std::strcmp(argv[1], "--frames") == 0) {
         maxFrames = std::strtol(argv[2], nullptr, 10);
-        int arg = 3;
+        arg = 3;
         if (arg < argc && argv[arg][0] != '-') {
             screenshotPath = argv[arg++];
         }
+    }
+    // The scan runs whether or not --frames led, so every flag below works on
+    // its own. It used to sit INSIDE the --frames branch, which meant
+    // `--mystery 7`, `--cutscene opening` and `--sandbox-edit` silently did
+    // nothing unless a smoke-run prefix happened to be present — the flags
+    // were reachable only from the harness that had never needed them.
+    {
         while (arg < argc) {
             if (arg + 3 < argc && std::strcmp(argv[arg], "--camera") == 0) {
                 cameraOverride = true;
@@ -217,6 +280,27 @@ int main(int argc, char** argv) {
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--hour") == 0) {
                 hourOverride = std::strtof(argv[arg + 1], nullptr);
                 arg += 2;
+            } else if (std::strcmp(argv[arg], "--sandbox-edit") == 0) {
+                bootSandboxEdit = true;
+                arg += 1;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--menu") == 0) {
+                bootMenuPage = argv[arg + 1];
+                arg += 2;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--cutscene") == 0) {
+                bootCutscene = argv[arg + 1];
+                arg += 2;
+            } else if (std::strcmp(argv[arg], "--mystery") == 0) {
+                bootMystery = true;
+                arg += 1;
+                // Optional seed; a bare --mystery keeps the default so the
+                // flag is usable without one. The leading-dash check is what
+                // makes `--mystery --cutscene opening` parse correctly rather
+                // than swallowing the next flag as a seed.
+                if (arg < argc && argv[arg][0] != '-') {
+                    mysterySeed = static_cast<unsigned>(
+                        std::strtoul(argv[arg], nullptr, 10));
+                    arg += 1;
+                }
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--map") == 0) {
                 // Boot straight into a sandbox map fixture (headless smoke
                 // shots for placed pieces; the in-game entry is the menu).
@@ -236,7 +320,19 @@ int main(int argc, char** argv) {
     bindings.load(bindingsPath);
 
     // World: the downtown map plus one NPC per persona file.
-    LlmClient client(loadLlmConfig(configDir));
+    const LlmConfig llmConfig = loadLlmConfig(configDir);
+    LlmClient client(llmConfig);
+    // Authored replies for recurring topics, served locally instead of a round
+    // trip (banks/README.md). Off by default: with no bank installed every
+    // request reaches the backend exactly as it always has.
+    if (llmConfig.lineBank) {
+        auto bank = std::make_unique<LineBank>(projectRoot / "banks",
+                                               llmConfig.lineBankThreshold);
+        for (const auto& err : bank->errors()) {
+            std::cerr << "[llm_npc] line bank error: " << err << "\n";
+        }
+        client.setLineBank(std::move(bank));
+    }
     client.warmUp();  // preload the model so the first reply starts fast
     World world(City::makeDowntown());
     // Smoke runs pin the clock so day/night screenshots are deterministic.
@@ -254,6 +350,16 @@ int main(int argc, char** argv) {
         std::cerr << "[llm_npc] trait error: " << err << "\n";
     }
     std::cerr << "[llm_npc] loaded " << traitLibrary.size() << " traits\n";
+
+    // Scripted camera sequences (issue #227). Degrades to inert: a missing
+    // cutscenes/ directory leaves the game entirely playable, and a cutscene
+    // that fails to load must never block a phase transition.
+    std::vector<std::string> cutsceneErrors;
+    const std::vector<CutsceneDef> cutsceneLibrary =
+        loadCutscenes(projectRoot / "cutscenes", &cutsceneErrors);
+    for (const auto& err : cutsceneErrors) {
+        std::cerr << "[llm_npc] cutscene error: " << err << "\n";
+    }
     // ONE look per NPC, index-aligned with world.npcs(). Every NPC —
     // designer persona or player-created — draws from the same shared
     // composite parts pool the creator picks from (plan:
@@ -450,6 +556,28 @@ int main(int argc, char** argv) {
 
     AppMode mode = AppMode::Playing;
     LocalPlayer player;
+    // Scripted camera playback. Pure core type: it owns no raylib and draws
+    // nothing — this layer reads pose() and hands it to beginFrame, then draws
+    // bars, fade and caption as 2D.
+    CutscenePlayer cutscene;
+    // Where the player was standing when playback started, restored on exit so
+    // a cutscene never teleports anyone.
+    LocalPlayer preCutscenePlayer;
+    AppMode preCutsceneMode = AppMode::Playing;
+    // Starts `scene` and takes over the camera. Copies the def, so a generated
+    // cutscene may be a temporary at the call site.
+    const auto playCutscene = [&](const CutsceneDef& scene) {
+        if (cutscene.active()) return;
+        preCutscenePlayer = player;
+        preCutsceneMode = (mode == AppMode::Cutscene) ? AppMode::Playing : mode;
+        cutscene.play(scene, CameraPose{Vec3{player.position.x,
+                                             player.position.y + kEyeHeight,
+                                             player.position.z},
+                                        player.yawDeg, player.pitchDeg});
+        if (!cutscene.active()) return;  // refused: no beats, or already playing
+        mode = AppMode::Cutscene;
+        EnableCursor();
+    };
     // Vertical motion state for jumping; position.y is the feet height and
     // everything downstream (camera, gun muzzle, net pose) derives from it.
     float playerVerticalSpeed = 0.f;
@@ -558,6 +686,120 @@ int main(int argc, char** argv) {
         spawnTownRoster();
     }
     resetNpcSideArrays();
+
+    // ---- the mystery (issue #220) ----
+    //
+    // HOST-ONLY GROUND TRUTH. `mysterySetup` is the answer sheet: never written
+    // to WorldState, never serialized, never rendered. The only sanctioned read
+    // of the killer is voteIsCorrect. Everything a player can ever learn goes
+    // onto the fact bus through seedMysteryFacts, which commits nothing that
+    // names the killer as the killer.
+    MysterySetup mysterySetup;
+    // This match's generated opening. Empty beats means no mystery, or no
+    // template on disk; both are survivable and neither blocks the match.
+    CutsceneDef matchOpening;
+    if (bootMystery && mapFile != nullptr) {
+        // They do not compose, and the failure is silent rather than loud:
+        // --map loads its city and respawns its NPCs further down, AFTER this
+        // runs, so the victim would be seeded dead and then replaced by a
+        // living map NPC while the facts stayed on the bus. A mystery whose
+        // victim is walking around is not a mystery.
+        std::cerr << "[llm_npc] --mystery ignored: --map replaces the roster "
+                     "this mystery would be cast onto\n";
+        bootMystery = false;
+    }
+    if (bootMystery) {
+        // Cast onto who is actually in the world, not onto the persona files.
+        // A template citing a resident who never spawned is a clue that can
+        // never resolve.
+        std::vector<Persona> living;
+        living.reserve(world.npcs().size());
+        for (const Npc& npc : world.npcs()) living.push_back(npc.persona());
+
+        std::vector<std::string> storylineErrors;
+        const std::vector<StorylineDef> storylines =
+            loadStorylines(projectRoot / "storylines", &storylineErrors);
+        for (const auto& err : storylineErrors) {
+            std::cerr << "[llm_npc] storyline error: " << err << "\n";
+        }
+
+        // FAIL CLOSED. A template with any structural error is not offered to
+        // the generator: half a mystery is worse than none, because a player
+        // cannot tell the difference between an unsolvable case and a hard one.
+        std::vector<const StorylineDef*> usable;
+        for (const StorylineDef& story : storylines) {
+            const auto problems =
+                validateStoryline(story, static_cast<int>(living.size()));
+            if (problems.empty()) {
+                usable.push_back(&story);
+                continue;
+            }
+            std::cerr << "[llm_npc] storyline \"" << story.id
+                      << "\" rejected (" << problems.size() << " problems):\n";
+            for (const StorylineError& problem : problems) {
+                std::cerr << "    " << problem.where << ": " << problem.reason << "\n";
+            }
+        }
+
+        if (usable.empty()) {
+            std::cerr << "[llm_npc] --mystery: no usable storyline in storylines/ "
+                         "— no mystery this session\n";
+        } else {
+            // Deterministic from the seed, like everything else in this chain:
+            // a match has to be replayable without shipping the answer.
+            const StorylineDef& chosen =
+                *usable[mysterySeed % usable.size()];
+
+            mysterySetup = generateMystery(living, mysterySeed);
+            castStoryline(chosen, living, mysterySetup, mysterySeed);
+            placeBodyClearOfColliders(mysterySetup, world.city());
+            startVictimDead(world.npcs(), mysterySetup);
+            seedMysteryFacts(world.state(), mysterySetup, living);
+
+            // WITHOUT THIS THE DEMO DOES NOT WORK. refreshGossip is what puts
+            // an NPC's known facts into their prompt, and resetNpcSideArrays
+            // already ran it — before any of these facts existed. A witness
+            // would have no idea they saw anything until a gossip tick
+            // happened to reach them, which needs the fact to age past
+            // kGossipMinAgeSeconds AND a proximity roll to land.
+            //
+            // The loop that makes this a detective game is: seeded testimony
+            // -> the witness's prompt -> the player asks -> the NPC says it ->
+            // fact extraction proposes it with playerLearned -> commitFact
+            // grants it to the player -> the Journal shows it, flagged against
+            // any account that contradicts it.
+            for (Npc& npc : world.npcs()) refreshGossip(npc);
+
+            // Build THIS match's opening from the authored template (#230).
+            // Held for the whole match rather than rebuilt on demand, because
+            // the Journal will replay it (#231) and a player who went back to
+            // re-read the clock has to see the same clock.
+            //
+            // Only three fields cross this call, and that is the leak defence:
+            // the killer is not in scope at the call site, so a reviewer can
+            // check the rule by reading the line.
+            if (const CutsceneDef* tmpl = findCutscene(cutsceneLibrary, "opening")) {
+                matchOpening = buildOpeningCutscene(*tmpl, mysterySetup.sceneZoneId,
+                                                    mysterySetup.murderHour,
+                                                    mysterySetup.bodyPosition);
+            } else {
+                std::cerr << "[llm_npc] --mystery: no cutscenes/opening.cutscene "
+                             "— starting without the opening\n";
+            }
+
+            // The victim and the scene are public knowledge the moment a body
+            // is found, so naming them here leaks nothing. The killer is not
+            // printed, and must not be — stderr is the first place a curious
+            // player looks.
+            std::cerr << "[llm_npc] --mystery: \"" << chosen.title << "\" seed "
+                      << mysterySeed << " — " << mysterySetup.victim
+                      << " found dead at " << zoneName(mysterySetup.sceneZoneId)
+                      << " (" << mysterySetup.bodyPosition.x << ", "
+                      << mysterySetup.bodyPosition.z << "), "
+                      << mysterySetup.witnesses.size() << " witnesses, "
+                      << mysterySetup.evidence.size() << " clues\n";
+        }
+    }
 
     // Character creator: persists BOTH records (independently) and spawns
     // the new citizen immediately. Declared after the per-NPC bookkeeping
@@ -844,7 +1086,80 @@ int main(int argc, char** argv) {
             std::cerr << "[llm_npc] --map: loaded '" << bootMap.name << "' ("
                       << world.city().buildings().size() << " solid pieces, "
                       << world.npcs().size() << " NPCs)\n";
+            if (bootSandboxEdit) {
+                sandboxNpcSources.clear();
+                for (const auto& loaded : roster) {
+                    sandboxNpcSources.push_back("persona:" + loaded.id);
+                }
+                mode = AppMode::SandboxEdit;
+                EnableCursor();
+            }
         }
+    }
+
+    // --cutscene <id>: boot straight into a scene so it has a visual-QA path.
+    // Fixed-step playback pins frame N to the same moment every run, which is
+    // the only reason a capture can serve as a regression signal.
+    // The win montage is built AT THE MOMENT OF THE WIN, not at match start:
+    // it splits the clue chain by what the player actually learned, and that
+    // is still changing right up to the vote. Held as a lambda rather than a
+    // value for exactly that reason.
+    const auto buildWinNow = [&]() -> CutsceneDef {
+        const CutsceneDef* tmpl = findCutscene(cutsceneLibrary, "win");
+        if (tmpl == nullptr || mysterySetup.killer.empty()) return CutsceneDef{};
+        const std::vector<ClueStep> chain = solutionChain(mysterySetup);
+        const MontagePlan plan = buildMontage(chain, world.state(), "player");
+        // Naming the killer is correct HERE and nowhere earlier: this plays
+        // after the answer is already out.
+        return buildWinCutscene(*tmpl, plan, mysterySetup.killer);
+    };
+
+    if (bootMenuPage != nullptr) {
+        const auto page = Menu::pageFromName(bootMenuPage);
+        if (!page) {
+            std::cerr << "[llm_npc] --menu: unknown page \"" << bootMenuPage
+                      << "\" (main, controls, multiplayer, creator, journal, "
+                         "sandbox, model)\n";
+        } else {
+            menu.showPage(*page);
+            mode = AppMode::Menu;
+            EnableCursor();
+        }
+    }
+
+    if (bootCutscene != nullptr) {
+        // Both of these are GENERATED per match, so playing the raw template
+        // would show a player the literal text "{hour}" or "{clue}" — which is
+        // exactly what shipped in #230 before a capture caught it. Prefer the
+        // built one; fall back to the template so a scene is still framable
+        // without a mystery.
+        const bool wantsOpening = std::strcmp(bootCutscene, "opening") == 0;
+        const bool wantsWin = std::strcmp(bootCutscene, "win") == 0;
+        CutsceneDef generatedWin;
+        if (wantsWin) generatedWin = buildWinNow();
+        const CutsceneDef* scene =
+            (wantsOpening && !matchOpening.beats.empty()) ? &matchOpening
+            : (wantsWin && !generatedWin.beats.empty())   ? &generatedWin
+                                                          : findCutscene(cutsceneLibrary, bootCutscene);
+        if (scene == nullptr) {
+            std::cerr << "[llm_npc] --cutscene: no cutscene named \""
+                      << bootCutscene << "\" in cutscenes/\n";
+        } else {
+            cutscene.setFixedStep(true);
+            playCutscene(*scene);
+        }
+    } else if (!matchOpening.beats.empty() && bootMenuPage == nullptr) {
+        // A mystery starts with its opening. Smoke runs included: a scene
+        // nobody ever captures is a scene nobody ever checks, which is how the
+        // map editor shipped with a menu drawn over it (#215).
+        //
+        // Unless --menu asked for a page. This block runs after the --menu
+        // block and playCutscene takes the mode, so without the guard an
+        // explicit request is silently overridden — every one of the first
+        // seven --menu captures came back showing the opening instead. An
+        // explicit flag beats an automatic one.
+        if (smokeRun) cutscene.setFixedStep(true);
+        playCutscene(matchOpening);
     }
 
     // Journal: a pure read of the shared fact store — what the player was
@@ -871,6 +1186,10 @@ int main(int argc, char** argv) {
     bool previewWasOpen = false;  // detects the frame the Creator page opens
     bool previewDragging = false;  // latched at press: is this a preview drag or a control click?
 
+    // Where every agent has been this session (issue #165). Ground truth,
+    // written every frame and read by nothing yet.
+    LocationLog locationLog;
+
     // Gossip propagation cadence (real seconds between ticks) and its rng
     // (seeded for reproducible town behavior in a session).
     float gossipTickTimer = 0.f;
@@ -878,6 +1197,7 @@ int main(int argc, char** argv) {
 
     long frames = 0;
     while (!WindowShouldClose() && (maxFrames < 0 || frames++ < maxFrames)) {
+        PROF_SPAN_BEGIN("sim");
         const float dt = std::fmin(0.03f, GetFrameTime());
 
         // A dropped link falls back to solo play; the menu status explains.
@@ -893,7 +1213,26 @@ int main(int argc, char** argv) {
         const bool joined = netClient != nullptr;  // connected, per the check above
 
         // ---- input ----
-        if (mode == AppMode::Playing) {
+        if (mode == AppMode::Cutscene) {
+            // Playback owns the camera and swallows everything else. Only skip
+            // is reachable, and only when the scene allows it.
+            if (!smokeRun && (IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_ENTER) ||
+                              IsKeyPressed(KEY_ESCAPE))) {
+                cutscene.skip();
+            }
+            if (!cutscene.advance(dt)) {
+                // Restore everything playback took: the pose, the mode and the
+                // cursor. A cutscene that leaves the camera moved, the mouse
+                // swallowed or a mode stuck is worse than one that never ran.
+                player = preCutscenePlayer;
+                mode = preCutsceneMode;
+                if (mode == AppMode::Playing || mode == AppMode::Dialogue) {
+                    DisableCursor();
+                } else {
+                    EnableCursor();
+                }
+            }
+        } else if (mode == AppMode::Playing) {
             if (IsWindowFocused() && !smokeRun) applyMouseLook(player);
             if (sandboxActive && IsKeyPressed(KEY_P)) {
                 // Back from play-testing to the editor: clear the live
@@ -1340,6 +1679,7 @@ int main(int argc, char** argv) {
         // NPC behaviors keep running during dialogue, freeze in the menu;
         // joined clients never simulate (the host's snapshots are truth).
         if (mode != AppMode::Menu && !joined) {
+            PROF_SCOPE_N("sim.npc_ai");
             for (Npc& npc : world.npcs()) {
                 // Combat movement (flee/hostile/dead) owns non-Idle NPCs;
                 // conversational behaviors would fight it.
@@ -1354,6 +1694,7 @@ int main(int argc, char** argv) {
         // gates, at most one fact per pair per tick. Knowledge only ever
         // flips on the shared bus — there is no NPC-to-NPC message channel.
         if (!joined) {
+            PROF_SCOPE_N("sim.gossip");
             gossipTickTimer += dt;
             if (gossipTickTimer >= 15.f) {
                 gossipTickTimer = 0.f;
@@ -1420,13 +1761,93 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
         }
-        // Facing derives from actual motion once every mover has run —
-        // behaviors and combat both; see Npc::deriveFacingFromMotion.
+        // Facing and grounding both derive from the finished frame, once every
+        // mover has run — behaviors and combat both. Facing has always been
+        // here; grounding joins it because it is the same kind of rule, and
+        // this is the only point where no mover is going to touch the NPC
+        // again this frame.
         if (mode != AppMode::Menu && !joined) {
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 world.npcs()[i].deriveFacingFromMotion(npcLastPos[i], dt);
+                world.npcs()[i].snapToGround();
             }
         }
+
+        // ---- where everyone has been (issue #165) ----
+        //
+        // OBSERVATION ONLY. Nothing in the game reads this yet; it is the
+        // substrate the alibi questions will be asked of, and producing the
+        // data is a separate change from consuming it. The log never
+        // influences movement, schedules or rendering.
+        //
+        // The player is logged under "player" like anyone else. The
+        // retaliation rule means a player has to be as observable as any
+        // resident — an alibi system that cannot place the player is half a
+        // system.
+        //
+        // Not ticked during the menu or a sandbox edit: someone rearranging a
+        // map is not an agent with an alibi, and recording them would put a
+        // building-placement session into the evidence.
+        if (mode != AppMode::Menu && mode != AppMode::SandboxEdit) {
+            PROF_SCOPE_N("sim.location_log");
+            // The same worldHour the rest of the frame uses. Reading the clock
+            // a second time here would let an agent's trail disagree with the
+            // timestamps on the facts it is meant to corroborate.
+            for (const Npc& npc : world.npcs()) {
+                if (npc.combatState() == NpcState::Dead) {
+                    // Close the stay rather than skipping it, or a corpse
+                    // accumulates one visit that never ends and every "who was
+                    // in the bakery" answer names the dead.
+                    //
+                    // Guarded on retired() because closeAgent walks back
+                    // through visits_ to find the agent's newest entry, and
+                    // that walk lengthens as everyone else keeps appending.
+                    if (!locationLog.retired(npc.persona().name)) {
+                        locationLog.closeAgent(npc.persona().name, worldHour);
+                    }
+                    continue;
+                }
+                locationLog.observe(npc.persona().name, npc.position().x,
+                                    npc.position().z, worldHour);
+            }
+            locationLog.observe("player", player.position.x, player.position.z,
+                                worldHour);
+        }
+
+#ifdef LLM_NPC_TRAIL_DUMP
+        // Trail dump for the nearest resident, so the wiring above can be
+        // checked by a human before anything depends on the data.
+        //
+        // COMPILE-GATED, not a config key or a runtime toggle — the same
+        // treatment revealKillerForDebug gets, and for a weaker but real
+        // version of the same reason: a trail is not the answer, but it is
+        // every resident's exact movements, and a host who can read it at
+        // will has an advantage no player can see. F9 is unbound; F1 and F2
+        // are the only function keys the game uses.
+        if (IsKeyPressed(KEY_F9)) {
+            const Npc* nearest = nullptr;
+            float best = 1e9f;
+            for (const Npc& npc : world.npcs()) {
+                const float d = distanceXZ(player.position, npc.position());
+                if (d < best) {
+                    best = d;
+                    nearest = &npc;
+                }
+            }
+            if (nearest != nullptr) {
+                const auto trail =
+                    locationLog.trailOf(nearest->persona().name, 0.0, 24.0);
+                std::cerr << "[llm_npc] trail for " << nearest->persona().name
+                          << " (" << trail.size() << " stays):\n";
+                for (const ZoneVisit& visit : trail) {
+                    std::cerr << "    " << zoneName(visit.zoneId) << "  "
+                              << visit.startHour << " -> "
+                              << (visit.ongoing ? 24.0 : visit.endHour)
+                              << (visit.ongoing ? "  (still there)" : "") << "\n";
+                }
+            }
+        }
+#endif
 
         for (auto& callout : callouts) callout.ttl -= dt;
         callouts.erase(std::remove_if(callouts.begin(), callouts.end(),
@@ -1738,11 +2159,21 @@ int main(int argc, char** argv) {
         }
 
         // ---- render ----
-        BeginDrawing();
+        PROF_SPAN_END();  // closes "sim"
+        PROF_SPAN_BEGIN("render.3d");
+        { PROF_SCOPE_N("render.begin"); BeginDrawing(); }
         renderer.setTimeOfDay(worldHour);  // sky, fog, light: one clock
         ClearBackground(renderer.skyColor());
         const bool sandboxEditing = (mode == AppMode::SandboxEdit);
-        if (sandboxEditing) {
+        const bool cutscenePlaying = (mode == AppMode::Cutscene);
+        if (cutscenePlaying) {
+            // Authored poses are eye-space; beginFrame adds kEyeHeight, so
+            // subtract it and the shot lands where the author framed it.
+            const CameraPose shot = cutscene.pose();
+            renderer.beginFrame(CameraPose{
+                Vec3{shot.position.x, shot.position.y - kEyeHeight, shot.position.z},
+                shot.yawDeg, shot.pitchDeg});
+        } else if (sandboxEditing) {
             // High tilted vantage over the pan target; beginFrame adds eye
             // height, so hand it the zoom height minus that.
             renderer.beginFrame(CameraPose{
@@ -1753,7 +2184,9 @@ int main(int argc, char** argv) {
             renderer.beginFrame(
                 CameraPose{player.position, player.yawDeg, player.pitchDeg});
         }
-        renderer.drawCity(world.city());
+        PROF_SPAN_END();  // "render.3d" resumes after the camera block
+        PROF_SPAN_BEGIN("render.3d.draw");
+        { PROF_SCOPE_N("render.city"); renderer.drawCity(world.city()); }
         if (sandboxEditing) {
             // Placed NPCs render as their real composite looks so the
             // editor shows the cast, not markers.
@@ -1815,6 +2248,7 @@ int main(int argc, char** argv) {
                 }
             }
         } else {
+            PROF_SCOPE_N("render.characters");
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 const Npc& npc = world.npcs()[i];
                 const bool walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
@@ -1826,11 +2260,13 @@ int main(int argc, char** argv) {
                 // the creator picks from (plan: shared-character-library).
                 // A gesture drives the bob so a talking NPC still reads as
                 // animated (composites have no gesture clip).
+                // Per-NPC clock offset so mesh-family idle/walk cycles
+                // don't play in eerie unison across the plaza (#142).
                 renderer.drawCompositeCharacter(
                     npcLooks[i], npc.position(), npc.facingDeg(),
                     walking || npc.pose() != NpcAction::None,
-                    static_cast<float>(GetTime()), face,
-                    npc.combatState() == NpcState::Dead);
+                    static_cast<float>(GetTime()) + static_cast<float>(i) * 1.618f,
+                    face, npc.combatState() == NpcState::Dead);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a
@@ -1900,11 +2336,17 @@ int main(int argc, char** argv) {
                                             previewYaw, false, 0.f);
         }
         previewWasOpen = previewOpen;
-        if (!joined && mode != AppMode::Dead && !sandboxEditing) {
+        // No viewmodel during a cutscene: the camera is not the player's
+        // eyes any more, so a floating gun in the corner of an
+        // establishing shot reads as a rendering bug.
+        if (!joined && mode != AppMode::Dead && !sandboxEditing &&
+            !cutscenePlaying) {
             renderer.drawViewmodel(static_cast<int>(world.player().weapon),
                                    world.player().attackAnimFraction);
         }
-        renderer.endFrame();
+        { PROF_SCOPE_N("render.end3d"); renderer.endFrame(); }
+        PROF_SPAN_END();  // closes "render.3d.draw"
+        PROF_SPAN_BEGIN("render.ui2d");
 
         // ---- 2D overlay ----
         if (worldgenStatusTtl > 0.f) {
@@ -1934,12 +2376,59 @@ int main(int argc, char** argv) {
                 "P play | Esc save+exit",
                 18, 14.f);
         }
+        // ---- HUD text labels: one collision pass (issue #274) ----
+        //
+        // Nameplates and building signage share one screen and one pixel
+        // font, so they share ONE placed-label list. Nameplates claim their
+        // boxes first — the person in front of you is information; the sign
+        // is still there when they walk on — and signage takes what is left.
+        // A label that loses its spot is simply not drawn that frame: no
+        // nudging, no stacking. Before this list each pass de-collided only
+        // among itself, and a resident standing in front of a signed
+        // building rendered their name THROUGH the sign — both illegible
+        // (found by #170's visual QA).
+        const bool menuOpen = (mode == AppMode::Menu);
+        std::vector<Vector2> placedLabels;
+        const auto claimLabelSpot = [&](const Vector2& screen) {
+            for (const Vector2& taken : placedLabels) {
+                if (labelBoxesOverlap(screen.x, screen.y, taken.x, taken.y,
+                                      kLabelClearX, kLabelClearY)) {
+                    return false;
+                }
+            }
+            placedLabels.push_back(screen);
+            return true;
+        };
+
         // Nameplates from whichever pose source is authoritative right now.
-        const auto plateFor = [&](const Vec3& feet, const std::string& name, Color color) {
-            if (distanceXZ(player.position, feet) > kNameplateRange) return;
+        //
+        // Suppressed during a cutscene, and not only for looks: the opening
+        // scene is required never to identify a living NPC, and a nameplate
+        // drifting into an establishing shot would name one outright.
+        //
+        // Suppressed with a menu open too. Nameplates are drawn before the
+        // menu's backdrop, which dims them without hiding them, so they came
+        // through the Journal's text as a second layer of words at the same
+        // size. Found on the first capture the Journal has ever had (#216) —
+        // no test would have shown it, and nobody had looked.
+        //
+        // Collected, then placed nearest-first — the same rule the signs
+        // use — so two residents shoulder to shoulder show the nearer name
+        // instead of garbling both.
+        struct PlateCandidate {
+            float range;
+            Vector2 screen;
+            std::string text;
+            Color color;
+        };
+        std::vector<PlateCandidate> plates;
+        const auto plateFor = [&](const Vec3& feet, std::string name, Color color) {
+            if (cutscenePlaying || menuOpen) return;
+            const float range = distanceXZ(player.position, feet);
+            if (range > kNameplateRange) return;
             Vector2 screen;
             if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
-            drawNameplate(name, screen, color);
+            plates.push_back({range, screen, std::move(name), color});
         };
         if (joined) {
             for (const auto& netNpc : netNpcs) {
@@ -1963,9 +2452,79 @@ int main(int argc, char** argv) {
         for (const auto& remote : remotePlayers) {
             plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
         }
+        std::sort(plates.begin(), plates.end(),
+                  [](const PlateCandidate& a, const PlateCandidate& b) {
+                      return a.range < b.range;
+                  });
+        for (const PlateCandidate& plate : plates) {
+            if (!claimLabelSpot(plate.screen)) continue;
+            drawNameplate(plate.text, plate.screen, plate.color);
+        }
+
+        // ---- building signage (issue #166) ----
+        //
+        // DATA-DRIVEN, and it already was: Building::name has carried "sign /
+        // label text; empty for filler and obstacles" since the city was
+        // authored, and nothing ever drew it. Sandbox pieces become Buildings
+        // through the same path, so a map placed in the editor gets signage
+        // with no code change — which is the requirement.
+        //
+        // Screen-space text rather than geometry in the world. The renderer is
+        // deliberately untouched, it matches the nameplate treatment already
+        // used for residents, and a 3D sign would need a font atlas to look
+        // like anything (#236).
+        if (mode != AppMode::Menu && !cutscenePlaying) {
+            // Nearest first, so that when two signs would land on the same
+            // spot the one you are walking toward is the one you get.
+            std::vector<std::pair<float, const Building*>> signs;
+            for (const Building& building : world.city().buildings()) {
+                if (building.name.empty()) continue;  // filler and obstacles
+                // Anchor on the point of the FOOTPRINT nearest the player, not
+                // the centroid. A deep building seen head-on projects its
+                // centroid behind the roof edge you are actually looking at,
+                // which stamped "City Police Station" across its own top-floor
+                // windows — the 40x40 police block was the only one big enough
+                // to show it. Clamping to the near face puts the sign on the
+                // face you can see, whatever the footprint.
+                const Vec3 anchor{clampf(player.position.x, building.minX, building.maxX),
+                                  signHeightFor(building),
+                                  clampf(player.position.z, building.minZ, building.maxZ)};
+                // Ranged like nameplates, and for the same reason: thirty
+                // labels stacked on the horizon is noise, not information.
+                const float range = distanceXZ(player.position, anchor);
+                if (range > kSignageRange) continue;
+                signs.push_back({range, &building});
+            }
+            std::sort(signs.begin(), signs.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            for (const auto& [range, building] : signs) {
+                const Vec3 anchor{clampf(player.position.x, building->minX, building->maxX),
+                                  signHeightFor(*building),
+                                  clampf(player.position.z, building->minZ, building->maxZ)};
+                Vector2 screen;
+                if (!renderer.worldToScreen(anchor, screen)) continue;
+                // Two landmarks on the same bearing project to the same pixels
+                // however far apart they are in depth, and two labels drawn on
+                // top of each other are not a label. Gus's Hot Dogs sits at the
+                // origin and the police station 60 units due south of it, so
+                // this is reachable by standing still and looking, not a corner
+                // case. Nearest wins — and a nameplate that claimed the spot
+                // first beats any sign; the loser is simply not drawn.
+                if (!claimLabelSpot(screen)) continue;
+                drawNameplate(building->name, screen, Color{255, 232, 170, 255});
+            }
+        }
 
         // Combat callouts float above their NPC like temporary nameplates.
+        // Combat callouts are nameplates by another name and sit in the same
+        // layer, so they come through a menu the same way. Deliberately
+        // OUTSIDE the shared placed-label pass (issue #274): a callout is
+        // transient combat information — it must neither be blanked by a
+        // nearby name nor blank one, and its anchor already sits 0.45 world
+        // units above the nameplate line.
         for (const auto& callout : callouts) {
+            if (cutscenePlaying || menuOpen) break;
             if (callout.npcIndex < 0 ||
                 callout.npcIndex >= static_cast<int>(world.npcs().size())) continue;
             const Npc& npc = world.npcs()[static_cast<std::size_t>(callout.npcIndex)];
@@ -2018,6 +2577,58 @@ int main(int argc, char** argv) {
         } else if (mode == AppMode::Dialogue) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
             dialog.render();
+        } else if (mode == AppMode::Cutscene) {
+            // Letterbox, fade and caption — the whole visual vocabulary. There
+            // is no post-processing chain, so a fade is a rectangle with alpha
+            // and bars are two more. Deliberately: dissolves and colour grading
+            // are out of scope and adding them means a renderer change, which
+            // this feature is specifically built to avoid.
+            const int w = GetScreenWidth();
+            const int h = GetScreenHeight();
+            const int bars = cutscene.letterboxPx();
+            if (bars > 0) {
+                DrawRectangle(0, 0, w, bars, BLACK);
+                DrawRectangle(0, h - bars, w, bars, BLACK);
+            }
+            const float alpha = cutscene.fadeAlpha();
+            if (alpha > 0.f) {
+                // Named colours only; a cutscene file is content, not code, and
+                // an unknown name falling back to black is the safe default.
+                const std::string& tint = cutscene.fadeColour();
+                Color fade = BLACK;
+                if (tint == "white") fade = RAYWHITE;
+                else if (tint == "grey" || tint == "gray") fade = Color{90, 90, 96, 255};
+                fade.a = static_cast<unsigned char>(255.f * alpha);
+                DrawRectangle(0, 0, w, h, fade);
+            }
+            const std::string& line = cutscene.caption();
+            if (!line.empty()) {
+                // Size 20 off the usable ladder: the built-in bitmap font
+                // computes glyph spacing with integer division, so 14 through
+                // 18 space identically and only ~10 / 20 / 30 visibly differ.
+                const int size = 20;
+                const int tw = MeasureText(line.c_str(), size);
+                DrawText(line.c_str(), (w - tw) / 2, h - bars - size - 18, size,
+                         RAYWHITE);
+            }
+            if (cutscene.canSkip()) {
+                DrawText("Space to skip", 24, h - bars - 26, 10,
+                         Color{200, 200, 200, 180});
+            }
+        } else if (mode == AppMode::SandboxEdit) {
+            // Draw NOTHING here, and that is the whole fix.
+            //
+            // SandboxEdit had no branch in this chain, so it fell through to
+            // the final else and ran menu.render() — which opens with a
+            // full-screen dim rect at alpha 170 plus a page title and has no
+            // early-out. The entire paused menu rendered over the editor every
+            // frame. You could still pan and place pieces behind it, which is
+            // why it read as "the map won't go away" rather than as a stuck
+            // menu.
+            //
+            // The editor's own HUD is already drawn further up, with the other
+            // world-space overlays (search `if (sandboxEditing)` above the
+            // nameplates). It does not belong here.
         } else {
             menu.render();
         }
@@ -2031,13 +2642,37 @@ int main(int argc, char** argv) {
             DrawText("Asset packs missing - run tools/fetch_assets.sh for the full look", 24,
                      GetScreenHeight() - 40, 18, Color{255, 225, 130, 255});
         }
+        // AFTER EndDrawing, not before. raylib batches 2D draw calls and
+        // flushes them at EndDrawing; TakeScreenshot reads the framebuffer
+        // directly. Called before the flush it captures the 3D scene and NONE
+        // of the pending UI — so every HUD, menu and overlay was silently
+        // missing from every capture, and visual QA of anything 2D was blind.
+        PROF_SPAN_END();  // closes "render.ui2d"
+
+        // present is NOT work — it is the frame limiter.
+        //
+        // FLAG_VSYNC_HINT plus SetTargetFPS(60) mean EndDrawing blocks until
+        // the next vblank and then raylib sleeps to pace the loop. So this
+        // scope absorbs all the slack: it is LARGE when the frame is cheap and
+        // SHRINKS as real work grows. Reading it as a cost inverts the truth.
+        //
+        // It is measured precisely so it can be excluded. "sim + render.3d +
+        // render.ui2d" is the number to compare against the 16.67 ms budget;
+        // wall-clock frame time cannot answer that question at all, which is
+        // why tools/bench_npc_render.py has been reporting the cap.
+        { PROF_SCOPE_N("present"); EndDrawing(); }
         if (screenshotPath && maxFrames >= 0 && frames >= maxFrames) {
             TakeScreenshot(screenshotPath);
         }
-        EndDrawing();
+        PROF_FRAME();
     }
 
 shutdown:
+    // Profiling dump (issue #257). No-op unless ENABLE_PROFILING is defined.
+    // Path is overridable so a measurement run does not collide with another.
+    PROF_DUMP(std::getenv("LLM_NPC_PROF_JSON") ? std::getenv("LLM_NPC_PROF_JSON")
+                                               : "/tmp/prof.json");
+
     // Transcripts with unsaved turns persist on quit; their summary refresh
     // happens at the next conversation close (summarizing here would block
     // shutdown on the LLM).

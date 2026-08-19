@@ -1,0 +1,463 @@
+"""Main application window for Silmulator."""
+
+from __future__ import annotations
+import json
+import os
+from typing import Optional
+
+from PyQt6.QtWidgets import (
+    QMainWindow, QToolBar, QDockWidget, QWidget, QVBoxLayout,
+    QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem,
+    QStatusBar, QMessageBox, QFileDialog, QSplitter, QTextEdit,
+    QMenuBar, QMenu, QApplication,
+)
+from PyQt6.QtCore import Qt, QPointF, QTimer, pyqtSlot
+from PyQt6.QtGui import QAction, QFont, QColor, QIcon, QKeySequence
+
+from silmulator.gui.canvas import CanvasScene, CanvasView, BLOCK_REGISTRY
+from silmulator.gui.blocks.base_block import BaseBlock
+from silmulator.gui.dialogs.device_config import DeviceConfigDialog
+
+
+class BlockLibraryPanel(QWidget):
+    """Side panel listing available hardware blocks that can be dragged onto the canvas."""
+
+    def __init__(self, canvas: CanvasScene) -> None:
+        super().__init__()
+        self.canvas = canvas
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        title = QLabel("Hardware Blocks")
+        title.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+        layout.addWidget(title)
+
+        self._list = QListWidget()
+        self._list.setFont(QFont("Consolas", 9))
+
+        descriptions = {
+            "Oscilloscope": "Tektronix MSO54-compatible\n4-channel, 1GHz, SCPI",
+            "Power Supply": "Keysight E36312A-compatible\n3-channel DC PSU",
+            "Function Generator": "Keysight 33522B-compatible\n2-ch, 30MHz AWG",
+            "Multimeter": "Keysight 34401A-compatible\n6.5 digit DMM",
+            "MSP430": "TI MSP430FR5994\nGPIO, ADC, UART, SPI, I2C",
+            "Code Input": "Code Analyzer\nC/C++/Python SCPI extractor",
+        }
+
+        for name, desc in descriptions.items():
+            item = QListWidgetItem(f"{name}")
+            item.setToolTip(desc)
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self._list.addItem(item)
+
+        self._list.itemDoubleClicked.connect(self._add_block)
+        layout.addWidget(self._list)
+
+        add_btn = QPushButton("Add Selected Block")
+        add_btn.clicked.connect(lambda: self._add_block(self._list.currentItem()))
+        layout.addWidget(add_btn)
+
+        hint = QLabel("Double-click or drag to add\nto canvas")
+        hint.setStyleSheet("color: #888; font-size: 8pt;")
+        layout.addWidget(hint)
+
+    def _add_block(self, item: Optional[QListWidgetItem]) -> None:
+        if item is None:
+            return
+        device_type = item.data(Qt.ItemDataRole.UserRole)
+        # Place at center of current view
+        pos = QPointF(
+            (len(self.canvas.blocks) % 5) * 260 + 20,
+            (len(self.canvas.blocks) // 5) * 260 + 20,
+        )
+        self.canvas.add_block(device_type, pos)
+
+
+class ConsolePanel(QWidget):
+    """SCPI command console panel."""
+
+    def __init__(self, canvas: CanvasScene) -> None:
+        super().__init__()
+        self.canvas = canvas
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        title = QLabel("SCPI Console")
+        title.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+        layout.addWidget(title)
+
+        # Block selector
+        block_bar = QHBoxLayout()
+        block_bar.addWidget(QLabel("Target:"))
+        self._block_combo_label = QLabel("(select a block on canvas)")
+        block_bar.addWidget(self._block_combo_label)
+        block_bar.addStretch()
+        layout.addLayout(block_bar)
+
+        # Output
+        self._output = QTextEdit()
+        self._output.setReadOnly(True)
+        self._output.setFont(QFont("Consolas", 9))
+        self._output.setStyleSheet("background: #1a1a2e; color: #00ff88;")
+        layout.addWidget(self._output)
+
+        # Input
+        input_bar = QHBoxLayout()
+        self._cmd_input = QTextEdit()
+        self._cmd_input.setMaximumHeight(60)
+        self._cmd_input.setFont(QFont("Consolas", 10))
+        self._cmd_input.setPlaceholderText("SCPI command (Ctrl+Enter to send)")
+        input_bar.addWidget(self._cmd_input)
+        send_btn = QPushButton("Send")
+        send_btn.setFixedWidth(60)
+        send_btn.clicked.connect(self._send)
+        input_bar.addWidget(send_btn)
+        layout.addLayout(input_bar)
+
+    def _send(self) -> None:
+        cmd = self._cmd_input.toPlainText().strip()
+        if not cmd:
+            return
+        # Send to all selected blocks
+        selected = [
+            item for item in self.canvas.selectedItems()
+            if isinstance(item, BaseBlock)
+        ]
+        if not selected:
+            self._output.append("<i>No block selected on canvas</i>")
+            return
+        for block in selected:
+            response = block.send_command(cmd)
+            self._output.append(f"<b>[{block.device_type}]</b> >> {cmd}")
+            if response:
+                self._output.append(f"<b>&lt;&lt;</b> {response}")
+        self._cmd_input.clear()
+
+    def log(self, message: str) -> None:
+        self._output.append(message)
+
+
+class MainWindow(QMainWindow):
+    """Silmulator main application window."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Silmulator — SIL/HIL/CIL Hardware Simulator")
+        self.resize(1400, 900)
+        self._current_file: Optional[str] = None
+        self._setup_scene()
+        self._setup_ui()
+        self._setup_menus()
+        self._setup_toolbar()
+        self._setup_statusbar()
+        self._apply_dark_theme()
+        self._statusbar.showMessage("Ready — Double-click blocks in the library to add them to the canvas")
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+
+    def _setup_scene(self) -> None:
+        self.canvas = CanvasScene()
+        self.canvas_view = CanvasView(self.canvas)
+        self.canvas.block_added.connect(self._on_block_added)
+        self.canvas.block_removed.connect(self._on_block_removed)
+        self.canvas.wire_added.connect(self._on_wire_added)
+
+    def _setup_ui(self) -> None:
+        # Central widget
+        self.setCentralWidget(self.canvas_view)
+
+        # Left dock: block library
+        lib_dock = QDockWidget("Library", self)
+        lib_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self._library_panel = BlockLibraryPanel(self.canvas)
+        self._library_panel.setMinimumWidth(180)
+        lib_dock.setWidget(self._library_panel)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, lib_dock)
+
+        # Bottom dock: console
+        console_dock = QDockWidget("SCPI Console", self)
+        console_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea)
+        self._console = ConsolePanel(self.canvas)
+        self._console.setMinimumHeight(150)
+        console_dock.setWidget(self._console)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, console_dock)
+
+    def _setup_menus(self) -> None:
+        mb = self.menuBar()
+
+        # File menu
+        file_menu = mb.addMenu("&File")
+        file_menu.addAction(self._make_action("&New", "Ctrl+N", self._new_canvas))
+        file_menu.addAction(self._make_action("&Open...", "Ctrl+O", self._open_layout))
+        file_menu.addAction(self._make_action("&Save", "Ctrl+S", self._save_layout))
+        file_menu.addAction(self._make_action("Save &As...", "Ctrl+Shift+S", self._save_layout_as))
+        file_menu.addSeparator()
+        file_menu.addAction(self._make_action("&Quit", "Ctrl+Q", self.close))
+
+        # Edit menu
+        edit_menu = mb.addMenu("&Edit")
+        edit_menu.addAction(self._make_action("Select &All", "Ctrl+A", self.canvas.selectAll))
+        edit_menu.addAction(self._make_action("&Delete Selected", "Del",
+                                               self._delete_selected))
+
+        # Add menu
+        add_menu = mb.addMenu("&Add")
+        for name in BLOCK_REGISTRY:
+            add_menu.addAction(self._make_action(name, None,
+                               lambda checked, n=name: self.canvas.add_block(n, QPointF(100, 100))))
+
+        # View menu
+        view_menu = mb.addMenu("&View")
+        view_menu.addAction(self._make_action("Fit &All", "Ctrl+Shift+F", self.canvas_view.fit_all))
+        view_menu.addAction(self._make_action("Reset &Zoom", "Ctrl+0",
+                                               self.canvas_view.resetTransform))
+
+        # Simulate menu
+        sim_menu = mb.addMenu("&Simulate")
+        sim_menu.addAction(self._make_action("&Reset All Devices", "Ctrl+R", self._reset_all))
+        sim_menu.addAction(self._make_action("Send Broadcast Command...", None, self._broadcast))
+
+        # Help menu
+        help_menu = mb.addMenu("&Help")
+        help_menu.addAction(self._make_action("&About", None, self._about))
+
+    def _make_action(self, text: str, shortcut: Optional[str], slot) -> QAction:
+        action = QAction(text, self)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        action.triggered.connect(slot)
+        return action
+
+    def _setup_toolbar(self) -> None:
+        tb = self.addToolBar("Main")
+        tb.setMovable(False)
+
+        for name in BLOCK_REGISTRY:
+            btn = QPushButton(name)
+            btn.setFixedHeight(30)
+            btn.clicked.connect(lambda checked, n=name: self.canvas.add_block(n, QPointF(200, 150)))
+            tb.addWidget(btn)
+
+        tb.addSeparator()
+        reset_btn = QPushButton("Reset All")
+        reset_btn.clicked.connect(self._reset_all)
+        tb.addWidget(reset_btn)
+
+        fit_btn = QPushButton("Fit View")
+        fit_btn.clicked.connect(self.canvas_view.fit_all)
+        tb.addWidget(fit_btn)
+
+    def _setup_statusbar(self) -> None:
+        self._statusbar = QStatusBar()
+        self.setStatusBar(self._statusbar)
+        self._block_count_label = QLabel("Blocks: 0  Wires: 0")
+        self._statusbar.addPermanentWidget(self._block_count_label)
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
+    def _new_canvas(self) -> None:
+        if self.canvas.blocks:
+            reply = QMessageBox.question(
+                self, "New Canvas",
+                "Clear the current canvas?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self.canvas.clear()
+        self._current_file = None
+        self.setWindowTitle("Silmulator — Untitled")
+        self._update_status()
+
+    def _open_layout(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Layout", "",
+            "Silmulator Layout (*.sil);;JSON (*.json);;All Files (*)"
+        )
+        if path:
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                self.canvas.from_dict(data)
+                self._current_file = path
+                self.setWindowTitle(f"Silmulator — {os.path.basename(path)}")
+                self._update_status()
+                self._console.log(f"Loaded layout: {path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", str(e))
+
+    def _save_layout(self) -> None:
+        if self._current_file:
+            self._do_save(self._current_file)
+        else:
+            self._save_layout_as()
+
+    def _save_layout_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Layout", "",
+            "Silmulator Layout (*.sil);;JSON (*.json);;All Files (*)"
+        )
+        if path:
+            if not path.endswith(('.sil', '.json')):
+                path += '.sil'
+            self._do_save(path)
+
+    def _do_save(self, path: str) -> None:
+        try:
+            data = self.canvas.to_dict()
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+            self._current_file = path
+            self.setWindowTitle(f"Silmulator — {os.path.basename(path)}")
+            self._statusbar.showMessage(f"Saved: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", str(e))
+
+    def _delete_selected(self) -> None:
+        for item in self.canvas.selectedItems():
+            if isinstance(item, BaseBlock):
+                self.canvas.remove_block(item)
+
+    def _reset_all(self) -> None:
+        for block in self.canvas.blocks:
+            block.device.reset()
+        self._console.log("All devices reset")
+        self.canvas.update()
+
+    def _broadcast(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+        cmd, ok = QInputDialog.getText(self, "Broadcast SCPI Command",
+                                        "Send to all blocks:")
+        if ok and cmd:
+            for block in self.canvas.blocks:
+                resp = block.send_command(cmd)
+                self._console.log(f"[{block.device_type}] >> {cmd}")
+                if resp:
+                    self._console.log(f"[{block.device_type}] << {resp}")
+
+    def _about(self) -> None:
+        QMessageBox.about(
+            self, "About Silmulator",
+            "<h3>Silmulator v1.0.0</h3>"
+            "<p>SIL/HIL/CIL Hardware Simulator</p>"
+            "<p>Simulated instruments:</p>"
+            "<ul>"
+            "<li>Oscilloscope (Tektronix MSO54-compatible)</li>"
+            "<li>Power Supply (Keysight E36312A-compatible)</li>"
+            "<li>Function Generator (Keysight 33522B-compatible)</li>"
+            "<li>Multimeter (Keysight 34401A-compatible)</li>"
+            "<li>MSP430 Microcontroller (TI MSP430FR5994)</li>"
+            "</ul>"
+            "<p>Each instrument implements the full SCPI command set.</p>"
+        )
+
+    # ------------------------------------------------------------------
+    # Slots
+    # ------------------------------------------------------------------
+
+    @pyqtSlot(str, str)
+    def _on_block_added(self, block_id: str, device_type: str) -> None:
+        self._console.log(f"Added {device_type} [{block_id}]")
+        self._update_status()
+
+    @pyqtSlot(str)
+    def _on_block_removed(self, block_id: str) -> None:
+        self._console.log(f"Removed block [{block_id}]")
+        self._update_status()
+
+    @pyqtSlot(str, str, str, str)
+    def _on_wire_added(self, src_block: str, src_port: str, dst_block: str, dst_port: str) -> None:
+        self._console.log(f"Connected [{src_block}].{src_port} → [{dst_block}].{dst_port}")
+        self._update_status()
+
+    def _update_status(self) -> None:
+        n_blocks = len(self.canvas.blocks)
+        n_wires = len(self.canvas._wires)
+        self._block_count_label.setText(f"Blocks: {n_blocks}  Wires: {n_wires}")
+
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    def _apply_dark_theme(self) -> None:
+        self.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #1e2330;
+                color: #d0d8f0;
+            }
+            QToolBar {
+                background-color: #252b3b;
+                border-bottom: 1px solid #3a4060;
+                spacing: 4px;
+                padding: 2px;
+            }
+            QPushButton {
+                background-color: #2e3a5a;
+                color: #c8d8ff;
+                border: 1px solid #4a5a80;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-family: Consolas;
+            }
+            QPushButton:hover {
+                background-color: #3a4a70;
+                border-color: #6a7aaa;
+            }
+            QPushButton:pressed {
+                background-color: #1a2a4a;
+            }
+            QDockWidget {
+                color: #c0c8e0;
+                font-family: Consolas;
+            }
+            QDockWidget::title {
+                background-color: #252b3b;
+                padding: 4px;
+            }
+            QListWidget {
+                background-color: #1a1f2e;
+                border: 1px solid #3a4060;
+                color: #c0d0f0;
+            }
+            QListWidget::item:selected {
+                background-color: #2e4070;
+            }
+            QTextEdit {
+                background-color: #141a28;
+                border: 1px solid #3a4060;
+                color: #c0d0f0;
+                font-family: Consolas;
+            }
+            QMenuBar {
+                background-color: #1a1f2e;
+                color: #c0d0f0;
+            }
+            QMenuBar::item:selected {
+                background-color: #2e4070;
+            }
+            QMenu {
+                background-color: #252b3b;
+                color: #c0d0f0;
+                border: 1px solid #3a4060;
+            }
+            QMenu::item:selected {
+                background-color: #2e4070;
+            }
+            QStatusBar {
+                background-color: #1a1f2e;
+                color: #808890;
+            }
+            QLabel {
+                color: #c0d0f0;
+            }
+        """)

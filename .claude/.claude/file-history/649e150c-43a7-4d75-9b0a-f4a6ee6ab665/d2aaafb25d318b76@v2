@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0015 — Alternative Data: Oil Drums &amp; the Walmart Parking Lot</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code{font-family:"JetBrains Mono",monospace;background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0015</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Alternative Data — Two Founding Stories</h1>
+<p class="lead">Why this matters: "alt-data" is jargon for "any data source that isn't a price feed or a filing." It's worth a lot of money to whoever sees a signal first. Two famous stories teach the whole concept. (More flavors come in Lesson 0020.)</p>
+
+<h2>1. What "alternative data" actually means</h2>
+<p>Traditional financial data: prices, volumes, filings, broker estimates, central-bank releases. <strong>Alternative data</strong>: anything else that hints at the same underlying economic reality before it shows up in those traditional channels.<sup><a class="fn" href="#fn-1">[1]</a></sup></p>
+<p>Three properties make a candidate alt-data feed valuable to a hedge fund:</p>
+<div class="grid2">
+<div class="card"><h4>1. It leads the official number</h4><p>You see it weeks before quarterly earnings or monthly economic releases. The whole point is to know first.</p></div>
+<div class="card"><h4>2. It's hard to replicate</h4><p>Anyone with a Bloomberg terminal sees the same earnings releases. If your alt-data is cheap and ubiquitous, the alpha lasts ~zero seconds after publication.</p></div>
+<div class="card"><h4>3. It maps cleanly onto a tradable variable</h4><p>"Foot traffic at Walmart parking lots" maps to "Walmart same-store sales" which maps to "Walmart Q earnings surprise" which maps to "WMT stock price reaction." Each step is mechanical and modellable.</p></div>
+<div class="card"><h4>The decay curve</h4><p>Once a data source becomes widely known, the alpha decays. The Walmart parking lot story is now textbook — using only parking data buys you nothing. The frontier moved to harder data.</p></div>
+</div>
+
+<h2>2. Founding story #1: The Walmart parking lot (2010)</h2>
+<p>In mid-2010 a UBS analyst named Neil Currie published a quarterly research note based on satellite imagery of 100 Walmart parking lots, claiming that car-counts indicated the stock was undervalued. UBS bought the parking-lot counts from a data provider, used the image-derived foot-traffic estimate to triangulate revenues, and was one of the first banks to monetize satellite imagery as an investment signal.<sup><a class="fn" href="#fn-2">[2]</a></sup></p>
+<p>The mechanics:</p>
+<ol>
+<li><strong>Source</strong>: commercial satellite imagery (Planet, DigitalGlobe-now-Maxar) over a Walmart store on multiple days.</li>
+<li><strong>Vendor</strong>: a specialist counts cars from the imagery using computer vision and publishes a daily/weekly foot-traffic estimate. Today's vendors include RS Metrics, Orbital Insight, SpaceKnow, Planet Labs.<sup><a class="fn" href="#fn-3">[3]</a></sup></li>
+<li><strong>Signal</strong>: car-counts → estimated visits → estimated revenues → revenue-vs-consensus surprise → price reaction.</li>
+<li><strong>Trade</strong>: long or short WMT before the quarterly print; close after.</li>
+</ol>
+
+<p>In 2014, Tiger Global Management was publicly known to be counting cars in Walmart parking lots from satellite imagery to estimate quarterly sales before earnings.<sup><a class="fn" href="#fn-4">[4]</a></sup> By the late 2010s the trade was crowded; by 2025 it's a textbook example, not an active alpha.</p>
+
+<h2>3. Founding story #2: Counting oil drums from space</h2>
+<p>The "oil drum" example: crude-oil storage tanks have <em>floating roofs</em> that sit on top of the oil itself, so the height of the roof tells you the fill level. From orbit, the shadow cast by the rim onto the roof reveals how high the roof sits — and therefore how much oil is in the tank.<sup><a class="fn" href="#fn-5">[5]</a></sup></p>
+<p>Ursa Space Systems, a New York firm, tracks roughly <strong>11,000 oil-storage tanks worldwide</strong> using Synthetic Aperture Radar (SAR) satellites and provides weekly inventory reports to commodity-trading hedge funds.<sup><a class="fn" href="#fn-5">[5]</a></sup> SAR sees through clouds and works at night — a crucial property since traditional oil-storage data is reported weekly by the EIA in the US and monthly by OPEC, with significant lag and self-reporting bias.</p>
+
+<p>The mechanics are the same shape as Walmart:</p>
+<ol>
+<li><strong>Source</strong>: SAR satellites passing over Cushing, OK (US benchmark), the Strait of Hormuz, China's strategic reserves, etc.</li>
+<li><strong>Vendor</strong>: image analysis (now mostly automated by CNNs) produces a per-tank fill estimate. Aggregated weekly.</li>
+<li><strong>Signal</strong>: inventory delta vs expectations → crude price reaction.</li>
+<li><strong>Trade</strong>: futures on WTI/Brent, or related ETFs/stocks.</li>
+</ol>
+
+<div class="callout"><strong>Why this is the cleanest example:</strong> oil-tank inventory is a single number that maps to a single tradable instrument (the crude futures curve), with a regulatory data release (EIA Petroleum Status Report) as the ground truth. You can backtest the alpha unambiguously.</div>
+
+<h2>4. The economics of alt-data</h2>
+<table>
+<tr><th>Cost driver</th><th>Typical 2024–25 range</th></tr>
+<tr><td>Mid-tier provider feed (e.g. one retail chain's foot-traffic)</td><td>$50k–$200k/yr</td></tr>
+<tr><td>Comprehensive satellite + geospatial bundle (Orbital Insight, SpaceKnow)</td><td>$200k–$500k/yr</td></tr>
+<tr><td>Premium / exclusive panel (one-of-its-kind data)</td><td>$1M+/yr</td></tr>
+</table>
+<p>The math fund managers do: an alt-data feed needs to add a few basis points of risk-adjusted return per year on the AUM that uses it. A $1B fund with a 10 bps lift earns $1M — pays for one premium feed and frees the question of whether it's worth a second.</p>
+
+<div class="callout warn"><strong>The non-obvious risk:</strong> alt-data vendors often sell the same signal to many funds. The first buyer gets the alpha; the tenth pays the same price for an empty signal. Exclusivity riders are negotiated, but expensive — usually only the largest funds can afford them.</div>
+
+<h2>5. In this project</h2>
+<p>The repo's <code>news_features.py</code> + <code>news_fetch.py</code> are a baby alt-data pipeline: news headlines + Alpha Vantage sentiment → daily per-ticker features. The structure (third-party transformation of unstructured data into a tradable signal) is identical to the Walmart parking lot pattern — just with text instead of imagery, and a much cheaper data source. Lesson 0007 noted that the sentiment scalar is silently a transformer's output you don't own; same story here.</p>
+<p>A realistic alt-data extension that fits this codebase: foot-traffic data for the S&amp;P 500 retailers via a SafeGraph or Placer.ai-style provider, merged into the GBM features panel via <code>walkforward_sim.py --use_news</code>-style flow. Not built; cleanly conceivable.</p>
+
+<h2>6. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Alt-data vs Fundamental data</h4><p><strong>Fundamental</strong>: from filings, accounting, official releases. <strong>Alt-data</strong>: derived from operational or behavioral signals before they appear in fundamentals. Alt-data <em>predicts</em> the fundamental.</p></div>
+<div class="card"><h4>Alt-data vs Technical signals</h4><p><strong>Technical</strong>: derived from past prices/volumes (RSI, momentum). <strong>Alt-data</strong>: derived from outside the market entirely. Technical signals are universally available; alt-data is gated by access.</p></div>
+<div class="card"><h4>Walmart pattern vs Oil-drum pattern</h4><p>Both use satellite imagery. Walmart maps to a single retailer's quarterly earnings (binary event, sparse). Oil drums map to a continuous commodity inventory (frequent, integrable). Different statistical shapes.</p></div>
+<div class="card"><h4>Signal vs Data</h4><p>Raw imagery is data. Counted cars is signal. Funds buy both at different price points; vendor margins are in turning data into signal at scale.</p></div>
+</div>
+
+<h2>7. Practice</h2>
+<div class="question" data-question><p class="q">Q1. Why does the floating-roof oil tank work for satellite-based inventory estimation?</p><ul class="options">
+<li data-correct="true" data-why="Right — the roof rests on top of the oil and rises/falls with fill level. The shadow of the rim onto the roof seen from above reveals how high the roof sits, which is the fill level.">The roof floats on the oil itself, so its height (visible via shadow length from orbit) directly indicates fill level.</li>
+<li data-correct="false" data-why="Color of oil doesn't usually drive remote sensing — the roof geometry does. Surface reflectance is too noisy.">The color of the oil changes over time and is visible from space.</li>
+<li data-correct="false" data-why="No — tanks don't broadcast inventory data; the whole point of remote sensing is that the operators aren't disclosing it.">Tanks broadcast inventory data via GPS.</li>
+<li data-correct="false" data-why="Tank temperature is too noisy a proxy and infrared isn't what's used. Floating-roof geometry is.">Thermal signature in infrared correlates with fill level.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. The Walmart parking lot signal was profitable in 2010–2014 but became uninteresting by 2025. What's the most likely cause?</p><ul class="options">
+<li data-correct="false" data-why="Imagery quality has improved, not degraded. The decay is from crowdedness, not data quality.">Satellite imagery quality has gotten worse.</li>
+<li data-correct="true" data-why="Right. The classic alt-data decay: once the signal is known, every fund subscribes, prices adjust before the earnings print, and the alpha vanishes. The frontier moves to harder/newer data.">Once everyone subscribed to the same data, the alpha was priced in before the earnings release.</li>
+<li data-correct="false" data-why="WMT is still a major retailer. The signal didn't lose meaning; the trade became crowded.">Walmart stopped being a major retailer.</li>
+<li data-correct="false" data-78="Foot-traffic data isn't an SEC disclosure. The decay is competitive, not regulatory.">SEC banned the use of alternative data in 2020.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Three properties make a candidate alt-data source valuable to a hedge fund. Which is NOT one of them?</p><ul class="options">
+<li data-correct="false" data-why="Leading the official number is exactly the point — you see it before the print.">It leads the official number.</li>
+<li data-correct="false" data-why="Hard-to-replicate is essential — if everyone has it, it's not alpha.">It's hard for competitors to replicate.</li>
+<li data-correct="false" data-why="Mapping onto a tradable variable is the whole reason to buy it. No mapping = no trade.">It maps cleanly to a tradable variable.</li>
+<li data-correct="true" data-why="Right. Public/SEC-disclosable status is actively bad — once it's public, the alpha is gone. Alt-data alpha lives on private, scarce, hard-to-copy data feeds.">It's publicly disclosed in SEC filings.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. A vendor offers an exclusive license on a new geospatial signal for $5M/yr. A non-exclusive license costs $500k/yr. Why might a $10B fund buy the exclusive?</p><ul class="options">
+<li data-correct="true" data-why="Right. At $10B AUM, even ~5 bps of alpha is $5M — exactly the exclusivity cost. More importantly, non-exclusive means competitors arbitrage the same signal and the alpha decays to zero. Exclusivity protects alpha durability, which is worth far more than the up-front cost.">Exclusivity prevents competitors from running the same trade, preserving the signal's alpha durability across years.</li>
+<li data-correct="false" data-why="Exclusivity doesn't change data quality — both versions of the data are the same. The buyer pays for the lack of competitors.">The exclusive license includes higher-resolution data.</li>
+<li data-correct="false" data-why="Vendor support is a side benefit; the load-bearing reason is competitive exclusion.">Better customer support from the vendor.</li>
+<li data-correct="false" data-why="There is no legal requirement to buy exclusive licenses; it's a commercial choice.">It's required by SEC regulation for large funds.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>8. Scenarios</h2>
+<details class="scenario"><summary>S1. You backtest an alt-data signal and find a Sharpe of 3.0 over 5 years. Two months after going live, Sharpe is 0.4. Diagnose.</summary>
+<p>Classic alt-data alpha decay — between backtest and live, the vendor probably onboarded several other funds and the signal has been arbitraged into the price. Possible secondary causes: backtest had look-ahead (the data was delivered with delay you didn't model), survivorship bias in the tickers used, or a regime change. The first-line check is to call the vendor and ask about subscriber growth; the second is to redo the backtest with a realistic delivery delay and an exit timing that matches when you can actually act.</p></details>
+
+<details class="scenario"><summary>S2. You're offered raw satellite imagery for $50k/yr OR pre-processed car counts for $200k/yr. You're a small fund without ML staff. Which is the rational choice?</summary>
+<p>The pre-processed counts — you're paying the vendor's price for their ML infrastructure (CNN models, validation labels, ops team running the pipeline) which would cost you much more than $150k/yr to build and maintain. Raw imagery is the right buy only if you have a CV team, want signal differentiation from other subscribers, and can extract value the vendor's standard pipeline misses. For a small fund, vendor margin on processed signal is real but cheap relative to do-it-yourself cost.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://vertdata.com/blog/alternative-data-hedge-funds-guide">Alternative Data for Hedge Funds Guide — VertData</a></li>
+<li id="fn-2"><a href="https://internationalbanker.com/brokerage/how-satellite-imagery-is-helping-hedge-funds-outperform/">How Satellite Imagery Is Helping Hedge Funds Outperform — International Banker</a></li>
+<li id="fn-3"><a href="https://paragonintel.com/satellite-data-for-investors-top-alternative-data-providers/">Satellite Data For Investors: Top Alternative Data Providers — Paragon Intel</a></li>
+<li id="fn-4"><a href="https://newsroom.haas.berkeley.edu/how-hedge-funds-use-satellite-images-to-beat-wall-street-and-main-street/">How hedge funds use satellite images to beat Wall Street — UC Berkeley Haas</a></li>
+<li id="fn-5"><a href="https://piersight.space/blog/how-hedge-funds-can-use-sar-ais-data-to-make-better-investment-decisions">How Hedge Funds Use SAR + AIS Data — PierSight</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

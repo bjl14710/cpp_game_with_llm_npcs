@@ -1,0 +1,143 @@
+// ITCH replay clock: deterministic, speed-controlled playback.
+// Plan: .claude/plans/itch-replay-clock.md.
+//
+// Framing mirrors itch_parser.cpp exactly: each frame is a 2-byte big-endian
+// length prefix; a zero-length frame is padding (skipped and counted); a
+// frame whose declared length runs past the buffer is a truncated final
+// message (delivery stops cleanly, no over-read). The ITCH timestamp is 6
+// big-endian bytes at offset 5 of the message body, present only when the
+// body is at least 11 bytes — shorter messages are delivered with timestamp
+// 0 and the clock never over-reads to find one.
+
+#include "replay_clock.hpp"
+
+#include <chrono>
+#include <cstdio>
+#include <memory>
+#include <stdexcept>
+#include <thread>
+
+namespace itch {
+
+namespace {
+
+// Big-endian readers, local to this translation unit (the parser's own
+// helpers are file-static in itch_parser.cpp and not exported).
+inline uint16_t be16(const uint8_t* p) {
+    return static_cast<uint16_t>(static_cast<uint16_t>(p[0]) << 8 | p[1]);
+}
+inline uint64_t be48(const uint8_t* p) {
+    return static_cast<uint64_t>(be16(p)) << 32 |
+           static_cast<uint64_t>(p[2]) << 24 | static_cast<uint64_t>(p[3]) << 16 |
+           static_cast<uint64_t>(p[4]) << 8 | static_cast<uint64_t>(p[5]);
+}
+
+// Timestamp: 6 bytes at offset 5 in every ITCH 5.0 message; a body must be at
+// least this long to carry one.
+constexpr std::size_t OFF_TIMESTAMP = 5;
+constexpr std::size_t MIN_TS_LEN = OFF_TIMESTAMP + 6;  // 11
+
+}  // namespace
+
+ReplayClock::ReplayClock(std::vector<uint8_t> buffer) : buf_(std::move(buffer)) {}
+
+ReplayClock ReplayClock::from_file(const std::string& path) {
+    // Whole-file gulp with the same IO error handling as
+    // cpp/signals_py/bindings.cpp read_file() — filtered days only.
+    std::unique_ptr<std::FILE, int (*)(std::FILE*)> f(
+        std::fopen(path.c_str(), "rb"), &std::fclose);
+    if (!f) throw std::runtime_error("cannot open ITCH file: " + path);
+    if (std::fseek(f.get(), 0, SEEK_END) != 0)
+        throw std::runtime_error("cannot seek ITCH file: " + path);
+    const long size = std::ftell(f.get());
+    if (size < 0) throw std::runtime_error("cannot stat ITCH file: " + path);
+    std::rewind(f.get());
+    std::vector<uint8_t> buf(static_cast<std::size_t>(size));
+    if (!buf.empty() &&
+        std::fread(buf.data(), 1, buf.size(), f.get()) != buf.size())
+        throw std::runtime_error("short read on ITCH file: " + path);
+    return ReplayClock(std::move(buf));
+}
+
+bool ReplayClock::next_frame(const uint8_t*& msg, uint16_t& len, uint64_t& ts) {
+    while (pos_ + 2 <= buf_.size()) {
+        const uint16_t msg_len = be16(&buf_[pos_]);
+        if (msg_len == 0) {
+            // Padding / heartbeat frame — skip without delivering.
+            pos_ += 2;
+            ++stats_.zero_len_frames_skipped;
+            continue;
+        }
+        if (pos_ + 2 + msg_len > buf_.size()) {
+            // Truncated final message — stop cleanly, deliver nothing more.
+            return false;
+        }
+        const uint8_t* body = &buf_[pos_ + 2];
+        const uint64_t timestamp =
+            msg_len >= MIN_TS_LEN ? be48(body + OFF_TIMESTAMP) : 0;
+
+        if (stats_.messages_delivered == 0) stats_.first_timestamp_ns = timestamp;
+        stats_.last_timestamp_ns = timestamp;
+        ++stats_.messages_delivered;
+        stats_.bytes_delivered += msg_len;
+
+        msg = body;
+        len = msg_len;
+        ts = timestamp;
+        pos_ += 2 + msg_len;
+        return true;
+    }
+    return false;
+}
+
+bool ReplayClock::step(const MessageSink& sink) {
+    const uint8_t* msg = nullptr;
+    uint16_t len = 0;
+    uint64_t ts = 0;
+    if (!next_frame(msg, len, ts)) return false;
+    sink(msg, len, ts);
+    return true;
+}
+
+void ReplayClock::run(const MessageSink& sink, ReplayMode mode, double speed) {
+    // run() is the batch entry point; single-message delivery is step(). Fail
+    // loudly rather than silently aliasing SingleStep to MaxSpeed.
+    if (mode == ReplayMode::SingleStep)
+        throw std::invalid_argument(
+            "ReplayClock::run: SingleStep is delivered via step(), not run()");
+    if (mode == ReplayMode::WallClock && speed <= 0.0)
+        throw std::invalid_argument("ReplayClock::run: speed must be > 0");
+
+    const uint8_t* msg = nullptr;
+    uint16_t len = 0;
+    uint64_t ts = 0;
+
+    if (mode == ReplayMode::MaxSpeed) {
+        // Deliver as fast as possible, no timing code at all.
+        while (next_frame(msg, len, ts)) sink(msg, len, ts);
+        return;
+    }
+
+    // WallClock: drift-corrected absolute schedule. Each message's target is
+    // start + (its ITCH timestamp - the first timestamp) / speed, computed
+    // against a fixed origin so per-gap rounding never accumulates. A message
+    // whose timestamp precedes the origin (backwards clock) targets the past
+    // and is delivered immediately — order always beats the clock.
+    const auto start = std::chrono::steady_clock::now();
+    uint64_t ts0 = 0;
+    bool have_origin = false;
+    while (next_frame(msg, len, ts)) {
+        if (!have_origin) {
+            ts0 = ts;
+            have_origin = true;
+        }
+        const double delay_ns =
+            ts >= ts0 ? static_cast<double>(ts - ts0) / speed : 0.0;
+        const auto target =
+            start + std::chrono::nanoseconds(static_cast<long long>(delay_ns));
+        std::this_thread::sleep_until(target);
+        sink(msg, len, ts);
+    }
+}
+
+}  // namespace itch

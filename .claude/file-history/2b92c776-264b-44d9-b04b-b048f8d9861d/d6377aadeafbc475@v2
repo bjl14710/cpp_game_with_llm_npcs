@@ -1,0 +1,163 @@
+"""Milestone + 7 issues for stylized-character-assets."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+gh = Github(token)
+repo = gh.get_repo(full)
+username = gh.get_user().login
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+existing_titles = {i.title.lower() for i in retry(repo.get_issues, state="open")}
+
+milestone = retry(repo.create_milestone,
+    title="Stylized character assets — one committed cartoon style",
+    description=("Quaternius CC0 modular character meshes through the existing socket/"
+                 "size/pack systems, banded cel shader + mesh outlines, flat texture "
+                 "faces, unified rollout across NPCs/creator/avatar. PREMISE NOTE: the "
+                 "engine is RAYLIB (not Godot as the originating brief assumed) — see "
+                 ".claude/plans/stylized-character-assets.md and .claude/skills/"
+                 "stylized-characters/SKILL.md (READ FIRST). Branch "
+                 "feature/stylized-characters (scaffolded, off dev)."))
+print(f"Milestone #{milestone.number}")
+
+SHARED = ("READ .claude/skills/stylized-characters/SKILL.md FIRST — engine correction "
+          "(raylib, NOT Godot), Tier A/B animation policy, socket/contract rules, "
+          "provenance rules. Un-skip the matching stub in tests/test_stylized_parts.cpp "
+          "in the same commit. Style commitment beats fidelity, always.")
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`feature/stylized-characters` (one atomic commit per issue, base dev; scaffold + skill already on the branch)
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    dict(title="chore(assets): fetch Quaternius modular pack, pinned + provenance",
+         what=("Add the Quaternius Ultimate Modular Characters pack (CC0) to tools/fetch_assets.sh "
+               "with a PINNED immutable archive URL + sha256 (the KayKit pattern; TODO marker in "
+               "place); unzip to assets/models/characters_modular/. If unpinnable/unfetchable, fall "
+               "back to the KayKit character packs ALREADY on disk and note the substitution. Append "
+               "pack name/version/license to assets/LICENSES.md; write the import checklist "
+               "(scale/materials/rest-pose verification steps) to docs/adding_character_packs.md."),
+         where="tools/fetch_assets.sh, assets/LICENSES.md, new docs/adding_character_packs.md",
+         verify="Fresh `bash tools/fetch_assets.sh` fetches + verifies; models load via a LoadModel smoke; provenance recorded.",
+         constraints=SHARED + " CC0 only for assets; Mixamo (free-not-CC0) is NOT fetched here.",
+         economy="Extend the existing script pattern; no new tooling.",
+         concept="reproducible asset provenance with pinned checksummed archives"),
+    dict(title="feat(render): banded cel shader composed with fog + mesh outlines",
+         what=("One character shader: banded (2-3 step) diffuse composed WITH the existing fog "
+               "stage (same uniforms), loaded via LoadShaderFromMemory (kFogVertexShader pattern; "
+               "TODO marker in Assets.cpp); routed onto EVERY character material — part meshes, "
+               "rigged fallback models, and the primitive batch during character passes; mesh "
+               "inverted-hull outlines (the #103 technique, model version). Testbed: apply to the "
+               "EXISTING rigged KayKit models first and screenshot before any modular work."),
+         where="src/app/Assets.cpp (shader strings + routing), src/app/RaylibRenderer.cpp (mesh outline pass)",
+         verify=("Screenshots: rigged model with visible lighting bands + outline; day/night fog still "
+                 "applies to characters (hour 12 vs 20 shots). No character draws with the default "
+                 "lit material (routing assert)."),
+         constraints=SHARED + " NO third-party shader code (the Godot picks don't apply) — write the GLSL here.",
+         economy="One shader program for all characters; no per-character variants (brief's own rule).",
+         concept="toon lighting bands composed with fog in one GLSL pass"),
+    dict(title="feat(parts): quaternius mesh part family through the pack seam",
+         what=("PartDef.meshName is scaffolded; add the mesh branch atop drawPartRecipe (draw the "
+               "loaded mesh at the socket, contract-scaled from MEASURED bounds; TODO marker in "
+               "place) and the quaternius catalog rows (bodies/heads/hair from the pack's modular "
+               "pieces, styleTag 'quaternius', measured localSize, authored sockets). Switch the "
+               "DEFAULT pool (randomizeLook, lookForPersona fallback, creator picker) to the new "
+               "family; core parts stay loadable so stored looks keep rendering."),
+         where="src/core/CharacterParts.{hpp,cpp}, src/app/Assets.cpp (part mesh loading), src/app/RaylibRenderer.cpp; un-skip 3 stubs in tests/test_stylized_parts.cpp",
+         verify=("Combo test absorbs the family; default-pool + core-back-compat + proportion-window "
+                 "stubs green (window changes get logged reasoning); screenshot of an assembled "
+                 "quaternius character at contract height beside a core one."),
+         constraints=(SHARED + " Proportions that fight the 1.8u contract → adjust size specs "
+                      "deliberately with logged old→new values; NEVER hand-scale meshes. Pieces that "
+                      "don't map onto sockets: ship what maps, list exceptions in the report."),
+         economy="The #101 seam does the work: rows + one mesh dispatch branch; no new assembly logic.",
+         concept="mesh-backed parts through a primitive-recipe seam"),
+    dict(title="feat(faces): flat texture faces + creator picks + mood variants",
+         what=("Faces as head-ORIENTED textured quads at the face socket (not camera billboards) "
+               "for quaternius heads; FaceTexture grows a stylized set (>=8 faces x mood variants "
+               "— happy/angry/sad/embarrassed/surprised); creator Eyes/Mouth picks become face "
+               "picks for this family; the floating emote billboard RETIRES for this family (mood "
+               "= face variant) — session-7 finding #1 fixed as a side effect."),
+         where="src/app/FaceTexture.{hpp,cpp} (marker in place), src/app/RaylibRenderer.cpp, src/app/Menu.cpp (picker rows for the family); un-skip the face stub",
+         verify=("Face-set stub green; screenshots: same character cycling 3 faces; an angry NPC shows "
+                 "the angry FACE with no floating billboard; core-family NPCs unchanged."),
+         constraints=SHARED + " No 3D facial geometry, no realistic eyes — flat and stylized by design.",
+         economy="Extend the existing procedural face generator; no image assets needed.",
+         concept="decal faces vs geometric faces (the Animal Crossing approach)"),
+    dict(title="feat(characters): unified rollout — NPCs, creator, avatar together",
+         what=("All three consumers on the new family in one pass: the ten persona looks re-authored "
+               "to quaternius equivalents (distinct, in-character, roster-test enforced); creator "
+               "defaults + avatar flows verified on the new family; old core looks demote gracefully "
+               "(load, render, never default). The old assets remain behind their pack tag only."),
+         where="personas/*.persona, tests/test_persona_roster.cpp expectations, spot-checks in main.cpp defaults",
+         verify=("Roster test green with quaternius looks; a stored core-look character still renders; "
+                 "screenshot: plaza crowd fully on the new style."),
+         constraints=SHARED + " All three consumers switch TOGETHER or the mismatch just moves around (brief).",
+         economy="Mostly persona data lines + test expectations; code changes only where defaults live.",
+         concept="default migration with legacy loadability"),
+    dict(title="feat(anim): Tier-B rigged locomotion with bone-attached parts (timeboxed)",
+         what=("AFTER Tier A is green: locomotion from the pack's rigged base (idle/walk/run via "
+               "UpdateModelAnimation, the KayKit path) with head/hair parts attached by sampling the "
+               "animated head-bone pose per frame. Weapon states keep deriving from the single-source "
+               "aim values. If bone attachment doesn't land cleanly in the timebox, Tier A (procedural "
+               "bob) stands and the exception is listed — the game must not regress."),
+         where="src/app/RaylibRenderer.cpp (bone sampling + attachment), src/app/Assets.cpp (clips)",
+         verify=("Walk cycle visible in a two-frame screenshot pair; aim tests stay green (the moonwalk "
+                 "guard); explicit report section either way."),
+         constraints=(SHARED + " Timeboxed — a clean Tier A beats a janky Tier B. Mixamo only if the "
+                      "pack lacks essential clips, with its own LICENSES.md entry."),
+         economy="Reuse the existing UpdateModelAnimation path; no animation framework.",
+         concept="bone-socket attachment in an immediate-mode renderer"),
+    dict(title="chore(qa): three-consumer style gate — consistency + no-uncanny",
+         what=("visual-qa subagent: side-by-side screenshot of a created character, a roaming NPC, "
+               "and the player avatar (avatar arm/creator preview surfaces) with new assets + cel "
+               "shader + outlines, judged for (a) style consistency across all three and (b) nothing "
+               "uncanny (no realism islands on stylized bodies). Report + screenshot paths into "
+               "OVERNIGHT_REPORT.md; gate failures on THIS milestone's acceptance get fixed."),
+         where="visual-qa run + docs/qa/screenshots/stylized/ (gitignored) + OVERNIGHT_REPORT.md (local)",
+         verify="Verdicts recorded per criterion; screenshots referenced; no unresolved gate failure.",
+         constraints=SHARED,
+         economy="No code beyond what a failed gate requires.",
+         concept="style-consistency review criteria"),
+]
+
+created = []
+for spec in SPECS:
+    if spec["title"].lower() in existing_titles:
+        print(f"  Skipping (exists): {spec['title']}")
+        continue
+    body = TEMPLATE.format(**{k: spec[k] for k in
+                              ("what", "where", "verify", "constraints", "economy", "concept")})
+    issue = retry(repo.create_issue, title=spec["title"], body=body,
+                  labels=["ready-for-ai"], assignees=[username], milestone=milestone)
+    created.append(issue.number)
+    print(f"  #{issue.number}: {spec['title']}")
+print("ISSUES:", created)

@@ -1,0 +1,43 @@
+"""Hypothetical trading transaction-cost estimate (the dashboard's cost panel b).
+
+This is a *teaching* estimate, not a calibrated execution model: given the
+config's per-asset half-spread + commission assumptions and a turnover, it
+reports the round-trip cost in basis points and annualised drag if the lead-lag
+signal were traded. Useful for the "is this alpha even tradeable?" gut-check.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from oil_alpha.config import COST_MODEL, AssetCost
+
+
+@dataclass
+class CostEstimate:
+    asset_key: str
+    round_trip_bp: float
+    turnover_per_year: float
+    annual_drag_bp: float
+
+    @property
+    def annual_drag_pct(self) -> float:
+        return self.annual_drag_bp / 100.0
+
+
+def transaction_cost_bp(asset_key: str, turnover_per_year: float = 252.0) -> CostEstimate:
+    """Round-trip cost (bp) and annualised drag for trading ``asset_key``.
+
+    ``annual_drag_bp = round_trip_bp * (turnover_per_year / 2)`` -- one round trip
+    is two one-way trades, so ``turnover/2`` round trips per year.
+    """
+    model: AssetCost = COST_MODEL[asset_key]
+    rt = model.round_trip_bp
+    drag = rt * (turnover_per_year / 2.0)
+    return CostEstimate(asset_key, rt, turnover_per_year, drag)
+
+
+def estimate_for_assets(
+    asset_keys: list[str], turnover_per_year: float = 252.0
+) -> list[CostEstimate]:
+    return [transaction_cost_bp(k, turnover_per_year) for k in asset_keys if k in COST_MODEL]

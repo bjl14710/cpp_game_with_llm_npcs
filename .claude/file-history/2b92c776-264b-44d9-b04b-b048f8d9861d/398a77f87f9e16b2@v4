@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0008 — Multiplayer Networking</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:840px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1.2rem; }
+  .term { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .term h3 { color:var(--accent2); font-size:1.05rem; margin-bottom:.4rem; }
+  .term p { margin-bottom:.4rem; }
+  .lbl { color:var(--muted); font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .3em; font-size:.88em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0008 · Multiplayer networking · covers lessons 0008-0013</div>
+<h1>Multiplayer Networking — Terms</h1>
+
+<div class="term"><h3>Framing</h3>
+<p>Rebuilding message boundaries on top of a byte stream that has none. <span class="lbl">In this repo:</span> <code>FrameAssembler</code> (length prefix, multiplayer) and <code>StreamAssembler</code> (newlines, Ollama NDJSON).</p>
+<p><span class="lbl">Contrast:</span> a <em>datagram</em> protocol (UDP) has built-in message boundaries but no delivery/order guarantees.</p></div>
+
+<div class="term"><h3>Length prefix</h3>
+<p>A fixed-size integer sent before each payload declaring its size — here 4 bytes, big-endian, capped at <code>kMaxFrameBytes</code> (1 MiB). A corrupt prefix is unrecoverable: the only safe response is dropping the connection.</p>
+<p><span class="lbl">Usage:</span> "The snapshot is one length-prefixed JSON frame."</p></div>
+
+<div class="term"><h3>Network byte order (big-endian)</h3>
+<p>The convention that multi-byte integers on the wire send their most significant byte first. x86/ARM CPUs are little-endian in memory, so conversion must be explicit (shifts, or <code>htonl</code>).</p></div>
+
+<div class="term"><h3>Server-authoritative</h3>
+<p>Architecture where one node (our host) owns the true game state and clients render replicas of it. Prevents divergence and cheating by construction; costs one round trip of latency on interactions.</p>
+<p><span class="lbl">Contrast:</span> <em>lockstep</em> (all peers simulate identically from shared inputs) and <em>client-authoritative</em> (each client owns its own state — trivially cheatable).</p></div>
+
+<div class="term"><h3>Replica / replication</h3>
+<p>A client's read-only copy of authoritative state, refreshed by <code>WorldSnapshot</code> broadcasts (~12 Hz here). Joined clients skip <code>npc.update()</code> entirely — a replica that simulates drifts.</p></div>
+
+<div class="term"><h3>Snapshot broadcast</h3>
+<p>Periodically sending the full (or delta-compressed) world state to every client. Full snapshots are simpler and fine at this scale: 4 players + ~43 NPC poses is a few KB at 12 Hz.</p></div>
+
+<div class="term"><h3>Handshake</h3>
+<p>The first exchange on a new connection that establishes identity and compatibility before any real traffic: <code>JoinRequest {version, name, code}</code> → <code>Welcome {accepted, playerId | reason}</code>. Rejects version mismatches, wrong join codes, and full sessions loudly.</p></div>
+
+<div class="term"><h3>Protocol version</h3>
+<p>An integer (<code>kNetProtocolVersion</code>) bumped whenever the wire format changes incompatibly. Compared in the handshake so mismatched builds get a clear refusal instead of a silent desync.</p></div>
+
+<div class="term"><h3>Thread contract (publish/drain)</h3>
+<p>This codebase's rule: network threads touch only sockets and internal queues; game state crosses the boundary as <em>values</em> (<code>publishNpcPoses</code>) in and drained events (<code>drainChatEvents</code>, <code>poll()</code>) out, pumped by the main loop. Keeps <code>World</code>/<code>LlmClient</code> single-threaded.</p>
+<p><span class="lbl">Contrast:</span> shared-state locking, where every system that touches NPCs must know about mutexes.</p></div>
+
+<div class="term"><h3>Request-id routing</h3>
+<p>Correlating streamed results back to their requester via the unique id <code>LlmClient::submit()</code> returns: <code>inflight_[id] = {playerId, npcIndex}</code>. The consume-or-pass drain (<code>routeDelta</code> returns false → it's the host's own) extends the queue to two consumers without touching solo code.</p></div>
+
+<div class="term"><h3>Lost wakeup</h3>
+<p>A condition-variable deadlock where the notify lands between the waiter's predicate check (false) and its block — hitting no waiter, gone forever. Prevented by writing predicate state under the waiter's mutex, <em>even if the write is atomic</em>. Found and fixed in <code>LlmClient::~LlmClient</code> tonight.</p></div>
+
+<div class="term"><h3>shutdown-join-close</h3>
+<p>The safe teardown order for a socket with a blocked reader thread: <code>shutdown()</code> unblocks the <code>recv()</code>, <code>join()</code> proves the thread is done with the fd, then <code>close()</code>. Closing first risks the kernel recycling the fd under a live thread.</p></div>
+
+<div class="term"><h3>Predicate polling (vs sleep-and-hope)</h3>
+<p>Async test waiting done right: re-check a condition every few ms under a deadline, pumping the event loop between checks (<code>eventually()</code> in the loopback tests). Fast when things work, honest when they hang.</p></div>
+
+<div class="term"><h3>NAT (Network Address Translation)</h3>
+<p>The router rewriting private↔public addresses, keyed by outbound connections. Explains why browsing works everywhere but hosting needs a port forward or an overlay VPN (Tailscale/ZeroTier).</p></div>
+
+<div class="term"><h3>Loopback (127.0.0.1)</h3>
+<p>The virtual network interface that never leaves the machine — real sockets, real threads, zero external dependencies. Where the whole multiplayer stack is integration-tested (with port 0 = "OS picks a free port").</p></div>
+</div></body></html>

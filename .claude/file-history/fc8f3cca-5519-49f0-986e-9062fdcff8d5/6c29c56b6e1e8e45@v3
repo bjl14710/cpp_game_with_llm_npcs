@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.env
+data_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+_build/
+_skbuild/
+src/*.so
+src/**/*.so
+*.so

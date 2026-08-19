@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drill 0002 — Connections &amp; Documentation</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0c1320;--surf:#18223a;--surf2:#22304e;--surf3:#2c3e62;
+  --accent:#60a5fa;--gold:#fcd34d;--green:#34d399;--red:#f87171;--orange:#fb923c;
+  --text:#dde5f5;--dim:#5a6a8a;--border:#243052;--code:#080e1c;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);
+     font-size:15px;line-height:1.68;min-height:100vh}
+.screen{display:none;max-width:800px;margin:0 auto;padding:2rem 1.5rem 4rem}
+.screen.active{display:block}
+
+/* ── start ──────────────────────────────────────────────────── */
+.hd{text-align:center;margin-bottom:2.2rem}
+.lbl{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.15em;
+     text-transform:uppercase;margin-bottom:.4rem}
+.ttl{font-size:2rem;color:#fff;margin-bottom:.4rem}
+.sub{color:var(--accent);font-size:.95rem}
+
+.chips{display:flex;flex-wrap:wrap;gap:.55rem;justify-content:center;margin:1.4rem 0}
+.chip{font-family:var(--mono);font-size:.8rem;padding:.35rem .85rem;
+      border:1px solid var(--border);border-radius:20px;cursor:pointer;
+      background:var(--surf);color:var(--dim);user-select:none;transition:all .15s}
+.chip.on{border-color:var(--accent);color:var(--accent);background:rgba(96,165,250,.1)}
+.chip.all{border-color:var(--gold);color:var(--gold);background:rgba(252,211,77,.07)}
+.chip.all.on{border-color:var(--gold);color:var(--gold)}
+
+.smeta{text-align:center;color:var(--dim);font-size:.85rem;margin-bottom:.9rem}
+.shuf{display:flex;align-items:center;justify-content:center;gap:.65rem;
+      margin-bottom:1.4rem;font-size:.86rem;color:var(--dim)}
+.tog{position:relative;display:inline-block;width:36px;height:20px}
+.tog input{opacity:0;width:0;height:0}
+.sl{position:absolute;inset:0;background:var(--surf2);border-radius:20px;cursor:pointer;transition:background .2s}
+.sl:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;
+           background:#fff;border-radius:50%;transition:transform .2s}
+input:checked+.sl{background:var(--accent)}
+input:checked+.sl:before{transform:translateX(16px)}
+
+/* ── question ───────────────────────────────────────────────── */
+.qhdr{display:flex;align-items:center;gap:.8rem;margin-bottom:1.5rem;flex-wrap:wrap}
+.qnum{font-family:var(--mono);font-size:.78rem;color:var(--dim)}
+.pbar{flex:1;height:5px;background:var(--surf2);border-radius:3px;min-width:80px}
+.pfill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+.ctag{font-family:var(--mono);font-size:.7rem;padding:.18rem .55rem;
+      border:1px solid var(--border);border-radius:12px;color:var(--dim)}
+.ttag{font-family:var(--mono);font-size:.7rem;padding:.18rem .55rem;border-radius:12px}
+.ttag.mc{background:rgba(96,165,250,.12);color:var(--accent)}
+.ttag.wr{background:rgba(251,146,60,.12);color:var(--orange)}
+
+.qtxt{font-size:1.05rem;font-weight:600;color:#fff;margin-bottom:1.1rem;line-height:1.5}
+pre.snip{background:var(--code);border:1px solid var(--border);border-radius:6px;
+         padding:.9rem 1.1rem;overflow-x:auto;font-family:var(--mono);font-size:.82rem;
+         line-height:1.6;margin-bottom:1.1rem;display:none}
+.kw{color:#c792ea}.str{color:#c3e88d}.cm{color:#405060;font-style:italic}
+.fn{color:#82aaff}.num{color:#f78c6c}.cls{color:#ffcb6b}.at{color:#a5d6ff}
+
+/* mc */
+.opts{list-style:none;margin:0;padding:0}
+.opts li{background:var(--surf);border:1px solid var(--border);border-radius:6px;
+         padding:.55rem 1rem;margin-bottom:.45rem;cursor:pointer;user-select:none;
+         transition:border-color .15s,background .15s}
+.opts li:hover:not(.lk){border-color:var(--accent);background:rgba(96,165,250,.07)}
+.opts li:focus{outline:2px solid var(--accent);outline-offset:2px}
+.opts li.ok{border-color:var(--green);background:rgba(52,211,153,.09);color:var(--green)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.09);color:var(--red)}
+.opts li.lk{cursor:default}
+.mfb{margin-top:.65rem;font-size:.87rem;padding:.45rem .8rem;border-radius:4px;display:none}
+.mfb.ok{background:rgba(52,211,153,.1);color:var(--green);border:1px solid rgba(52,211,153,.28)}
+.mfb.no{background:rgba(248,113,113,.09);color:var(--red);border:1px solid rgba(248,113,113,.28)}
+
+/* written */
+textarea{width:100%;min-height:108px;background:var(--surf);border:1px solid var(--border);
+         border-radius:6px;padding:.7rem .9rem;color:var(--text);font-family:inherit;
+         font-size:.92rem;resize:vertical;line-height:1.55}
+textarea:focus{outline:2px solid var(--accent)}
+.wacts{display:flex;gap:.55rem;margin-top:.65rem;flex-wrap:wrap}
+.kwres{margin-top:.8rem;display:none}
+.tally{font-weight:700;margin-bottom:.4rem;font-size:.9rem}
+.kwchips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.55rem}
+.kc{font-family:var(--mono);font-size:.75rem;padding:.18rem .5rem;border-radius:12px}
+.kc.h{background:rgba(52,211,153,.12);color:var(--green);border:1px solid rgba(52,211,153,.28)}
+.kc.m{background:rgba(248,113,113,.1);color:var(--red);border:1px solid rgba(248,113,113,.28)}
+.knote{color:var(--dim);font-size:.78rem}
+.modans{display:none;margin-top:.8rem;background:var(--surf);border:1px solid var(--border);
+        border-radius:6px;padding:.8rem 1rem;font-size:.9rem;line-height:1.65}
+.modlbl{font-family:var(--mono);font-size:.7rem;color:var(--dim);text-transform:uppercase;
+        letter-spacing:.08em;margin-bottom:.35rem}
+.sr{display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
+    font-size:.85rem;color:var(--dim);margin-top:.65rem}
+
+/* nav + buttons */
+.nav{display:flex;gap:.55rem;margin-top:1.5rem;flex-wrap:wrap;align-items:center}
+.spc{flex:1}
+.btn{font-family:var(--mono);font-size:.83rem;padding:.45rem 1rem;border:1px solid transparent;
+     border-radius:5px;cursor:pointer;transition:opacity .15s;user-select:none}
+.btn:focus{outline:2px solid var(--accent);outline-offset:2px}
+.pri{background:var(--accent);color:#000}.pri:hover{opacity:.82}
+.sec{background:var(--surf2);color:var(--text);border-color:var(--border)}
+.sec:hover{border-color:var(--accent)}
+.grn{background:var(--green);color:#000}
+.gld{background:var(--gold);color:#000}
+.sm{padding:.32rem .7rem;font-size:.77rem}
+.red{background:var(--red);color:#fff}
+
+/* results */
+.rhdr{text-align:center;margin-bottom:1.8rem}
+.sbig{font-size:3.4rem;font-family:var(--mono);color:var(--accent)}
+.slbl{color:var(--dim);font-size:.88rem;margin-top:.25rem}
+.rcols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.4rem 0}
+@media(max-width:520px){.rcols{grid-template-columns:1fr}}
+.rcard{background:var(--surf);border:1px solid var(--border);border-radius:7px;padding:.9rem 1.1rem}
+.rcard h3{font-family:var(--mono);font-size:.78rem;color:var(--dim);
+          text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem}
+.miss{background:var(--surf2);border-radius:4px;padding:.38rem .65rem;
+      margin-bottom:.38rem;font-size:.86rem}
+.mcorr{color:var(--green);font-family:var(--mono);font-size:.8rem;display:block;margin-top:.2rem}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ START ═══════════ -->
+<div id="S" class="screen active">
+<div class="hd">
+  <div class="lbl">Drill 0002 · Active Recall</div>
+  <div class="ttl">Connections &amp; Documentation</div>
+  <div class="sub">20 questions — ports, wires, custom blocks, hardware_docs</div>
+</div>
+<p style="text-align:center;color:var(--dim);font-size:.87rem;margin-bottom:1rem">Pick channels to drill, or keep All.</p>
+<div class="chips" id="chips">
+  <div class="chip all on" data-ch="all">⚡ All</div>
+  <div class="chip on" data-ch="ports">Ports &amp; positioning</div>
+  <div class="chip on" data-ch="wires">Wires &amp; connect_ports</div>
+  <div class="chip on" data-ch="serial">Save / load / port_map</div>
+  <div class="chip on" data-ch="docs">hardware_docs</div>
+  <div class="chip on" data-ch="custom">Custom block JSON</div>
+</div>
+<p class="smeta" id="smeta">20 questions selected</p>
+<div class="shuf">
+  Shuffle
+  <label class="tog"><input type="checkbox" id="sh" checked><span class="sl"></span></label>
+</div>
+<div style="text-align:center">
+  <button class="btn pri" onclick="go()" style="font-size:1rem;padding:.65rem 2rem">Begin →</button>
+</div>
+</div>
+
+<!-- ═══════════ QUESTION ═══════════ -->
+<div id="Q" class="screen">
+<div class="qhdr">
+  <span class="qnum" id="qn">Q 1 / 20</span>
+  <div class="pbar"><div class="pfill" id="pf" style="width:0%"></div></div>
+  <span class="ctag" id="ct"></span>
+  <span class="ttag mc" id="tt">MC</span>
+</div>
+<div class="qtxt" id="qt"></div>
+<pre class="snip" id="qs"></pre>
+
+<div id="MA" style="display:none">
+  <ul class="opts" id="mo"></ul>
+  <div class="mfb" id="mf"></div>
+</div>
+
+<div id="WA" style="display:none">
+  <textarea id="wa" placeholder="Type your answer here…"></textarea>
+  <div class="wacts">
+    <button class="btn sec sm" onclick="chkW()">Check keywords</button>
+    <button class="btn sec sm" onclick="showM()">Show model answer</button>
+  </div>
+  <div class="kwres" id="kr">
+    <div class="tally" id="kt"></div>
+    <div class="kwchips" id="kc"></div>
+    <div class="knote">⚠ Keyword check is fuzzy — judge honestly against the model answer.</div>
+  </div>
+  <div class="modans" id="md"><div class="modlbl">Model answer</div><div id="mt"></div></div>
+  <div class="sr" id="sr">
+    Rate yourself:
+    <button class="btn grn sm" onclick="rate('k')">✓ Knew it</button>
+    <button class="btn red sm"  onclick="rate('r')">↺ Needs review</button>
+  </div>
+</div>
+
+<div class="nav">
+  <button class="btn sec sm" id="bp" onclick="prev()">← Prev</button>
+  <div class="spc"></div>
+  <button class="btn pri sm" id="bn" onclick="next()">Next →</button>
+  <button class="btn gld sm" id="bf" style="display:none" onclick="results()">Results</button>
+</div>
+</div>
+
+<!-- ═══════════ RESULTS ═══════════ -->
+<div id="R" class="screen">
+<div class="rhdr">
+  <div class="sbig" id="rb">—</div>
+  <div class="slbl" id="rl"></div>
+</div>
+<div class="rcols">
+  <div class="rcard"><h3>MC misses</h3><div id="rm"><em style="color:var(--dim);font-size:.86rem">None!</em></div></div>
+  <div class="rcard"><h3>Written — needs review</h3><div id="rw"><em style="color:var(--dim);font-size:.86rem">None flagged.</em></div></div>
+</div>
+<div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:.8rem">
+  <button class="btn sec" onclick="rev()">Review missed only</button>
+  <button class="btn pri" onclick="location.reload()">Restart</button>
+</div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// QUESTION BANK  (20 questions, ~13 written / 7 MC)
+// ══════════════════════════════════════════════════════════════
+const BANK = [
+
+// ─── CHANNEL: ports ───────────────────────────────────────────
+{id:'p1',ch:'ports',type:'w',
+ q:'What are the four main instance attributes stored on a ConnectionPort? For each, give its Python type and what it means.',
+ c:[{l:'port_id (str)',t:['port_id','str']},
+    {l:'label (str)',t:['label']},
+    {l:'parent_block (BaseBlock)',t:['parent_block','baseblock']},
+    {l:'connected_to (Optional[ConnectionPort])',t:['connected_to','none','optional']}],
+ m:`port_id (str) — unique name within the block, e.g. "CH1_IN"; used as the key in port_map during save/load.
+label (str) — the short string painted near the circle on the canvas.
+parent_block (BaseBlock) — the block this port belongs to; used in connect_ports() to reject self-loops.
+connected_to (Optional[ConnectionPort]) — None when free; holds a reference to the peer port when connected. connect_to() sets both sides simultaneously.`
+},
+
+{id:'p2',ch:'ports',type:'mc',
+ q:'add_port("VCC","VCC",0.5,0.0) is called on a block with BLOCK_WIDTH=280 and BLOCK_HEIGHT=240. Where does the port appear in local block coordinates?',
+ snip:`<span class="cm"># base_block.py:189</span>
+<span class="kw">def</span> <span class="fn">add_port</span>(self, port_id, label, x_frac, y_frac):
+    port.<span class="fn">setPos</span>(self.BLOCK_WIDTH * x_frac,
+                self.BLOCK_HEIGHT * y_frac)`,
+ opts:[
+  {t:'x=140, y=0 — horizontal midpoint, top edge',c:true, w:'Correct. 280×0.5=140, 240×0.0=0. Top-centre is the conventional power-pin position.'},
+  {t:'x=0, y=120 — left edge, vertical midpoint',c:false,w:'x_frac=0.5 maps to 140, not 0. x=0 would require x_frac=0.0.'},
+  {t:'x=140, y=240 — horizontal midpoint, bottom edge',c:false,w:'y_frac=0.0 maps to 0 (top), not 240 (bottom).'},
+  {t:'x=280, y=120 — right edge, vertical midpoint',c:false,w:'x_frac=0.5 → 140, not 280. 280 would require x_frac=1.0.'},
+ ]
+},
+
+{id:'p3',ch:'ports',type:'w',
+ q:'Why does ConnectionPort.__init__ call super().__init__(-r, -r, 2*r, 2*r, parent) with negative x and y? What does that mean visually?',
+ c:[{l:'centre the circle on setPos point',t:['center','centre','centred','centered','origin','middle']},
+    {l:'-r,-r shifts bounding rect so pos is centre',t:['-r','-6','negative','shift','offset']},
+    {l:'QGraphicsEllipseItem rect is relative to local origin',t:['local','relative','bounding']}],
+ m:`QGraphicsEllipseItem takes a bounding rect in the item's own local coordinates, with (0,0) at the top-left. By using (-r, -r, 2r, 2r) the circle's bounding rect is centred on the item's local origin. When setPos(x, y) is called, that origin lands exactly at (x,y) in the parent's coordinate system. Without the offset, the top-left corner of the circle (not its centre) would sit at the port position — the dot would appear shifted half a radius down and right of the block edge.`
+},
+
+{id:'p4',ch:'ports',type:'w',
+ q:'The Oscilloscope block has BLOCK_WIDTH=300 and BLOCK_HEIGHT=220. It adds CH1_IN at x_frac=0.0, y_frac=0.15. What pixel position is that, and which edge of the block is it on?',
+ snip:`<span class="cm"># oscilloscope_block.py:41</span>
+<span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">1</span>, <span class="num">5</span>):
+    self.<span class="fn">add_port</span>(f<span class="str">"CH{i}_IN"</span>, f<span class="str">"CH{i}"</span>,
+                  <span class="num">0.0</span>, <span class="num">0.15</span> + <span class="num">0.2</span> * (i - <span class="num">1</span>))`,
+ c:[{l:'x=0 (left edge)',t:['x=0','left','0.0 ×','0 px']},
+    {l:'y=33 (0.15 × 220)',t:['y=33','33','0.15 × 220','0.15×220']},
+    {l:'left edge of block',t:['left edge','left side']}],
+ m:`x = 300 × 0.0 = 0 px → the left edge of the block.
+y = 220 × 0.15 = 33 px → 33 pixels from the top.
+So CH1_IN sits at the left edge, about 15% down from the top. CH2_IN would be at y = 220 × 0.35 = 77 px, and so on (each 0.2 × 220 = 44 px lower).`
+},
+
+// ─── CHANNEL: wires ───────────────────────────────────────────
+{id:'w1',ch:'wires',type:'mc',
+ q:'Why does WireItem call self.setZValue(-1) in __init__?',
+ snip:`<span class="cm"># canvas.py:57</span>
+self.<span class="fn">setZValue</span>(-<span class="num">1</span>)   <span class="cm"># render BELOW blocks</span>`,
+ opts:[
+  {t:'So the wire renders behind all blocks (ZValue 0), keeping port circles visible on top.',c:true, w:'Correct. Lower ZValue → painted first → underneath. Blocks default to 0, ports inherit the block\'s layer. Wires at -1 are always below both.'},
+  {t:'So mouse events on the wire are suppressed, preventing accidental wire selection.',c:false,w:'ZValue controls render order, not hit-testing. Mouse-event suppression is done via setAcceptedMouseButtons/setFlag instead.'},
+  {t:'So the wire appears dimmer than blocks, giving a visual hierarchy hint to users.',c:false,w:'ZValue is a depth/order property; it has no effect on colour, opacity, or brightness.'},
+  {t:'So the wire is skipped during scene.items() iteration in _port_at().',c:false,w:'_port_at() skips the temp wire by identity check (item is self._temp_wire), not by ZValue.'},
+ ]
+},
+
+{id:'w2',ch:'wires',type:'w',
+ q:'connect_ports(src, dst) has two guards before it creates a WireItem. What are they, and what happens when each fires?',
+ snip:`<span class="cm"># canvas.py:185</span>
+<span class="kw">def</span> <span class="fn">connect_ports</span>(self, src, dst):
+    <span class="kw">if</span> src.parent_block <span class="kw">is</span> dst.parent_block:
+        <span class="kw">return None</span>
+    <span class="kw">if</span> src.connected_to <span class="kw">or</span> dst.connected_to:
+        <span class="kw">return None</span>`,
+ c:[{l:'self-loop guard: same parent_block → None',t:['same block','self-loop','parent_block','same parent']},
+    {l:'already-connected guard: either port busy → None',t:['already','connected_to','busy','occupied']},
+    {l:'both return None silently',t:['return none','none','silent','no exception','no wire']}],
+ m:`Guard 1 — self-loop: if src.parent_block is dst.parent_block, the user tried to wire a block to itself. Returns None immediately; no wire or signal is emitted.
+Guard 2 — overwrite protection: if either port already has a connected_to peer, wiring it again would orphan the existing connection without removing the old wire. Returns None; the existing connection is preserved.
+Both failures are silent (no exception), so the UI simply stays unchanged.`
+},
+
+{id:'w3',ch:'wires',type:'w',
+ q:'Describe exactly what _remove_wire(wire) does, in order. What state does it clean up and why does the order matter?',
+ snip:`<span class="cm"># canvas.py:203</span>
+<span class="kw">def</span> <span class="fn">_remove_wire</span>(self, wire):
+    wire.src_port.<span class="fn">disconnect</span>()
+    wire.dst_port.<span class="fn">disconnect</span>()
+    self._wires.<span class="fn">pop</span>(wire.wire_id, <span class="kw">None</span>)
+    self.<span class="fn">removeItem</span>(wire)
+    self.wire_removed.<span class="fn">emit</span>(wire.wire_id)`,
+ c:[{l:'port.disconnect() nulls both sides connected_to',t:['disconnect','null','none','connected_to','both side']},
+    {l:'_wires dict is popped',t:['_wires','pop','dict','registry']},
+    {l:'removeItem removes from scene',t:['removeitem','scene','remove']},
+    {l:'wire_removed signal emitted',t:['signal','emit','wire_removed']}],
+ m:`1. src_port.disconnect() — sets src.connected_to = None AND clears the peer's connected_to. Doing this before removeItem means the ports update their colour (back to blue) while the scene is still valid.
+2. dst_port.disconnect() — symmetric; clears the other side. (In practice src.disconnect() already nulls both, but calling both is defensive.)
+3. _wires.pop(wire.wire_id, None) — removes the WireItem from the scene's bookkeeping dict so it doesn't appear in to_dict() or future lookups.
+4. removeItem(wire) — deletes the C++ QGraphicsLineItem from the scene.
+5. wire_removed.emit — notifies listeners (e.g. status bar) that a wire is gone.
+Order matters: if removeItem ran first, the C++ object would be invalid and calling disconnect() or accessing port references through the wire would crash.`
+},
+
+{id:'w4',ch:'wires',type:'mc',
+ q:'update_position() is called on every WireItem during mouseMoveEvent. What does it do and when is it needed?',
+ snip:`<span class="cm"># canvas.py:60</span>
+<span class="kw">def</span> <span class="fn">update_position</span>(self) -> None:
+    src_pos = self.src_port.<span class="fn">scenePos</span>()
+    dst_pos = self.dst_port.<span class="fn">scenePos</span>()
+    self.<span class="fn">setLine</span>(<span class="cls">QLineF</span>(src_pos, dst_pos))`,
+ opts:[
+  {t:'Redraws the wire by querying current world-space port positions, keeping it taut when a block is dragged.',c:true, w:'Correct. scenePos() returns the port\'s current world coordinates. When a block moves, its ports move with it; the wire must re-query those coords to stay anchored.'},
+  {t:'Animates the wire colour from gold to green to confirm a successful connection.',c:false,w:'update_position() only calls setLine(); it doesn\'t touch the pen or colour at all.'},
+  {t:'Recalculates the ZValue so the wire stays under any blocks that overlap it.',c:false,w:'ZValue is set once in __init__ and never changes. update_position() only updates the line endpoints.'},
+  {t:'Checks whether the two connected ports are still on the same block and deletes the wire if so.',c:false,w:'There\'s no validation in update_position(); it only reads scenePos() and calls setLine().'},
+ ]
+},
+
+{id:'w5',ch:'wires',type:'w',
+ q:'If you delete a WireItem from the scene (removeItem) WITHOUT calling port.disconnect() first, what breaks? Be specific.',
+ c:[{l:'connected_to still set — ghost state',t:['connected_to','ghost','still set','not null','not none']},
+    {l:'ports still green / show connected',t:['green','colour','color','_update_color','visual']},
+    {l:'connect_ports() will refuse future connections',t:['connect_ports','refuse','guard','already','overwrite']}],
+ m:`The two ports (src and dst) still hold references to each other via connected_to. This "ghost" state has three consequences:
+1. The port dots remain green (COLOR_CONNECTED) even though no wire is visible, confusing the user.
+2. connect_ports() guard 2 ("if src.connected_to or dst.connected_to: return None") fires — both ports appear "busy" so any future connection attempt to either port is silently rejected.
+3. to_dict() looks for wires via self._wires, so the wire won't be serialised — but the ports still think they're connected, creating an inconsistency between the layout file and runtime state.`
+},
+
+// ─── CHANNEL: serial ──────────────────────────────────────────
+{id:'s1',ch:'serial',type:'w',
+ q:'Walk through how from_dict() reconstructs wire connections. What is port_map, what is its key, and what happens if a block fails to load?',
+ snip:`<span class="cm"># canvas.py:333</span>
+<span class="kw">def</span> <span class="fn">from_dict</span>(self, data):
+    self.<span class="fn">clear</span>()
+    port_map = {}
+    <span class="kw">for</span> bdata <span class="kw">in</span> data[<span class="str">"blocks"</span>]:
+        block = self.<span class="fn">add_block</span>(bdata[<span class="str">"type"</span>], ...)
+        <span class="kw">if</span> block:
+            <span class="kw">for</span> port <span class="kw">in</span> block.ports:
+                port_map[(bdata[<span class="str">"id"</span>], port.port_id)] = port
+    <span class="kw">for</span> wdata <span class="kw">in</span> data[<span class="str">"wires"</span>]:
+        src = port_map.<span class="fn">get</span>((wdata[<span class="str">"src_block"</span>], wdata[<span class="str">"src_port"</span>]))
+        dst = port_map.<span class="fn">get</span>((wdata[<span class="str">"dst_block"</span>], wdata[<span class="str">"dst_port"</span>]))
+        <span class="kw">if</span> src <span class="kw">and</span> dst:
+            self.<span class="fn">connect_ports</span>(src, dst)`,
+ c:[{l:'port_map key is (block_id, port_id) tuple',t:['block_id','port_id','tuple','(','key']},
+    {l:'port_map maps to ConnectionPort objects',t:['connectionport','port object','port ref']},
+    {l:'failed block → ports absent from port_map → wire silently dropped',t:['absent','missing','silent','drop','skip']}],
+ m:`port_map is a dict keyed by (block_id, port_id) tuples — e.g. ("abc12345", "CH1_IN") → the live ConnectionPort object.
+It is built in the first loop: for every successfully loaded block, each of its ports is registered with the block's saved id as part of the key.
+If a block fails to load (add_block returns None — e.g. because device_type is not in BLOCK_REGISTRY), its ports are never added to port_map. In the wire loop, port_map.get(...) returns None for those keys, the "if src and dst" guard fails, and the wire is silently dropped — no error, no partial connection.`
+},
+
+{id:'s2',ch:'serial',type:'mc',
+ q:'to_dict() serialises wires as {"src_block": ..., "src_port": ..., "dst_block": ..., "dst_port": ...}. What value is stored in src_port?',
+ opts:[
+  {t:'The port_id string, e.g. "CH1_IN"',c:true, w:'Correct. wire.src_port.port_id is the string set in add_port(). This is the key used in port_map during from_dict().'},
+  {t:'The ConnectionPort Python object reference',c:false,w:'Python objects cannot be JSON-serialised. to_dict() serialises only the port_id string, not the object itself.'},
+  {t:'The integer index of the port in the block\'s _ports list',c:false,w:'Index order is fragile — it changes if _setup_ports() order changes. port_id is the stable identifier used instead.'},
+  {t:'The label string shown on the canvas, e.g. "CH1"',c:false,w:'label is for display only. port_id is the canonical identifier stored in the serialised wire.'},
+ ]
+},
+
+{id:'s3',ch:'serial',type:'w',
+ q:'A colleague loads a .sil layout and discovers that all wires connecting to a particular block vanished. Name two root causes that could produce this and explain the mechanism behind each.',
+ c:[{l:'device_type mismatch — block not in registry',t:['device_type','registry','mismatch','block_registry','function gen']},
+    {l:'port_id changed — port absent from port_map',t:['port_id','port_map','absent','missing','renamed']},
+    {l:'both cause port_map lookup to fail → wires silently dropped',t:['port_map','silent','drop','none','missing key']}],
+ m:`Cause 1 — device_type/registry mismatch: the block's device_type string doesn't match any key in BLOCK_REGISTRY (e.g. "Function Gen" vs "Function Generator"). add_block() returns None, so the block isn't created, its ports never enter port_map, and every wire referencing them is dropped.
+Cause 2 — port_id rename: a developer changed _setup_ports() so that a port's id string changed (e.g. "CH1_IN" → "CH1IN"). The saved layout still refers to the old id. port_map.get((block_id, "CH1_IN")) returns None; the wire is dropped silently.
+Both mechanisms share the same failure point: port_map.get() returns None, the "if src and dst:" guard fails, and connect_ports() is never called — no error, no wire.`
+},
+
+// ─── CHANNEL: docs ────────────────────────────────────────────
+{id:'d1',ch:'docs',type:'mc',
+ q:'What is the primary purpose of the hardware_docs/ folder in the Silmulator repo?',
+ opts:[
+  {t:'A human-readable reference store for vendor PDFs and command tables that ships with the app for offline use.',c:true, w:'Correct. Docs here are not auto-parsed at startup. They travel with the Docker image and .app bundle so engineers have references available without internet.'},
+  {t:'The folder is auto-parsed at startup and its contents are loaded into BLOCK_REGISTRY as device specs.',c:false,w:'custom_blocks/ JSON files are auto-loaded at startup. hardware_docs/ PDFs and markdown files are not parsed automatically.'},
+  {t:'It stores test fixtures and expected SCPI responses used by the pytest suite.',c:false,w:'Test fixtures live in tests/. hardware_docs/ is documentation for human engineers, not the test harness.'},
+  {t:'It is a staging area where new Python block classes are placed before being merged into silmulator/devices/.',c:false,w:'Python device classes live in silmulator/devices/. hardware_docs/ holds PDFs and markdown reference docs, not Python code.'},
+ ]
+},
+
+{id:'d2',ch:'docs',type:'w',
+ q:'You have a vendor PDF for a new relay board. Describe the complete workflow to make it appear as a block in the Silmulator library — from the PDF to the running app.',
+ c:[{l:'put PDF in hardware_docs/<vendor>/<model>/',t:['hardware_docs','pdf','vendor','folder']},
+    {l:'write scpi_commands.md (optional but recommended)',t:['scpi_commands','markdown','md','command table']},
+    {l:'create JSON spec in silmulator/custom_blocks/',t:['custom_blocks','json','spec']},
+    {l:'restart app — discover_specs() picks it up',t:['restart','discover_specs','startup','launch']}],
+ m:`1. Place the vendor PDF in hardware_docs/<vendor>/<model>/programmer_reference.pdf (e.g. hardware_docs/mylab/relay-4ch/).
+2. (Recommended) Write a scpi_commands.md in that folder summarising only the commands you'll actually test — this is the human reference the JSON spec is derived from.
+3. Create a JSON spec file in silmulator/custom_blocks/mylab_relay4ch.json with the block's name, color, ports, and commands map.
+4. Restart Silmulator. At import time, register_custom_blocks() calls discover_specs() which globs *.json in both PACKAGED_DIR and USER_DIR, parses each spec, and calls make_custom_block_class(spec) to synthesise a live Python class — then adds it to BLOCK_REGISTRY. The block appears in the Library panel.`
+},
+
+{id:'d3',ch:'docs',type:'w',
+ q:'What are the two directories that discover_specs() scans? What is the difference between them in terms of who should use each?',
+ snip:`<span class="cm"># custom_block.py</span>
+PACKAGED_DIR = Path(__file__)...parent.parent.parent / <span class="str">"custom_blocks"</span>
+USER_DIR = Path.home() / <span class="str">".silmulator"</span> / <span class="str">"custom_blocks"</span>`,
+ c:[{l:'PACKAGED_DIR = silmulator/custom_blocks/ (shipped in repo)',t:['packaged','silmulator/custom_block','repo','shipped','project']},
+    {l:'USER_DIR = ~/.silmulator/custom_blocks/ (personal/local)',t:['user_dir','~/.silmulator','home','personal','local']},
+    {l:'PACKAGED for team/shared; USER_DIR for personal blocks',t:['team','shared','personal','individual','per-user']}],
+ m:`PACKAGED_DIR = silmulator/custom_blocks/ — inside the repo. These specs are committed to version control and ship with the installer, Docker image, and .app bundle. Use this for blocks the whole team needs.
+USER_DIR = ~/.silmulator/custom_blocks/ — in the user's home directory. These are personal or experimental blocks that aren't committed. Only that machine sees them; other team members won't have them unless they copy the file manually. Useful for work-in-progress specs before they're polished enough to commit.`
+},
+
+// ─── CHANNEL: custom ──────────────────────────────────────────
+{id:'c1',ch:'custom',type:'w',
+ q:'A custom block JSON has this command entry: "ECHO": "echo:{0}". What does _make_handler do with this template, and what does the block return when a user sends "ECHO 42"?',
+ snip:`<span class="cm"># custom_block.py:114</span>
+<span class="kw">def</span> <span class="fn">_make_handler</span>(template):
+    <span class="kw">def</span> <span class="fn">handler</span>(cmd):
+        <span class="kw">if not</span> template: <span class="kw">return</span> <span class="str">""</span>
+        <span class="kw">if</span> <span class="str">"{"</span> <span class="kw">not in</span> template: <span class="kw">return</span> template
+        <span class="kw">try</span>: <span class="kw">return</span> template.<span class="fn">format</span>(*cmd.params)
+        <span class="kw">except</span>: <span class="kw">return</span> template
+    <span class="kw">return</span> handler`,
+ c:[{l:'template.format(*cmd.params) substitutes SCPI params',t:['format','cmd.params','params','substitute','{0}']},
+    {l:'"ECHO 42" → cmd.params = ["42"] → echo:42',t:['echo:42','42','echo:']},
+    {l:'empty template → write-only (returns "")',t:['empty','write-only','""','no response']},
+    {l:'no { in template → return verbatim',t:['no {','verbatim','literal','no brace']}],
+ m:`_make_handler(template) is a closure factory. For "echo:{0}":
+- "{" is in the template, so the format path runs.
+- For "ECHO 42", the SCPI parser produces cmd.params = ["42"].
+- template.format(*["42"]) → "echo:{0}".format("42") → "echo:42"
+So the block responds with "echo:42".
+The three branches: (1) empty string → write-only, returns ""; (2) no "{" → always return the template verbatim (e.g. "STATUS?": "OK" always returns "OK"); (3) "{0}", "{1}", etc. → substitute positional SCPI params.`
+},
+
+{id:'c2',ch:'custom',type:'mc',
+ q:'A custom_blocks/ JSON file has a syntax error (invalid JSON). What happens at startup?',
+ opts:[
+  {t:'discover_specs() catches the exception, skips that file, and continues — other blocks and all built-ins still load.',c:true, w:'Correct. The try/except in the for loop swallows any exception from BlockSpec.from_file() and calls continue, so one bad file cannot block startup.'},
+  {t:'The app raises an ImportError at canvas.py import time and fails to start.',c:false,w:'canvas.py wraps register_custom_blocks() in a try/except that catches all exceptions, preventing any crash.'},
+  {t:'Silmulator loads but the entire custom_blocks/ directory is ignored for that session.',c:false,w:'Only the one broken file is skipped. Other valid JSON files in the same directory are still loaded.'},
+  {t:'The broken spec is loaded with a placeholder block that shows an error message on the canvas.',c:false,w:'No placeholder is created. The bad file is silently skipped by the continue statement inside the try/except.'},
+ ]
+},
+
+{id:'c3',ch:'custom',type:'w',
+ q:'You want a custom block called "Relay Board" that has two commands: OUTP ON/OFF (write-only, no response) and STATUS? (always returns "READY"). Write the minimal JSON spec including ports on the left and right sides.',
+ c:[{l:'"name": "Relay Board"',t:['"name"','relay board','relay']},
+    {l:'ports array with x:0.0 and x:1.0',t:['ports','x":0','x":1','0.0','1.0']},
+    {l:'"OUTP": "" (write-only, empty string)',t:['outp','"": ','""','empty','write-only']},
+    {l:'"STATUS?": "READY"',t:['status','ready','status?']}],
+ m:`{
+  "name": "Relay Board",
+  "manufacturer": "MyLab",
+  "model": "RB-1",
+  "color": "#4a3a1a",
+  "ports": [
+    {"id": "IN",  "label": "IN",  "x": 0.0, "y": 0.5},
+    {"id": "OUT", "label": "OUT", "x": 1.0, "y": 0.5}
+  ],
+  "commands": {
+    "OUTP":    "",        // write-only: empty string = no response
+    "STATUS?": "READY"   // always returns "READY"
+  }
+}`
+},
+
+{id:'c4',ch:'custom',type:'mc',
+ q:'discover_specs() uses seen_names to deduplicate. What problem does this solve?',
+ opts:[
+  {t:'Prevents the same block name appearing twice if a spec in USER_DIR has the same name as one in PACKAGED_DIR.',c:true, w:'Correct. PACKAGED_DIR is scanned first. If USER_DIR has a spec with the same name, it\'s skipped. This lets the packaged version take precedence, preventing accidental override of shipped blocks.'},
+  {t:'Prevents two specs that define the same SCPI command from conflicting at runtime.',c:false,w:'SCPI command conflicts are within a single device\'s _handlers dict. seen_names deduplicates at the spec/block level, not the command level.'},
+  {t:'Prevents the same JSON file from being parsed twice if it appears in both dirs.',c:false,w:'A file appearing in both dirs would be the same content but with different paths, and the same name — so seen_names does catch this, but the reason is to handle the user-override scenario, not duplicate file paths.'},
+  {t:'Ensures block names are valid Python identifiers before make_custom_block_class() uses them.',c:false,w:'make_custom_block_class() doesn\'t require Python-identifier names. seen_names is purely for deduplication, not validation.'},
+ ]
+},
+
+{id:'c5',ch:'custom',type:'w',
+ q:'What does make_custom_block_class(spec) return, and how does the resulting object end up callable as a zero-arg constructor in the BLOCK_REGISTRY?',
+ c:[{l:'returns a new Python class (type)',t:['class','type','returns a class','new class']},
+    {l:'__init__ calls super().__init__(_CustomDevice(spec), spec.name)',t:['_customdevice','super().__init__','device','spec.name']},
+    {l:'class stored in BLOCK_REGISTRY[spec.name]',t:['block_registry','registry','spec.name']]},
+    {l:'add_block() does cls() — zero-arg instantiation',t:['cls()','add_block','zero-arg','no arg']}],
+ m:`make_custom_block_class(spec) returns a new Python class (created dynamically via a class statement inside the function). The class inherits from BaseBlock and its __init__ calls super().__init__(_CustomDevice(spec), spec.name) — wiring up a device whose SCPI handlers come from the spec's commands map.
+register_custom_blocks() stores this class in BLOCK_REGISTRY[spec.name]. When add_block("Relay Board") is called, it does cls = BLOCK_REGISTRY["Relay Board"] then block = cls() — a zero-arg constructor call. The class's __init__ takes no arguments (spec is captured via closure), so this works transparently alongside the built-in block classes.`
+},
+
+]; // end BANK
+
+// ══════════════════════════════════════════════════════════════
+const CHS=['ports','wires','serial','docs','custom'];
+let active=new Set(CHS),qs=[],idx=0,saved={},mcR={},wR={};
+
+// chip wiring
+document.querySelectorAll('.chip:not(.all)').forEach(c=>{
+  c.addEventListener('click',()=>{
+    const ch=c.dataset.ch;
+    active.has(ch)?active.delete(ch):active.add(ch);
+    c.classList.toggle('on',active.has(ch));
+    document.querySelector('.chip.all').classList.toggle('on',active.size===CHS.length);
+    upMeta();
+  });
+});
+document.querySelector('.chip.all').addEventListener('click',()=>{
+  const allOn=active.size===CHS.length;
+  allOn?active.clear():CHS.forEach(c=>active.add(c));
+  document.querySelectorAll('.chip:not(.all)').forEach(c=>c.classList.toggle('on',!allOn));
+  document.querySelector('.chip.all').classList.toggle('on',!allOn);
+  upMeta();
+});
+function upMeta(){const n=BANK.filter(q=>active.has(q.ch)).length;document.getElementById('smeta').textContent=`${n} question${n===1?'':'s'} selected`;}
+
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+function go(){
+  qs=BANK.filter(q=>active.has(q.ch));
+  if(document.getElementById('sh').checked)shuf(qs);
+  if(!qs.length)return;
+  idx=0;saved={};mcR={};wR={};
+  show('Q');render();
+}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+
+function render(){
+  const q=qs[idx],n=qs.length;
+  document.getElementById('qn').textContent=`Q ${idx+1} / ${n}`;
+  document.getElementById('pf').style.width=((idx+1)/n*100)+'%';
+  document.getElementById('ct').textContent=q.ch;
+  const tt=document.getElementById('tt');
+  tt.textContent=q.type==='mc'?'MC':'Written';
+  tt.className='ttag '+(q.type==='mc'?'mc':'wr');
+  document.getElementById('qt').innerHTML=q.q;
+  const sn=document.getElementById('qs');
+  if(q.snip){sn.style.display='block';sn.innerHTML=q.snip;}else sn.style.display='none';
+  document.getElementById('MA').style.display=q.type==='mc'?'block':'none';
+  document.getElementById('WA').style.display=q.type!=='mc'?'block':'none';
+  q.type==='mc'?renderMC(q):renderW(q);
+  document.getElementById('bp').disabled=idx===0;
+  const last=idx===n-1;
+  document.getElementById('bn').style.display=last?'none':'inline-block';
+  document.getElementById('bf').style.display=last?'inline-block':'none';
+}
+
+function renderMC(q){
+  const list=document.getElementById('mo');list.innerHTML='';
+  const fb=document.getElementById('mf');fb.style.display='none';
+  const prev=mcR[q.id];
+  shuf([...q.opts]).forEach(o=>{
+    const li=document.createElement('li');li.tabIndex=0;
+    li.dataset.correct=o.c?'true':'false';li.dataset.why=o.w;li.textContent=o.t;
+    if(prev)li.classList.add('lk');
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelectorAll('[data-correct="true"]').forEach(x=>x.classList.add('ok'));
+      mcR[q.id]=ok?'ok':'no';
+      fb.style.display='block';fb.className='mfb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+    });
+    li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')li.click();});
+    list.appendChild(li);
+  });
+  if(prev){fb.style.display='block';fb.className='mfb '+(prev==='ok'?'ok':'no');
+    fb.textContent=prev==='ok'?'✓ Marked correct.':'✗ Marked incorrect.';}
+}
+
+function renderW(q){
+  const sv=saved[q.id]||{};
+  document.getElementById('wa').value=sv.t||'';
+  const kr=document.getElementById('kr');kr.style.display=sv.kr?'block':'none';
+  if(sv.kr){document.getElementById('kt').innerHTML=sv.kr.tally;document.getElementById('kc').innerHTML=sv.kr.chips;}
+  document.getElementById('md').style.display=sv.ms?'block':'none';
+  if(sv.ms)document.getElementById('mt').textContent=q.m;
+  document.getElementById('sr').style.display=sv.ms?'flex':'none';
+}
+
+function saveW(){
+  const q=qs[idx];if(!q||q.type!=='w')return;
+  if(!saved[q.id])saved[q.id]={};
+  saved[q.id].t=document.getElementById('wa').value;
+}
+
+function chkW(){
+  const q=qs[idx];
+  const txt=(document.getElementById('wa').value||'').toLowerCase();
+  const hits=q.c.map(c=>({l:c.l,h:c.t.some(t=>txt.includes(t.toLowerCase()))}));
+  const got=hits.filter(h=>h.h).length;
+  const tally=`<strong>${got} / ${hits.length} key concepts detected</strong>`;
+  const chips=hits.map(h=>`<span class="kc ${h.h?'h':'m'}">${h.h?'✓':'✗'} ${h.l}</span>`).join('');
+  document.getElementById('kt').innerHTML=tally;
+  document.getElementById('kc').innerHTML=chips;
+  document.getElementById('kr').style.display='block';
+  if(!saved[q.id])saved[q.id]={};
+  saved[q.id].kr={tally,chips};
+  saved[q.id].t=document.getElementById('wa').value;
+}
+
+function showM(){
+  const q=qs[idx];
+  document.getElementById('mt').textContent=q.m;
+  document.getElementById('md').style.display='block';
+  document.getElementById('sr').style.display='flex';
+  if(!saved[q.id])saved[q.id]={};
+  saved[q.id].ms=true;
+  saved[q.id].t=document.getElementById('wa').value;
+}
+
+function rate(v){
+  wR[qs[idx].id]=v;
+  if(!saved[qs[idx].id])saved[qs[idx].id]={};
+  saved[qs[idx].id].rate=v;
+  document.getElementById('sr').querySelectorAll('button').forEach(b=>b.style.opacity='.35');
+  const tgt=v==='k'?document.getElementById('sr').children[1]:document.getElementById('sr').children[2];
+  if(tgt)tgt.style.opacity='1';
+}
+
+function prev(){saveW();if(idx>0){idx--;render();}}
+function next(){saveW();if(idx<qs.length-1){idx++;render();}}
+
+function results(){
+  saveW();
+  const mcTotal=qs.filter(q=>q.type==='mc').length;
+  const mcOk=Object.values(mcR).filter(v=>v==='ok').length;
+  const pct=mcTotal?Math.round(mcOk/mcTotal*100):0;
+  document.getElementById('rb').textContent=`${mcOk}/${mcTotal}`;
+  document.getElementById('rl').textContent=(pct===100?'🎉 Perfect MC score!':pct>=60?`${pct}% — review misses below`:`${pct}% — re-read lesson 0002`)+` · Written: see self-ratings`;
+
+  const misses=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const rm=document.getElementById('rm');
+  rm.innerHTML=misses.length?misses.map(q=>`<div class="miss">${q.q.slice(0,75)}…<span class="mcorr">✓ ${q.opts.find(o=>o.c).t.slice(0,55)}</span></div>`).join(''):'<em style="color:var(--dim);font-size:.84rem">None!</em>';
+
+  const revW=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const rw=document.getElementById('rw');
+  rw.innerHTML=revW.length?revW.map(q=>`<div class="miss">${q.q.slice(0,75)}…</div>`).join(''):'<em style="color:var(--dim);font-size:.84rem">None flagged.</em>';
+
+  show('R');
+}
+
+function rev(){
+  const mc=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const wr=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const all=[...mc,...wr];if(!all.length)return;
+  mc.forEach(q=>delete mcR[q.id]);
+  wr.forEach(q=>{delete wR[q.id];delete saved[q.id];});
+  qs=all;idx=0;
+  show('Q');render();
+}
+</script>
+</body>
+</html>

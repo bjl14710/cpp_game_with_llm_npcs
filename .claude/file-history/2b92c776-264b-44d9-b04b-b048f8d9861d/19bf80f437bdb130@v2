@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Create the scoped combat-core integration issue; cross-link on issues 7-13."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+BODY = """## What to change
+Integrate the combat CORE from the just-merged weapons stack (now on the
+`initial_npcs_and_world` branch, PRs #14-#20) into the current codebase, then
+rebuild its app layer on raylib. The core pieces are renderer-independent and
+mostly reusable: `CombatEvents.hpp`, `Player.hpp`, `Weapon.hpp`, the NPC
+health/state machine (Idle/Fleeing/Dead - orthogonal to the mood-era
+`behavior_` system), the `World` combat API, `personas/cop.persona`, and both
+combat test files.
+
+## Where it is
+Source: `origin/initial_npcs_and_world` (diff vs main is ~970 lines).
+Target: the raylib stack tip. An attempted union merge (aborted, overnight
+2026-07-05) established the conflict map:
+- `.gitignore`: keep both sides
+- `src/app/main.cpp`, `Renderer3D.*`: take the raylib line; port attack
+  input / HUD / death screen / combat callouts to raylib fresh
+- `src/core/Npc.hpp` + `Persona.hpp` + `PersonaLoader.cpp`: union - theirs
+  branched before the mood/instruct era (PR #6), so its conflict hunks are
+  deletions of newer code; keep ours and graft the combat additions
+- The CLAUDE.md committed on that branch is stale - do not take it
+
+## How to verify it's done
+Both combat test files pass alongside the existing 96 cases; attack input
+works in the raylib build; a fleeing NPC visibly flees; cop death/arrest
+interplay decided and tested.
+
+## Constraints
+IMPORTANT: the merged weapons code contains its own unfinished TODO stubs
+("TODO(combat): implement in World.cpp", fire-cooldown tick) - those old
+overnight PRs were partially scaffolded. Audit which combat functions are
+real vs stubs before integrating; finish or cut the stubs (repo rule: no
+TODOs in committed code). Also reconcile combat with the multiplayer thread
+contract: combat must run host-side only and replicate via snapshots
+(NetNpcPose likely needs a state field, which bumps kNetProtocolVersion).
+
+## Code economy note
+Reuse the existing directive/action plumbing for LLM combat reactions rather
+than a parallel system. No new dependencies.
+
+## Branch name
+`feature/issue-N-combat-core-integration`
+
+## Concept for learning materials
+Merging across divergent histories: merge bases, semantic vs textual conflicts
+"""
+
+
+def retry(fn, what):
+    for attempt in range(3):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up on {what}")
+
+
+issue = retry(lambda: repo.create_issue(
+    title="feat(combat): integrate weapons core with the mood-era NPCs and raylib app layer",
+    body=BODY, labels=["needs-human"], assignees=["bjl14710"],
+    milestone=repo.get_milestone(3)), "create issue")
+print(f"created #{issue.number}: {issue.html_url}")
+
+note = ("Update (overnight session 2): the weapons stack you merged landed on the "
+        "`initial_npcs_and_world` branch, not main. Its combat CORE is worth carrying "
+        "forward, but it contains unfinished TODO stubs and predates the mood/instruct "
+        f"era - full analysis and an integration map are in #{issue.number}. Labeled "
+        "needs-human because it needs your call on scope (finish the stubs vs cut them) "
+        "and combat-vs-multiplayer semantics.")
+for n in range(7, 14):
+    old = repo.get_issue(n)
+    if old.state == "open":
+        retry(lambda: old.create_comment(note), f"comment #{n}")
+print("commented on 7-13")

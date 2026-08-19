@@ -1,0 +1,61 @@
+"""PnL and inventory analysis for the market-making sim (scaffold).
+
+Plan: ``.claude/plans/avellaneda-stoikov-mm-sim.md``, step 5. Consumes the
+columnar result of ``signals_cpp.run_mm_sim`` (once implemented — see the
+TODO(mm-4) stub in cpp/signals_py/bindings.cpp) and produces:
+
+- PnL decomposition: realized spread capture vs inventory mark-to-market
+- fill statistics: fill rate, average queue wait, requote count, clamped
+  quotes, dropped late actions
+- figures per plots.py conventions (decimated; PnL path, inventory path,
+  our quotes vs mid)
+- ``__main__`` CLI over the AAPL golden day, including the latency sweep
+  (0/1/5/20 ms) whose numbers feed the docs/perf writeup.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import plotly.graph_objects as go
+
+
+def mm_result_frame(raw: dict) -> pd.DataFrame:
+    """Columnar run_mm_sim dict -> samples DataFrame (fills in .attrs).
+
+    TODO(mm-5): mirror events.py's load pattern (columns fixed by the
+    MMSample struct; diagnostics/fill list carried on attrs).
+    """
+    raise NotImplementedError("TODO(mm-5)")
+
+
+def pnl_decomposition(samples: pd.DataFrame) -> dict[str, float]:
+    """Split terminal PnL into realized spread capture vs inventory mark.
+
+    TODO(mm-5): realized = cash from closed round-trips; inventory mark =
+    terminal_inventory * final mid; report both plus max drawdown of the
+    mark-to-mid path.
+    """
+    raise NotImplementedError("TODO(mm-5)")
+
+
+def pnl_and_inventory_figure(samples: pd.DataFrame) -> go.Figure:
+    """Twin-axis PnL path ($) and inventory path (shares) over the session.
+
+    TODO(mm-5): decimate to <=5k points (reuse plots._decimate), grey band
+    where quotes were pulled at the inventory cap.
+    """
+    raise NotImplementedError("TODO(mm-5)")
+
+
+def _main() -> None:
+    """CLI: run the sim over the golden day, print stats, save figures.
+
+    TODO(mm-5): argparse over MMParams knobs (gamma, kappa, size, cap,
+    latency-ns); --latency-sweep runs 0/1/5/20 ms and prints the
+    comparison table for docs/perf.
+    """
+    raise NotImplementedError("TODO(mm-5)")
+
+
+if __name__ == "__main__":
+    _main()

@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""Create the raylib visual-overhaul milestone + 8 ready-for-ai issues on
+bjl14710/cpp_game_with_llm_npcs, per .claude/plans/raylib-visual-overhaul.md."""
+import os
+from datetime import datetime
+from pathlib import Path
+
+from github import Github, GithubException
+
+REPO_SLUG = "bjl14710/cpp_game_with_llm_npcs"
+USERNAME = os.environ.get("GITHUB_USERNAME", "bjl14710")
+
+MILESTONE_TITLE = "Renderer: raylib and low-poly visual overhaul"
+MILESTONE_DESC = (
+    "Replace SFML and the legacy-GL renderer with raylib, restyle the game "
+    "with CC0 low-poly asset packs. src/core is untouched; only src/app is "
+    "rewritten, full feature parity before merge. "
+    "Plan: .claude/plans/raylib-visual-overhaul.md. "
+    "Scaffold branch: feature/raylib-scaffold. "
+    "Prerequisite: merge the Multiplayer v1 PR stack first."
+)
+
+ISSUE_TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/issue-N-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+COMMON = ("Read `.claude/skills/raylib-migration/SKILL.md` first — it holds the "
+          "SFML→raylib API mapping, type-collision hazards, and per-step done "
+          "bar. `src/core/` and `tests/` must not change; `make -C tests test` "
+          "stays at 96 passing. Branch stacks on the previous issue's branch "
+          "(scaffold base: `feature/raylib-scaffold`).")
+
+SPECS = [
+    {
+        "title": "build(raylib): replace SFML with FetchContent raylib and a blank window",
+        "slug": "raylib-window",
+        "what": ("Enable the commented FetchContent block in CMakeLists.txt (pin the "
+                 "latest stable raylib tag), delete the SFML/OpenGL find_packages and "
+                 "sfml-*/OpenGL::GL/ApplicationServices linkage, add the scaffolded "
+                 "RaylibRenderer/Assets/FaceTexture .cpp files to the app target minus "
+                 "Renderer3D.cpp (keep the file on disk for reference until the final "
+                 "cleanup issue), and reduce main.cpp to an InitWindow/WindowShouldClose "
+                 "loop that clears to a sky color. Update run.sh/run.ps1/run.bat to drop "
+                 "the sfml@2 CMAKE_PREFIX_PATH logic."),
+        "where": ("CMakeLists.txt (block is pre-written in comments), src/app/main.cpp, "
+                  "run.sh, run.ps1, run.bat. Temporarily #ifdef-out or stub the "
+                  "SFML-dependent Menu/DialogUI/InputMap compilation as needed — they "
+                  "are rewritten two issues later."),
+        "verify": ("Fresh clone with NO SFML installed: `cmake -S . -B build && cmake "
+                   "--build build -j` succeeds and the binary opens an empty raylib "
+                   "window at 60 fps titled 'LLM NPC City'. `make -C tests test` green."),
+        "constraints": COMMON + (" This issue may temporarily remove gameplay from the "
+                                 "window — that is expected; the mode machine returns in "
+                                 "the next issue."),
+        "economy_note": ("FetchContent only — no brew/system raylib, no submodules. "
+                         "Do not start porting UI or rendering here; a colored empty "
+                         "window is the whole deliverable."),
+        "concept": "Dependency pinning with CMake FetchContent vs system packages",
+    },
+    {
+        "title": "feat(app): input, camera, and mode machine on raylib",
+        "slug": "raylib-input-modes",
+        "what": ("Port InputMap to raylib key codes (KeyBindings names/format unchanged "
+                 "— saved configs must still load), restore the AppMode "
+                 "Playing/Dialogue/Menu machine in main.cpp with per-frame polling "
+                 "(IsKeyPressed/GetCharPressed per the skill's mapping), mouse look via "
+                 "DisableCursor/GetMouseDelta (delete the macOS CG* workaround), WASD "
+                 "movement through City::resolveMovement, and placeholder text overlays "
+                 "for menu/dialogue modes so mode switches are visible."),
+        "where": ("src/app/InputMap.{hpp,cpp}, src/app/main.cpp. DialogUI/Menu still "
+                  "stubbed — full UI parity is its own issue."),
+        "verify": ("Walk the (still empty) world with WASD+mouse at 60 fps; T near an "
+                   "NPC position enters Dialogue mode, Escape opens the Menu placeholder, "
+                   "rebound keys from an existing keybindings.cfg still work. Tests green."),
+        "constraints": COMMON,
+        "economy_note": ("Keep the 0.03s dt clamp and the flatForward/flatRight math "
+                         "exactly as-is — only the input source changes. No camera "
+                         "smoothing/bob features."),
+        "concept": "Event-queue vs per-frame-polled input handling",
+    },
+    {
+        "title": "feat(render): low-poly city scene from CC0 asset packs",
+        "slug": "raylib-city-scene",
+        "what": ("Pick the city packs (drop Kenney City Kit / KayKit / Quaternius "
+                 "candidates into the scene and eyeball), pin them in "
+                 "tools/fetch_assets.sh with sha256s, fill assets/LICENSES.md rows, "
+                 "implement Assets model loading + modelForBuilding (curated spotId "
+                 "picks for bakery/police/etc., facadeKind rotation for filler), and "
+                 "implement RaylibRenderer beginFrame/drawCity/endFrame/worldToScreen "
+                 "with ground, roads, sky, fog/tint. Missing assets/ → on-screen "
+                 "fetch_assets.sh notice + primitive-cube fallback."),
+        "where": ("src/app/Assets.cpp, src/app/RaylibRenderer.cpp, tools/fetch_assets.sh, "
+                  "assets/LICENSES.md, main.cpp render call."),
+        "verify": ("After tools/fetch_assets.sh: every City building renders as a real "
+                   "model (zero legacy boxes), named shops are visually distinct, 60 fps "
+                   "in the plaza. Delete assets/ → game still runs with cubes + notice. "
+                   "LICENSES.md has one row per pack with its CC0 statement. Tests green."),
+        "constraints": COMMON + (" City geometry/collision (Building AABBs) is "
+                                 "authoritative and unchanged — models scale to fit the "
+                                 "existing footprints, never the reverse."),
+        "economy_note": ("glTF (.glb) only — no OBJ/FBX loaders. No dynamic shadows or "
+                         "post-processing; one directional tint + fog is the v1 mood "
+                         "budget. Curate ~6-10 building models, not the whole pack."),
+        "concept": "Kit-bashing a 3D scene from modular CC0 asset packs (and licensing hygiene)",
+    },
+    {
+        "title": "feat(render): animated glTF characters for NPCs and players",
+        "slug": "raylib-characters",
+        "what": ("Pin a CC0 character pack (rigged, with idle/walk clips), implement "
+                 "Assets::modelForCharacter (stable variantSeed → model variant, "
+                 "1000+playerId for remote players) and clip-name resolution, and "
+                 "RaylibRenderer::drawCharacter: per-entity animation clock, hard "
+                 "idle/walk switch from position deltas, gesture clip while "
+                 "gesturePhase > 0, facing normalized to the pack's forward axis. "
+                 "main.cpp builds CharacterVisuals from Npc state (and remotePlayers) "
+                 "in both solo and joined modes."),
+        "where": ("src/app/Assets.cpp, src/app/RaylibRenderer.cpp, main.cpp's NPC/remote "
+                  "player draw loops, tools/fetch_assets.sh, assets/LICENSES.md."),
+        "verify": ("All 10 NPCs stand at their spots as distinct characters; 'follow me' "
+                   "shows a walk cycle; wave/raise-hand read as gestures; an arrest chase "
+                   "animates; capsule fallback without assets. Two-instance multiplayer "
+                   "shows remote avatars as characters. Tests green."),
+        "constraints": COMMON + (" NPC identity mapping must stay stable across runs "
+                                 "(same NPC index → same look, the existing tint trick)."),
+        "economy_note": ("No animation blending, no IK, no per-NPC custom outfits — "
+                         "variant = model pick + tint. Approximate wave/raise-hand with "
+                         "the pack's nearest clips."),
+        "concept": "Skeletal animation clips in glTF: loading, naming, and switching",
+    },
+    {
+        "title": "feat(render): mood face textures on character models",
+        "slug": "raylib-mood-faces",
+        "what": ("Implement FaceTexture::bake — port the legacy Renderer3D::drawFace "
+                 "brow/eye/mouth geometry for all six NpcMoods onto a 128x128 "
+                 "RenderTexture (transparent background) — and wire Assets::faceTexture "
+                 "+ drawCharacter head-material swapping. If the chosen pack's head UVs "
+                 "make texture-swap impractical, fall back to the emote billboard above "
+                 "the head (documented in the plan)."),
+        "where": ("src/app/FaceTexture.cpp, src/app/Assets.cpp, "
+                  "src/app/RaylibRenderer.cpp. Reference geometry: legacy "
+                  "src/app/Renderer3D.cpp drawFace()."),
+        "verify": ("Anger an NPC ([[MOOD]] via conversation): face visibly changes on "
+                   "the model; all six moods distinguishable at conversation distance; "
+                   "side-by-side eyeball against the legacy renderer confirms angry/sad "
+                   "brow tilt matches (regression from commit 6298566). In multiplayer, "
+                   "a bystander sees the mood change (NpcMoodUpdate path). Tests green."),
+        "constraints": COMMON,
+        "economy_note": ("Bake once per mood at startup — never per frame. Reuse the six "
+                         "existing face designs; no new expressions, no smooth morphing."),
+        "concept": "Render-to-texture: baking procedural 2D art into 3D materials",
+    },
+    {
+        "title": "feat(ui): DialogUI, Menu, and HUD parity in raylib",
+        "slug": "raylib-ui-parity",
+        "what": ("Rewrite the draw layer of DialogUI (transcript, streaming line, input "
+                 "box, GetCharPressed text entry with the swallow-first-char behavior) "
+                 "and Menu (all pages: main, controls rebinding with key capture, "
+                 "multiplayer host/join with the address text field) using "
+                 "DrawTextEx/DrawRectangleRounded and the bundled font via "
+                 "Assets::uiFont. Port nameplates (worldToScreen), talk prompt, jail "
+                 "countdown, and crosshair in main.cpp. Bundle a CC0 font in the fetch "
+                 "script."),
+        "where": ("src/app/DialogUI.{hpp,cpp}, src/app/Menu.{hpp,cpp}, main.cpp overlay "
+                  "section, tools/fetch_assets.sh (font), assets/LICENSES.md."),
+        "verify": ("Full manual pass: talk to an NPC (streamed text renders live, Enter "
+                   "sends, Esc leaves), rebind a key and relaunch (persisted), host + "
+                   "join pages accept typed input and toast errors, nameplates track "
+                   "heads, jail countdown shows after an arrest. Layouts scale on window "
+                   "resize. Tests green."),
+        "constraints": COMMON + (" Keep each class's public interface and state-machine "
+                                 "logic; this is a draw-call port, not a redesign."),
+        "economy_note": ("No UI framework (no raygui) — the existing hand-drawn layout "
+                         "logic ports directly. Same colors/spacing as today unless a "
+                         "value is unreadable over the new scenes."),
+        "concept": "Porting an immediate-mode UI between rendering backends",
+    },
+    {
+        "title": "test(mp): multiplayer parity pass on the raylib build",
+        "slug": "raylib-mp-parity",
+        "what": ("Structured two-instance verification of every multiplayer feature on "
+                 "the raylib build, fixing what it surfaces: host/join flow, remote "
+                 "avatars animating from snapshots, replicated NPC poses/moods, shared "
+                 "NPC chat (asker streaming + bystander mood/bubble), session-full and "
+                 "wrong-address error toasts, disconnect fallback to solo. Write the "
+                 "checklist results into the PR description."),
+        "where": ("Whatever the pass surfaces — expected hotspots: main.cpp joined-mode "
+                  "render path, CharacterVisual mapping from NetNpcPose/PlayerPose."),
+        "verify": ("The checklist in the PR: every item checked on macOS with two local "
+                   "instances (host 40605 + join 127.0.0.1). Loopback suite still green "
+                   "8x consecutively (threading untouched, prove it anyway)."),
+        "constraints": COMMON + (" Wire protocol unchanged — if a render need seems to "
+                                 "require a protocol field, stop and flag needs-human."),
+        "economy_note": ("This is a verification + small-fixes issue; if any single fix "
+                         "exceeds ~100 lines, split it out rather than growing this PR."),
+        "concept": "Parity checklists: verifying a rewrite against its predecessor",
+    },
+    {
+        "title": "chore(render): delete legacy GL renderer and SFML remnants; polish + docs",
+        "slug": "raylib-cleanup",
+        "what": ("Delete Renderer3D.{hpp,cpp} and every remaining SFML reference "
+                 "(includes, comments, docs, launch-script hints), tune fog/palette/sky "
+                 "for a cohesive look, update README (new screenshots, build "
+                 "instructions, fetch_assets step) and DEVELOPER.md (module table: "
+                 "RaylibRenderer/Assets/FaceTexture replace Renderer3D; asset "
+                 "workflow), and verify a from-scratch clone→fetch→build→play flow."),
+        "where": ("src/app/Renderer3D.* (delete), CMakeLists.txt, README.md, "
+                  "docs/DEVELOPER.md, docs/CONTROLS.md if key hints changed."),
+        "verify": ("`grep -ri sfml src/ CMakeLists.txt run.*` → no hits. Fresh-clone "
+                   "flow works end to end. README screenshots show the new city. "
+                   "Tests green; game builds on macOS."),
+        "constraints": COMMON + (" Only delete Renderer3D after the mood-face "
+                                 "side-by-side check (issue 5) is confirmed done."),
+        "economy_note": ("Polish = numbers in existing knobs (fog density, light tint, "
+                         "palette), not new rendering features."),
+        "concept": "Strangler-fig migrations: running old and new side by side, deleting last",
+    },
+]
+
+
+def main() -> None:
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise SystemExit("GH_TOKEN not set")
+    gh = Github(token)
+    repo = gh.get_repo(REPO_SLUG)
+    print(f"Planning issues for: {repo.full_name}")
+
+    existing_titles = set()
+    for issue in repo.get_issues(state="open"):
+        if not issue.pull_request:
+            existing_titles.add(issue.title.lower())
+    print(f"Existing open issues: {len(existing_titles)}")
+
+    milestone = None
+    for m in repo.get_milestones(state="open"):
+        if m.title == MILESTONE_TITLE:
+            milestone = m
+            print(f"Milestone exists (reusing): #{m.number}")
+            break
+    if milestone is None:
+        milestone = repo.create_milestone(title=MILESTONE_TITLE, description=MILESTONE_DESC)
+        print(f"Created milestone: {milestone.title} (#{milestone.number})")
+
+    created = []
+    for spec in SPECS:
+        if spec["title"].lower() in existing_titles:
+            print(f"Skipping (exists): {spec['title']}")
+            continue
+        body = ISSUE_TEMPLATE.format(**{k: spec[k] for k in
+                                        ("what", "where", "verify", "constraints",
+                                         "economy_note", "slug", "concept")})
+        issue = repo.create_issue(title=spec["title"], body=body,
+                                  labels=["ready-for-ai"], assignees=[USERNAME],
+                                  milestone=milestone)
+        issue.edit(body=body.replace("feature/issue-N-", f"feature/issue-{issue.number}-"))
+        print(f"  Created #{issue.number}: {spec['title']}")
+        print(f"  Concept: {spec['concept']}")
+        created.append({"number": issue.number, "title": spec["title"],
+                        "concept": spec["concept"], "url": issue.html_url})
+
+    print("\n=== ready-for-ai queue ===")
+    label = repo.get_label("ready-for-ai")
+    count = 0
+    for issue in repo.get_issues(state="open", labels=[label]):
+        if issue.pull_request:
+            continue
+        print(f"  #{issue.number:3} {issue.title}")
+        count += 1
+    print(f"\nTotal: {count} issues queued")
+
+    summary = (f"# Issue Planning Summary\n"
+               f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+               f"Repo: {repo.full_name}\nFocus: improve looks and engine (raylib overhaul)\n\n"
+               f"## Issues Created\n")
+    for i in created:
+        summary += (f"- #{i['number']}: {i['title']}\n  Concept: {i['concept']}\n"
+                    f"  URL: {i['url']}\n\n")
+    summary += (
+        "\n## What Was NOT Planned\n"
+        "- Godot/Unreal migration: rejected in /idea Q&A (raylib keeps the C++ core).\n"
+        "- Post-processing/shadow features, animation blending, custom art: plan's\n"
+        "  out-of-scope list.\n"
+        "- Ordering: these 8 issues are SEQUENTIAL (each stacks on the previous)\n"
+        "  and the whole milestone stacks on the Multiplayer v1 stack (#28-#34) —\n"
+        "  merge that first.\n"
+    )
+    Path(".claude/memory/planning-session.md").write_text(summary)
+    print("\nPlan saved to .claude/memory/planning-session.md")
+
+
+if __name__ == "__main__":
+    main()

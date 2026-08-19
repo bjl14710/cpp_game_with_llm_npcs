@@ -1,0 +1,32 @@
+/idea
+
+Goal: A player-facing journal that collects facts learned from NPCs and
+surfaces contradictions between what different NPCs have said.
+
+Context: This is a reader of the same shared fact store the gossip ticket
+writes to — not a separate tracking system. The journal should only ever
+show facts the player was personally told (filtered by source/hearer), so
+it doesn't spoil gossip the player wasn't part of.
+
+Scope:
+1. Journal UI — list facts the player has learned, grouped by subject,
+   using the existing menu system from the earlier menu/dialogue ticket
+   rather than a new UI stack.
+2. Contradiction detection — compare facts sharing the same normalized
+   subject field for conflicting content (e.g. two different times given
+   for the same event) and flag them visibly to the player.
+3. Read path only — this ticket should not need to modify how facts are
+   written; if it does, that's a sign the fact schema from the gossip
+   ticket needs a field added, not that the journal needs its own store.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Pick the most defensible option yourself, log the
+  decision and reasoning in OVERNIGHT_REPORT.md, and keep going.
+- If the gossip ticket hasn't shipped yet or the fact schema doesn't exist,
+  implement a minimal version of the shared fact store as a prerequisite
+  rather than inventing a parallel journal-only data structure.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

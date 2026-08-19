@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0017 — Tiling Modular Kits</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0017 · pairs with lesson 0017</div>
+<h1>Drill: Tiling Modular Kits over a Parametric Grid</h1>
+
+<div class="q"><h3>1. Why not start tiling at the map edge?</h3>
+<p>The map spans ±110 and tiles are 16 wide. What breaks if you lay tiles
+edge-to-edge starting at -110?</p>
+<details><summary>Answer</summary><div class="a">
+<p>220/16 = 13.75, and tile centers land at -102, -86, … — the junctions at
+±32 fall mid-tile, so junction art can't be placed. Anchor the grid to the
+junctions (centers at multiples of 16) and treat the 6-unit leftovers at the
+edges as fitted end caps instead.</p>
+</div></details></div>
+
+<div class="q"><h3>2. The 0.8-unit curb</h3>
+<p>The road tile is 2×2×0.1. Scaling it uniformly by 8 fills the 16-unit
+street — and creates what bug?</p>
+<details><summary>Answer</summary><div class="a">
+<p>The 0.1 thickness becomes 0.8 world units: a knee-high asphalt platform
+over ground that collision says is flat, so players float/clip visually.
+Scale XZ from the bounds, pin Y to a small constant (0.05).</p>
+</div></details></div>
+
+<div class="q"><h3>3. Junction double-draw</h3>
+<p>The junction tile at (32,32) belongs to both the x=32 street and the z=32
+street. How does the loop avoid drawing it twice, and why would twice be
+bad?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Only the Z-running pass draws junction tiles; the X-running pass skips
+those centers. Two coplanar copies would z-fight (flickering markings), and
+a rotated second copy could disagree with the first's art.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Rotation and scale order</h3>
+<p><code>DrawModelEx</code> scales in model space before rotating. For a
+90°-yawed tile filling worldX×worldZ, which model axis gets worldZ?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Model X. After a 90° yaw the model's X axis lies along world Z, so
+<code>scale.x = worldZ / size.x</code> and <code>scale.z = worldX /
+size.z</code> — the axes swap whenever the rotation flag is set.</p>
+</div></details></div>
+
+<div class="q"><h3>5. Where do zebra crossings go, and why there?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>On the arm tiles directly beside each junction (centers ±16 and ±48 —
+distance 16 from a junction center). That's where the 48-unit sidewalk
+blocks end, so pedestrians naturally cross there; it's derived from the same
+block constants, not hand-placed coordinates.</p>
+</div></details></div>
+</div></body>
+</html>

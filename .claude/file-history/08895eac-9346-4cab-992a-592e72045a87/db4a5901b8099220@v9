@@ -1,0 +1,69 @@
+"""Load the C++ microstructure event stream as a pandas DataFrame (scaffold).
+
+Follows the ``oil_volume.py`` wrapper pattern: importing this module never
+fails, ``USING_CPP`` reports whether the ``signals_cpp`` extension is built.
+Unlike ``oil_volume`` there is deliberately no pure-Python fallback — parsing
+a 45 MB binary ITCH day in Python is exactly the workload the C++ layer
+exists for, so a missing extension raises with a build hint instead.
+"""
+
+from __future__ import annotations
+
+import warnings
+
+import pandas as pd
+
+try:
+    import signals_cpp as _cpp
+
+    USING_CPP = True
+except ImportError:
+    _cpp = None  # type: ignore[assignment]
+    USING_CPP = False
+
+#: Columns of the event-stream DataFrame, in order.
+EVENT_COLUMNS: tuple[str, ...] = (
+    "timestamp_ns", "ofi", "microprice", "best_bid", "best_ask",
+    "bid_size", "ask_size",
+)
+
+# AAPL traded roughly $289-$293 on the golden day (2019-12-30, pre-split).
+# Fixed-point (x10000) book bounds with headroom for the full session:
+AAPL_GOLDEN_MIN_RAW: int = 2_800_000   # $280.00
+AAPL_GOLDEN_MAX_RAW: int = 3_000_000   # $300.00
+
+
+def load_micro_events(
+    path: str,
+    min_price_raw: int,
+    max_price_raw: int,
+    tick_size: int = 1,
+) -> pd.DataFrame:
+    """Parse a symbol-filtered framed ITCH file into a per-update event frame.
+
+    Returns a DataFrame with :data:`EVENT_COLUMNS`; ``attrs`` carries the
+    ``skipped_one_sided`` and ``book_error_count`` diagnostics. Prices are
+    ITCH fixed-point (dollars x 10000) on input, dollars in the output frame.
+
+    A file with no book activity for the symbol (halted / illiquid session)
+    returns an EMPTY frame with the right columns and emits a warning — it
+    never raises. IO problems (missing/unreadable file) raise RuntimeError
+    from the extension.
+    """
+    if not USING_CPP:
+        raise ImportError(
+            "signals_cpp extension not built — run `pip install -e .` "
+            "(see cpp/signals_py/)"
+        )
+    raw = _cpp.events_from_file(path, min_price_raw, max_price_raw, tick_size)
+    df = pd.DataFrame({c: raw[c] for c in EVENT_COLUMNS})
+    df.attrs["skipped_one_sided"] = raw["skipped_one_sided"]
+    df.attrs["book_error_count"] = raw["book_error_count"]
+    if df.empty:
+        warnings.warn(
+            f"no microstructure events in {path!r} (halted/illiquid symbol, or "
+            f"price bounds [{min_price_raw}, {max_price_raw}] never held a "
+            "two-sided book)",
+            stacklevel=2,
+        )
+    return df

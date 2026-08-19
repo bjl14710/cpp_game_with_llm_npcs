@@ -2,6 +2,9 @@
 build/
 tests/build/
 
+# Python bytecode — running tools/*.py (eval_lines, refine_lines) drops these
+__pycache__/
+
 # Downloaded CC0 asset packs (tools/fetch_assets.sh recreates them;
 # assets/LICENSES.md stays tracked)
 assets/models/
@@ -14,5 +17,28 @@ bench/out/
 # Visual-QA screenshot sets (generated per run by the visual-qa agent)
 docs/qa/screenshots/
 
+# Profiler captures backing docs/perf/frame-budget.md. Large, machine-specific,
+# and a point-in-time snapshot — the CONCLUSIONS get committed, not the traces.
+docs/perf/*.sample
+docs/perf/*.trace
+docs/perf/*.trace/
+
 # Local cloud API key (never commit secrets); see config/secrets.cfg.example
 config/secrets.cfg
+
+# Claude Code config: ONLY the shareable toolkit is tracked (skills,
+# commands, agents, hooks) so remote/cloud sessions get the same setup.
+# Everything else under .claude/ is machine state or secrets — session
+# history, credentials, memory, plans, caches — and must never land in
+# a commit (a full ~/.claude copy once did; see PR #145).
+.claude/*
+!.claude/skills/
+!.claude/commands/
+!.claude/agents/
+!.claude/hooks/
+# editor droppings inside the tracked dirs
+.claude/**/*~
+.claude/**/.*.un~
+
+# Frame-budget reports (issue #257) — generated per run, machine-specific
+docs/reports/

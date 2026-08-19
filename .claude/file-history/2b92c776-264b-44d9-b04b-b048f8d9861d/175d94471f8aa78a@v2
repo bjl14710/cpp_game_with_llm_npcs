@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0017 — Tiling Modular Kits</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0017 · pairs with lesson 0017</div>
+<h1>Vocab: Tiling Modular Kits over a Parametric Grid</h1>
+<dl>
+<dt>modular kit</dt>
+<dd>An asset pack designed around interchangeable, same-footprint pieces
+(road straight/corner/junction) that butt together seamlessly. The kit's
+contract: origin-centered, uniform bounds, consistent texel density.</dd>
+
+<dt>tile pitch</dt>
+<dd>The center-to-center spacing of placed tiles. Here pitch = street width
+(16), chosen so junction landmarks land on tile centers.</dd>
+
+<dt>grid anchoring</dt>
+<dd>Choosing the tile grid's origin/phase so that world landmarks
+(junctions, doorways) coincide with tile centers or edges, rather than
+starting the grid at an arbitrary map edge.</dd>
+
+<dt>end cap</dt>
+<dd>A partial tile fitted (via the Fill contract) to the remainder left when
+a span isn't an integer number of tiles — 6 units here, at the ±110 edge.</dd>
+
+<dt>parametric layout</dt>
+<dd>A world defined by named constants (block pitch 64, street width 16,
+half-size 110) so derived systems — tiling, colliders, crossings — compute
+placements instead of hardcoding coordinates.</dd>
+
+<dt>z-fighting</dt>
+<dd>Flicker when two coplanar surfaces contest the depth buffer. Avoided
+here by floating tiles 0.01 above the grass plane and drawing shared
+junction tiles exactly once.</dd>
+</dl>
+</div></body>
+</html>

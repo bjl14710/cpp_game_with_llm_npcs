@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0012 — emplace_back vs push_back</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .step-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0012 &middot; cpp_games / docs / learning</div>
+  <h1><code>emplace_back</code> vs. <code>push_back</code></h1>
+  <p class="why">Why this matters: your code uses <code class="inline">push_back</code> in 20+ places and <code class="inline">emplace_back</code> in zero. Online lore says "always prefer emplace_back &mdash; it's faster." That lore is wrong in 2026, and reaching for it without understanding has a real safety cost. This lesson is the rule for picking right.</p>
+</header>
+
+<h2>1. The concept &mdash; one constructs, the other appends</h2>
+
+<p>Both add a new element to the end of a vector. The difference is <em>how</em> the element gets there.</p>
+
+<ul>
+  <li><b><code class="inline">push_back(t)</code></b> takes an already-existing <code class="inline">T</code> (or something implicitly convertible) and copies or moves it into the vector's storage. The function signature is concrete: <code class="inline">void push_back(const T&amp;)</code> and <code class="inline">void push_back(T&amp;&amp;)</code>.</li>
+  <li><b><code class="inline">emplace_back(args...)</code></b> takes any number of constructor arguments and forwards them &mdash; perfectly &mdash; to <code class="inline">T</code>'s constructor, building the object <em>directly inside</em> the vector's storage. No temporary is built, no copy or move happens.</li>
+</ul>
+
+<h3>The visual step-by-step</h3>
+
+<div class="step-diagram">  push_back(std::string("hello"))                emplace_back("hello")
+  ────────────────────────────                  ──────────────────────
+  1. construct temp std::string("hello")        1. forward "hello" as constructor arg
+     on the stack                                  no temp built
+  2. push_back moves it into vector storage     2. emplace_back constructs std::string
+     (move constructor runs)                       directly into vector storage
+  3. destroy the temp                           3. ... that's it.
+
+  Two constructions + one move.                 One construction. No move.</div>
+
+<p>That sounds like a clear win for <code class="inline">emplace_back</code>. The reality in 2026 is more nuanced: for modern types with cheap move constructors (basically everything in your code), the difference is invisible. The cost of "construct then move" a <code class="inline">std::string</code> is ~5 ns. You can't measure it from a game loop.</p>
+
+<div class="callout">
+  <h3>The modern rule of thumb</h3>
+  <p><b>Prefer <code class="inline">push_back</code> by default.</b> Reach for <code class="inline">emplace_back</code> when you have a specific reason: you'd construct a temporary anyway, the type has multiple constructor arguments and you want to forward them in place, or there's no move/copy available. The "always emplace" advice you may have seen is older than the language is now &mdash; it predates good move semantics and modern compiler optimisation.</p>
+</div>
+
+<h2>2. Minimal example &mdash; three patterns side by side</h2>
+
+<pre class="code"><span class="kw">struct</span> ChatTurn { std::string role; std::string content; };
+
+std::vector&lt;ChatTurn&gt; history;
+
+<span class="com">// (A) "I already have a ChatTurn" — push_back is the obvious choice.</span>
+ChatTurn t{<span class="str">"user"</span>, <span class="str">"hello"</span>};
+<span class="ok">history.push_back(std::move(t));      <span class="com">// move t into the vector. One move.</span></span>
+
+<span class="com">// (B) "I want to build a new one inline from arguments."</span>
+<span class="com">//     push_back constructs a temp + moves it; emplace_back builds in place.</span>
+<span class="com">//     For ChatTurn this is unobservable; for types with no cheap move it matters.</span>
+<span class="ok">history.push_back({<span class="str">"user"</span>, <span class="str">"hello"</span>});       <span class="com">// build temp, move into vector</span>
+history.emplace_back(<span class="str">"user"</span>, <span class="str">"hello"</span>);    <span class="com">// build in place</span></span>
+
+<span class="com">// (C) The DANGEROUS case — explicit constructors.</span>
+<span class="kw">struct</span> Capacity { <span class="kw">explicit</span> Capacity(<span class="typ">int</span> n) : value(n) {} <span class="typ">int</span> value; };
+std::vector&lt;Capacity&gt; caps;
+
+<span class="bad">caps.push_back(<span class="num">42</span>);        <span class="com">// COMPILE ERROR — push_back refuses explicit conversions.</span>
+caps.emplace_back(<span class="num">42</span>);     <span class="com">// COMPILES — emplace_back DOES invoke explicit constructors.</span>
+<span class="com">// If you intended 'a Capacity holding 42', emplace_back was right.</span>
+<span class="com">// If you intended 'push the integer 42' (and forgot the type),</span>
+<span class="com">// emplace_back silently obliged. push_back would have caught the bug.</span></span></pre>
+
+<p>Pattern (A) is what your code does already. Pattern (B) is where <em>both</em> are fine and the choice is style. Pattern (C) is the gotcha &mdash; <b>emplace_back invokes explicit constructors that push_back refuses</b>. That's a feature when you want it and a silent bug when you don't.</p>
+
+<div class="callout bug">
+  <h3>The hidden gotcha &mdash; explicit constructors</h3>
+  <p>The Chromium project publishes an internal PSA: <em>"Prefer push_back() over emplace_back() unless you know you need it."</em> The reason is exactly pattern (C). <code class="inline">emplace_back</code> is more permissive about what it'll convert to <code class="inline">T</code>; <code class="inline">push_back</code> is stricter. Sometimes the permissiveness is what you want; usually you don't want a "fast write" function to be slipping in conversions you didn't ask for.</p>
+</div>
+
+<h2>3. In your project &mdash; every <code class="inline">push_back</code>, audited</h2>
+
+<h3>The "could be emplace" cases &mdash; equivalent in practice</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/Npc.cpp:30</small>
+<pre class="code">history_.push_back({<span class="str">"user"</span>, std::move(pendingUserLine_)});
+history_.push_back({<span class="str">"assistant"</span>, reply.content});</pre>
+
+<p>The brace-init constructs a temporary <code class="inline">ChatTurn</code> and <code class="inline">push_back</code> moves it in. <code class="inline">emplace_back("user", std::move(pendingUserLine_))</code> would build in place. For a struct of two <code class="inline">std::string</code>s with their cheap moves, the difference is unmeasurable. The <code class="inline">push_back</code> form is also more readable &mdash; the braces make the "I am building a ChatTurn" intent visible, while <code class="inline">emplace_back</code> hides the type.</p>
+
+<small class="path">cpp_racing_game/src/main.cpp:285</small>
+<pre class="code">pts.push_back(sf::Vector2f(cx + std::cos(a) * r, cy + std::sin(a) * r));</pre>
+
+<p>This is the textbook "build a temporary and shove it in" case. <code class="inline">pts.emplace_back(cx + std::cos(a) * r, cy + std::sin(a) * r)</code> would forward those two floats straight to <code class="inline">sf::Vector2f</code>'s constructor. Both compile, both produce the same machine code on modern compilers. <code class="inline">emplace_back</code> is arguably cleaner here &mdash; no redundant <code class="inline">sf::Vector2f(...)</code> spelled out. Either is fine.</p>
+
+<h3>The "emplace would be wrong" cases &mdash; you're already moving</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:62</small>
+<pre class="code">replies_.push_back(std::move(reply));</pre>
+
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.cpp:98</small>
+<pre class="code">transcript_.push_back(std::move(line));</pre>
+
+<p>Here you already have an existing object (<code class="inline">reply</code>, <code class="inline">line</code>) and you're transferring ownership into the vector. <code class="inline">push_back(std::move(x))</code> is exactly the right shape. Writing <code class="inline">emplace_back(std::move(reply))</code> would call <code class="inline">ChatReply</code>'s move constructor with one argument &mdash; same outcome, but the intent ("I'm appending this thing") is muddier. The Abseil style guide says it explicitly: use <code class="inline">push_back</code> when you have an existing object to put in.</p>
+
+<h3>The "definitely fine as push_back" cases &mdash; copies of locals</h3>
+
+<small class="path">cpp_shooter_game/src/main.cpp:410, 498, 555, 568, 748</small>
+<pre class="code">game.impacts.push_back(fx);
+game.pickups.push_back(pickup);
+game.projectiles.push_back(shot);
+game.enemies.push_back(enemy);</pre>
+
+<p>Each appends a copy of a local <code class="inline">struct</code>. Since these are POD-ish (or close to it &mdash; mostly arithmetic types), copy and move are identical. <code class="inline">emplace_back(fx)</code> would just call <code class="inline">ImpactEffect</code>'s copy constructor with one argument &mdash; same code. No reason to change anything; <code class="inline">push_back</code> is the clearer expression of "append this thing."</p>
+
+<div class="callout real">
+  <h3>Audit summary</h3>
+  <p>Across all 20 <code class="inline">push_back</code> calls in your code, zero of them have a meaningful win from converting to <code class="inline">emplace_back</code>. The racing game's <code class="inline">sf::Vector2f</code> temporary is the closest call &mdash; pure style, no perf. The Npc <code class="inline">ChatTurn</code> calls would also work as emplace, but the brace-init form is more readable. This is what the modern advice means in practice: <em>your default is fine</em>.</p>
+</div>
+
+<h2>4. Often confused with...</h2>
+
+<h3><code class="inline">emplace_back</code> vs <code class="inline">push_back</code> (the headline)</h3>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th><code class="inline">push_back</code></th><th><code class="inline">emplace_back</code></th></tr></thead>
+  <tbody>
+    <tr><td>Signature</td><td><code>void push_back(const T&amp;)</code> + rvalue overload</td><td><code>template&lt;class... Args&gt; void emplace_back(Args&amp;&amp;... args)</code></td></tr>
+    <tr><td>Takes</td><td>An object of type <code class="inline">T</code></td><td>Constructor arguments forwarded to <code class="inline">T</code></td></tr>
+    <tr><td>How element is created</td><td>Copy/move the argument</td><td>Construct in place from args</td></tr>
+    <tr><td>Explicit ctors</td><td>Refuses (compile error)</td><td>Invokes (silent)</td></tr>
+    <tr><td>Best when</td><td>You have an existing object (the common case)</td><td>You'd build a temp purely to append it</td></tr>
+    <tr><td>Readability</td><td>Higher (type is explicit at call site)</td><td>Lower (call site shows only args; type is hidden in <code>vector&lt;T&gt;</code> declaration)</td></tr>
+  </tbody>
+</table>
+
+<h3><code class="inline">emplace_back</code> vs <code class="inline">push_back(std::move(x))</code></h3>
+<p>These are sometimes presented as identical. They're not. <code class="inline">emplace_back(x)</code> forwards <code class="inline">x</code> to a one-argument constructor of <code class="inline">T</code> &mdash; might be a copy constructor, a move constructor, or some other converting constructor that happens to match. <code class="inline">push_back(std::move(x))</code> is concrete: it calls the rvalue-reference overload and the move constructor. The latter expresses intent more clearly when <em>moving an existing object</em> is what you mean.</p>
+
+<h3><code class="inline">emplace_back</code> vs <code class="inline">make_X</code> functions</h3>
+<p>Some libraries have factory functions (<code class="inline">make_pair</code>, <code class="inline">make_tuple</code>, <code class="inline">make_unique</code>). These construct and return an object &mdash; you'd then <code class="inline">push_back</code> the result. <code class="inline">emplace_back</code> skips the make step by constructing directly. For <code class="inline">std::unique_ptr</code> specifically, <code class="inline">vec.emplace_back(std::make_unique&lt;T&gt;(...))</code> is the standard pattern because <code class="inline">unique_ptr</code> isn't copyable; you have to either move it in (<code class="inline">push_back(make_unique...)</code>) or emplace it. Both work.</p>
+
+<h3>The Abseil/Chromium guidance vs the older "always emplace" advice</h3>
+<p>Pre-2015 advice was "<code class="inline">emplace_back</code> can skip a move, so prefer it." That advice predates the language's full move-semantics maturity and modern compilers' RVO/copy-elision. The current consensus among industry style guides (Abseil, Chromium, Google C++ Style) is the inverse: <b>prefer <code class="inline">push_back</code>; reach for <code class="inline">emplace_back</code> when you have a specific reason</b>. If you read an older tutorial, calibrate accordingly.</p>
+
+<h3><code class="inline">emplace_back</code> vs <code class="inline">emplace</code> (with no <code class="inline">_back</code>)</h3>
+<p>Different operation. <code class="inline">emplace_back</code> is vector/deque-specific and adds at the end. <code class="inline">emplace</code> on <code class="inline">std::vector</code> takes an iterator and inserts in the middle (O(n) for vector). <code class="inline">emplace</code> on <code class="inline">std::map</code>/<code class="inline">std::set</code> inserts into the tree. Different containers, different return types &mdash; don't conflate the names.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">Look at <code class="inline">replies_.push_back(std::move(reply));</code> in <code class="inline">LlmClient.cpp</code>. If you change it to <code class="inline">replies_.emplace_back(std::move(reply));</code>, what happens at runtime?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="They're not different in this case. emplace_back with one rvalue argument calls the move constructor — same as push_back of an rvalue. Identical runtime behaviour.">
+      <code class="inline">emplace_back</code> avoids the move constructor and is meaningfully faster here.
+    </li>
+    <li data-correct="true" data-why="Right. With one rvalue argument, emplace_back forwards to ChatReply's move constructor — the exact same code that push_back(std::move(x)) calls. No measurable difference. The push_back form just expresses intent better: 'I have an object; append it.'">
+      Identical behaviour &mdash; both forms end up calling <code class="inline">ChatReply</code>'s move constructor. <code class="inline">push_back</code> is clearer for an existing object.
+    </li>
+    <li data-correct="false" data-why="reply.id is the request ID; nothing about emplace_back touches it. Both calls just transfer the ChatReply into the vector.">
+      <code class="inline">emplace_back</code> resets <code class="inline">reply.id</code> to zero as a side effect.
+    </li>
+    <li data-correct="false" data-why="emplace_back is in every reasonable C++ standard since 11. Both forms work on any modern compiler.">
+      It fails to compile on older compilers because <code class="inline">emplace_back</code> requires C++23.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You define <code class="inline">struct Bytes { explicit Bytes(size_t n) : count(n) {} size_t count; };</code> and write <code class="inline">std::vector&lt;Bytes&gt; bufs; bufs.emplace_back(1024);</code>. A teammate "improves" the code to <code class="inline">bufs.push_back(1024);</code>. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backwards. push_back refuses to invoke explicit constructors implicitly. The compile error happens at push_back; emplace_back was the one that compiled.">
+      The push_back version compiles and is faster.
+    </li>
+    <li data-correct="true" data-why="Right. Bytes' constructor is explicit, so 1024 won't implicitly convert to Bytes. push_back refuses, the compiler errors. To make push_back work you'd write push_back(Bytes(1024)). The original emplace_back was actually the right tool here — explicit constructors are one of the legitimate emplace_back use cases.">
+      Compile error on the push_back line &mdash; <code class="inline">Bytes</code>'s constructor is explicit, so <code class="inline">1024</code> won't implicitly convert. <code class="inline">emplace_back</code> was correct.
+    </li>
+    <li data-correct="false" data-why="Both compile and produce the same Bytes element... is wrong because push_back wouldn't compile due to the explicit. The compiler explicitly catches this case.">
+      Both compile and produce a <code class="inline">Bytes</code> with <code class="inline">count == 1024</code>.
+    </li>
+    <li data-correct="false" data-why="explicit affects implicit conversions, not size constants. push_back simply refuses to convert int to an explicit-only Bytes. No special handling of 1024 vs other numbers.">
+      Both compile; <code class="inline">push_back(1024)</code> silently truncates if 1024 is larger than what <code class="inline">size_t</code> holds.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A "modern C++ tutorial" written in 2019 says "always prefer <code class="inline">emplace_back</code> &mdash; it's faster and idiomatic." What's the most accurate critique in 2026?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="emplace_back hasn't been deprecated; it's a fine tool when you have a reason. The critique is about defaults, not removal.">
+      It's outdated; <code class="inline">emplace_back</code> was deprecated in C++23.
+    </li>
+    <li data-correct="true" data-why="Right. Modern industry style guides (Abseil, Chromium, Google C++) flipped the advice: push_back is the default, emplace_back when you have a specific reason. The 2019 advice missed that emplace_back also bypasses explicit constructors (a safety regression for normal use) and that, for modern movable types, the 'avoids a move' win is unmeasurable.">
+      The advice is out of date. Current style guides prefer <code class="inline">push_back</code> as the default; <code class="inline">emplace_back</code> can bypass explicit constructors and hide types at the call site.
+    </li>
+    <li data-correct="false" data-why="The standard library hasn't changed semantics — emplace_back still constructs in place. The change is in stylistic advice, not language behaviour.">
+      It's wrong because C++23 changed <code class="inline">emplace_back</code> to make a copy first.
+    </li>
+    <li data-correct="false" data-why="The compiler doesn't issue this kind of warning. The point is that humans should prefer push_back; the compiler is neutral.">
+      Compilers now emit a warning when you write <code class="inline">emplace_back</code>.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Look at the racing game's <code class="inline">pts.push_back(sf::Vector2f(cx + std::cos(a) * r, cy + std::sin(a) * r));</code>. Of the rewrites below, which is the <em>only</em> one that compiles and means the same thing?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="emplace_back wants sf::Vector2f's constructor arguments — pass the two floats directly, not pre-wrapped in sf::Vector2f(...). Wrapping defeats the point and is just push_back with extra steps.">
+      <code class="inline">pts.emplace_back(sf::Vector2f(cx + ..., cy + ...));</code>
+    </li>
+    <li data-correct="true" data-why="Right. emplace_back forwards args to sf::Vector2f's constructor directly. Two floats in, one sf::Vector2f constructed in place. Same outcome as the original, just no intermediate temp.">
+      <code class="inline">pts.emplace_back(cx + std::cos(a) * r, cy + std::sin(a) * r);</code>
+    </li>
+    <li data-correct="false" data-why="That's an assignment to the back of the vector, but pts.back() is the *last existing* element — and if pts is empty (which it might be on first iteration), back() is undefined behaviour. Wrong shape entirely.">
+      <code class="inline">pts.back() = sf::Vector2f(cx + ..., cy + ...);</code>
+    </li>
+    <li data-correct="false" data-why="reserve allocates capacity but doesn't add elements. Without a subsequent push/emplace, no points are added.">
+      <code class="inline">pts.reserve(pts.size() + 1); pts[pts.size()] = sf::Vector2f(cx + ..., cy + ...);</code>
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You have a vector of <code class="inline">std::unique_ptr&lt;Backend&gt;</code>. Which line adds a new <code class="inline">OllamaBackend</code> to it?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backslash. You can't copy a unique_ptr; the line wouldn't compile. Even if you could, you'd construct a unique_ptr separately and push it in, which works but is more code.">
+      <code class="inline">backends.push_back(std::unique_ptr&lt;Backend&gt;(<span class="kw">new</span> OllamaBackend(host, port, model)));</code>
+    </li>
+    <li data-correct="true" data-why="Right. make_unique builds the unique_ptr; push_back accepts it as an rvalue and moves it into the vector. Idiomatic and exception-safe. (emplace_back(make_unique...(args)) would also work, but you're not gaining anything — there's no temporary to elide.)">
+      <code class="inline">backends.push_back(std::make_unique&lt;OllamaBackend&gt;(host, port, model));</code>
+    </li>
+    <li data-correct="false" data-why="emplace_back(host, port, model) would try to construct a unique_ptr<Backend> from three arguments — unique_ptr's constructor doesn't take (host, port, model). Compile error.">
+      <code class="inline">backends.emplace_back(host, port, model);</code>
+    </li>
+    <li data-correct="false" data-why="That tries to assign a unique_ptr to a non-existent element. Even if the vector were non-empty, it wouldn't *add* — it'd overwrite the first element.">
+      <code class="inline">backends[<span class="num">0</span>] = std::make_unique&lt;OllamaBackend&gt;(host, port, model);</code>
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> The racing game's <code class="inline">pts.push_back(sf::Vector2f(...))</code> would be equally valid as <code class="inline">pts.emplace_back(...)</code>. Pick the one you'd prefer for new code in this codebase and defend it in two sentences. (There's no objectively right answer — the point is the reasoning.)</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> Imagine you're refactoring <code class="inline">Npc::onReplyArrived</code> to use <code class="inline">emplace_back</code> instead of <code class="inline">push_back({"user", std::move(line)})</code>. Rewrite the two relevant lines. Then identify one tiny thing that becomes <em>less</em> clear in the emplace version. (Hint: where is the type "ChatTurn" mentioned now?)</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> You define <code class="inline">struct Damage { explicit Damage(float v) : value(v) {} float value; };</code> and write code like <code class="inline">damages.emplace_back(player.health * 0.1f);</code>. Six months later a teammate accidentally writes <code class="inline">damages.emplace_back(<span class="num">3</span>);</code> &mdash; an int, not a float, meant as "3 hits worth." Walk through what would have happened with <code class="inline">push_back(Damage(3))</code>, and explain why a <code class="inline">push_back</code>-by-default style would have caught the bug earlier.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can state the difference between the two in one sentence each</label></li>
+  <li><label><input type="checkbox"> Walked through the three-pattern example &mdash; I understand the explicit-constructor gotcha</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I can find each push_back in my repo and say why it's right</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I won't conflate emplace_back with push_back(std::move(x))</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://abseil.io/tips/112">Abseil Tip #112 &mdash; emplace vs. push_back</a> &middot;
+    <a href="https://quuxplusone.github.io/blog/2021/03/03/push-back-emplace-back/">Arthur O'Dwyer &mdash; Don't blindly prefer <code>emplace_back</code></a> &middot;
+    <a href="https://groups.google.com/a/chromium.org/g/chromium-dev/c/7mJypsYz6AA">Chromium PSA &mdash; prefer push_back unless you know you need emplace</a> &middot;
+    <a href="https://en.cppreference.com/cpp/container/vector/emplace_back">cppreference: <code>std::vector::emplace_back</code></a>
+  </p>
+  <p>Lesson 0012 &middot; <code class="inline">docs/learning/lessons/0012-emplace-back-vs-push-back.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

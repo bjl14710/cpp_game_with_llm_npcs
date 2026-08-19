@@ -1,0 +1,31 @@
+# Checkpoint
+Session started: 2026-06-30
+Goal: Work through all ready-for-ai issues
+Status: COMPLETE
+Issues to process: [#42, #43, #44, #45, #46]
+Issues completed: [#42 (PR#47), #43 (PR#48), #44 (PR#49), #45 (PR#50), #46 (PR#51)]
+Issues failed: []
+Issues skipped: []
+
+## Detail
+- #42: scripts/generate_icons.py + webapp/static/icons/ (180/192/512px PNGs) — PR #47
+- #43: webapp/static/manifest.json + PWA meta tags in base.html — PR #48
+- #44: mobile CSS (@media ≤600px) + hamburger nav in base.html — PR #49
+- #45: mac-setup.sh prereq checker + uvicorn + ngrok launch + SIGINT trap — PR #50
+- #46: MAC_SETUP.md step-by-step guide — PR #51
+
+## Learning materials written
+- lessons/0034-progressive-web-apps.html
+- drills/0005-progressive-web-apps.html
+- docs/learning/index.html (rebuilt)
+- docs/learning/PROGRESS.md (updated)
+
+## Prior session (2026-06-28) — COMPLETE
+- #30: strategies/ BaseStrategy ABC + Signal — PR #34
+- #4:  robinhood_executor --loop mode — PR #35
+- #9:  NASDAQ-100 universe + micro-cap filter — PR #36
+- #31: EngulfingStrategy detector, 9 tests — PR #37
+- #26: morning_runner.py pipeline — PR #38
+- #6:  meanvar_long_short(), --allow_short flag — PR #39
+- #32: PaperEngine bar-by-bar sim, 9 tests — PR #40
+- #33: intraday-sim CLI + pyproject.toml — PR #41

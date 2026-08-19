@@ -1,0 +1,28 @@
+"""Plant test composite characters exercising the new #92 parts/palettes."""
+import sqlite3, sys, json
+
+db = sys.argv[1]
+con = sqlite3.connect(db)
+con.execute("CREATE TABLE IF NOT EXISTS character_persona (character_id TEXT PRIMARY KEY, persona_text TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')")
+con.execute("CREATE TABLE IF NOT EXISTS character_look (character_id TEXT PRIMARY KEY, look_json TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')")
+
+def persona(name, x, z):
+    return f"name = {name}\nrole = mannequin\nspot = plaza\nposition = {x}, {z}\nfacing = 180\n---\nA display dummy for the style showcase.\n"
+
+def look(body, head, eyes, hair, palette):
+    return json.dumps({"body": body, "head": head, "eyes": eyes, "hair": hair, "palette": palette})
+
+# Positioned in open plaza clear of the hot-dog cart (0,0), taxi, benches.
+chars = [
+    ("aaa_round",  -5.0, -12.0, "body_slim", "head_oval",  "eyes_round", "hair_pony",   "berry"),
+    ("bbb_blocky",  0.0, -12.0, "body_bulk", "head_tall",  "eyes_happy", "hair_mohawk", "slate"),
+    ("ccc_mint",    5.0, -12.0, "body_round","head_round", "eyes_happy", "hair_pony",   "mint"),
+]
+for cid, x, z, b, h, e, hr, pal in chars:
+    con.execute("INSERT OR REPLACE INTO character_persona (character_id, persona_text) VALUES (?,?)",
+                (cid, persona(cid, x, z)))
+    con.execute("INSERT OR REPLACE INTO character_look (character_id, look_json) VALUES (?,?)",
+                (cid, look(b, h, e, hr, pal)))
+con.commit()
+con.close()
+print(f"planted {len(chars)} characters into {db}")

@@ -1,0 +1,141 @@
+# Plan: Police-only arrests, facing fix, moods + expressive faces
+
+## Context
+
+The NPC instruction feature (committed as `1b15976`) works, and play-testing
+surfaced the next round of requests:
+1. **Anyone can "arrest"** — only police should; civilians should instead
+   summon the police to come arrest you.
+2. **"Face me" turns NPCs the wrong way** — When they face me, they stay still and when I turn left, they turn right. they mirror the player's movement
+   instead of tracking it.
+3. **NPCs aren't emotionally reactive** — "I love you" should fluster them,
+   "you suck" should anger them, "I like your hat" should flatter them.
+4. **No faces** — heads are blank skin boxes; expressions should be visible.
+
+Items 3+4 unify naturally: the LLM emits a mood tag each reply, and the mood
+renders as a facial expression on the model.
+
+## Verified groundwork (done during planning)
+
+- **Facing bug root cause**: `Renderer3D::drawNpc` rotates by `-facingDeg`,
+  but rotation by `+f` about Y maps local +Z (the visor/front) to
+  `(sin f, 0, cos f)` = `flatForward(f)`. The `-f` mirrors every NPC in X.
+  Persona files are authored to the *documented* convention (librarian at
+  (-36,0), library west, plaza east, `facing = 90` = +X toward plaza ✓), so
+  the renderer sign is the bug and persona files stay untouched.
+- **Model behavior with two tags** (tested against live qwen2.5:3b): emits
+  mood tags reliably but sloppily — duplicates, tags at start/middle, unknown
+  words ("annoyed"), occasional single brackets `[ACTION: wave]`, spurious
+  actions. The parser must scan the whole reply, strip every directive
+  wherever it appears, map synonyms, and take the **last** mood as final.
+
+## Changes
+
+### 1. `src/core/NpcAction.hpp` — generalize the tag parser
+- Add `enum class NpcMood { Neutral, Happy, Angry, Sad, Embarrassed, Surprised }`.
+- Add `NpcAction::CallPolice` to the action enum.
+- New `struct Directives { NpcAction action; NpcMood mood; bool hasMood; }` and
+  `Directives parseDirectives(std::string& reply)`:
+  - Scans for every `[[KIND: keyword]]` **and** single-bracket `[KIND: keyword]`
+    where KIND is `action`/`mood` (case-insensitive, whitespace-tolerant).
+  - Strips **all** matched tags from the reply wherever they appear (start,
+    middle, end — the model doesn't follow placement rules), collapsing
+    doubled whitespace at the seams; unknown keywords are also stripped (so
+    brackets never leak to the transcript) but map to None/no-mood.
+  - Last mood tag wins. Synonym map: annoyed/irritated/frustrated→angry;
+    flattered/pleased/excited/joyful→happy; flustered/awkward/shy→embarrassed;
+    shocked/startled→surprised; upset/hurt→sad.
+  - Action keyword `call_police` (also `call police`, `police`) → CallPolice.
+- Keep `parseActionTag` as a thin wrapper (returns `.action`) so existing
+  callers/tests survive; update the one test that expects unknown tags to be
+  left in the text (they're now stripped — a display improvement).
+
+### 2. Persona: police flag + persona-aware protocol + mood protocol
+- `Persona` (src/core/Persona.hpp) gains `bool police = false`.
+- `renderActionProtocol()` becomes non-static / takes the flag: police get the
+  `[[ACTION: arrest]]` line; civilians instead get
+  `[[ACTION: call_police]] - you call out for the police to come arrest the player`.
+- Append a MOOD block: react like a real person (compliments flatter,
+  insults sting, love declarations fluster, surprises startle — show it in
+  your words), and ALWAYS end with exactly one `[[MOOD: …]]` tag from the
+  six. Tighten ACTION wording: "most replies need NO action directive".
+- `PersonaLoader.cpp`: parse new header key `police = true` (accept
+  true/yes/1; loader errors on unknown keys today, so this is required).
+- `personas/cop.persona`: add `police = true`.
+
+### 3. `src/core/Npc.hpp` / `Npc.cpp` — moods, summoning, lookAt
+- `onReplyArrived`: use `parseDirectives`; route action via `applyAction` as
+  today; set `mood_` + `moodTimer_` (~25 s decay back to Neutral, ticked in
+  `update()` like the gesture timer).
+- `applyAction`: if `action == Arrest && !persona_.police` convert to
+  CallPolice (the model sometimes disobeys). CallPolice sets `lastAction_`
+  and triggers a Wave pose (visually flagging someone down); no movement
+  behavior change for the caller.
+- New public `void commandArrest()` (sets behavior to Arrest, clears catch
+  latch) so the main loop can order police around, and
+  `void lookAt(const Vec3&)` (public wrapper over `faceToward`).
+- Accessor `NpcMood mood() const`.
+
+### 4. Renderer — facing sign fix + faces
+- `drawNpc`: `glRotatef(-npc.facingDeg, …)` → `glRotatef(npc.facingDeg, …)`.
+  (One character; fixes "face me" mirroring AND every NPC's authored facing.)
+- `NpcVisual` gains renderer-local `NpcFace` enum (mirrors NpcMood, same
+  pattern as the existing NpcPose) — main.cpp maps mood→face.
+- New private `drawFace(NpcFace)` called from `drawNpc` in the local frame:
+  small `drawTexturedBox` quads proud of the head's front (+Z) face —
+  - eyes: two dark boxes (bigger when Surprised),
+  - brows: thin boxes, rotated inward for Angry / outward for Sad
+    (glPushMatrix + glRotatef about Z, same pattern as drawArm),
+  - mouth: thin box; raised corner boxes for Happy, lowered for Sad,
+    small open square for Surprised,
+  - blush: two pink boxes on the cheeks when Embarrassed.
+
+### 5. `src/app/main.cpp` — wiring
+- Reply-arrival block: stage directions for CallPolice ("calls for the
+  police!"); after applying, if `npc.lastAction() == CallPolice`, loop the
+  world's NPCs and `commandArrest()` every `persona().police` NPC (the cop
+  visibly sprints over; the existing catch latch shows "caught you!").
+- T-key talk handler: `npc.lookAt(camera.position)` so an NPC turns to you
+  the moment you start talking ("they should face you if they aren't
+  already").
+	- If you are caught by the police, you should be "arrested" this may mean that you get sent to the police station for 10 seconds"
+		- Note: teh 10 seconds is because right now the biggest arrest should be something like "disturbing the police" 
+		- for instance: let's say I say *shout* and that is my characrter is shouting, that should annoy the npcs and after a warning or two, they should find someone to arrest me.
+			- This would also mean adding new abilities for the player to do stuff by calling '**' with the action, maybe we can make this like AI dungeon but 3d.
+- NPC draw loop: map `npc.mood()` → `NpcFace`, pass into `NpcVisual`.
+
+### 6. Tests (auto-globbed by tests/Makefile)
+- Extend `tests/test_npc_action.cpp`: parseDirectives strips tags anywhere
+  (start/middle/adjacent), single-bracket form, last-mood-wins, synonym map,
+  unknown keyword stripped → no mood/None action, call_police keyword.
+- Extend `tests/test_npc_behavior.cpp`: civilian `arrest` converts to
+  CallPolice (no chase) while a `police = true` persona keeps Arrest; mood set
+  by reply and decays to Neutral via `update()`; `commandArrest()` makes a cop
+  chase; `lookAt` turns without moving.
+- Extend `tests/test_persona.cpp` / `test_persona_roster.cpp` patterns:
+  loader parses `police = true`; prompt contains the arrest directive only
+  for police personas, and always contains the MOOD block.
+
+## Out of scope
+- The pedestrian doesn't pathfind to the cop; the cop comes to you.
+- Moods don't alter movement/voice — facial expression + prose only.
+- The transient raw-tag flicker during streaming (pre-existing cosmetic nit).
+
+## Verification
+- `make -C tests test` — full offline suite.
+- `cmake --build build -j`; relaunch the game (Ollama already up):
+  - "face me" to a side-on NPC → turns *toward* you and tracks correctly.
+  - Walk up + `T` → NPC turns to face you immediately.
+  - To the baker: "arrest me!" → she refuses/calls police; the cop sprints
+    over and "caught you!" appears. To the cop: "arrest me" → she chases.
+  - "I love you" → embarrassed face (blush); "you suck" → angry brows;
+    "I like your hat" → happy face. Watch the face change after each reply.
+- Headless spot-check (same harness as /tmp/instr_check.cpp) to confirm tag
+  hygiene with the real persona prompts before in-game testing.
+
+## Commit
+multiple small commits on `be_able_to_instruct_npcs` 
+after all is done, run /code-review:
+verify that all is good, syntax and performance
+`feat(npc): police-only arrests, moods with facial expressions, facing fix`
+(no push, per repo rules).

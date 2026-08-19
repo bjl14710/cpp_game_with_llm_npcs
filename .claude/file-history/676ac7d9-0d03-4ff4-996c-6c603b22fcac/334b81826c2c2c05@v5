@@ -1,0 +1,417 @@
+"""Spec-driven edge-case tests for the MSP430 simulator.
+
+Each test cites the TI document section it verifies (SLAU367P User's Guide /
+SLASE54D datasheet — the copies in ``hardware_docs/ti/MSP430FR5994/``).
+
+Behaviors the current model gets wrong are marked ``xfail(strict=True)`` with
+the matching finding from ``docs/audits/msp430-compliance-report.md``. That is
+the plan's "captured failure list": fixing ``msp430.py`` makes the marker fail
+loudly (XPASS) so it gets removed deliberately, never silently.
+"""
+import pytest
+
+from silmulator.devices.msp430 import MSP430
+
+
+@pytest.fixture
+def mcu():
+    return MSP430()
+
+
+def errors(mcu) -> int:
+    """Depth of the device SCPI error queue."""
+    return len(mcu._error_queue)
+
+
+# ---------------------------------------------------------------------------
+# GPIO — SLAU367P §12 (Digital I/O)
+# ---------------------------------------------------------------------------
+
+class TestGPIOEdgeCases:
+    def test_direction_mask_boundaries(self, mcu):
+        # SLAU367P §12.2.3: PxDIR is an 8-bit register; 0x00 and 0xFF are the extremes.
+        mcu.process("GPIO:PORT1:DIRECTION 0x00")
+        assert mcu.process("GPIO:PORT1:DIRECTION?") == "0x00"
+        mcu.process("GPIO:PORT1:DIRECTION 0xFF")
+        assert mcu.process("GPIO:PORT1:DIRECTION?") == "0xFF"
+        assert errors(mcu) == 0
+
+    def test_direction_write_masks_to_8_bits(self, mcu):
+        # SLAU367P §12.2.3: ports are 8 bits wide; excess bits cannot be stored.
+        mcu.process("GPIO:PORT1:DIRECTION 0x1FF")
+        assert mcu.process("GPIO:PORT1:DIRECTION?") == "0xFF"
+
+    def test_pin_direction_valid_boundary_pins(self, mcu):
+        # SLAU367P §12.2.3: pins 0 and 7 are the valid extremes of an 8-bit port.
+        mcu.process("GPIO:PORT1:PIN:DIRECTION 0,OUTPUT")
+        mcu.process("GPIO:PORT1:PIN:DIRECTION 7,OUTPUT")
+        assert int(mcu.process("GPIO:PORT1:DIRECTION?"), 16) == 0x81
+        assert errors(mcu) == 0
+
+    def test_pin_index_beyond_port_width_rejected(self, mcu):
+        # SLAU367P §12.2: each port has exactly 8 I/O lines; pin 12 does not exist.
+        mcu.process("GPIO:PORT1:PIN:VALUE 12,1")
+        assert errors(mcu) == 1
+        assert mcu.ports[1].output <= 0xFF
+
+    def test_invalid_pin_mode_rejected(self, mcu):
+        # SLAU367P §12.2.3: a pin is input (0) or output (1); no other mode exists.
+        mcu.process("GPIO:PORT1:PIN:DIRECTION 0,BANANA")
+        assert errors(mcu) == 1
+
+    def test_pullup_pulldown_mutually_exclusive(self, mcu):
+        # SLAU367P §12.2.4, Table 12-1: PxREN enables one resistor whose direction
+        # is PxOUT's bit — pull-up and pull-down cannot both be active.
+        mcu.process("GPIO:PORT1:PULLUP 0x01")
+        mcu.process("GPIO:PORT1:PULLDOWN 0x01")
+        assert not (mcu.ports[1].pullup & mcu.ports[1].pulldown)
+
+    def test_input_reflects_enabled_pullup(self, mcu):
+        # SLAU367P §12.2.4: with the pin as input and the pull-up enabled, an
+        # undriven pin reads high.
+        mcu.process("GPIO:PORT1:DIRECTION 0x00")
+        mcu.process("GPIO:PORT1:PULLUP 0x01")
+        assert int(mcu.process("GPIO:PORT1:INPUT?"), 16) & 0x01 == 0x01
+
+
+# ---------------------------------------------------------------------------
+# ADC — SLAU367P §34 (ADC12_B), §33 (REF_A); SLASE54D §8.12.9
+# ---------------------------------------------------------------------------
+
+class TestADCEdgeCases:
+    def test_resolution_valid_values(self, mcu):
+        # SLAU367P §34.3 (ADC12CTL2.ADC12RES): 8-, 10-, and 12-bit modes exist.
+        for res in (8, 10, 12):
+            mcu.process(f"ADC:RESOLUTION {res}")
+            assert mcu.process("ADC:RESOLUTION?") == str(res)
+        assert errors(mcu) == 0
+
+    def test_resolution_invalid_rejected(self, mcu):
+        # SLAU367P §34.3: ADC12RES has no 14-bit encoding.
+        mcu.process("ADC:RESOLUTION 14")
+        assert errors(mcu) == 1
+
+    def test_raw_full_scale_at_reference_voltage(self, mcu):
+        # SLAU367P §34.2.1 Eq. 13: NADC is full scale (0FFFh) when Vin >= VR+.
+        mcu.inject_adc(0, 3.3)
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) == 4095
+
+    def test_raw_saturates_above_reference(self, mcu):
+        # SLAU367P §34.2.1 Eq. 15: output saturates at full scale above VR+.
+        mcu.inject_adc(0, 5.0)
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) == 4095
+
+    def test_raw_clamps_to_zero_below_vr_minus(self, mcu):
+        # SLAU367P §34.2.1: NADC is zero when the input is at or below VR-.
+        mcu.inject_adc(0, -1.0)
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) == 0
+
+    def test_resolution_scales_full_range(self, mcu):
+        # SLAU367P §34.3 (ADC12RES): 8-bit mode has a 255-count full scale.
+        mcu.process("ADC:RESOLUTION 8")
+        mcu.inject_adc(0, 3.3)
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) == 255
+
+    def test_reference_out_of_range_rejected(self, mcu):
+        # SLAU367P §34.2.4 (ADC12VRSEL), §33 (REF_A): the reference is selected
+        # from a fixed set (AVCC, 1.2/2.0/2.5-V REF, external) — not free-form.
+        mcu.process("ADC:REFERENCE BANANA")
+        assert errors(mcu) == 1
+
+    def test_raw_respects_selected_reference(self, mcu):
+        # SLAU367P §34.2.1 Eq. 13: with VR+ = 1.2-V VREF, a 1.2-V input is full scale.
+        mcu.process("ADC:REFERENCE VREF")
+        mcu.inject_adc(0, 1.2)
+        assert int(mcu.process("ADC:CHANNEL0:RAW?")) == 4095
+
+    def test_veref_voltage_param_must_be_numeric(self, mcu):
+        # A malformed VeREF+ voltage must queue a SCPI error, not crash the
+        # handler (ADC:REFERENCE VEREF,<v> takes a board-supplied voltage).
+        mcu.process("ADC:REFERENCE VEREF,notanumber")
+        assert errors(mcu) == 1
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="audit ADC:CONVERT (NON_COMPLIANT): conversions run without the "
+               "ADC12ENC enable gate",
+    )
+    def test_conversion_requires_enable(self, mcu):
+        # SLAU367P §34.2 (ADC12ENC): 'ADC12ENC must be set to 1 before any
+        # conversion can take place.'
+        mcu.inject_adc(0, 1.0)
+        mcu.process("ADC:CONVERT 0")
+        assert errors(mcu) == 1  # channel/module was never enabled
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="audit ADC:CONVERT: nonexistent channel returns '0' with no error",
+    )
+    def test_convert_invalid_channel_rejected(self, mcu):
+        # SLASE54D Table 6-1: the FR5994 exposes a bounded ADC channel set; a
+        # conversion on a channel that does not exist is an error, not a zero.
+        mcu.process("ADC:CONVERT 99")
+        assert errors(mcu) == 1
+
+
+# ---------------------------------------------------------------------------
+# Timer_A — SLAU367P §25; SLASE54D Table 6-1
+# ---------------------------------------------------------------------------
+
+class TestTimerAEdgeCases:
+    def test_mode_valid_set(self, mcu):
+        # SLAU367P §25.2.3 (MC bits): stop, up, continuous, up/down.
+        for mode in ("STOP", "UP", "CONTINUOUS", "UPDOWN"):
+            mcu.process(f"TIMERA0:MODE {mode}")
+            assert mcu.process("TIMERA0:MODE?") == mode
+        assert errors(mcu) == 0
+
+    def test_mode_invalid_rejected(self, mcu):
+        # SLAU367P §25.2.3: MC has exactly four encodings.
+        mcu.process("TIMERA0:MODE BANANA")
+        assert errors(mcu) == 1
+
+    def test_clock_source_valid_set(self, mcu):
+        # SLAU367P §25.3.1 (TASSEL): TACLK, ACLK, SMCLK, INCLK.
+        for src in ("TACLK", "ACLK", "SMCLK", "INCLK"):
+            mcu.process(f"TIMERA0:CLOCK:SOURCE {src}")
+            assert mcu.process("TIMERA0:CLOCK:SOURCE?") == src
+        assert errors(mcu) == 0
+
+    def test_clock_source_invalid_rejected(self, mcu):
+        # SLAU367P §25.3.1: TASSEL has four encodings.
+        mcu.process("TIMERA0:CLOCK:SOURCE BANANA")
+        assert errors(mcu) == 1
+
+    def test_divider_valid_boundaries(self, mcu):
+        # SLAU367P §25.2.1.1: ID (/1../8) x TAIDEX (/1../8) reaches /1 and /64.
+        mcu.process("TIMERA0:CLOCK:DIVIDER 1")
+        assert mcu.process("TIMERA0:CLOCK:DIVIDER?") == "1"
+        mcu.process("TIMERA0:CLOCK:DIVIDER 64")
+        assert mcu.process("TIMERA0:CLOCK:DIVIDER?") == "64"
+        assert errors(mcu) == 0
+
+    def test_divider_128_rejected(self, mcu):
+        # SLAU367P §25.2.1.1: no ID x TAIDEX combination produces /128.
+        mcu.process("TIMERA0:CLOCK:DIVIDER 128")
+        assert errors(mcu) == 1
+
+    def test_count_16bit_maximum(self, mcu):
+        # SLAU367P §25.2.1: TAxR is 16 bits; 0xFFFF is the last valid count.
+        mcu.process("TIMERA0:COUNT 0xFFFF")
+        assert int(mcu.process("TIMERA0:COUNT?")) == 0xFFFF
+
+    def test_count_over_16bit_rejected_or_masked(self, mcu):
+        # SLAU367P §25.2.1: a 16-bit counter cannot hold 0x10000.
+        mcu.process("TIMERA0:COUNT 0x10000")
+        assert errors(mcu) == 1 or mcu.timer_a[0].count <= 0xFFFF
+
+    def test_capture_compare_boundary_value(self, mcu):
+        # SLAU367P §25.2.4: TAxCCRn is a 16-bit compare register.
+        mcu.process("TIMERA0:CC0:VALUE 0xFFFF")
+        assert int(mcu.process("TIMERA0:CC0:VALUE?")) == 0xFFFF
+
+    def test_capture_mode_settable(self, mcu):
+        # SLAU367P §25.2.4 (CAP bit): each CC unit supports capture mode.
+        mcu.process("TIMERA0:CC1:MODE CAPTURE")
+        assert mcu.process("TIMERA0:CC1:MODE?") == "CAPTURE"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="audit TIMERAn:CCn:VALUE (PARTIAL): model exposes CCR0-3 on every "
+               "instance; FR5994 Timer_A instances have 3,3,2,2,2 CC registers",
+    )
+    def test_ta0_ccr3_does_not_exist(self, mcu):
+        # SLASE54D Table 6-1: TA0 has three CC registers (CCR0-CCR2).
+        mcu.process("TIMERA0:CC3:VALUE 100")
+        assert errors(mcu) == 1  # undefined header on real hardware
+
+    def test_period_is_ccr0_in_up_mode(self, mcu):
+        # SLAU367P §25.2.3.1: in up mode the period register IS TAxCCR0.
+        mcu.process("TIMERA0:MODE UP")
+        mcu.process("TIMERA0:PERIOD 1000")
+        assert int(mcu.process("TIMERA0:CC0:VALUE?")) == 1000
+
+
+# ---------------------------------------------------------------------------
+# I2C (eUSCI_B) — SLAU367P §32.3
+# ---------------------------------------------------------------------------
+
+class TestI2CEdgeCases:
+    def test_10bit_address_accepted(self, mcu):
+        # SLAU367P §32.3.1 (UCSLA10/UCA10): 10-bit addressing spans 0-0x3FF.
+        mcu.process("I2C0:ADDRESS 0x2FF,10BIT")
+        assert mcu.process("I2C0:ADDRESS?") == "0x2FF"
+        assert errors(mcu) == 0
+
+    def test_10bit_address_out_of_range_rejected(self, mcu):
+        # SLAU367P §32.3.1: 10-bit addressing tops out at 0x3FF.
+        mcu.process("I2C0:ADDRESS 0x400,10BIT")
+        assert errors(mcu) == 1
+
+    def test_7bit_address_out_of_range_rejected(self, mcu):
+        # SLAU367P §32.3.1: default (7-bit) addressing tops out at 0x7F; the
+        # old model silently truncated this instead of rejecting it.
+        mcu.process("I2C0:ADDRESS 0x80")
+        assert errors(mcu) == 1
+
+    def test_frequency_invalid_rejected(self, mcu):
+        # SLASE54D §8.12.8; SLAU367P §32.3: only 100 kHz/400 kHz/1 MHz exist;
+        # the old model had dead validation code that accepted anything.
+        mcu.process("I2C0:FREQUENCY 12345")
+        assert errors(mcu) == 1
+        assert mcu.i2c[0].clock_frequency == 100000  # unchanged from default
+
+    def test_frequency_valid_trio_accepted(self, mcu):
+        # SLASE54D §8.12.8: standard/fast/fast-plus are all valid eUSCI_B modes.
+        for freq in (100000, 400000, 1000000):
+            mcu.process(f"I2C0:FREQUENCY {freq}")
+            assert mcu.process("I2C0:FREQUENCY?") == str(freq)
+        assert errors(mcu) == 0
+
+    def test_transfer_to_unknown_address_nacks(self, mcu):
+        # SLAU367P §32.3.4 (UCNACKIFG): no simulated slave lives at 0x77 —
+        # the bus NACKs instead of silently zero-filling like the old model.
+        resp = mcu.process('I2C0:TRANSFER 0x77,"AB"')
+        assert resp == "NACK"
+        assert errors(mcu) == 0  # NACK is a bus-level response, not a SCPI error
+
+    def test_transfer_to_configured_address_acks(self, mcu):
+        # The default configured address (I2CState.address, 0x50) is a known
+        # slave out of the box, so a transfer to it proceeds instead of NACKing.
+        resp = mcu.process('I2C0:TRANSFER 0x50,"AB"')
+        assert resp == "00"
+
+    def test_transfer_routes_to_per_address_buffers(self, mcu):
+        # SLAU367P §32.3.4: independent addresses are independent slaves —
+        # data injected for one address must not answer a transfer to another.
+        mcu.inject_i2c_rx(0, bytes([0xAA, 0xBB]), address=0x60)
+        assert mcu.process('I2C0:TRANSFER 0x60,"0102"') == "aabb"
+        assert mcu.process('I2C0:TRANSFER 0x61,"0102"') == "NACK"
+
+    def test_write_nacks_when_no_slave_present(self, mcu):
+        # SLAU367P §32.3.4 (UCNACKIFG): WRITE must be able to NACK, not
+        # unconditionally ACK as the old model did.
+        assert mcu.process('I2C0:WRITE "DEADBEEF"') == "ACK"  # 0x50 known by default
+        mcu.i2c[0].addr_buffers.clear()
+        assert mcu.process('I2C0:WRITE "DEADBEEF"') == "NACK"
+
+
+# ---------------------------------------------------------------------------
+# WDT_A — SLAU367P §24.2
+# ---------------------------------------------------------------------------
+
+class TestWDTEdgeCases:
+    def test_wrong_password_causes_puc(self, mcu):
+        # SLAU367P §24.2 (WDTPW): a WDTCTL write whose upper byte isn't 0x5A
+        # is a password violation and causes an immediate PUC (device reset).
+        mcu.process("CPU:PC 0x8000")
+        mcu.process("GPIO:PORT1:OUTPUT 0xFF")
+        mcu.process("WDT:STATE HOLD")
+        mcu.process("WDT:PASSWORD 0x1234")  # 0x12 != 0x5A
+        assert mcu._pc == mcu._reset_vector_pc()  # PC went to the reset vector
+        assert mcu.ports[1].output == 0x00        # peripheral state also reset
+        assert mcu.wdt.hold is False               # WDT itself reset to its default
+        assert errors(mcu) == 0                    # PUC is a hardware event, not a SCPI error
+
+    def test_correct_password_accepted(self, mcu):
+        # SLAU367P §24.2: 0x5A in the upper byte is the correct WDTPW value;
+        # the write is accepted and does not reset the device.
+        mcu.process("CPU:PC 0x8000")
+        mcu.process("WDT:PASSWORD 0x5A00")
+        assert mcu._pc == 0x8000
+        assert errors(mcu) == 0
+
+    def test_hold_start_state(self, mcu):
+        # SLAU367P §24.2 (WDTHOLD): the watchdog can be held or started, and
+        # a correct password's WDTHOLD bit (bit 7 of the lower byte) drives
+        # the same stored state.
+        mcu.process("WDT:STATE HOLD")
+        assert mcu.process("WDT:STATE?") == "HOLD"
+        mcu.process("WDT:STATE START")
+        assert mcu.process("WDT:STATE?") == "START"
+        mcu.process("WDT:PASSWORD 0x5A80")  # WDTHOLD bit set
+        assert mcu.process("WDT:STATE?") == "HOLD"
+        assert errors(mcu) == 0
+
+
+# ---------------------------------------------------------------------------
+# Interrupt system — SLAU367P §4.3.3 (SR.GIE); SLASE54D §9.5 Table 9-4
+# ---------------------------------------------------------------------------
+
+class TestInterruptEdgeCases:
+    def test_gie_stored(self, mcu):
+        # SLAU367P §4.3.3: GIE is a real SR bit; it must be settable, hold
+        # its value, and read back — not a stub.
+        assert mcu.process("INTERRUPT:GIE?") == "0"  # GIE clear after a PUC
+        mcu.process("INTERRUPT:GIE ON")
+        assert mcu.process("INTERRUPT:GIE?") == "1"
+        mcu.process("INTERRUPT:ENABLE")
+        assert mcu.process("INTERRUPT:GIE?") == "1"
+        mcu.process("INTERRUPT:DISABLE")
+        assert mcu.process("INTERRUPT:GIE?") == "0"
+        assert errors(mcu) == 0
+
+    def test_vector_and_flag_reflect_set_gpio_flag(self, mcu):
+        # SLASE54D Table 9-4: I/O port P1's vector is 0FFDEh. With GIE set
+        # and P1's interrupt enable/flag both set, VECTOR? must report P1's
+        # real vector address and FLAG? must report the pending condition.
+        mcu.process("GPIO:PORT1:INTERRUPT:ENABLE 0x01")
+        mcu.process("GPIO:PORT1:INTERRUPT:FLAG 0x01")
+        mcu.process("INTERRUPT:GIE ON")
+        assert mcu.process("INTERRUPT:VECTOR?") == "0xFFDE"
+        assert mcu.process("INTERRUPT:FLAG?") == "1"
+
+    def test_vector_gated_by_gie(self, mcu):
+        # SLAU367P §4.3.3: GIE gates whether a maskable interrupt is taken;
+        # a pending flag with GIE clear must not produce a vector.
+        mcu.process("GPIO:PORT1:INTERRUPT:ENABLE 0x01")
+        mcu.process("GPIO:PORT1:INTERRUPT:FLAG 0x01")
+        assert mcu.process("INTERRUPT:VECTOR?") == "0x0000"
+        # FLAG? is independent of GIE — IFG bits are set regardless.
+        assert mcu.process("INTERRUPT:FLAG?") == "1"
+
+    def test_vector_no_pending_source(self, mcu):
+        # With GIE set but nothing pending, VECTOR? reads 0x0000 (no vector
+        # in Table 9-4 is address 0) and FLAG? reads 0.
+        mcu.process("INTERRUPT:GIE ON")
+        assert mcu.process("INTERRUPT:VECTOR?") == "0x0000"
+        assert mcu.process("INTERRUPT:FLAG?") == "0"
+
+
+# ---------------------------------------------------------------------------
+# Clock system and PMM boundaries — SLAU367P §3, §2; SLASE54D §8.3
+# ---------------------------------------------------------------------------
+
+class TestClockAndPowerEdgeCases:
+    def test_mclk_divider_32_boundary(self, mcu):
+        # SLAU367P §3.3.3 (CSCTL3.DIVM): /32 is the maximum divider.
+        mcu.process("CLOCK:MCLK:DIVIDER 32")
+        assert mcu.process("CLOCK:MCLK:DIVIDER?") == "32"
+        assert errors(mcu) == 0
+
+    def test_mclk_divider_64_rejected(self, mcu):
+        # SLAU367P §3.3.3: DIVM encodings stop at /32.
+        mcu.process("CLOCK:MCLK:DIVIDER 64")
+        assert errors(mcu) == 1
+
+    def test_mclk_source_modclk_accepted(self, mcu):
+        # SLAU367P §3.3.2 (CSCTL2.SELM): MODCLK is encoding 4.
+        mcu.process("CLOCK:MCLK:SOURCE MODCLK")
+        assert errors(mcu) == 0
+        assert mcu.process("CLOCK:MCLK:SOURCE?") == "MODCLK"
+
+    def test_lpm35_accepted(self, mcu):
+        # SLAU367P §2.2.4: 'LPM3.5 and LPM4.5 are additional low-power modes'.
+        mcu.process("POWER:MODE LPM3.5")
+        assert errors(mcu) == 0
+        assert mcu.process("POWER:MODE?") == "LPM3.5"
+
+    def test_vcc_boundaries(self, mcu):
+        # SLASE54D §8.3: supply range is 1.8 V to 3.6 V inclusive.
+        mcu.process("CPU:VCC 1.8")
+        mcu.process("CPU:VCC 3.6")
+        assert errors(mcu) == 0
+        mcu.process("CPU:VCC 1.7")
+        assert errors(mcu) == 1
+        mcu.process("CPU:VCC 3.7")
+        assert errors(mcu) == 2

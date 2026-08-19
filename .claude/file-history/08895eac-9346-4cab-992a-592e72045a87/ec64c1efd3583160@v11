@@ -1,0 +1,142 @@
+"""Tests for the bench-history parser and regression rule.
+
+Pure-logic tests on canned bench output and a synthetic history — never
+runs the real benches (plan: .claude/plans/bench-latency-history.md).
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import pathlib
+import sys
+
+import pytest
+
+# scripts/ is not a package; load the module by path (stdlib pattern).
+# Registering in sys.modules BEFORE exec is required for @dataclass under
+# `from __future__ import annotations` to resolve its module namespace.
+_SPEC = importlib.util.spec_from_file_location(
+    "bench_history",
+    pathlib.Path(__file__).parent.parent / "scripts" / "bench_history.py",
+)
+bench_history = importlib.util.module_from_spec(_SPEC)
+sys.modules["bench_history"] = bench_history
+_SPEC.loader.exec_module(bench_history)
+
+CANNED = (
+    "=== ITCH Bench (flat-array book): tick-to-trade latency ===\n"
+    "Messages parsed:  add=100000  execute=0  delete=0  replace=0\n"
+    "Latency (ns):  p50=0  p99=1000  p99.9=2000  mean=30.9  max=170000\n"
+    "Total timed events: 100000\n"
+)
+
+
+def test_parser_extracts_all_fields_exactly() -> None:
+    """Canned output (with the real macOS p50=0 quirk) parses field-perfect."""
+    got = bench_history.parse_latency_line(CANNED)
+    assert got == {"p50": 0, "p99": 1000, "p999": 2000, "mean": 30.9, "max": 170000}
+
+
+def test_parser_raises_loudly_on_format_drift() -> None:
+    """A changed latency line must raise, never record garbage."""
+    with pytest.raises(ValueError):
+        bench_history.parse_latency_line("Latency (us): median=1 avg=2\n")
+
+
+def test_parse_messages_reads_timed_event_count() -> None:
+    """The workload size comes from the 'Total timed events' line."""
+    assert bench_history.parse_messages(CANNED) == 100000
+
+
+def test_parse_messages_raises_when_line_absent() -> None:
+    """Missing workload line must raise, not silently record 0."""
+    with pytest.raises(ValueError):
+        bench_history.parse_messages("Latency (ns):  p50=0 mean=1.0\n")
+
+
+def test_regression_rule_thresholds() -> None:
+    """25% above the 5-row median flags; 15% passes (threshold=20%)."""
+    history = [30.0, 31.0, 29.0, 30.5, 30.0]      # median 30.0
+    flagged, _ = bench_history.regression_verdict(37.5, history)   # +25%
+    assert flagged
+    flagged, _ = bench_history.regression_verdict(34.5, history)   # +15%
+    assert not flagged
+
+
+def test_regression_uses_only_last_n_rows() -> None:
+    """An old fast streak must not shield a current slow median."""
+    # Ten rows: five fast then five at ~50. Last-5 median is 50, so a 55
+    # mean is only +10% and passes; measured against all ten it would flag.
+    history = [10, 10, 10, 10, 10, 50, 50, 50, 50, 50]
+    flagged, _ = bench_history.regression_verdict(55.0, history, n=5)
+    assert not flagged
+
+
+def test_insufficient_history_is_recorded_not_judged() -> None:
+    """Fewer than N prior matching rows -> not flagged, explicit message."""
+    flagged, msg = bench_history.regression_verdict(999.0, [30.0, 31.0])
+    assert not flagged
+    assert "insufficient" in msg.lower()
+
+
+def test_host_id_is_lowercase_and_spaceless() -> None:
+    """The fingerprint is stable-shaped: lowercase, no spaces, three parts."""
+    hid = bench_history.host_id()
+    assert hid == hid.lower()
+    assert " " not in hid
+    assert hid.count("-") >= 2  # host-arch-os at minimum
+
+
+def test_matching_means_excludes_other_host_bench_and_workload() -> None:
+    """Only rows sharing (host_id, bench, workload) enter the window."""
+    history = [
+        {"host_id": "h1", "bench": "bench_main", "messages": "100000", "mean_ns": "30.0"},
+        {"host_id": "h2", "bench": "bench_main", "messages": "100000", "mean_ns": "99.0"},
+        {"host_id": "h1", "bench": "bench_main_flat", "messages": "100000", "mean_ns": "88.0"},
+        {"host_id": "h1", "bench": "bench_main", "messages": "50000", "mean_ns": "77.0"},
+        {"host_id": "h1", "bench": "bench_main", "messages": "100000", "mean_ns": "31.0"},
+    ]
+    means = bench_history._matching_means(history, "h1", "bench_main", 100000)
+    assert means == [30.0, 31.0]
+
+
+def test_append_then_read_round_trips_a_row(tmp_path) -> None:
+    """A written row reads back with every field intact, incl. runs_json."""
+    path = tmp_path / "history.csv"
+    row = bench_history.BenchRow(
+        commit="abc123-dirty",
+        date_utc="2026-07-06T00:00:00Z",
+        host_id="h1",
+        bench="bench_main",
+        messages=100000,
+        p50_ns=0,
+        p99_ns=1000,
+        p999_ns=2000,
+        mean_ns=42.5,
+        max_ns=170000,
+        runs_json="[42.5, 43.1]",  # embedded comma must survive quoting
+        flagged=False,
+    )
+    bench_history.append_row(path, row)
+    got = bench_history.read_history(path)
+    assert len(got) == 1
+    assert got[0]["commit"] == "abc123-dirty"
+    assert got[0]["runs_json"] == "[42.5, 43.1]"
+    assert float(got[0]["mean_ns"]) == 42.5
+    # The file must be created with the schema marker as its first line.
+    assert path.read_text().splitlines()[0] == bench_history.CSV_SCHEMA_LINE
+    # And LF-terminated, not CRLF (diff-clean, plan decision 6).
+    assert "\r" not in path.read_text()
+
+
+def test_read_history_missing_file_is_empty(tmp_path) -> None:
+    """An absent history file reads as no rows, not an error."""
+    assert bench_history.read_history(tmp_path / "nope.csv") == []
+
+
+def test_read_history_rejects_foreign_schema(tmp_path) -> None:
+    """A first line that isn't the schema marker must raise (exit 2 path)."""
+    path = tmp_path / "history.csv"
+    path.write_text("commit,mean_ns\nabc,1.0\n")
+    with pytest.raises(ValueError):
+        bench_history.read_history(path)

@@ -1,0 +1,112 @@
+"""VHDL flat-book parity tests.
+
+Regenerate golden vectors from the C++ oracle, run the GHDL sim, and let its
+exit code be the assertion (plan: .claude/plans/vhdl-flat-book.md). Skips
+cleanly when ghdl is absent (install: scripts/setup-vhdl.sh) or when the
+golden_vectors binary has not been built.
+"""
+
+from __future__ import annotations
+
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+
+import pytest
+
+_REPO = pathlib.Path(__file__).resolve().parent.parent
+_SIM = _REPO / "scripts" / "run_vhdl_sim.sh"
+
+
+def _find_golden_vectors() -> pathlib.Path | None:
+    """Locate the built oracle binary.
+
+    ``GOLDEN_VECTORS_BIN`` overrides discovery outright. Otherwise the most
+    recently built copy wins, so a stale binary in one build tree is never
+    silently preferred over a fresh rebuild in another (glob order is not
+    guaranteed, and this repo can hold several build directories at once).
+    """
+    env = os.environ.get("GOLDEN_VECTORS_BIN")
+    if env:
+        p = pathlib.Path(env)
+        return p if p.is_file() and os.access(p, os.X_OK) else None
+    cands = [
+        p
+        for p in _REPO.glob("**/golden_vectors")
+        if p.is_file() and os.access(p, os.X_OK)
+    ]
+    if not cands:
+        return None
+    return max(cands, key=lambda p: p.stat().st_mtime)
+
+
+_GV = _find_golden_vectors()
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("ghdl") is None,
+    reason="ghdl not installed — run scripts/setup-vhdl.sh",
+)
+_needs_gv = pytest.mark.skipif(
+    _GV is None,
+    reason="golden_vectors not built — run scripts/build_cpp.sh (or cmake --build _build)",
+)
+
+
+def _gen(mode: str, depth: int, out: pathlib.Path, seed: int = 12345) -> None:
+    # capture_output so a nonzero exit surfaces the oracle's stderr in the
+    # pytest failure message rather than only the raw CalledProcessError.
+    proc = subprocess.run(
+        [str(_GV), mode, str(depth), str(out), str(seed)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"golden_vectors failed:\n{proc.stderr}{proc.stdout}"
+
+
+def _run_sim(vectors: pathlib.Path, depth: int) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(_SIM), str(vectors), str(depth)], capture_output=True, text=True
+    )
+
+
+def _cycles(proc: subprocess.CompletedProcess) -> int:
+    m = re.search(r"cycles=(\d+)", proc.stderr + proc.stdout)
+    assert m, f"no cycle count reported:\n{proc.stderr}\n{proc.stdout}"
+    return int(m.group(1))
+
+
+@_needs_gv
+def test_edge_case_vectors_match_cpp_oracle(tmp_path) -> None:
+    """Clamp-at-zero, best-level removal, side emptying, boundary indexes 0 and
+    DEPTH-1: the VHDL book matches OrderBookFlat exactly (GHDL exit 0)."""
+    v = tmp_path / "edge.csv"
+    _gen("edge", 4096, v)
+    proc = _run_sim(v, 4096)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+@_needs_gv
+def test_random_10k_op_vectors_match_cpp_oracle(tmp_path) -> None:
+    """Seeded pseudo-random 10k-op sequence: full parity (exit 0)."""
+    v = tmp_path / "rand.csv"
+    _gen("random", 4096, v)
+    proc = _run_sim(v, 4096)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+
+
+@_needs_gv
+def test_cycles_per_op_constant_across_depth_sweep(tmp_path) -> None:
+    """DEPTH=1024 and DEPTH=4096 report identical cycles for the same op count
+    — the range-independence claim, demonstrated not asserted."""
+    v1 = tmp_path / "r1024.csv"
+    v4 = tmp_path / "r4096.csv"
+    _gen("random", 1024, v1)
+    _gen("random", 4096, v4)
+    p1 = _run_sim(v1, 1024)
+    p4 = _run_sim(v4, 4096)
+    assert p1.returncode == 0, p1.stderr + p1.stdout
+    assert p4.returncode == 0, p4.stderr + p4.stdout
+    # 10k ops each, one cycle per op at any DEPTH -> identical cycle counts.
+    assert _cycles(p1) == _cycles(p4) == 10000

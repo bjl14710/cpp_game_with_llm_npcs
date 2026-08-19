@@ -731,4 +731,18 @@ void Menu::render() const {
     }
 }
 
+std::optional<Menu::Page> Menu::pageFromName(const std::string& name) {
+    // One row per Page. A page added without a row here simply cannot be
+    // captured, which is the failure this whole issue is about, so the list
+    // lives next to the enum rather than somewhere a reader has to go find.
+    if (name == "main") return Page::Main;
+    if (name == "controls") return Page::Controls;
+    if (name == "multiplayer") return Page::Multiplayer;
+    if (name == "creator") return Page::Creator;
+    if (name == "journal") return Page::Journal;
+    if (name == "sandbox") return Page::Sandbox;
+    if (name == "model") return Page::Model;
+    return std::nullopt;
+}
+
 }  // namespace llm_npc

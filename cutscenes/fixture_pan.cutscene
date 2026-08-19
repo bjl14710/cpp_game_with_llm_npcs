@@ -1,0 +1,37 @@
+# A fixture, not content. Exists so the cutscene system has something to play
+# in a smoke capture, and so real scenes can be rewritten freely without any
+# test or QA script depending on their shots.
+#
+# Frames a slow pull-back across the plaza at eye-ish height, then holds and
+# fades. Every feature the format has is exercised at least once: all three
+# easings, partial pose inheritance, a fade in, a fade out, a tinted fade, and
+# a caption carrying a mid-line hash.
+name = Fixture Pan
+skippable = always
+letterbox = 90
+
+beat = cut_in
+  camera = 0.0, 2.4, 34.0
+  yaw = 180
+  pitch = -8
+  hold = 1.0
+  ease = hold
+  caption = Plaza, looking north. Bench #4 is the mark.
+  fade_in = 0.6
+
+beat = pull_back
+  camera = 0.0, 5.5, 48.0
+  pitch = -16
+  hold = 2.0
+  ease = smooth
+
+beat = pan_only
+  yaw = 205
+  hold = 1.5
+  ease = linear
+  caption = Same shot, yaw alone. The rest is inherited.
+
+beat = out
+  hold = 1.0
+  fade_out = 0.8
+  fade_colour = grey

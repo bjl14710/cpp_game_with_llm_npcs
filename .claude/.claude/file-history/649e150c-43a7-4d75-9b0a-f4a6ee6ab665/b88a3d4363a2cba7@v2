@@ -1,0 +1,79 @@
+"""Exercise 03 (part 2): risk and compliance utilities.
+
+Implement everything below. Grade yourself with:
+
+    uv run pytest tests/exercises/test_03_stat_arb_risk.py -v
+
+Lessons: 0006 (CUSUM), 0019 (order-to-trade ratio). The CUSUM concept
+already appears in walkforward_sim.py as a regime guard — this is the
+clean, reusable version.
+"""
+import numpy as np  # noqa: F401
+
+
+class CUSUMDetector:
+    """Two-sided CUSUM on a standardized stream (units of sigma).
+
+    pos_t = max(0, pos_{t-1} + x_t - k)
+    neg_t = max(0, neg_{t-1} - x_t - k)
+    Alarm when either statistic exceeds h.
+
+    k is the drift allowance (half the shift you want to detect), h the
+    decision threshold. Validate: k >= 0, h > 0 (ValueError otherwise).
+    Expose the running statistics as attributes `pos` and `neg`.
+    """
+
+    def __init__(self, k: float = 0.5, h: float = 5.0) -> None:
+        raise NotImplementedError
+
+    def reset(self) -> None:
+        """Zero both running statistics."""
+        raise NotImplementedError
+
+    def update(self, x: float) -> bool:
+        """Feed one observation; return True when an alarm fires."""
+        raise NotImplementedError
+
+
+class OTRTracker:
+    """Order-to-trade ratio: messages (orders + cancels) per trade.
+
+    The MiFID II RTS 9-style metric — exchanges fine participants whose
+    ratio exceeds the venue threshold. Expose counters as attributes
+    `orders`, `cancels`, `trades`.
+    """
+
+    def __init__(self) -> None:
+        raise NotImplementedError
+
+    def record_order(self, n: int = 1) -> None:
+        raise NotImplementedError
+
+    def record_cancel(self, n: int = 1) -> None:
+        raise NotImplementedError
+
+    def record_trade(self, n: int = 1) -> None:
+        raise NotImplementedError
+
+    def ratio(self) -> float:
+        """(orders + cancels) / trades; inf when there are messages but no
+        trades; 0.0 when nothing has happened at all."""
+        raise NotImplementedError
+
+    def breached(self, threshold: float) -> bool:
+        raise NotImplementedError
+
+
+def walkforward_splits(n: int, train: int, test: int,
+                       embargo: int = 0) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Chronological walk-forward splits over `n` samples.
+
+    Each split is (train_indices, test_indices): `train` consecutive samples,
+    an `embargo` gap (left out entirely, to stop leakage from overlapping
+    labels), then `test` consecutive samples. Roll the window forward by
+    `test` so consecutive test windows tile without overlap. Stop when a
+    full train+embargo+test window no longer fits in `n`.
+
+    Validate: train/test positive, embargo non-negative (ValueError).
+    """
+    raise NotImplementedError

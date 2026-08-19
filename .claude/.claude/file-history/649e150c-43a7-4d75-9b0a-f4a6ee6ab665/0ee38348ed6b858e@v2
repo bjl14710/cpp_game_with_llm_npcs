@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0003 — ML Algorithms Used in Trading</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Boosting visual */
+  .boost-step {
+    display: grid; grid-template-columns: 60px 1fr; gap: 14px; align-items: start;
+    background: var(--panel-2); padding: 12px 14px; border-radius: 8px;
+    border-left: 3px solid var(--accent); margin: 8px 0;
+  }
+  .boost-step .num { color: var(--accent); font-weight: 700; font-size: 14px; }
+  .arrow { text-align: center; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0003</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 The big idea</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Three algorithms</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Boosting in detail</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 In this project</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 Contrasts</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>ML Algorithms Used in Trading</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: three different learners are
+    already in this repo. <code>fpga/linear_regression_predictor.vhd</code> uses linear
+    regression. <code>fpga/moving_average_trader.vhd</code> uses a rule (technically not
+    ML — and that matters). <code>paper_trading_sim.py</code> uses
+    <code>GradientBoostingRegressor</code> — the project's flagship model.
+    You should know what each one actually <em>does</em> and why each one lives where it does.
+  </p>
+
+  <!-- ===================== §1 BIG IDEA ===================== -->
+  <h2>1. What does "ML for trading" actually mean in this repo?</h2>
+
+  <p>
+    Every supervised ML model is a function <code>ŷ = f(x; θ)</code> learned from
+    <em>(input, output)</em> pairs. The art is choosing <code>x</code>, <code>y</code>,
+    and the shape of <code>f</code>. This repo's choice:
+  </p>
+  <table>
+    <tr><th>Variable</th><th>In this project</th><th>Where it's set</th></tr>
+    <tr>
+      <td><code>x</code> (features)</td>
+      <td>per-day, per-ticker: <code>close</code>, <code>ret_1d</code>, <code>ma_5</code>, <code>ma_10</code>, <code>ma_gap</code>, <code>vol_10</code>, <code>rsi_14</code></td>
+      <td><code>build_features</code> in <code>paper_trading_sim.py</code></td>
+    </tr>
+    <tr>
+      <td><code>y</code> (target)</td>
+      <td><strong>Next day's return</strong>, <code>fwd_ret_1d = close.pct_change().shift(-1)</code></td>
+      <td>same file, line 68</td>
+    </tr>
+    <tr>
+      <td><code>f</code> (model)</td>
+      <td><code>GradientBoostingRegressor</code> from scikit-learn</td>
+      <td><code>train_model</code>, line 113</td>
+    </tr>
+    <tr>
+      <td><code>θ</code> (parameters)</td>
+      <td>The internal weights/tree structure learned from history</td>
+      <td>Saved to <code>models/*.joblib</code></td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <strong>The single most consequential design choice in the repo:</strong>
+    predicting a <em>continuous</em> next-day return (regression), not a
+    <em>direction</em> (up/down classification), not an <em>absolute price</em>.
+    This is why the file is named <code>GradientBoosting<u>Regressor</u></code> and
+    not <code>...Classifier</code>. The continuous predictions are then
+    <em>sorted</em>, and the top-N become the portfolio.
+  </div>
+
+  <h3>The pipeline, from data to dollars</h3>
+  <div class="boost-step">
+    <span class="num">1</span>
+    <div><strong>Raw data:</strong> daily OHLCV from yfinance for every ticker in the universe.</div>
+  </div>
+  <div class="arrow">▼</div>
+  <div class="boost-step">
+    <span class="num">2</span>
+    <div><strong>Features:</strong> <code>build_features</code> turns prices into returns, moving averages, an MA gap, 10-day vol, RSI. 7 numbers per (ticker, date).</div>
+  </div>
+  <div class="arrow">▼</div>
+  <div class="boost-step">
+    <span class="num">3</span>
+    <div><strong>Target:</strong> next day's return is shifted into the same row. Training pairs (x, y) ready.</div>
+  </div>
+  <div class="arrow">▼</div>
+  <div class="boost-step">
+    <span class="num">4</span>
+    <div><strong>Model:</strong> a single <code>GradientBoostingRegressor</code> is fit on the <em>stacked</em> data from all tickers (one model, not one-per-ticker).</div>
+  </div>
+  <div class="arrow">▼</div>
+  <div class="boost-step">
+    <span class="num">5</span>
+    <div><strong>Rank &amp; allocate:</strong> for each day, predict next-day returns for every ticker, sort, take <code>top_n</code>, send to <code>meanvar_long_only</code> for risk-aware weights.</div>
+  </div>
+
+  <!-- ===================== §2 THREE ALGORITHMS ===================== -->
+  <h2>2. The three algorithms in this repo, side by side</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Linear Regression — small, fast, FPGA-friendly</h4>
+      <p><code>ŷ = w₀ + w₁x₁ + w₂x₂ + … + wₙxₙ</code></p>
+      <p>Just a weighted sum. <strong>Parametric</strong> (fixed number of parameters regardless of dataset size). Trained by closed-form least squares.</p>
+      <p>Lives in <code>fpga/linear_regression_predictor.vhd</code> and the C++ at <code>gradient_boosting/sample_with_gradient_boosting.cpp</code> (despite the filename).</p>
+    </div>
+    <div class="card">
+      <h4>Moving Average Crossover — a rule, not ML</h4>
+      <p>Buy when price &lt; (MA − spread). Sell when price &gt; (MA + spread).</p>
+      <p>Zero learned parameters. <strong>This is not machine learning</strong> — it's a hand-coded mean-reversion rule. Useful baseline to beat.</p>
+      <p>Lives in <code>fpga/moving_average_trader.vhd</code>.</p>
+    </div>
+    <div class="card">
+      <h4>Gradient Boosting Regressor — flagship</h4>
+      <p>An ensemble of ~100 small decision trees, where each tree corrects the errors of the previous ones. <strong>Non-parametric</strong>: model size grows with the data and complexity of the signal.</p>
+      <p>Lives in <code>paper_trading_sim.py:train_model</code>.</p>
+    </div>
+    <div class="card">
+      <h4>Why three? They serve different masters</h4>
+      <p>Linear: tiny LUT footprint → FPGA viable. Moving average: zero training data needed → instant baseline. Gradient boosting: best predictive power → wins on the Sharpe ratio, but too big for one chip cycle.</p>
+    </div>
+  </div>
+
+  <h3>What each one can express</h3>
+  <table>
+    <tr><th>Model</th><th>Can capture</th><th>Cannot capture</th><th>Training data needed</th></tr>
+    <tr>
+      <td>Moving avg rule</td>
+      <td>Mean reversion at one timescale</td>
+      <td>Anything else</td>
+      <td>None</td>
+    </tr>
+    <tr>
+      <td>Linear regression</td>
+      <td>Monotonic, additive effects per feature</td>
+      <td>Interactions, non-linearities</td>
+      <td>Hundreds of rows</td>
+    </tr>
+    <tr>
+      <td>Gradient boosting</td>
+      <td>Non-linear effects, feature interactions, thresholds</td>
+      <td>Very long-range temporal dependencies (use RNN/transformer for that)</td>
+      <td>Thousands to millions of rows</td>
+    </tr>
+  </table>
+
+  <!-- ===================== §3 BOOSTING DETAIL ===================== -->
+  <h2>3. What <code>GradientBoostingRegressor</code> actually does</h2>
+
+  <p>
+    The name confuses people. Break it down:
+  </p>
+  <ul>
+    <li><strong>"Regressor"</strong> = predicts a continuous number (next-day return), not a class.</li>
+    <li><strong>"Gradient"</strong> = each new tree is trained to predict the <em>gradient of the loss</em> — i.e., the direction the current prediction needs to move. For squared-error loss, that's just the residual.</li>
+    <li><strong>"Boosting"</strong> = combine many weak learners (shallow trees) sequentially, each one fixing what the previous ensemble got wrong.</li>
+  </ul>
+
+  <p>Step by step, for the squared-error loss the regressor uses by default:</p>
+
+  <div class="boost-step">
+    <span class="num">1</span>
+    <div><strong>Initialize</strong> the ensemble prediction at the mean of <code>y</code>: <code>F₀(x) = mean(y_train)</code>.</div>
+  </div>
+  <div class="boost-step">
+    <span class="num">2</span>
+    <div><strong>Compute residuals</strong> for every training row: <code>rᵢ = yᵢ − F(xᵢ)</code>. These are how far off the current ensemble is on each row.</div>
+  </div>
+  <div class="boost-step">
+    <span class="num">3</span>
+    <div><strong>Fit a small tree</strong> to predict the residuals (depth typically 3–8). The tree carves the feature space into rectangles and predicts a constant residual in each rectangle.</div>
+  </div>
+  <div class="boost-step">
+    <span class="num">4</span>
+    <div><strong>Add the tree</strong> to the ensemble, scaled by a small learning rate (<code>ν</code>, e.g. 0.1):
+    <code>F_new(x) = F(x) + ν · tree(x)</code>.</div>
+  </div>
+  <div class="boost-step">
+    <span class="num">5</span>
+    <div><strong>Repeat</strong> from step 2 until you have <code>n_estimators</code> trees (default 100).</div>
+  </div>
+
+  <p class="small">
+    Final prediction: <code>F(x) = mean(y) + ν · (tree₁(x) + tree₂(x) + … + tree₁₀₀(x))</code>.
+  </p>
+
+  <p>
+    Why this works for trading returns: each individual tree is too weak to overfit, but
+    the ensemble can compose hundreds of small, non-linear "this feature crosses that
+    threshold AND that other feature is high" rules — exactly the kind of regime-specific
+    signal that a single linear weight can't express.
+  </p>
+
+  <h3>Tiny, runnable example</h3>
+<pre><span class="kw">from</span> sklearn.ensemble <span class="kw">import</span> GradientBoostingRegressor
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="com"># Toy: 200 days, 2 features (e.g., today's return and 10-day vol)</span>
+rng = np.random.default_rng(<span class="num">0</span>)
+X = rng.normal(size=(<span class="num">200</span>, <span class="num">2</span>))
+<span class="com"># True signal: positive when feature 0 > 0 AND feature 1 < 0 (an interaction)</span>
+y = (X[:, <span class="num">0</span>] > <span class="num">0</span>) * (X[:, <span class="num">1</span>] < <span class="num">0</span>) * <span class="num">0.02</span> + rng.normal(<span class="num">0</span>, <span class="num">0.005</span>, <span class="num">200</span>)
+
+model = <span class="fn">GradientBoostingRegressor</span>(n_estimators=<span class="num">100</span>, max_depth=<span class="num">3</span>, learning_rate=<span class="num">0.1</span>)
+model.<span class="fn">fit</span>(X, y)
+
+<span class="com"># Predict and inspect feature importances</span>
+<span class="fn">print</span>(model.<span class="fn">predict</span>(X[:<span class="num">5</span>]))
+<span class="fn">print</span>(model.feature_importances_)   <span class="com"># which feature contributes most to splits</span>
+</pre>
+
+  <p>
+    Linear regression would <em>miss</em> the interaction signal in that toy entirely
+    — it would only see "feature 0 has slight positive correlation" and shrug.
+    Gradient boosting picks up the joint rule because depth-3 trees can split on both
+    features at once.
+  </p>
+
+  <!-- ===================== §4 IN THIS PROJECT ===================== -->
+  <h2>4. In this project</h2>
+
+  <span class="filepath">paper_trading_sim.py (lines 48–69)</span>
+<pre><span class="kw">def</span> <span class="fn">build_features</span>(df: pd.DataFrame) -> pd.DataFrame:
+    out = pd.DataFrame(index=df.index)
+    out[<span class="str">"close"</span>]   = df[<span class="str">"Close"</span>]
+    out[<span class="str">"ret_1d"</span>]  = out[<span class="str">"close"</span>].<span class="fn">pct_change</span>()
+    out[<span class="str">"ma_5"</span>]    = out[<span class="str">"close"</span>].<span class="fn">rolling</span>(<span class="num">5</span>).<span class="fn">mean</span>()
+    out[<span class="str">"ma_10"</span>]   = out[<span class="str">"close"</span>].<span class="fn">rolling</span>(<span class="num">10</span>).<span class="fn">mean</span>()
+    out[<span class="str">"ma_gap"</span>]  = (out[<span class="str">"ma_5"</span>] / out[<span class="str">"ma_10"</span>]) - <span class="num">1</span>     <span class="com"># short-vs-long-MA</span>
+    out[<span class="str">"vol_10"</span>]  = out[<span class="str">"ret_1d"</span>].<span class="fn">rolling</span>(<span class="num">10</span>).<span class="fn">std</span>()
+    out[<span class="str">"rsi_14"</span>]  = <span class="fn">_rsi</span>(out[<span class="str">"close"</span>], <span class="num">14</span>) / <span class="num">100.0</span>      <span class="com"># normalized RSI</span>
+    out[<span class="str">"fwd_ret_1d"</span>] = out[<span class="str">"ret_1d"</span>].<span class="fn">shift</span>(-<span class="num">1</span>)    <span class="com"># THE TARGET — note shift(-1)</span>
+    <span class="kw">return</span> out.<span class="fn">dropna</span>()
+</pre>
+
+  <p>
+    The <code>.shift(-1)</code> on the last line is doing the heavy semantic lifting:
+    it puts <em>tomorrow's</em> return on <em>today's</em> row, so when you train,
+    you're learning "given today's features → predict tomorrow's return." Get that
+    direction wrong and you've built a look-ahead-biased model that looks great in
+    backtests and loses money live.
+  </p>
+
+  <span class="filepath">paper_trading_sim.py (lines 113–125)</span>
+<pre><span class="kw">def</span> <span class="fn">train_model</span>(X: np.ndarray, y: np.ndarray) -> GradientBoostingRegressor:
+    model = <span class="fn">GradientBoostingRegressor</span>(random_state=<span class="num">42</span>)
+    model.<span class="fn">fit</span>(X, y)
+    <span class="kw">return</span> model
+</pre>
+
+  <p>
+    Notice what's <em>not</em> here: no hyperparameter tuning, no cross-validation, no
+    regularization knobs explicitly set. sklearn's defaults are
+    <code>n_estimators=100</code>, <code>max_depth=3</code>, <code>learning_rate=0.1</code>,
+    <code>loss="squared_error"</code> — reasonable, conservative starting points for a
+    learner this size. A real production pipeline would sweep these.
+  </p>
+
+  <span class="filepath">paper_trading_sim.py (lines 218–231) — what the prediction is used for</span>
+<pre><span class="kw">for</span> dt, day_df <span class="kw">in</span> pred_df.<span class="fn">groupby</span>(level=<span class="num">0</span>):
+    day_sorted = day_df.<span class="fn">sort_values</span>(<span class="str">"pred"</span>, ascending=<span class="kw">False</span>)
+    picks = day_sorted.<span class="fn">head</span>(cfg.top_n)        <span class="com"># <-- rank, take top-N</span>
+    weight = <span class="num">1.0</span> / <span class="fn">len</span>(picks)
+    day_ret = <span class="fn">float</span>((picks[<span class="str">"fwd_ret_1d"</span>].<span class="fn">mean</span>()))   <span class="com"># equal-weight realized return</span>
+</pre>
+
+  <p>
+    Crucial insight: the model's predicted <em>magnitude</em> barely matters. What
+    matters is its <strong>cross-sectional ranking</strong> — which tickers it ranks
+    highest today. A model that systematically underestimates returns but still ranks
+    them in the right order will beat a model with low MAE but a noisy ranking.
+  </p>
+
+  <h3>And on the FPGA: linear regression instead</h3>
+  <span class="filepath">fpga/linear_regression_predictor.vhd (lines 75–78)</span>
+<pre><span class="kw">constant</span> W0   : signed(31 <span class="kw">downto</span> 0) := <span class="fn">to_signed</span>(  50, 32);   <span class="com">--  0.05 ×1000 — intercept</span>
+<span class="kw">constant</span> W_F0 : signed(31 <span class="kw">downto</span> 0) := <span class="fn">to_signed</span>( 300, 32);   <span class="com">--  0.30 ×1000 — feature 0 weight</span>
+<span class="kw">constant</span> W_F1 : signed(31 <span class="kw">downto</span> 0) := <span class="fn">to_signed</span>(-100, 32);   <span class="com">-- -0.10 ×1000 — feature 1 weight</span>
+<span class="kw">constant</span> W_F2 : signed(31 <span class="kw">downto</span> 0) := <span class="fn">to_signed</span>( 200, 32);   <span class="com">--  0.20 ×1000 — feature 2 weight</span>
+</pre>
+  <p>
+    Four <em>numbers</em>. That's the entire model. This is what makes linear
+    regression FPGA-viable: 4 constants → 3 multiplies + 3 adds → done in 2 clock
+    cycles. The 100-tree gradient booster cannot collapse into that.
+  </p>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> the Python gradient boosting model is more accurate but
+    can't run on the FPGA. The FPGA linear regression is fast but expresses only a tiny
+    fraction of what the Python model learned. The honest bridge is what <code>fpga/README.md</code>
+    points at: <strong>hls4ml</strong> or <strong>Vitis AI</strong>, which compile larger models
+    into HDL by quantizing and pruning. None of that is wired up yet — it's the obvious next
+    step for whoever takes this repo seriously.
+  </div>
+
+  <!-- ===================== §5 CONTRASTS ===================== -->
+  <h2>5. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Regression vs Classification</h4>
+      <p>
+        <strong>Regression</strong> predicts a number on a continuous scale (this repo:
+        next-day return as a decimal). <strong>Classification</strong> predicts a label
+        (e.g., "up" or "down"). Trading-specific tradeoff: classification throws away
+        magnitude information that is essential for ranking and sizing positions.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Gradient Boosting vs Random Forest</h4>
+      <p>
+        Both are tree ensembles. <strong>Random forest</strong> trains many <em>independent</em>
+        deep trees on bootstrap samples and averages them — reduces variance.
+        <strong>Gradient boosting</strong> trains <em>sequential</em> shallow trees, each
+        correcting the previous — reduces bias. Boosting usually wins on tabular data; forests
+        are more robust to bad hyperparameters.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Linear Regression vs Logistic Regression</h4>
+      <p>
+        <strong>Linear regression</strong> outputs an unbounded number; <strong>logistic
+        regression</strong> outputs a probability in (0, 1) via a sigmoid. Despite the
+        name, logistic regression is a <em>classifier</em>. This repo uses linear, not
+        logistic.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Parametric vs Non-parametric</h4>
+      <p>
+        <strong>Parametric</strong> models have a fixed parameter count regardless of data
+        size (linear regression: N weights). <strong>Non-parametric</strong> models grow
+        with the data (gradient boosting: number and depth of trees scale).
+        Why it matters here: parametric fits an FPGA; non-parametric usually doesn't.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Training vs Inference</h4>
+      <p>
+        <strong>Training</strong> is the expensive offline step that produces the parameters
+        (<code>model.fit(X, y)</code>). <strong>Inference</strong> is the cheap online step
+        that uses them (<code>model.predict(X)</code>). HFT cares about inference latency;
+        the model lives or dies on it. Training latency essentially doesn't matter.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Feature vs Target</h4>
+      <p>
+        A <strong>feature</strong> is what the model sees as input on day T (RSI, MA gap,
+        etc.). The <strong>target</strong> is what it's trying to predict — here, the return
+        on day T+1. If you accidentally include something from T+1 in the features, you've
+        invented a model that "predicts" what it already knows. That's
+        <strong>look-ahead bias</strong> and it's the #1 way backtests lie to you.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §6 QUIZ ===================== -->
+  <h2>6. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. Why does <code>paper_trading_sim.py</code> use <code>GradientBoostingRegressor</code> and not <code>GradientBoostingClassifier</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="No — sklearn provides both, with identical interfaces. The choice is semantic, not availability.">Because sklearn doesn't have a classifier version.</li>
+      <li data-correct="true"  data-why="Right. Daily allocation requires ranking by predicted return magnitude (top-N). A classifier would only output up/down labels, throwing away the magnitude information needed to rank tickers against each other.">Because the downstream step ranks tickers by predicted return magnitude to pick top-N — a classifier's up/down labels would discard the magnitude needed for ranking.</li>
+      <li data-correct="false" data-why="Classifiers can be just as fast at inference. Speed isn't why; ranking is.">Because classifiers are too slow at inference time.</li>
+      <li data-correct="false" data-why="Backwards — regressors typically tolerate noisier targets than classifiers do, and returns are noisy. Either way, accuracy is not the reason for the choice.">Because returns are too noisy for a regressor; a classifier is more accurate.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. In <code>build_features</code>, the line <code>out["fwd_ret_1d"] = out["ret_1d"].shift(-1)</code> — what does the <code>-1</code> shift accomplish?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That would be shift(+1), the opposite direction. shift(-1) pulls future values backward in the index, not past values forward.">Puts yesterday's return into today's row as a lagged feature.</li>
+      <li data-correct="true"  data-why="Correct — shift(-1) pulls TOMORROW's return back onto TODAY's row. That row then becomes a training pair: features-known-today → target-realized-tomorrow.">Puts tomorrow's return onto today's row, so that one training row pairs today's features with tomorrow's realized return.</li>
+      <li data-correct="false" data-why="It does drop the last row in effect (since the last day has no T+1), but the *purpose* is to align target with features, not to drop rows. dropna() is what removes them.">Drops the most recent row from the dataset.</li>
+      <li data-correct="false" data-why="Normalization happens with division or z-scoring, not shift. shift only moves values along the index.">Normalizes returns by subtracting their lag.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. What does a single tree in <code>GradientBoostingRegressor</code> get trained on, on iteration <em>t</em>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That would be a random forest, where trees are independent and trained on the original targets. Boosting is sequential.">The original target <code>y</code>, on a bootstrap sample of rows.</li>
+      <li data-correct="true"  data-why="Yes — that's the 'gradient' in gradient boosting. For squared error loss, the gradient of the loss with respect to the prediction is just the residual y − F(x). Tree t learns to predict the leftover error of the ensemble so far.">The residuals (errors) of the current ensemble's predictions — equivalently, the gradient of the loss w.r.t. predictions.</li>
+      <li data-correct="false" data-why="No — every tree sees the same feature columns. What changes is the target it tries to predict.">A random subset of features only, with the original target.</li>
+      <li data-correct="false" data-why="That would be model distillation or ensemble averaging, not boosting. In boosting, each tree is fit against residuals, not against another tree's outputs.">The output of tree <em>t-1</em>, to mimic the previous tree.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. <code>fpga/linear_regression_predictor.vhd</code> can run on a single FPGA in ~8 ns. Why isn't the gradient boosting model from <code>paper_trading_sim.py</code> deployed the same way?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's a workaround, not the reason. Decision trees branch on feature thresholds, which expand into deep multiplexer trees in HDL. Even with one tree per cycle, the routing and LUT cost is enormous for 100 trees.">Because trees can only be evaluated one per clock cycle.</li>
+      <li data-correct="true"  data-why="Right — 100 trees, each branching on float comparisons, expand into very deep multiplexer trees and consume vast LUT/routing resources. fpga/README.md (lines 152–155) calls this out directly and points at hls4ml / Vitis AI as the proper path.">Decision-tree ensembles branch on float comparisons that expand into deep multiplexer trees; 100 trees consume LUT and routing resources that don't fit cleanly on one chip. README points at hls4ml or Vitis AI instead.</li>
+      <li data-correct="false" data-why="Most HFT-grade FPGAs have ample BRAM. The bottleneck isn't memory; it's the routing and combinational depth of the branching logic.">Because FPGAs don't have enough BRAM to hold the tree structures.</li>
+      <li data-correct="false" data-why="There's nothing in scikit-learn's design that prevents export. ONNX, hls4ml, and Vitis AI can all consume sklearn models. The problem is the synthesized hardware cost, not export.">Because scikit-learn models can't be exported to any FPGA toolchain.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. Is <code>fpga/moving_average_trader.vhd</code> machine learning?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Computing an average is arithmetic. Nothing about the module is fit from data — the WINDOW and SPREAD are set at synthesis time by the human.">Yes — it computes statistics (the moving average) so it counts as a statistical learning algorithm.</li>
+      <li data-correct="true"  data-why="Correct — the parameters (WINDOW, SPREAD) are chosen by a human, not learned from data. It's a fixed mean-reversion rule. Useful as a baseline, but distinct from anything you'd call ML.">No — its parameters are hand-chosen at synthesis (WINDOW, SPREAD), not learned from data. It's a fixed mean-reversion rule, useful as a baseline.</li>
+      <li data-correct="false" data-why="A neural net is one specific kind of learner. Most ML isn't neural nets. The reason this isn't ML is that there's no learning, not the absence of neurons.">No — but only because it isn't a neural network.</li>
+      <li data-correct="false" data-why="Trees vs lines isn't the dividing line. Linear regression is ML and produces a linear boundary. The dividing line is whether parameters are *learned from data*.">Yes — anything that produces a buy/sell decision counts as ML.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §7 SCENARIOS ===================== -->
+  <h2>7. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A teammate adds <code>out["high_today"] = df["High"]</code> to <code>build_features</code>. What's the problem?</summary>
+    <p>
+      Subtle but lethal: <code>df["High"]</code> is the day's high price, only known
+      <em>after</em> the day closes. Targets are also "after the close" (next day's
+      return). If today's row contains today's high (computed at end-of-day) and you
+      use it to "predict" tomorrow's return, you'd be fine — BUT if you ever apply
+      the model intraday for live trading, you don't yet know today's high, and the
+      live features won't match the training distribution. The model will appear to
+      work in backtest and fail live. Always ask: "would I actually know this feature
+      at the moment I want to act?"
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You sweep <code>n_estimators</code> from 100 → 500 in <code>train_model</code>, and the training R² goes from 0.05 to 0.40 while the test R² <em>drops</em>. What happened, and what would you adjust?</summary>
+    <p>
+      Classic <strong>overfitting</strong>: more trees means the ensemble can memorize
+      noise in the training data. The fix is regularization — lower
+      <code>learning_rate</code> (0.05 or 0.03), reduce <code>max_depth</code> (already 3
+      by default — try 2), add <code>subsample=0.8</code> (stochastic gradient boosting),
+      and use early stopping based on a held-out validation slice. In time-series
+      specifically: <em>never</em> use random k-fold; use a chronological train/validation
+      split or, better, walk-forward — which is exactly what <code>walkforward_sim.py</code>
+      does for evaluation.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. <code>predict_next.py</code> calls <code>meanvar_long_only(mu, Sigma, max_w)</code> on the top-N predictions. Is that step ML?</summary>
+    <p>
+      No — it's <strong>optimization</strong>, not learning. <code>mu</code> is the model's
+      predicted expected returns, <code>Sigma</code> is the empirical covariance matrix of
+      historical returns. The function solves a closed-form portfolio problem
+      (Markowitz mean-variance with non-negativity + capping). Nothing is fit; nothing
+      is learned. This is a critical mental separation: ML produces the <em>signals</em>
+      (mu), portfolio optimization decides <em>how to act on them</em> (w).
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidates: <strong>(a) Walk-forward backtesting and look-ahead bias</strong>
+    — formalize the temporal discipline this lesson hinted at, grounded in
+    <code>walkforward_sim.py</code>. <strong>(b) Mean-variance portfolio optimization</strong>
+    — what <code>meanvar_long_only</code> is actually doing, and why <code>Σ⁻¹μ</code> is the
+    canonical answer.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

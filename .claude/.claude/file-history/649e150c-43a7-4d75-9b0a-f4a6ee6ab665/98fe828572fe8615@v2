@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0025 — Gradient Boosting: A Deep Dive</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:30px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}pre .kw{color:var(--code-kw)}pre .str{color:var(--code-str)}pre .num{color:var(--code-num)}pre .com{color:var(--code-com);font-style:italic}pre .fn{color:var(--code-fn)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0025</span><span class="small">Quiz: <strong id="quizScore">0 / 5</strong></span></div>
+<h1>Gradient Boosting: A Deep Dive</h1>
+<p class="lead">Why this matters: <code>GradientBoostingRegressor</code> is the flagship model of this repo — every backtest in <code>paper_trading_sim.py</code> and <code>walkforward_sim.py</code> rides on it, with <em>all-default hyperparameters</em>. This lesson opens the black box: what each boosting round actually computes, why the defaults are what they are, and which knob you'd turn first on noisy financial data. (Lesson 0003 introduced the idea; this is the mechanics.)</p>
+
+<h2>1. The big idea: descent in function space</h2>
+<p>Ordinary gradient descent improves a <em>parameter vector</em>: <code>w ← w − η·∇L(w)</code>. Gradient boosting improves a <em>function</em>. The model is a running sum:</p>
+<div class="callout"><p style="margin:0"><strong>F<sub>m</sub>(x) = F<sub>m−1</sub>(x) + ν · h<sub>m</sub>(x)</strong> &nbsp;&nbsp;where each h<sub>m</sub> is a small regression tree fit to the <em>negative gradient of the loss</em> evaluated at the current predictions.<sup><a class="fn" href="#fn-1">[1]</a></sup></p></div>
+<p>For squared-error loss <code>L = ½(y − F(x))²</code>, the negative gradient is just <code>y − F(x)</code> — the <strong>residual</strong>. So the procedure reads plainly:</p>
+<ol>
+<li>Start with the dumbest possible model: <code>F₀(x) = mean(y)</code>.</li>
+<li>Compute what it got wrong on every row: <code>r = y − F₀(x)</code>.</li>
+<li>Fit a shallow tree h₁ to predict those residuals.</li>
+<li>Add a <em>shrunk</em> copy of it: <code>F₁ = F₀ + ν·h₁</code> (ν = learning rate, default 0.1).</li>
+<li>Repeat from step 2, M times (default M = 100).</li>
+</ol>
+<p>Every round attacks whatever error pattern is still left. Different losses just change what "what it got wrong" means — absolute error gives sign-of-residual, Huber blends the two — which is why the same machinery handles robust regression for free.</p>
+
+<h2>2. Worked example — three rounds by hand</h2>
+<p>Five points, one feature, depth-1 trees (stumps), and ν = 0.5 so the arithmetic stays visible (sklearn's default is 0.1 — same mechanics, smaller steps, more rounds).</p>
+<table>
+<tr><th>x</th><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+<tr><th>y</th><td>2</td><td>4</td><td>6</td><td>8</td><td>10</td></tr>
+</table>
+
+<h3>Round 0 — the constant</h3>
+<p><code>F₀ = mean(y) = 6</code> everywhere. Residuals <code>r = y − 6 = [−4, −2, 0, 2, 4]</code>. Sum of squared residuals (SSE): <strong>40</strong>.</p>
+
+<h3>Round 1 — first stump</h3>
+<p>A stump on the residuals picks the best single split. Here that's <code>x ≤ 2.5</code>: left leaf predicts the left residual mean (−3), right leaf the right mean (+2). Shrink by ν=0.5 and add:</p>
+<table>
+<tr><th>x</th><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+<tr><th>F₁ = 6 + 0.5·h₁</th><td>4.5</td><td>4.5</td><td>7</td><td>7</td><td>7</td></tr>
+<tr><th>new residual y − F₁</th><td>−2.5</td><td>−0.5</td><td>−1</td><td>+1</td><td>+3</td></tr>
+</table>
+<p>SSE: 6.25 + 0.25 + 1 + 1 + 9 = <strong>17.5</strong>.</p>
+
+<h3>Round 2 — second stump</h3>
+<p>Refit on the <em>new</em> residuals. The best split is now <code>x ≤ 3.5</code> (left mean −4/3 ≈ −1.33, right mean +2) — a <em>different</em> split than round 1, because the error pattern changed. Add 0.5 of it:</p>
+<table>
+<tr><th>x</th><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td></tr>
+<tr><th>F₂</th><td>3.83</td><td>3.83</td><td>6.33</td><td>8</td><td>8</td></tr>
+<tr><th>residual y − F₂</th><td>−1.83</td><td>+0.17</td><td>−0.33</td><td>0</td><td>+2</td></tr>
+</table>
+<p>SSE: ≈ <strong>7.5</strong>. The trend 40 → 17.5 → 7.5 is the whole story: each round provably shrinks training error. That guarantee is also the danger — run long enough and the ensemble will fit pure noise, which is why the <em>test</em> error curve is U-shaped while training error only falls.</p>
+
+<div class="callout warn"><strong>Key observation:</strong> the stump in round 2 chose a different split point than round 1. Boosting builds a staircase of corrections, each shaped by what's left to explain. That's fundamentally different from fitting one deep tree to y directly — the ensemble allocates its capacity where the remaining error is.</div>
+
+<h2>3. The three knobs and what they trade</h2>
+<table>
+<tr><th>Parameter</th><th>sklearn default<sup><a class="fn" href="#fn-2">[2]</a></sup></th><th>What raising it does</th><th>On noisy financial data</th></tr>
+<tr><td><code>n_estimators</code> (M)</td><td>100</td><td>More rounds = lower training error, eventually overfitting</td><td>Use early stopping (<code>n_iter_no_change</code>) on a chronological validation split rather than guessing M</td></tr>
+<tr><td><code>learning_rate</code> (ν)</td><td>0.1</td><td>Bigger steps = fewer trees needed, worse generalization</td><td>Lower ν (0.01–0.05) + more trees almost always generalizes better; ν and M trade off roughly multiplicatively</td></tr>
+<tr><td><code>max_depth</code></td><td>3</td><td>Deeper trees capture higher-order feature interactions</td><td>Daily-bar alpha signals rarely support depth &gt; 4 — interactions deeper than 3 features are mostly noise at this signal-to-noise ratio</td></tr>
+</table>
+<p>Two more worth knowing: <code>subsample &lt; 1.0</code> turns it into <em>stochastic</em> gradient boosting (each tree sees a random row sample — cheap variance reduction), and <code>loss="huber"</code> caps the influence of fat-tailed return outliers, which financial targets have in abundance.</p>
+
+<h2>4. In this project</h2>
+<h3><code>paper_trading_sim.py:113–125</code> — the trainer</h3>
+<pre><span class="kw">def</span> <span class="fn">train_model</span>(X: np.ndarray, y: np.ndarray) -&gt; GradientBoostingRegressor:
+    model = <span class="fn">GradientBoostingRegressor</span>(random_state=<span class="num">42</span>)   <span class="com"># all defaults: M=100, ν=0.1, depth=3</span>
+    model.<span class="fn">fit</span>(X, y)
+    <span class="kw">return</span> model
+</pre>
+<p>Three things to notice:</p>
+<ul>
+<li><strong>The defaults are untuned.</strong> 100 trees × depth 3 × ν 0.1 is sklearn's general-purpose setting, not a choice made for daily equity returns. The first experiment worth running on this repo: ν=0.05 with early stopping, scored on the walk-forward Sharpe rather than in-sample R².</li>
+<li><strong><code>random_state=42</code> matters even without subsampling</strong> — feature-split ties are broken pseudo-randomly, so this pin is what makes a retrain reproducible.</li>
+<li><strong>The target is brutal.</strong> <code>fwd_ret_1d</code> (built in <code>build_features</code>, line 68, via <code>shift(-1)</code>) has a signal-to-noise ratio so low that train R² of a few percent is normal. The repo never needs the predictions to be <em>accurate</em> — only their daily <em>ranking</em> has to be better than random, because the backtest takes the top-N by predicted return (Lesson 0003's cross-sectional ranking argument).</li>
+</ul>
+
+<h3><code>walkforward_sim.py:224</code> — same model, different lifecycle</h3>
+<p>The walk-forward simulator can refit the same all-default GBM on a rolling window (<code>--rolling_retrain</code>, default 756 trading days ≈ 3 years, monthly cadence). That's the project's answer to <strong>non-stationarity</strong>: the feature→return mapping drifts as regimes change, so the ensemble is periodically rebuilt on recent history only. Note what this implies — the *hyperparameters* stay frozen across refits while the *trees* are entirely replaced. Tuning and retraining are different time scales.</p>
+
+<h3>The model bundle</h3>
+<pre>{ <span class="str">"model"</span>: GradientBoostingRegressor, <span class="str">"features"</span>: [<span class="str">"close"</span>, <span class="str">"ret_1d"</span>, <span class="str">"ma_5"</span>, <span class="str">"ma_10"</span>, <span class="str">"ma_gap"</span>, <span class="str">"vol_10"</span>, <span class="str">"rsi_14"</span>] }
+</pre>
+<p>Trees address features <em>by column index</em>, not by name. The <code>features</code> list in the saved bundle is the contract that keeps inference columns in training order — feed the columns shuffled and the model silently produces garbage. This is also why <code>CLAUDE.md</code> insists on retraining after any <code>build_features</code> change.</p>
+
+<h2>5. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Gradient boosting vs Random forest</h4><p>Both are tree ensembles; the resemblance ends there. <strong>Random forest</strong>: many <em>deep</em> trees trained <em>independently</em> on bootstrap samples, then averaged — variance reduction by averaging. <strong>Boosting</strong>: many <em>shallow</em> trees trained <em>sequentially</em>, each on the previous ensemble's residuals — bias reduction by correction. RF parallelizes trivially and barely overfits with more trees; boosting can't parallelize across trees and will overfit if you let M grow unchecked.</p></div>
+<div class="card"><h4>Boosting vs Gradient descent</h4><p>Both follow a negative gradient, in different spaces. <strong>Gradient descent</strong> updates a fixed-length parameter vector. <strong>Boosting</strong> takes a step in <em>function space</em>: the "step direction" is itself a fitted tree approximating the gradient at every training point. Each boosting round = one gradient step where the step is a function.</p></div>
+<div class="card"><h4>GradientBoostingRegressor vs HistGradientBoosting / XGBoost / LightGBM</h4><p>Same algorithm family, different engineering. The histogram-based variants bucket feature values into 256 bins before splitting, making training 10–100× faster on large data, and add niceties (native NaN handling, better regularization). At this repo's data size (~thousands of rows per training set) the classic implementation is fine; at S&amp;P-500 × 10-years × minute-bars scale it wouldn't be.</p></div>
+<div class="card"><h4>Residual vs Gradient</h4><p>For squared error they coincide (up to sign/scale), which is why "fit the residuals" is the standard intuition. For any other loss they differ — with absolute error each tree fits <code>sign(y − F)</code>, with log-loss (classification) it fits <code>y − p</code>. "Fit the negative gradient" is the general truth; "fit the residuals" is the squared-error special case.</p></div>
+</div>
+
+<h2>6. Practice</h2>
+<div class="question" data-question><p class="q">Q1. In the worked example, round 1's stump split at x ≤ 2.5 but round 2's split at x ≤ 3.5. Why did the split move?</p><ul class="options">
+<li data-correct="false" data-why="random_state affects tie-breaking, but the split moved because the optimization target changed — the residuals are different data.">Random tie-breaking from the seed chose a different split.</li>
+<li data-correct="true" data-why="Right. Each tree is fit to the CURRENT residuals, and round 1's correction changed them. After round 1, the biggest remaining error concentration sat elsewhere, so the optimal split moved. This is the essence of boosting: capacity flows to whatever error is left.">Round 2 fits a different target — the residuals left after round 1's correction — so the best split is wherever the remaining error now concentrates.</li>
+<li data-correct="false" data-why="Stumps always have exactly one split; depth didn't change between rounds.">The tree got deeper in round 2, allowing more splits.</li>
+<li data-correct="false" data-why="The learning rate scales the leaf values added to the ensemble; it doesn't change where a tree splits.">The learning rate shifted the split threshold.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. You halve the learning rate from 0.1 to 0.05 and keep n_estimators at 100. What's the most likely immediate effect?</p><ul class="options">
+<li data-correct="false" data-why="Lower ν is MORE conservative, not more overfit — each tree contributes less.">Stronger overfitting, since each tree now matters more.</li>
+<li data-correct="true" data-why="Right. ν and M trade off roughly multiplicatively: halving ν means the ensemble takes half-sized steps, so 100 rounds no longer travels as far down the training loss. To recover, you'd roughly double n_estimators — and the ν=0.05/M=200 combo usually generalizes a bit better than ν=0.1/M=100.">Underfitting — the ensemble hasn't taken enough total correction with only 100 half-sized steps; you'd typically raise n_estimators to compensate.</li>
+<li data-correct="false" data-why="Training time per tree is unchanged; ν doesn't affect the cost of fitting each tree.">Training becomes twice as fast.</li>
+<li data-correct="false" data-why="ν has no effect on which features are available or how splits are scored within a tree — only on how much each fitted tree contributes.">Feature importance becomes concentrated on fewer features.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Why does this repo tolerate a model whose predictions of <code>fwd_ret_1d</code> are individually almost worthless (R² of a few percent)?</p><ul class="options">
+<li data-correct="true" data-why="Right. The backtest sorts all tickers by predicted return each day and buys the top-N (sort_values('pred') in paper_trading_sim.py). Only the ORDERING needs to beat chance — a model that's 52% right about which of two stocks does better tomorrow compounds into real money across thousands of daily picks, even though each individual prediction is noise-dominated.">Because the strategy only consumes the cross-sectional ranking of predictions, not their values — small ordering skill compounds across many picks.</li>
+<li data-correct="false" data-why="The risk overlay in walkforward_sim.py scales exposure; it can't turn valueless predictions into profitable ones.">Because the risk overlay corrects the predictions downstream.</li>
+<li data-correct="false" data-why="Low R² on a hard target is not a bug — financial returns are mostly noise, so a few percent R² can be genuinely useful signal.">It doesn't — low R² means the model is broken and should be discarded.</li>
+<li data-correct="false" data-why="More trees would raise TRAINING R² but the test-set ceiling is set by the signal in the data, not by model capacity.">Because adding more trees would push R² to acceptable levels.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. Gradient boosting vs random forest — which statement is correct?</p><ul class="options">
+<li data-correct="false" data-why="Backwards: RF trees are typically deep and independent; boosted trees are shallow and sequential.">Random forests use shallow sequential trees; boosting uses deep independent trees.</li>
+<li data-correct="false" data-why="It's the opposite — RF is embarrassingly parallel across trees; boosting is inherently sequential because each tree needs the previous ensemble's output.">Boosting parallelizes across trees more easily than random forests.</li>
+<li data-correct="true" data-why="Right. RF reduces VARIANCE by averaging many independently-trained deep trees (more trees never really hurts). Boosting reduces BIAS by sequentially correcting errors with shallow trees — and because each round chases remaining error, unlimited rounds eventually chase noise, so M is a real regularization knob.">Random forests average independent deep trees to cut variance; boosting chains shallow trees to cut bias, so more rounds can eventually overfit.</li>
+<li data-correct="false" data-why="Both handle regression and classification; the loss function, not the task, distinguishes them.">Random forests are for classification and boosting is for regression.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q5. After adding a new feature to <code>build_features</code>, a teammate loads the old saved model bundle and runs inference with the new 8-column frame. What happens?</p><ul class="options">
+<li data-correct="false" data-why="sklearn checks the COUNT of features and will raise on 8 columns vs 7 — but the deeper danger is the reordering case, where counts match and nothing raises.">The model transparently ignores the extra column.</li>
+<li data-correct="true" data-why="Right. With a changed column count sklearn raises a shape error — annoying but safe. The truly dangerous variant is same-count, different-order columns: trees address features by position, so predictions become silent garbage. That's why the bundle stores the exact feature list and why CLAUDE.md mandates retraining (and re-exporting ONNX) after any build_features change.">Best case a shape error; worst case (same count, different order) silently wrong predictions — the bundle's feature list exists to prevent exactly this.</li>
+<li data-correct="false" data-why="Trees cannot use a feature that didn't exist at fit time; there's no mechanism to incorporate new columns at inference.">The model uses the new feature for splits it already has.</li>
+<li data-correct="false" data-why="Refitting at inference time would defeat the saved-bundle workflow; sklearn predict() never refits.">sklearn automatically refits the model on the new schema.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>7. Scenarios</h2>
+<details class="scenario"><summary>S1. You tune the GBM and training R² jumps from 4% to 35%, but walk-forward Sharpe drops from 1.1 to 0.4. What happened and what do you check?</summary>
+<p>Classic overfitting signature on a low signal-to-noise target. The extra in-sample fit is mostly memorized noise, and memorized noise doesn't repeat out-of-sample — but it does displace the small real signal in the ranking. Check: (1) which knob moved — deeper trees (<code>max_depth</code> &gt; 4) and more estimators without early stopping are the usual suspects; (2) whether the validation used for tuning was <em>chronological</em> — a shuffled split leaks future rows into training and rewards exactly this kind of memorization (Lesson 0021's cardinal sin); (3) re-tune scoring on the walk-forward metric directly, not on R². On financial data, the right amount of fit usually feels insultingly small.</p></details>
+
+<details class="scenario"><summary>S2. The C++ ONNX path (gradient_boosting/main.cpp) must produce identical predictions to the Python model. After a retrain, Python and C++ disagree. List the likely causes in order.</summary>
+<p>(1) <strong>Stale export</strong> — the .onnx file was not regenerated after retraining; it still encodes the old trees (<code>python gradient_boosting/model_to_onnx.py</code> is the mandated step). (2) <strong>Feature-order drift</strong> — the C++ side builds its input vector by hand; if <code>build_features</code> changed order or added a column, the ONNX graph receives features at wrong indices and produces garbage with no error. (3) <strong>Float precision</strong> — ONNX Runtime evaluates in float32 while sklearn uses float64; tiny per-tree differences are normal, but they only matter if a comparison threshold sits exactly on a leaf boundary — disagreement beyond ~1e-6 relative means cause (1) or (2), not this. The fix discipline is in CLAUDE.md: retrain → re-export → rebuild together, never separately.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://scikit-learn.org/stable/modules/ensemble.html#gradient-boosting">scikit-learn User Guide §1.11 — Gradient boosting (algorithm, shrinkage, subsampling)</a></li>
+<li id="fn-2"><a href="https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingRegressor.html">sklearn.ensemble.GradientBoostingRegressor — API reference (defaults: n_estimators=100, learning_rate=0.1, max_depth=3, loss='squared_error')</a></li>
+<li id="fn-3"><a href="https://jerryfriedman.su.domains/ftp/trebst.pdf">J. Friedman (2001), "Greedy Function Approximation: A Gradient Boosting Machine" — the original paper</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

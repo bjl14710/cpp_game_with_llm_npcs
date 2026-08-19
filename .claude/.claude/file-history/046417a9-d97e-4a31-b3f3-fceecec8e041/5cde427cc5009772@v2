@@ -1,0 +1,14 @@
+
+# Claude Code
+.claude/settings.local.json
+.claude/audit.log
+
+# Build output
+build/
+*.o
+*.d
+cpp_shooter_game
+
+# Plans and overnight reports (generated, not source)
+OVERNIGHT_REPORT.md
+docs/learning/

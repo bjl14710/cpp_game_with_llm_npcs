@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0003 — Low-latency C++ for game loops</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .budget-bar {
+    display: flex; height: 32px; border-radius: 6px; overflow: hidden;
+    margin: 14px 0 22px; border: 1px solid var(--line);
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+  }
+  .budget-bar div {
+    display: flex; align-items: center; justify-content: center;
+    color: #15171c; padding: 0 4px;
+  }
+  .b-update { background: #a0d8ff; }
+  .b-ai     { background: #ffd58a; }
+  .b-render { background: #c4e08a; }
+  .b-slack  { background: #2b2f3a; color: var(--ink-dim); }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0003 &middot; cpp_games / docs / learning</div>
+  <h1>Low-latency C++ for game loops</h1>
+  <p class="why">Why this matters: your three games each run an update-then-render loop 60 times a second. That gives you a 16.67 ms budget. Miss it once and you've stuttered. Most performance bugs in game code aren't algorithmic &mdash; they're the same three mistakes, repeated. This lesson is how to spot and avoid them in your own code.</p>
+</header>
+
+<h2>1. The concept &mdash; the frame budget mindset</h2>
+
+<p>At 60 frames per second, you have <b>16.67 ms</b> per frame. That budget pays for every game-loop step:</p>
+
+<div class="budget-bar" aria-label="16.67ms frame budget breakdown">
+  <div class="b-update" style="flex: 4">update (4ms)</div>
+  <div class="b-ai"     style="flex: 2">AI / NPC (2ms)</div>
+  <div class="b-render" style="flex: 6">render (6ms)</div>
+  <div class="b-slack"  style="flex: 4.67">slack (4.67ms)</div>
+</div>
+
+<p>That slack &mdash; the dark bar &mdash; is your safety margin. A single 5 ms hiccup eats it. If your slack ever turns negative, the frame is dropped: the player sees a stutter even if your average is fine. <b>Low-latency C++ is mostly about defending the slack against rare-but-large spikes</b>, not chasing the last microsecond of average speed.</p>
+
+<p>Three failure modes account for the overwhelming majority of game-loop hitches:</p>
+
+<table class="compare">
+  <thead><tr><th style="width:30%">The rule</th><th>What it costs when you break it</th><th>How to spot it</th></tr></thead>
+  <tbody>
+    <tr><td><b>Don't allocate in the hot loop.</b><br><code class="inline">new</code>, <code class="inline">malloc</code>, vector growth, string concat.</td><td>A heap allocation is typically a few hundred nanoseconds &mdash; <em>sometimes</em>. Worst case it's a syscall and tens of microseconds. Multiplied by N entities, then N+1 next frame as the vector reallocates...</td><td>Look inside <code class="inline">for</code> loops for <code class="inline">push_back</code>, <code class="inline">std::string</code> concatenation, <code class="inline">make_unique</code>, <code class="inline">new</code>. If the iteration count is unbounded, that's a smell.</td></tr>
+    <tr><td><b>Don't copy when you can move.</b><br>Returning vectors/strings by copy, passing big structs by value.</td><td>A copy of a <code class="inline">std::vector&lt;ChatTurn&gt;</code> with 20 entries means 20 string copies, each potentially a heap allocation. A copy of a <code class="inline">std::string</code> with 200 characters is one allocation.</td><td>Look for big-typed function parameters or return values without <code class="inline">const&amp;</code>, <code class="inline">&amp;&amp;</code>, or <code class="inline">std::move</code>.</td></tr>
+    <tr><td><b>Don't make the CPU wait on memory.</b><br>Pointer-chasing, scattered allocations, virtual calls in tight loops.</td><td>An L1 cache hit is ~1 ns. A main-memory fetch is ~100 ns. Iterating 1000 enemies stored in scattered heap memory can be 100&times; slower than 1000 in a contiguous <code class="inline">std::vector</code>.</td><td>Look for <code class="inline">std::list</code>, <code class="inline">std::map</code>, <code class="inline">std::vector&lt;Enemy*&gt;</code>, or "components that all override a virtual update()."</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <h3>The first rule of optimization</h3>
+  <p><b>Measure before you change.</b> Most performance "fixes" are guesses. Your slack today is comfortable &mdash; you don't have a problem yet. The point of learning this lesson is so that when you <em>do</em> profile and find a hot spot, you'll recognise which of these three patterns is causing it. Don't rewrite working code based on suspicion.</p>
+</div>
+
+<h2>2. Minimal example &mdash; the same loop, twice</h2>
+
+<p>A toy "spawn particles" function in two styles. Same observable behaviour, very different per-frame cost.</p>
+
+<pre class="code"><span class="com">// HOT-PATH HOSTILE — three mistakes in nine lines.</span>
+<span class="bad"><span class="kw">void</span> spawnParticlesBad(<span class="typ">int</span> n) {
+    std::vector&lt;Particle&gt; particles;                  <span class="com">// new vector every call</span>
+    <span class="kw">for</span> (<span class="typ">int</span> i = <span class="num">0</span>; i &lt; n; ++i) {
+        std::string name = <span class="str">"particle_"</span> + std::to_string(i);  <span class="com">// alloc + alloc</span>
+        Particle p;                                   <span class="com">// fine, on stack</span>
+        p.label = name;                               <span class="com">// COPY of a heap string</span>
+        particles.push_back(p);                       <span class="com">// COPY into a growing vector</span>
+    }
+    persist(particles);                               <span class="com">// passed by value — full COPY</span>
+}</span>
+
+<span class="com">// HOT-PATH FRIENDLY — same effect, no per-frame surprises.</span>
+<span class="ok"><span class="kw">void</span> spawnParticlesGood(std::vector&lt;Particle&gt;&amp; out, <span class="typ">int</span> n) {
+    out.reserve(out.size() + n);                      <span class="com">// one allocation, at most</span>
+    <span class="kw">for</span> (<span class="typ">int</span> i = <span class="num">0</span>; i &lt; n; ++i) {
+        Particle p;
+        p.labelId = i;                                <span class="com">// int instead of string — no alloc</span>
+        out.push_back(std::move(p));                  <span class="com">// move into the vector</span>
+    }
+}</span>  <span class="com">// caller already owns `out`; nothing copied across the boundary.</span></pre>
+
+<p>The bad version makes <b>2n + 2</b> allocations per call. The good version makes <b>at most 1</b> (only if <code class="inline">out</code>'s capacity wasn't enough). For <code class="inline">n = 100</code> particles, that's ~202 vs ~1 allocations <em>per frame</em>. The bad version isn't algorithmically worse &mdash; it just leaks budget on every iteration.</p>
+
+<h2>3. In your games &mdash; the real code</h2>
+
+<h3>The shooter game already does most of this right</h3>
+
+<small class="path">cpp_shooter_game/src/main.cpp:318 — GameState owns its vectors</small>
+<pre class="code"><span class="kw">struct</span> GameState {
+    Player player;
+    std::vector&lt;Projectile&gt; projectiles;
+    std::vector&lt;Enemy&gt;      enemies;
+    std::vector&lt;Pickup&gt;     pickups;
+    std::vector&lt;ImpactEffect&gt; impacts;
+    <span class="com">// ...</span>
+};</pre>
+
+<p>The vectors are members of <code class="inline">GameState</code>, not locals reborn every frame. Across frames their <b>capacity grows once and stays</b>. Each frame's <code class="inline">push_back</code> after warmup is just a write to an already-allocated slot &mdash; no allocation. That's rule 1 followed by accident: just by giving the vectors a long-lived home, you've avoided the worst trap.</p>
+
+<small class="path">cpp_shooter_game/src/main.cpp:686 — erase-remove for cleanup</small>
+<pre class="code">game.projectiles.erase(
+    std::remove_if(game.projectiles.begin(), game.projectiles.end(),
+                   [](<span class="kw">const</span> Projectile&amp; p) {
+                       <span class="kw">return</span> p.lifetime &lt;= <span class="num">0.0f</span>;
+                   }),
+    game.projectiles.end());</pre>
+
+<p>This is the classic <b>erase-remove idiom</b>. <code class="inline">remove_if</code> shifts the surviving elements toward the front in O(n) of cache-friendly contiguous writes; <code class="inline">erase</code> then just adjusts <code class="inline">size</code>. The capacity stays put &mdash; <em>no shrink, no free, no realloc</em>. Next frame's <code class="inline">push_back</code> reuses the freed slots.</p>
+
+<small class="path">cpp_shooter_game/src/main.cpp:639 — the update loop</small>
+<pre class="code"><span class="kw">void</span> updateProjectiles(GameState&amp; game, <span class="typ">float</span> dt) {
+    <span class="kw">for</span> (<span class="kw">auto</span>&amp; projectile : game.projectiles) {   <span class="com">// reference, no copy</span>
+        projectile.pos += projectile.velocity * dt;
+        projectile.lifetime -= dt;
+    }
+    <span class="com">// ... collision pass over the same contiguous vector ...</span>
+}</pre>
+
+<p>Three things to notice:</p>
+<ul>
+  <li><code class="inline">auto&amp;</code> &mdash; we iterate by reference. <code class="inline">auto</code> alone would copy each <code class="inline">Projectile</code> every iteration. With 500 projectiles per frame that adds up.</li>
+  <li><code class="inline">GameState&amp; game</code> &mdash; the whole game state passes by reference. Passing by value would copy every vector every frame: a catastrophic mistake the type system would let you make silently.</li>
+  <li>The data being iterated is contiguous (<code class="inline">std::vector</code>). The prefetcher loves this. Each iteration's memory fetch overlaps the previous iteration's arithmetic.</li>
+</ul>
+
+<h3>The LLM client &mdash; rule 2 in action</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:21</small>
+<pre class="code">std::uint64_t LlmClient::submit(std::string systemPrompt,
+                                std::vector&lt;ChatTurn&gt; history,
+                                std::string userMessage) {
+    ChatRequest req;
+    req.id = nextId_.fetch_add(<span class="num">1</span>);
+    req.systemPrompt = <span class="kw">std</span>::move(systemPrompt);   <span class="com">// move, not copy</span>
+    req.history      = <span class="kw">std</span>::move(history);
+    req.userMessage  = <span class="kw">std</span>::move(userMessage);
+    <span class="com">// ...</span>
+    requests_.push(<span class="kw">std</span>::move(req));               <span class="com">// move into the queue</span>
+}</pre>
+
+<p>The parameters are by-value <em>on purpose</em>. The caller decides whether to give us a copy or a move; once they're our locals, we treat them as such and <code class="inline">std::move</code> them deeper. A history with 20 turns goes from caller &rarr; <code class="inline">submit</code> &rarr; <code class="inline">requests_</code> with <em>zero element copies</em>. If we'd written <code class="inline">req.history = history;</code>, every <code class="inline">ChatTurn</code> would be deep-copied.</p>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:42 — drainReplies()</small>
+<pre class="code">std::vector&lt;ChatReply&gt; LlmClient::drainReplies() {
+    std::vector&lt;ChatReply&gt; out;
+    std::lock_guard&lt;std::mutex&gt; lock(replyMutex_);
+    out.swap(replies_);   <span class="com">// O(1): swap three pointers, no element work</span>
+    <span class="kw">return</span> out;             <span class="com">// NRVO — no return copy either</span>
+}</pre>
+
+<p><code class="inline">swap</code> on two <code class="inline">std::vector</code>s exchanges their internal pointers in constant time, regardless of how many elements they hold. We hold the mutex for only the swap, not for any element copying. The return uses Named Return Value Optimization: the compiler builds <code class="inline">out</code> directly in the caller's slot, no copy or move.</p>
+
+<h3>A real allocation-in-loop bug, in my own code</h3>
+
+<div class="callout bug">
+  <h3>Look what I left in DialogUI.cpp...</h3>
+  <p>Honesty: lesson 0003 wouldn't be worth much if I only showed you fixed code. Here's a per-frame allocation pattern in code I wrote for you. It's <em>fine</em> right now because the budget is comfortable, but the next lesson on profiling will surface it.</p>
+</div>
+
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.cpp:109 — render(), called every frame</small>
+<pre class="code"><span class="kw">void</span> DialogUI::render(sf::RenderTarget&amp; target) <span class="kw">const</span> {
+    <span class="com">// ... compute layout ...</span>
+    <span class="kw">struct</span> RenderedLine { std::string text; sf::Color color; };
+    std::vector&lt;RenderedLine&gt; rendered;                <span class="com">// 1) fresh vector every frame</span>
+
+    <span class="kw">for</span> (<span class="kw">auto</span> it = transcript_.rbegin(); it != transcript_.rend(); ++it) {
+        <span class="kw">const auto</span>&amp; line = *it;
+        std::string prefix = line.speaker.empty() ? <span class="str">""</span> : line.speaker + <span class="str">": "</span>;  <span class="com">// 2) string alloc</span>
+        <span class="kw">auto</span> wrapped = wrap(prefix + line.text, wrapChars);                       <span class="com">// 3) more allocs</span>
+        <span class="com">// ...</span>
+    }
+    <span class="com">// ... and inside render():</span>
+    <span class="kw">for</span> (<span class="kw">const auto</span>&amp; rl : rendered) {
+        sf::Text t(rl.text, font_, kFontSize);        <span class="com">// 4) sf::Text constructor allocates</span>
+        target.draw(t);
+    }
+}</pre>
+
+<p>Every frame, on every transcript line that fits on screen, this:</p>
+<ol>
+  <li>Allocates a fresh <code class="inline">rendered</code> vector and reallocates as it grows.</li>
+  <li>Builds a <code class="inline">prefix</code> string via concatenation &mdash; one allocation per line.</li>
+  <li>Calls <code class="inline">wrap()</code>, which builds yet more strings.</li>
+  <li>Constructs an <code class="inline">sf::Text</code> per line, which sets up internal glyph state.</li>
+</ol>
+<p>For 20 transcript lines this might be 50&ndash;100 small allocations per frame &mdash; well under the budget on a modern PC, but a textbook violation of rule 1. <b>The fix is not to rewrite it now</b>; the fix is to recognise it when a profiler eventually points here. The good news is you've seen the bad pattern from inside your own repo, which is the version most likely to stick.</p>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Latency vs. throughput</h3>
+<p>A web server cares about <b>throughput</b> &mdash; total requests per second across many users. A game cares about <b>latency</b> &mdash; how long the <em>single</em> in-flight frame takes. A doubling of throughput at the cost of an occasional 30 ms spike is a great deal for a server and a disaster for a game. When you read "low latency" advice written for trading systems or game engines, that's the lens: keeping the <em>worst-case single operation</em> small, not maximising overall work done.</p>
+
+<h3>Stack allocation vs. heap allocation</h3>
+<p>A local <code class="inline">Projectile p;</code> "allocates" too &mdash; on the stack. Stack allocation is just a register decrement; it costs nothing measurable. <b>Heap allocation</b> (<code class="inline">new</code>, <code class="inline">malloc</code>, vector growth) is the slow one. When we say "don't allocate in the hot loop," we mean don't <em>heap</em>-allocate. Locals are free.</p>
+
+<h3>std::move vs. copy &mdash; and when std::move <em>is</em> a copy</h3>
+<p><code class="inline">std::move</code> doesn't move anything by itself &mdash; it's a cast. It tells the compiler "this object's value can be stolen from." Whether anything is actually stolen depends on the destination's move constructor. For <code class="inline">std::string</code> and <code class="inline">std::vector</code>, that move steals the heap buffer in O(1). For an <code class="inline">int</code> or a <code class="inline">Vec3</code> of three floats, <em>there's nothing on the heap to steal</em> &mdash; the "move" copies the bytes. That's fine; it just means <code class="inline">std::move</code> on small trivial types is free but not magic. Don't expect it to make POD operations faster.</p>
+
+<h3><code class="inline">push_back(std::move(x))</code> vs. <code class="inline">emplace_back(...)</code></h3>
+<p>Common online advice says "always prefer <code class="inline">emplace_back</code>." The current consensus is more nuanced: use <code class="inline">push_back</code> when you have an existing object to put in (it's safer and just as fast after move); use <code class="inline">emplace_back</code> when you'd otherwise construct a temporary just to immediately copy/move it. In your code, lines like <code class="inline">history_.push_back({"user", std::move(line)});</code> are fine &mdash; an <code class="inline">emplace_back("user", std::move(line))</code> would be equivalent on a modern compiler.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">You add a feature where every frame the shooter game scans for nearby enemies. The new code is <code class="inline">std::vector&lt;Enemy*&gt; nearby; for (auto&amp; e : game.enemies) if (close(e)) nearby.push_back(&amp;e);</code>. Frame time spikes randomly. Which rule is being broken?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Vector of pointers is fine for the read pattern here. The cache problem appears only if you then iterate the pointers heavily; that's not what the question describes.">
+      Rule 3 (cache) &mdash; storing pointers instead of values.
+    </li>
+    <li data-correct="true" data-why="Right. The vector is a local re-created every frame, so its capacity starts at zero and reallocates as you push. Make it a member of GameState (or local with .reserve(game.enemies.size())) and the spikes disappear.">
+      Rule 1 (don't allocate) &mdash; <code class="inline">nearby</code> is local, so it allocates and grows every frame.
+    </li>
+    <li data-correct="false" data-why="Copies happen with std::vector&lt;Enemy&gt;; here we store Enemy*, which is 8 bytes per push. The copy cost is negligible.">
+      Rule 2 (don't copy) &mdash; <code class="inline">push_back</code> copies the enemy.
+    </li>
+    <li data-correct="false" data-why="The standard library is fine; the bug is in how the user code uses it. Replacing the container won't fix the per-frame allocation.">
+      None of the rules &mdash; <code class="inline">std::vector</code> itself is the problem.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">In <code class="inline">LlmClient::submit</code> the parameters are <code class="inline">std::string systemPrompt, std::vector&lt;ChatTurn&gt; history, std::string userMessage</code> &mdash; passed by value. Why isn't that always wasteful?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="C++ doesn't elide parameter copies. By-value vs by-const-ref is a real difference at the parameter level.">
+      The compiler always elides parameter copies, so by-value is free.
+    </li>
+    <li data-correct="true" data-why="Right. The caller can move or copy into the parameter as they wish. Once it's our local, we std::move it into req. Result: one move overall when the caller hands us an rvalue, zero deep copies.">
+      The caller decides whether to copy or move into the parameter; inside <code class="inline">submit</code> we <code class="inline">std::move</code> the parameter deeper, so it costs at most one move.
+    </li>
+    <li data-correct="false" data-why="That's the opposite of what we're doing. We never re-allocate inside submit — we move the existing buffer.">
+      Pass-by-value allocates a fresh buffer, which we then re-use.
+    </li>
+    <li data-correct="false" data-why="By-value parameters have nothing to do with thread safety. The mutex around requests_.push covers that.">
+      Pass-by-value is required for thread-safety with the worker thread.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Why does <code class="inline">LlmClient::drainReplies()</code> use <code class="inline">out.swap(replies_)</code> instead of <code class="inline">out = replies_; replies_.clear();</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Both forms are valid C++. The difference is performance and lock-hold duration, not correctness.">
+      The assignment form wouldn't compile because <code class="inline">replies_</code> is a member.
+    </li>
+    <li data-correct="false" data-why="That's a side effect, but not the point. swap doesn't keep elements 'sorted by time'; it just exchanges pointers.">
+      <code class="inline">swap</code> keeps replies in arrival order; assignment would reorder them.
+    </li>
+    <li data-correct="true" data-why="Yes. swap is O(1) — exchange three pointers. Assignment is O(n) — deep-copy every ChatReply (each holding a std::string!). And we hold replyMutex_ across this; shorter critical section means the worker thread is blocked less.">
+      <code class="inline">swap</code> is O(1) and runs while we hold the mutex; assignment would deep-copy every reply and keep the worker thread blocked longer.
+    </li>
+    <li data-correct="false" data-why="They're both move-safe and exception-safe in modern C++. That's not the differentiator.">
+      Assignment is unsafe under the mutex; <code class="inline">swap</code> is the only thread-safe operation.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A new feature pings the shooter game's update loop: <code class="inline">for (auto&amp; e : game.enemies) e.name = "enemy_" + std::to_string(e.id);</code>. Why is this a low-latency landmine?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="It almost certainly compiles. The 'bug' is runtime cost, not a type error.">
+      It won't compile &mdash; you can't assign to a string member through a reference.
+    </li>
+    <li data-correct="false" data-why="That's an extreme exaggeration. Each iteration allocates, sure, but mass-scale allocation isn't what's specifically wrong here.">
+      It allocates 1 GB of memory per frame.
+    </li>
+    <li data-correct="true" data-why="Right. Every enemy gets one allocation for to_string and at least one more for the concatenation, every single frame, even though the result is the same. Compute names once at spawn time, not in the per-frame loop.">
+      Every frame, every enemy does at least two heap allocations &mdash; for <code class="inline">to_string</code> and the <code class="inline">+</code> &mdash; even though the name never changes.
+    </li>
+    <li data-correct="false" data-why="Iteration order is fine and consistent. That's not the issue.">
+      Iteration order over <code class="inline">std::vector</code> isn't guaranteed, so names will drift.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Your average frame is 8 ms with occasional 22 ms spikes that cause visible stutter. Which kind of fix should you reach for <em>first</em>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Average is already half your budget; an algorithm change there optimizes the case that isn't a problem. Spikes are the problem.">
+      Find an algorithmic improvement that drops the 8 ms average to 4 ms.
+    </li>
+    <li data-correct="true" data-why="Yes. Stutters come from rare-but-large spikes, not bad averages. Spikes are usually allocation events or pre-render syncs. Profile the 22 ms frames specifically.">
+      Profile the 22 ms frames specifically &mdash; spikes are almost always allocation or sync events, not the average path.
+    </li>
+    <li data-correct="false" data-why="A higher framerate cap makes the budget tighter, not bigger; it doesn't address the spikes at all.">
+      Raise <code class="inline">setFramerateLimit</code> to 120 so each frame has half as much work to skip.
+    </li>
+    <li data-correct="false" data-why="Threading might help but only if you know what's slow first. Reaching for threads before profiling is the classic premature-parallelism trap.">
+      Move all update functions to a worker thread.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> You're adding a debug overlay to the racing game that prints <code class="inline">"speed: 142 kph"</code> in the corner each frame. Sketch the version of this that <em>would</em> break rule 1, and the version that wouldn't. (Hint: the difference is where the <code class="inline">std::string</code> lives.)</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> Look at <code class="inline">DialogUI::render()</code> at <code class="inline">cpp_game_with_llm_npcs/src/DialogUI.cpp:109</code>. Without writing the fix, list two distinct per-frame allocations you'd target if a profiler said this function was hot. For each, name the rule it breaks.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> In the shooter game, suppose a player triggers a "screen-clearing super-bomb" that should despawn every projectile and every enemy at once. Walk through what happens to the four vectors in <code class="inline">GameState</code> &mdash; do they shrink? Do they free memory? Should they? Reason from the rules.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 (frame budget + three rules)</label></li>
+  <li><label><input type="checkbox"> Walked through the minimal example &mdash; spotted all three mistakes in the bad version</label></li>
+  <li><label><input type="checkbox"> Read the real-code section, including the bug in DialogUI</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat and locked in the right answer</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://cppcon.org/class-2026-low-latency/">CppCon 2026: Using C++ for Low-Latency Systems</a> &middot;
+    <a href="https://www.aussieai.com/blog/list-low-latency-techniques">Catalog of low-latency techniques</a> &middot;
+    <a href="https://abseil.io/tips/112">Abseil Tip #112: emplace vs push_back</a> &middot;
+    <a href="https://quuxplusone.github.io/blog/2021/03/03/push-back-emplace-back/">Arthur O'Dwyer: don't blindly prefer emplace_back</a>
+  </p>
+  <p>Lesson 0003 &middot; <code class="inline">docs/learning/lessons/0003-low-latency-cpp-game-loops.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

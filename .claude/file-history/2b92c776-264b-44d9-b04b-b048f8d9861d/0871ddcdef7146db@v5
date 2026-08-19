@@ -1,0 +1,106 @@
+# Plan: De-blockify pass — rounder characters, richer town, atmosphere
+
+## Context
+
+The town reads as primitives: characters are stacked cylinders + a cube head,
+buildings are flat-tinted boxes, the sky is one flat color, and there are no
+contact shadows, fog, or surface detail. The user wants a "GTA-5-ish, less
+blocky" look. True photorealism is out of reach here — the renderer is
+**legacy OpenGL 2.1 fixed-function** (`src/app/Renderer3D.cpp`), all geometry
+is procedural boxes/cylinders, textures are tiny procedural patterns, and there
+are no model/texture assets. The agreed scope is a **stylized pass within the
+current tech, no new dependencies**: round the characters, add architectural
+trim and recessed windows, add atmosphere (gradient sky, distance fog, warmer
+light, anti-aliasing), ground everything with blob shadows, and enrich the
+procedural textures. Target: cohesive stylized 3D, not photoreal.
+
+This is rendering-only. No core logic, no gameplay, no test changes (the
+renderer has no unit tests); the offline suite must stay green and the game
+must keep building/running. Verification is build + in-game view (the GL
+surface can't be screenshotted in this environment, so the user eyeballs it;
+all tuning lives in named constants for quick iteration).
+
+## New rendering primitives (anonymous namespace in Renderer3D.cpp)
+- `drawSphere(center, radius, slices, stacks, tex, tint)` — UV sphere, smooth
+  per-vertex normals. Heads, shoulders, hips, tree canopies, bushes.
+- `drawTaperedCylinder(center, rBottom, rTop, halfHeight, segments, tex, tint)`
+  — frustum with correct slanted side normals (the existing
+  `drawTexturedCylinder` becomes a thin wrapper passing equal radii). Tapered
+  torsos and limbs.
+- `drawBlobShadow(cx, cz, radius)` — soft dark translucent ground disc
+  (lighting off, blended fan at y≈0.02). Grounds NPCs and street props.
+
+## Changes by area
+
+### 1. Atmosphere & lighting (`Renderer3D::init` / `beginFrame`, `main.cpp`)
+- `main.cpp:239` bump `antialiasingLevel` 4 → 8 (cheap edge smoothing).
+- `init()`: explicit `glShadeModel(GL_SMOOTH)`; warmer sun diffuse
+  (~1.0,0.96,0.88) + a touch more specular and a material shininess so curved
+  surfaces catch light; enable `GL_FOG` (GL_LINEAR, start ~70 / end ~210) with
+  a haze color matched to the sky horizon.
+- `beginFrame()`: replace the flat `glClearColor` with a **gradient sky** —
+  after clearing depth, draw a full-screen vertical gradient quad in an ortho
+  pass (depth test/write off, lighting/texture off, restore after): deep blue
+  at top → pale haze at the horizon, horizon color == fog color so distant
+  buildings dissolve into the sky.
+
+### 2. Rounder characters (`drawNpc`, `drawArm`, `drawFace`)
+Rebuild the figure from smooth parts in the existing local frame
+(`Renderer3D.cpp:493`): tapered torso (broad shoulders → narrow waist), two
+tapered legs instead of one block, a **sphere head** (replacing the cube) with
+a small hair/cap cap, a short neck, small shoulder spheres, and arms rebuilt in
+`drawArm` as tapered cylinders with a sphere hand (keeping the existing
+raise/swing pivot logic). Add a `drawBlobShadow` under each NPC. `drawFace`
+keeps its feature boxes but sits them on the sphere's front (z ≈ head radius)
+and tracks the new head center; brow/eye/mouth shaping is unchanged.
+
+### 3. Building trim & windows (`drawBuilding`, `drawHollowBuilding`)
+- A **cornice** (oversized thin lip) at each building top and a **base plinth**
+  at the bottom, slightly darker than the wall — instant de-blockify.
+- **Recessed window grid** on solid filler (apartments/office/tower): a tiled
+  grid of inset glass quads with frame borders via a new `drawWindowGrid` using
+  a new procedural window texture (lit panes). Shops get **storefront glass**
+  panels flanking the doorway on the front wall.
+- Awning/sign band gains thin support poles and a slight forward tilt.
+
+### 4. Greener park & street (`drawStreetProps`, `drawCity`)
+- Trees: trunk (tapered cylinder) + a **canopy of 3–4 overlapping spheres**
+  instead of one cube; scatter a few **bushes** (squashed spheres) in the park.
+- Lamp posts keep their glow; add blob shadows under posts/trees.
+- Ground: a few **road-line decals** (thin bright quads) down the main streets
+  and a crosswalk near the plaza, drawn after the asphalt.
+
+### 5. Richer procedural textures (`make*Texture`, new makers)
+- Raise texture resolution (64 → 128) and add subtle per-texel noise/variation
+  so brick, plaster, pavement and grass aren't flat.
+- New `makeWindowTexture` (framed panes, a few lit) for facades and
+  `makeFoliageTexture` (mottled green) for canopies.
+
+## Files
+- **src/app/main.cpp** — MSAA level only.
+- **src/app/Renderer3D.hpp** — new texture members + private method decls
+  (`drawSphere`, `drawTaperedCylinder`, `drawBlobShadow`, `drawWindowGrid`,
+  `drawSky`).
+- **src/app/Renderer3D.cpp** — all the geometry/texture/lighting work above.
+
+## Out of scope
+- No GLSL shaders, normal maps, real shadow maps, or authored models (that was
+  the bigger option the user declined).
+- No gameplay/collision changes — collision still uses the box footprints from
+  `City`, so visual trim/round edges are cosmetic only.
+
+## Verification
+- `make -C tests test` — suite stays green (no core changes).
+- `cmake --build build -j` after each commit; launch and walk the plaza, a
+  shop interior, and the park. Confirm: smoother silhouettes on people,
+  buildings with caps/trim/windows, a graded sky with distance haze, soft
+  shadows under characters, rounder trees — and that interiors are still lit
+  and the framerate is fine.
+
+## Commits (incremental, on `5-detail-the-town`)
+1. `feat(render): gradient sky, distance fog, warmer light, MSAA`
+2. `feat(render): smooth rounded NPCs with blob shadows`
+3. `feat(render): building cornices, trim, and recessed windows`
+4. `feat(render): rounder trees, street markings, richer textures`
+Then a final inline review (syntax + performance) and a launch for sign-off; no
+push.

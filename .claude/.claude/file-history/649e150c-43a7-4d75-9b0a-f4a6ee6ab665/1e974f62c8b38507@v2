@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0014 — Hardware Acceleration Practices</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-ty:#7cc4ff;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0014</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Hardware Acceleration Practices in HFT</h1>
+<p class="lead">Why this matters: Lesson 0002 covered FPGAs and 0011 placed them on the latency ladder. This lesson zooms out to the full menu of hardware accelerators a trading firm actually uses — FPGA, GPU, SmartNIC/DPU, ASIC, NPU — and which workload goes where.</p>
+<p class="illus">Illustrative code where the repo doesn't have the real thing yet.</p>
+
+<h2>1. The five-family taxonomy</h2>
+<table>
+<tr><th>Family</th><th>What it is</th><th>Best at</th><th>HFT role</th></tr>
+<tr><td>CPU</td><td>General-purpose serial cores with deep caches and branch prediction.</td><td>Complex branchy logic, glue code.</td><td>Strategy logic on tier 2; control plane everywhere.</td></tr>
+<tr><td>FPGA</td><td>Reconfigurable logic fabric.<sup><a class="fn" href="#fn-1">[1]</a></sup></td><td>Deterministic ns-scale pipelines.</td><td>Tick-to-trade hot path (this repo's <code>fpga/</code>).</td></tr>
+<tr><td>GPU</td><td>Thousands of SIMD cores, deep memory hierarchy.<sup><a class="fn" href="#fn-2">[2]</a></sup></td><td>Massively parallel dense math (training, batch inference).</td><td>Model training, alt-data CV, options pricing. Not hot path.</td></tr>
+<tr><td>SmartNIC / DPU</td><td>NIC with onboard ARM cores + programmable packet engines (BlueField, Pensando).<sup><a class="fn" href="#fn-3">[3]</a></sup></td><td>Network offload, in-line risk checks, parsing.</td><td>Replacing dumb NICs in colocation racks; growing fast.</td></tr>
+<tr><td>ASIC / NPU</td><td>Fixed-function silicon for one job. NPUs are AI-specific ASICs.<sup><a class="fn" href="#fn-4">[4]</a></sup></td><td>Best $/throughput/watt for one workload.</td><td>Apex HFT for matching/parsing; AI training at hyperscalers.</td></tr>
+</table>
+
+<h2>2. The decision framework — three questions</h2>
+<div class="grid2">
+<div class="card"><h4>1. Determinism vs throughput?</h4><p>If the workload is "one tick at a time, ns matter" → FPGA/ASIC. If it's "millions of samples, batched" → GPU/NPU. CPUs sit between, mediocre at both.</p></div>
+<div class="card"><h4>2. How often does the algorithm change?</h4><p>Weekly strategy iteration → FPGA (re-synth in hours). Frozen algorithm at scale → ASIC (months of tape-out, then years of use).</p></div>
+<div class="card"><h4>3. Is the workload AI?</h4><p>Training: GPU is still king (NVIDIA H100/B100). Inference at low latency: NPU/Groq LPU offer 10×+ vs GPU on specific shapes.<sup><a class="fn" href="#fn-2">[2]</a></sup> Inference on the trading hot path: hls4ml-style FPGA compile.</p></div>
+<div class="card"><h4>The pattern: heterogeneous</h4><p>2025 production HFT stacks combine all five — CPU control + FPGA hot path + GPU training + SmartNIC for risk/parsing + (rarely) ASIC for matching. Mixing tiers is the design, not a smell.<sup><a class="fn" href="#fn-1">[1]</a></sup></p></div>
+</div>
+
+<h2>3. SmartNIC / DPU — the newest entrant worth understanding</h2>
+<p>A SmartNIC is a NIC plus an embedded CPU complex (typically ARM) and programmable packet engines. NVIDIA BlueField and AMD Pensando are the market leaders; BlueField-4 ships 800 Gbps with 6× compute over its predecessor.<sup><a class="fn" href="#fn-3">[3]</a></sup> The DPU/SmartNIC market reached $1.11B in 2024 and is on a 14.9% CAGR through 2034.<sup><a class="fn" href="#fn-3">[3]</a></sup></p>
+<p>For HFT specifically they fit two niches:</p>
+<ul>
+<li><strong>Inline risk checks.</strong> Run Rule 15c3-5 pre-trade filters on the DPU's ARM cores instead of on the host CPU, saving the PCIe round-trip for rejected orders.</li>
+<li><strong>Protocol parsing.</strong> Strip exchange feeds (ITCH, OUCH, FIX) on the DPU and hand the application a structured tick — same shape as FPGA parsing but cheaper to ship a new schema (no re-synth).</li>
+</ul>
+
+<h2>4. The repo today and the realistic next step</h2>
+<p>The repo's hardware story is the FPGA folder (<code>fpga/*.vhd</code>). Realistic upgrade paths, in order of cost:</p>
+<ol>
+<li><strong>Add a GPU for training</strong> — the GBM in <code>paper_trading_sim.py</code> stays on CPU; if you ever swap it for a neural net (Lesson 0007), training moves to GPU. Zero hot-path impact.</li>
+<li><strong>Add a SmartNIC for the eventual feed handler</strong> — when (if) the repo gains a live exchange feed, BlueField-class NICs let you offload parsing without writing HDL.</li>
+<li><strong>Compile a small NN onto the FPGA via hls4ml</strong> — covered in Lesson 0007. The bridge between Python-trained models and ULL execution.</li>
+<li><strong>ASIC: don't.</strong> Not at this scale; the economics need billions of messages per day to justify tape-out.</li>
+</ol>
+
+<h2>5. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>DPU vs SmartNIC</h4><p>The terms are used interchangeably in 2025 marketing. Pedantically: SmartNIC = NIC with some programmability; DPU = SmartNIC with a full CPU complex and OS. NVIDIA/AMD now use "DPU" exclusively.<sup><a class="fn" href="#fn-3">[3]</a></sup></p></div>
+<div class="card"><h4>FPGA vs ASIC</h4><p>FPGA reprograms in seconds via a new bitstream; ASIC is silicon you taped out and frozen. Same logic on ASIC is 5–10× faster and ~10× cheaper per unit at scale but $10M+ to make.</p></div>
+<div class="card"><h4>NPU vs GPU</h4><p>NPU is an ASIC specialized for the matmul + activation pattern of neural nets. Better $/W on that shape; useless for general parallel code. GPU is more flexible, more power-hungry.<sup><a class="fn" href="#fn-4">[4]</a></sup></p></div>
+<div class="card"><h4>Acceleration vs Offload</h4><p><strong>Acceleration</strong>: doing the same work faster. <strong>Offload</strong>: moving the work elsewhere so the original processor can do other things. SmartNICs are mostly offload; FPGAs are mostly acceleration.</p></div>
+</div>
+
+<h2>6. Practice</h2>
+<div class="question" data-question><p class="q">Q1. You need to run a 7B-parameter LLM for nightly news-sentiment featurization across millions of articles. Which accelerator?</p><ul class="options">
+<li data-correct="false" data-why="FPGAs are deterministic and ns-scale but terrible for huge batched dense matmuls — wrong workload shape.">FPGA via hls4ml.</li>
+<li data-correct="true" data-why="Right — overnight batch inference of dense models is exactly the GPU/NPU sweet spot. Cold path, throughput-bound, no determinism need.">GPU (or NPU if cost matters).</li>
+<li data-correct="false" data-why="CPU works but takes ~50–100× longer. For nightly batch you'd want a GPU on AWS p4d or similar.">CPU with AVX-512.</li>
+<li data-correct="false" data-why="ASICs are for fixed-function high-volume work like a single matching engine — not for varying inference workloads.">Custom ASIC.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. The Rule-15c3-5 pre-trade risk check is currently on the host CPU and adds ~3 µs per order. You want to halve it without changing the rule logic. Best option?</p><ul class="options">
+<li data-correct="true" data-why="Right. Putting the same risk filter on a SmartNIC's ARM cores avoids the host PCIe round-trip for rejected orders and runs the logic at line rate. No new logic, just a different location.">Move the filter to a SmartNIC / DPU so it runs inline at line rate.</li>
+<li data-correct="false" data-why="Rule 15c3-5 explicitly prohibits skipping the filter. Removing it is illegal regardless of latency benefit.">Skip the risk check on small orders.</li>
+<li data-correct="false" data-why="GPUs are throughput devices with terrible single-message latency due to driver and PCIe round-trip — usually worse than CPU for one event.">Run the check on a GPU.</li>
+<li data-correct="false" data-why="Hand-translating a checkable filter rule into VHDL works but takes weeks and is harder to audit than the same C code on a DPU.">Rewrite the entire rule in VHDL on the FPGA.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Why isn't ASIC the answer for almost any small-to-medium HFT desk?</p><ul class="options">
+<li data-correct="false" data-why="ASICs are reliable once made — that's not the issue. Tape-out economics are.">ASICs have higher fault rates than FPGAs.</li>
+<li data-correct="true" data-why="Right — a single tape-out at modern node costs $5–50M, takes 12–24 months, and freezes the design forever. Only firms with a stable, multi-year-justifiable workload (e.g. a matching engine, an exchange) make ASICs work. HFT strategies iterate too fast.">Tape-out costs millions and takes a year-plus, and the design is frozen — strategies iterate too fast to amortize that.</li>
+<li data-correct="false" data-why="ASICs are widely available in design-services arrangements; the issue is whether a desk's strategy economics support the capex.">ASICs are export-controlled and unavailable to most firms.</li>
+<li data-correct="false" data-why="ASICs are faster, not slower. The blocker is cost and inflexibility, not performance.">ASICs are slower than FPGAs for the same workload.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. A modern production HFT stack typically uses how many of these accelerator families simultaneously?</p><ul class="options">
+<li data-correct="false" data-why="A single-accelerator stack is naive. Each family fits a different niche and pure-FPGA shops still need CPUs for control and GPUs for offline ML.">One — usually FPGA, with everything else replaced.</li>
+<li data-correct="true" data-why="Right. Heterogeneous architectures combining CPU + FPGA + GPU + SmartNIC (and occasionally NPU/ASIC) are the 2025 norm because each family fits a different niche on the same firm's workload graph.">Three to five, with each family serving a different niche on the firm's workload graph.</li>
+<li data-correct="false" data-why="Two might describe a small startup but production HFT firms run heterogeneous stacks with GPUs for research, CPUs for control, FPGAs for hot path, SmartNICs for offload, and increasingly NPUs for AI inference.">Exactly two — CPU and FPGA, since the others are research-only.</li>
+<li data-correct="false" data-why="ASICs are at the apex and rare; the broader stack uses the other four families heavily. 'All ASIC' is not how anyone operates.">All ASIC — anything programmable is a transitional technology.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>7. Scenarios</h2>
+<details class="scenario"><summary>S1. A founder claims their new "AI HFT platform" will use only NPUs for everything. What's wrong with the architecture story?</summary>
+<p>NPUs are inference-shaped — fixed matmul + activation pipelines on dense tensors. They don't run general code well, they don't do deterministic ns-scale parsing well, they don't replace control-plane CPUs, and they don't compete with FPGAs on tick-to-trade. "All NPU" can't be the architecture; it can only be the inference accelerator inside a heterogeneous stack. Treat the claim as marketing.</p></details>
+
+<details class="scenario"><summary>S2. Your team wants to add a SmartNIC. Which workload should NOT be on the DPU?</summary>
+<p>The actual strategy decision (the buy/sell/hold logic) and any complex branching state machine. SmartNICs excel at line-rate stateless or shallow-state transforms — parsing, filtering, simple risk checks, encryption offload. Putting the full strategy on a DPU's ARM core gives you a slow CPU, not an accelerator. Strategy stays on the FPGA or a tier-2 CPU; offload the boring inline plumbing to the DPU.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://www.bestgpusforai.com/blog/ai-accelerators">AI and Deep Learning Accelerators Beyond GPUs in 2026 — BestGPUsForAI</a></li>
+<li id="fn-2"><a href="https://www.geniatech.com/ai-hardware-2025/">Global AI Hardware Landscape 2025: GPU, FPGA, ASIC — Geniatech</a></li>
+<li id="fn-3"><a href="https://introl.com/blog/dpus-smartnics-data-center-infrastructure-bluefield-pensando-2025">DPUs and SmartNICs: BlueField, Pensando, 2025 market — Introl</a></li>
+<li id="fn-4"><a href="https://bizety.com/2025/10/09/ai-chips-overview-tpu-npu-gpu-and-fpga/">AI Chips Overview: TPU, NPU, GPU, FPGA — Bizety</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

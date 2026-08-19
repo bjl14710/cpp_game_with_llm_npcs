@@ -1,0 +1,146 @@
+// itch_filter — stream-filter a raw Nasdaq TotalView-ITCH 5.0 file to one symbol.
+//
+// Reads a framed ITCH stream (2-byte big-endian length prefix per message,
+// the format of the emi.nasdaq.com sample files) on stdin and writes the same
+// framing to stdout, keeping only:
+//   - 'S' System Event messages (session start/end markers, locate 0),
+//   - the 'R' Stock Directory message for the target symbol (teaches us the
+//     day's stock-locate code), and
+//   - every message whose stock-locate field matches that code.
+//
+// Every ITCH 5.0 message begins: type(1) | stock locate(2) | tracking(2) |
+// timestamp(6) — so locate-based filtering works uniformly across all types.
+//
+// Usage:
+//   gunzip -c 12302019.NASDAQ_ITCH50.gz | itch_filter AAPL \
+//       [--fixture PATH --fixture-bytes N] > AAPL-12302019.itch
+//
+// --fixture tees the first N output bytes (truncated at a message boundary)
+// into PATH, producing a small deterministic test fixture in one pass.
+//
+// Exit codes: 0 ok; 1 usage/IO error; 2 symbol never seen in Stock Directory.
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
+namespace {
+
+// Progress note to stderr every this many input messages.
+constexpr uint64_t PROGRESS_EVERY = 50'000'000;
+
+void usage(const char* argv0) {
+    std::fprintf(stderr,
+        "usage: %s SYMBOL [--fixture PATH --fixture-bytes N] < in.itch > out.itch\n",
+        argv0);
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 2) { usage(argv[0]); return 1; }
+
+    // Target symbol, space-padded to ITCH's 8-byte stock field.
+    char padded[8];
+    std::memset(padded, ' ', sizeof(padded));
+    const std::size_t sym_len = std::strlen(argv[1]);
+    if (sym_len == 0 || sym_len > 8) {
+        std::fprintf(stderr, "error: SYMBOL must be 1-8 characters\n");
+        return 1;
+    }
+    std::memcpy(padded, argv[1], sym_len);
+
+    const char* fixture_path  = nullptr;
+    uint64_t    fixture_cap   = 0;
+    for (int i = 2; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--fixture") == 0 && i + 1 < argc) {
+            fixture_path = argv[++i];
+        } else if (std::strcmp(argv[i], "--fixture-bytes") == 0 && i + 1 < argc) {
+            fixture_cap = std::strtoull(argv[++i], nullptr, 10);
+        } else {
+            usage(argv[0]);
+            return 1;
+        }
+    }
+
+    std::FILE* fixture = nullptr;
+    if (fixture_path) {
+        fixture = std::fopen(fixture_path, "wb");
+        if (!fixture) {
+            std::fprintf(stderr, "error: cannot open fixture %s\n", fixture_path);
+            return 1;
+        }
+    }
+
+    uint8_t  hdr[2];
+    uint8_t  msg[65535];
+    uint64_t msgs_in = 0, msgs_kept = 0, bytes_out = 0, fixture_bytes = 0;
+    long     locate = -1;  // -1 until the symbol's Stock Directory entry is seen
+
+    while (std::fread(hdr, 1, 2, stdin) == 2) {
+        const uint16_t len = static_cast<uint16_t>(hdr[0] << 8 | hdr[1]);
+        if (len == 0) continue;  // padding/heartbeat frame
+        if (std::fread(msg, 1, len, stdin) != len) {
+            std::fprintf(stderr, "warning: truncated final message, stopping\n");
+            break;
+        }
+        ++msgs_in;
+        if (msgs_in % PROGRESS_EVERY == 0)
+            std::fprintf(stderr, "  ...%llu million messages scanned, %llu kept\n",
+                         static_cast<unsigned long long>(msgs_in / 1'000'000),
+                         static_cast<unsigned long long>(msgs_kept));
+
+        const char     type       = static_cast<char>(msg[0]);
+        const uint16_t msg_locate = static_cast<uint16_t>(msg[1] << 8 | msg[2]);
+
+        bool keep = false;
+        if (type == 'S') {
+            keep = true;  // system events frame the session for any symbol
+        } else if (type == 'R' && len >= 19) {
+            // Stock Directory: stock symbol (8B, space-padded) at offset 11.
+            if (std::memcmp(msg + 11, padded, 8) == 0) {
+                locate = msg_locate;
+                keep = true;
+            }
+        } else if (locate >= 0 && msg_locate == static_cast<uint16_t>(locate)) {
+            keep = true;
+        }
+        if (!keep) continue;
+
+        ++msgs_kept;
+        if (std::fwrite(hdr, 1, 2, stdout) != 2 ||
+            std::fwrite(msg, 1, len, stdout) != len) {
+            std::fprintf(stderr, "error: write failed\n");
+            return 1;
+        }
+        bytes_out += 2u + len;
+
+        // Tee the head of the filtered stream into the fixture, whole
+        // messages only, so the fixture is a valid framed ITCH file.
+        if (fixture && fixture_bytes + 2u + len <= fixture_cap) {
+            std::fwrite(hdr, 1, 2, fixture);
+            std::fwrite(msg, 1, len, fixture);
+            fixture_bytes += 2u + len;
+        }
+    }
+
+    if (fixture) std::fclose(fixture);
+
+    std::fprintf(stderr,
+        "itch_filter: %llu messages in, %llu kept (%.4f%%), %llu bytes out%s\n",
+        static_cast<unsigned long long>(msgs_in),
+        static_cast<unsigned long long>(msgs_kept),
+        msgs_in ? 100.0 * static_cast<double>(msgs_kept) / static_cast<double>(msgs_in) : 0.0,
+        static_cast<unsigned long long>(bytes_out),
+        fixture_path ? " (+fixture)" : "");
+
+    if (locate < 0) {
+        std::fprintf(stderr,
+            "warning: symbol '%s' never appeared in the Stock Directory — "
+            "output contains only system events\n", argv[1]);
+        return 2;
+    }
+    return 0;
+}

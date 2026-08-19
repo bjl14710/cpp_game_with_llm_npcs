@@ -1,0 +1,13 @@
+{# Metric-card macro shared by both themes: classic renders it as a plain
+   stat block (style.css), lab as a Streamlit-style metric card
+   (theme-lab.css). delta_positive controls the green/red arrow when a
+   delta string is given. #}
+{% macro metric(label, value, delta=None, delta_positive=True) -%}
+<div class="metric-card">
+  <div class="metric-label">{{ label }}</div>
+  <div class="metric-value">{{ value }}</div>
+  {% if delta is not none %}
+  <div class="metric-delta {{ 'up' if delta_positive else 'down' }}">{{ delta }}</div>
+  {% endif %}
+</div>
+{%- endmacro %}

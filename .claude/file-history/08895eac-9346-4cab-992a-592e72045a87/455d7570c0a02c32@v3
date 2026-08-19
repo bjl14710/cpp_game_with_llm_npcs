@@ -1,0 +1,143 @@
+-- flat_book_tb.vhd — file-driven testbench.
+-- Plan: .claude/plans/vhdl-flat-book.md.
+--
+-- Reads the golden CSV produced by cpp/itch/golden_vectors_main.cpp (schema
+-- version asserted from the header comment before any op runs), applies one op
+-- per clock cycle, asserts level best-of-book outputs and clamp pulses match
+-- the C++ oracle exactly, and reports total cycles. GHDL exits nonzero on any
+-- assertion failure (severity failure) — that exit code IS the parity test
+-- consumed by tests/test_vhdl_flat_book.py; a clean run ends with std.env.finish
+-- (exit 0). The VECTORS generic is the CSV path; DEPTH matches the entity.
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+use std.textio.all;
+use std.env.all;
+
+entity flat_book_tb is
+  generic (
+    VECTORS : string  := "golden.csv";
+    DEPTH   : positive := 4096
+  );
+end entity flat_book_tb;
+
+architecture sim of flat_book_tb is
+  constant SHARES_W : positive := 32;
+  constant HALF     : time := 5 ns;
+
+  signal clk       : std_logic := '0';
+  signal rst       : std_logic := '0';
+  signal op_valid  : std_logic := '0';
+  signal op_kind   : std_logic := '0';
+  signal op_side   : std_logic := '0';
+  signal op_index  : unsigned(11 downto 0) := (others => '0');
+  signal op_shares : unsigned(SHARES_W - 1 downto 0) := (others => '0');
+
+  signal best_bid_valid  : std_logic;
+  signal best_bid_index  : unsigned(11 downto 0);
+  signal best_bid_shares : unsigned(SHARES_W - 1 downto 0);
+  signal best_ask_valid  : std_logic;
+  signal best_ask_index  : unsigned(11 downto 0);
+  signal best_ask_shares : unsigned(SHARES_W - 1 downto 0);
+  signal err_underflow_clamped : std_logic;
+
+  -- Read one comma-separated integer, then consume the trailing separator
+  -- (which is absent on the final field — that read simply fails harmlessly).
+  procedure read_csv_int(variable l : inout line; variable val : out integer) is
+    variable ch : character;
+    variable ok : boolean;
+  begin
+    read(l, val, ok);
+    assert ok report "golden CSV: expected an integer field" severity failure;
+    read(l, ch, ok);  -- consume ',' if present; end-of-line -> ok=false (fine)
+  end procedure;
+begin
+  dut : entity work.flat_book
+    generic map (DEPTH => DEPTH, SHARES_W => SHARES_W)
+    port map (
+      clk => clk, rst => rst,
+      op_valid => op_valid, op_kind => op_kind, op_side => op_side,
+      op_index => op_index, op_shares => op_shares,
+      best_bid_valid => best_bid_valid, best_bid_index => best_bid_index,
+      best_bid_shares => best_bid_shares,
+      best_ask_valid => best_ask_valid, best_ask_index => best_ask_index,
+      best_ask_shares => best_ask_shares,
+      err_underflow_clamped => err_underflow_clamped
+    );
+
+  stim : process
+    file f          : text;
+    variable status : file_open_status;
+    variable l      : line;
+    variable op, side, index, shares : integer;
+    variable ebv, ebi, ebs, eav, eai, eas, eclamp : integer;
+    variable cycles : integer := 0;
+    -- Full header the C++ oracle writes, including depth/shares_w — asserting
+    -- these against the generics catches a vectors file generated at a smaller
+    -- depth than this DUT (which would otherwise silently under-exercise the
+    -- level arrays instead of failing loudly).
+    constant HDR    : string := "# flat_book_golden schema=1 depth="
+                                & integer'image(DEPTH) & " shares_w="
+                                & integer'image(SHARES_W);
+  begin
+    file_open(status, f, VECTORS, read_mode);
+    assert status = open_ok
+      report "cannot open golden vectors: " & VECTORS severity failure;
+
+    -- One reset cycle.
+    rst <= '1'; op_valid <= '0';
+    clk <= '0'; wait for HALF;
+    clk <= '1'; wait for HALF;
+    rst <= '0'; clk <= '0'; wait for HALF;
+
+    -- Header: assert the schema comment, then skip the column-name line.
+    readline(f, l);
+    assert l'length >= HDR'length and l.all(1 to HDR'length) = HDR
+      report "golden CSV schema mismatch (expected '" & HDR & "')" severity failure;
+    readline(f, l);
+
+    while not endfile(f) loop
+      readline(f, l);
+      next when l'length = 0;
+      read_csv_int(l, op);   read_csv_int(l, side);
+      read_csv_int(l, index); read_csv_int(l, shares);
+      read_csv_int(l, ebv);  read_csv_int(l, ebi); read_csv_int(l, ebs);
+      read_csv_int(l, eav);  read_csv_int(l, eai); read_csv_int(l, eas);
+      read_csv_int(l, eclamp);
+
+      -- Drive the op, then pulse the clock (rising edge applies it).
+      op_valid  <= '1';
+      op_kind   <= '1' when op = 1 else '0';
+      op_side   <= '1' when side = 1 else '0';
+      op_index  <= to_unsigned(index, 12);
+      op_shares <= to_unsigned(shares, SHARES_W);
+      clk <= '0'; wait for HALF;
+      clk <= '1'; wait for HALF;   -- rising edge + output settle
+
+      assert (best_bid_valid = '1') = (ebv = 1)
+        report "bid_valid mismatch at op " & integer'image(cycles) severity failure;
+      assert to_integer(best_bid_index) = ebi
+        report "bid_index mismatch at op " & integer'image(cycles) severity failure;
+      assert to_integer(best_bid_shares) = ebs
+        report "bid_shares mismatch at op " & integer'image(cycles) severity failure;
+      assert (best_ask_valid = '1') = (eav = 1)
+        report "ask_valid mismatch at op " & integer'image(cycles) severity failure;
+      assert to_integer(best_ask_index) = eai
+        report "ask_index mismatch at op " & integer'image(cycles) severity failure;
+      assert to_integer(best_ask_shares) = eas
+        report "ask_shares mismatch at op " & integer'image(cycles) severity failure;
+      assert (err_underflow_clamped = '1') = (eclamp = 1)
+        report "clamp mismatch at op " & integer'image(cycles) severity failure;
+
+      cycles := cycles + 1;
+    end loop;
+
+    op_valid <= '0';
+    file_close(f);
+    report "flat_book_tb: PASS cycles=" & integer'image(cycles) &
+           " depth=" & integer'image(DEPTH) severity note;
+    finish;
+  end process;
+end architecture sim;

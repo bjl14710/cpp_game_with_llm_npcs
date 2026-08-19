@@ -1,0 +1,103 @@
+"""Open ONE draft PR for the shared-character-library branch and close #95-98."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Milestone #11 — one shared character library. Roaming NPCs and
+player-created characters were drawn by two unrelated systems (rigged
+glTF KayKit models vs the composite `CharacterParts` socket catalog), so
+a created character never looked native next to the townsfolk, and
+hairstyles could only ever be added to the creator's pool. This branch
+makes the composite catalog the single shared library. One atomic commit
+per issue:
+
+**#95 feat(persona): optional authored look with deterministic
+fallback.** A `.persona` file may carry `look = body, head, eyes, hair,
+palette`; `lookForPersona` returns it when valid, else a deterministic
+`randomizeLook(FNV-1a(name))` — every persona always spawns with a valid
+look from the one shared catalog, and a stale part id demotes to the
+fallback (logged) instead of killing the file. `commit ee7c07e`
+
+**#96 feat(npc): render every NPC from the shared composite parts
+library.** All NPCs now route through `drawCompositeCharacter` (which
+gains defaulted face/dead params: same emote billboards, tip-over death
+pose). The rigged models are retired as the NPC source — loading stays
+dormant for remote players and unknown net indices. `commit fc336b6`
+
+**#97 feat(parts): expand the shared hairstyle pool.** Six new
+style-tagged hair parts (cap, buzz, bob, curls, bun, side-sweep) with
+bespoke recipes — hair 6 → 12, picked up by the creator picker AND every
+NPC with zero further wiring. `commit 119db76`
+
+**#98 feat(personas): author ten distinct in-character looks.** Marge's
+bun, Officer Brooks' cap + visor + slate uniform, Benny's mohawk, Yuki's
+bowl cut… all pairwise-distinct, style-valid, asserted by the roster
+test. NPC variety now exceeds the old five-rigged-model baseline.
+`commit 53584f3`
+
+## Verification
+- `make -C tests test` green: **173 cases / 3323 assertions** (new
+  `test_persona_look.cpp`; the exhaustive part-combination test absorbed
+  the six new hair parts, 2343 → 3323; roster test asserts authored,
+  valid, pairwise-distinct looks).
+- **Visual-QA subagent PASS** on a side-by-side gate: every humanoid in 9
+  screenshots is a composite (no rigged mesh, no fallback cylinder); the
+  stored player-created character framed beside the hot-dog vendor and
+  tourist is indistinguishable in construction; cop reads as uniformed
+  authority. Shots in `docs/qa/screenshots/shared-character-library/`
+  (local, uncommitted).
+
+## Trade-off (deliberate, logged)
+This retires the five rigged, skeletally-animated KayKit adventurers as
+the NPC look in exchange for one-pool cohesion + shared hairstyles (the
+brief's stated priority). Composites keep the procedural walk bob, mood
+emotes, and gain a death pose; gestures drive the bob. The off-ramp, if
+rigged fidelity is wanted later, is a modular CC0 pack rebuild (XL),
+documented in `.claude/plans/shared-character-library.md`.
+
+## Needs human verification
+- In-game feel of the composite townsfolk (walk bob, emotes, death pose)
+  — screenshots confirm statics, not motion.
+- Creator flow end-to-end: build a character with the new hair, Save &
+  Spawn, confirm it stands naturally among NPCs.
+
+## Notes
+- Stacked on `feature/aim-styles-preview` (PR #94). Merge order:
+  player-journal → aim-styles-preview → this. Do not merge; review only.
+- Follow-up logged: remote *players* still render as rigged meshes
+  (multiplayer edge, out of scope here).
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="feat: one shared character library — NPCs and creator draw from the same parts pool (#95-#98)",
+           body=BODY, base="feature/aim-styles-preview",
+           head="feature/shared-character-library", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in (95, 96, 97, 98):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/shared-character-library`. Draft PR #{pr.number} open for review (stacked on feature/aim-styles-preview). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: labels={labels}, closed, linked to PR #{pr.number}")
+
+print("done")

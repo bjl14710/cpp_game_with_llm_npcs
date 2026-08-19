@@ -1,0 +1,120 @@
+"""Tests for the vendor-doc block spec and its diff against msp430.py.
+
+Covers the plan's acceptance criteria: the generated spec loads in
+Silmulator without error, the diff flags known intentional gaps, and the
+report is emitted in both Markdown and JSON.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from silmulator.custom_blocks.diff_report import (
+    CONFLICT,
+    DEFAULT_SPEC,
+    MATCH,
+    MISSING_FROM_GENERATED,
+    MISSING_FROM_MODEL,
+    compare,
+    main,
+    render_markdown,
+    representative,
+)
+from silmulator.gui.blocks.custom_block import BlockSpec, make_custom_block_class
+
+
+@pytest.fixture(scope="module")
+def spec_dict() -> dict:
+    return json.loads(DEFAULT_SPEC.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def report(spec_dict):
+    return compare(spec_dict)
+
+
+class TestGeneratedSpecLoads:
+    def test_loads_as_block_spec_without_error(self):
+        spec = BlockSpec.from_file(DEFAULT_SPEC)
+        assert spec.name == "MSP430FR5994 (doc-generated)"
+        assert spec.commands  # command surface survived the loader
+        assert len(spec.ports) == 3
+
+    def test_block_class_builds_from_spec(self):
+        spec = BlockSpec.from_file(DEFAULT_SPEC)
+        cls = make_custom_block_class(spec)
+        assert cls.__name__.startswith("Custom_")
+
+    def test_every_generator_entry_has_citation(self, spec_dict):
+        for entry in spec_dict["generator"]["commands"]:
+            assert entry.get("citation"), entry["path"]
+
+
+class TestDiffClassification:
+    def test_divider_128_gap_resolved(self, report):
+        # SLAU367P §25.2.1.1: /128 is impossible. The model used to accept
+        # it (a pinned CONFLICT); since issue #19 it rejects /128, so the
+        # probe now classifies the command as MATCH.
+        conflicts = {i.path for i in report.items if i.kind == CONFLICT}
+        matches = {i.path for i in report.items if i.kind == MATCH}
+        assert "TIMERA0:CLOCK:DIVIDER" not in conflicts
+        assert "TIMERA0:CLOCK:DIVIDER" in matches
+
+    def test_flags_missing_timer_instances(self, report):
+        # SLASE54D Table 6-1: five Timer_A instances; the model has three.
+        missing = {i.path for i in report.items if i.kind == MISSING_FROM_MODEL}
+        assert "TIMERA3:*" in missing
+        assert "TIMERA4:*" in missing
+
+    def test_flags_structural_pull_resistor_conflict(self, report):
+        conflicts = {i.path for i in report.items if i.kind == CONFLICT}
+        assert "GPIO:PORT1:RESISTOR:ENABLE" in conflicts
+
+    def test_simulator_features_land_in_missing_from_generated(self, report):
+        # ADC:OVERSAMPLE has no ADC12_B doc basis — correct classification.
+        paths = {i.path for i in report.items if i.kind == MISSING_FROM_GENERATED}
+        assert "ADC:OVERSAMPLE" in paths
+
+    def test_doc_compliant_commands_match(self, report):
+        matches = {i.path for i in report.items if i.kind == MATCH}
+        assert "TIMERA0:MODE" in matches
+        assert "ADC:RESOLUTION" in matches
+
+    def test_every_item_classified_once(self, report):
+        paths = [(i.kind, i.path) for i in report.items]
+        assert len(paths) == len(set(paths))
+
+
+class TestReportOutputs:
+    def test_markdown_has_revision_header(self, report):
+        md = render_markdown(report)
+        assert "SLAU367P" in md and "SLASE54D" in md
+        assert "## Summary" in md
+
+    def test_conflicts_are_warnings_not_blockers(self, report):
+        md = render_markdown(report)
+        assert "warnings" in md.lower()
+        assert report.counts()[CONFLICT] > 0  # warnings present, nothing raised
+
+    def test_cli_writes_md_and_json(self, tmp_path):
+        md = tmp_path / "diff.md"
+        js = tmp_path / "diff.json"
+        exit_code = main(["--output-md", str(md), "--output-json", str(js)])
+        assert exit_code == 0
+        assert md.exists() and js.exists()
+        data = json.loads(js.read_text())
+        assert set(data["counts"]) == {MATCH, CONFLICT, MISSING_FROM_MODEL,
+                                       MISSING_FROM_GENERATED}
+        assert data["source_documents"]
+
+
+class TestRepresentativeNormalization:
+    def test_collapses_instances(self):
+        assert representative("GPIO:PORT7:OUTPUT") == "GPIO:PORT1:OUTPUT"
+        assert representative("ADC:CHANNEL11:RAW") == "ADC:CHANNEL0:RAW"
+        assert representative("TIMERA2:CC3:VALUE") == "TIMERA0:CC0:VALUE"
+
+    def test_leaves_unindexed_paths_alone(self):
+        assert representative("ADC:RESOLUTION") == "ADC:RESOLUTION"

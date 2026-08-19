@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0006 — Stack vs. heap</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .mem-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.45;
+  }
+
+  .side-by-side {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;
+  }
+  .side-by-side > div {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; font-size: 13.5px;
+  }
+  .side-by-side h4 { margin: 0 0 8px; font-size: 14px; color: var(--accent-2); }
+  .side-by-side.stack > div:first-child { border-top: 3px solid #a0d8ff; }
+  .side-by-side.stack > div:last-child  { border-top: 3px solid #ffb780; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .side-by-side { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0006 &middot; cpp_games / docs / learning</div>
+  <h1>Stack vs. heap</h1>
+  <p class="why">Why this matters: every variable in your three games sits in one of these two places. Earlier lessons told you "stack is fast, heap is slow" without explaining what those are. This is the lesson where memory finally clicks &mdash; and where you stop guessing which side of the line a given <code class="inline">std::vector</code>, <code class="inline">std::string</code>, or <code class="inline">Vec3</code> lives on.</p>
+</header>
+
+<h2>1. The concept</h2>
+
+<p>Every running program gets a chunk of memory from the OS. That chunk is organised into three regions a beginner C++ programmer can mostly think about: the <b>static</b> region (your code, your globals, string literals), the <b>stack</b>, and the <b>heap</b>. The stack and the heap are the two areas where your <em>data</em> usually lives, and they behave completely differently.</p>
+
+<div class="mem-diagram">  high addresses
+   +----------------------+
+   |        STACK         |  &lt;-- grows DOWN as you call functions
+   |  (each thread has    |
+   |   its own; ~8 MB     |
+   |   for main, ~1 MB    |
+   |   for worker threads)|
+   |   ↓                  |
+   |                      |
+   |   ...empty...        |
+   |                      |
+   |   ↑                  |
+   |        HEAP          |  &lt;-- grows UP as you call new/malloc
+   |  (one big arena,     |
+   |   shared by all      |
+   |   threads in the     |
+   |   process)           |
+   +----------------------+
+   |   static / globals   |
+   +----------------------+
+   |   program code       |
+   +----------------------+
+  low addresses</div>
+
+<h3>The stack</h3>
+
+<p>The stack is a <b>LIFO region</b> tied to the call chain. When a function is called, a chunk called a <i>stack frame</i> is added on top &mdash; it holds that function's local variables and bookkeeping. When the function returns, the chunk is popped. Allocating on the stack is one CPU instruction: subtract from the stack-pointer register. Deallocating is one instruction too: add back. That's why we say stack allocation is "free" &mdash; in any meaningful per-frame measurement, it really is.</p>
+
+<p>Properties of stack storage:</p>
+<ul>
+  <li><b>Tiny cost.</b> Single instruction, no kernel involvement, perfect cache locality.</li>
+  <li><b>Automatic lifetime.</b> When the function returns, the object is destroyed &mdash; destructor runs, memory reclaimed. No <code class="inline">delete</code>, no leak.</li>
+  <li><b>Compile-time-known size.</b> The compiler has to know how big the stack frame is. Variable-length arrays in stack frames are not standard C++.</li>
+  <li><b>Limited total size.</b> Linux: ~8 MB for the main thread, ~1 MB per worker thread by default. Windows: ~1 MB for everything by default. Overflow it (e.g. deep recursion) and the program crashes.</li>
+  <li><b>One stack per thread.</b> Your main thread and <code class="inline">LlmClient</code>'s worker have <em>separate</em> stacks; they never accidentally collide.</li>
+</ul>
+
+<h3>The heap</h3>
+
+<p>The heap is a <b>free-form arena</b>. You ask the allocator for <i>N</i> bytes and it finds a free spot. You ask it to release them later. The allocator (typically <code class="inline">malloc</code>'s implementation under <code class="inline">new</code>) maintains free lists, tracks fragmentation, and occasionally asks the kernel for more memory via <code class="inline">brk</code> or <code class="inline">mmap</code>.</p>
+
+<p>Properties of heap storage:</p>
+<ul>
+  <li><b>Variable cost.</b> Usually a few hundred nanoseconds. Sometimes a syscall (tens of microseconds). Spiky.</li>
+  <li><b>Manual lifetime.</b> You decide when to release. In modern C++, <em>RAII containers</em> (<code class="inline">std::vector</code>, <code class="inline">std::unique_ptr</code>, <code class="inline">std::string</code>) do this for you in their destructors. Raw <code class="inline">new</code>/<code class="inline">delete</code> is a foot-gun and you shouldn't use it.</li>
+  <li><b>Runtime-sized.</b> The size can be a value computed at runtime.</li>
+  <li><b>Huge.</b> Practically as big as your free RAM &mdash; gigabytes.</li>
+  <li><b>Shared across threads.</b> One heap per process. Allocator code is thread-safe (which makes it slower than a single-threaded allocator would be).</li>
+</ul>
+
+<div class="callout">
+  <h3>One-paragraph mental model</h3>
+  <p>The stack is a fast scratch pad whose size and lifetime are decided at compile time and tied to function calls. The heap is a flexible long-lived workspace whose size can be decided at runtime, and whose lifetime is decided by your code. C++ pushes you toward the stack by default &mdash; locals, parameters, members of locals all live there &mdash; and asks you to <em>opt in</em> to the heap by writing a container or <code class="inline">new</code>.</p>
+</div>
+
+<h2>2. Minimal example &mdash; same data, two storage locations</h2>
+
+<p>This program holds three integers in three places.</p>
+
+<pre class="code"><span class="pp">#include</span> <span class="str">&lt;array&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;vector&gt;</span>
+
+<span class="kw">struct</span> Point { <span class="typ">int</span> x, y, z; };  <span class="com">// 12 bytes</span>
+
+<span class="typ">int</span> main() {
+    <span class="com">// (A) STACK — the Point object itself sits in this function's frame.</span>
+    <span class="com">//     Lifetime: until main() returns. Cost: 12 bytes of stack pointer move.</span>
+    Point p1{<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>};
+
+    <span class="com">// (B) STACK — std::array is a thin wrapper. The 12 bytes live inline.</span>
+    <span class="com">//     Same lifetime and cost as (A) — no heap involvement at all.</span>
+    std::array&lt;<span class="typ">int</span>, <span class="num">3</span>&gt; p2 = {<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>};
+
+    <span class="com">// (C) MIXED — the vector OBJECT (3 pointers, 24 bytes on x64) is on the</span>
+    <span class="com">//     stack. The 12 bytes of data are on the heap. push_back may call</span>
+    <span class="com">//     new to grow. Destructor frees the heap data when main returns.</span>
+    std::vector&lt;<span class="typ">int</span>&gt; p3 = {<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>};
+    p3.push_back(<span class="num">4</span>);  <span class="com">// might allocate; the vector grows beyond its capacity</span>
+
+    <span class="com">// (D) RAW HEAP — single Point on the heap. unique_ptr cleans up at scope end.</span>
+    <span class="kw">auto</span> p4 = std::make_unique&lt;Point&gt;(<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>);
+}
+<span class="com">// p1, p2, p3, p4 all destroyed here — p3's heap buffer freed by its dtor,</span>
+<span class="com">// p4's heap Point freed by unique_ptr's dtor. No "delete" needed.</span></pre>
+
+<p>The case that trips beginners is (C). The <code class="inline">std::vector</code> is <em>not</em> "on the heap." Its three internal pointers (<code class="inline">begin</code>, <code class="inline">end</code>, <code class="inline">capacity</code>) live wherever the variable does &mdash; on the stack in <code class="inline">main</code>, in a member of a class on the heap, etc. The data those pointers point to is on the heap. This split is the secret to why <code class="inline">std::vector</code> is fast: small object you can copy/move cheaply, big growable storage when you actually need it.</p>
+
+<h2>3. In your project &mdash; the line through your real code</h2>
+
+<h3>Pure stack: <code class="inline">Vec3</code> and <code class="inline">std::array</code></h3>
+
+<small class="path">cpp_shooter_game/src/main.cpp:36</small>
+<pre class="code"><span class="kw">struct</span> Vec3 {
+    <span class="typ">float</span> x = <span class="num">0.0f</span>;
+    <span class="typ">float</span> y = <span class="num">0.0f</span>;
+    <span class="typ">float</span> z = <span class="num">0.0f</span>;
+};
+
+<span class="com">// And, deep inside the per-frame loop:</span>
+<span class="kw">const</span> Vec3 playerCenter = game.player.pos + Vec3{<span class="num">0.0f</span>, <span class="num">2.5f</span>, <span class="num">0.0f</span>};</pre>
+
+<p><code class="inline">Vec3</code> is 12 bytes of POD. The temporary <code class="inline">Vec3{0, 2.5, 0}</code>, the result of <code class="inline">operator+</code>, and the local <code class="inline">playerCenter</code> all live on the stack. Every frame thousands of these come and go &mdash; and zero of them touch the heap. That's why lesson 0003 said "don't allocate in the hot loop" rather than "don't <em>have</em> objects in the hot loop." Locals are free.</p>
+
+<small class="path">cpp_racing_game/src/main.cpp:943</small>
+<pre class="code"><span class="kw">const</span> std::array&lt;sf::Vector2f, <span class="num">4</span>&gt; outerQuad = { <span class="com">/* four corners */</span> };</pre>
+
+<p>Four <code class="inline">sf::Vector2f</code>s &mdash; 32 bytes &mdash; sitting in the renderer's stack frame for the duration of the draw call. When the function returns, they're gone. No <code class="inline">delete</code>, no allocator, no bookkeeping.</p>
+
+<h3>The mixed case: containers and their heap buffers</h3>
+
+<small class="path">cpp_shooter_game/src/main.cpp:318</small>
+<pre class="code"><span class="kw">struct</span> GameState {
+    Player player;                          <span class="com">// inline — same memory as GameState</span>
+    std::vector&lt;Projectile&gt; projectiles;    <span class="com">// 3-pointer struct inline; data on heap</span>
+    std::vector&lt;Enemy&gt;      enemies;        <span class="com">// same</span>
+    std::vector&lt;Pickup&gt;     pickups;        <span class="com">// same</span>
+    std::vector&lt;ImpactEffect&gt; impacts;      <span class="com">// same</span>
+    <span class="typ">int</span> kills = <span class="num">0</span>;                       <span class="com">// inline — 4 bytes of GameState</span>
+};
+
+<span class="typ">int</span> main() {
+    GameState game;   <span class="com">// the WHOLE struct is on the stack of main()</span>
+}</pre>
+
+<p>The <code class="inline">GameState</code> variable in <code class="inline">main()</code> is on the stack. So are the <code class="inline">Player</code>, the four vectors' three-pointer internals, the <code class="inline">int kills</code>. But the moment <code class="inline">projectiles.push_back(...)</code> happens, the new <code class="inline">Projectile</code> goes to a heap buffer that the vector points at. That's where the "vectors as long-lived members" trick from lesson 0003 pays off: the heap buffer grows once and stays put, and per-frame pushes after warmup don't reallocate.</p>
+
+<h3>The trap: <code class="inline">std::string</code> and SSO</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/Npc.hpp</small>
+<pre class="code"><span class="kw">struct</span> ChatTurn {
+    std::string role;     <span class="com">// 32 bytes on libstdc++; might or might not allocate</span>
+    std::string content;  <span class="com">// same</span>
+};</pre>
+
+<p>A <code class="inline">std::string</code> looks like a heap allocation. It usually <em>isn't</em>. Modern standard libraries use <b>Small String Optimization (SSO)</b>: the string struct itself reserves ~15 bytes for the contents. If the string fits, it's stored inline &mdash; no heap allocation at all. <code class="inline">role</code> in your <code class="inline">ChatTurn</code> is always either <code class="inline">"user"</code> or <code class="inline">"assistant"</code> (4 and 9 chars). Neither allocates. Wren's replies almost always do.</p>
+
+<div class="callout warn">
+  <h3>Why SSO matters for game code</h3>
+  <p>You can sprinkle small <code class="inline">std::string</code> labels everywhere without paying for them, but the moment a string grows past ~15 chars you've quietly bought a heap allocation. This is one of the surprising places lesson 0003's rule 1 ("don't allocate in the hot loop") gets violated by accident.</p>
+</div>
+
+<h3>The thread case: another stack appears</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:13</small>
+<pre class="code">LlmClient::LlmClient(LlmConfig config) : config_(std::move(config)) {
+    worker_ = std::thread(&amp;LlmClient::workerLoop, <span class="kw">this</span>);
+}</pre>
+
+<p>That one line of code allocates an <em>entire second stack</em> &mdash; about 1 MB on Linux, dedicated to the worker thread. The two threads share the heap (so <code class="inline">requests_</code> can be touched from both) but each has its own stack (so a local <code class="inline">ChatRequest req</code> in <code class="inline">workerLoop</code> is private). This is the underlying reason a thread can call functions without disturbing the main thread's call chain &mdash; their call chains live in different memory.</p>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Stack vs. heap &mdash; the headline</h3>
+
+<div class="side-by-side stack">
+  <div>
+    <h4>Stack</h4>
+    <ul style="margin: 0; padding-left: 18px;">
+      <li>One CPU instruction to (de)allocate</li>
+      <li>Lifetime = scope</li>
+      <li>Size known at compile time</li>
+      <li>Small &mdash; megabytes</li>
+      <li>One per thread</li>
+      <li>Pointers/references valid only until scope ends</li>
+    </ul>
+  </div>
+  <div>
+    <h4>Heap</h4>
+    <ul style="margin: 0; padding-left: 18px;">
+      <li>Hundreds of ns, sometimes a syscall</li>
+      <li>Lifetime = until you (or RAII) free it</li>
+      <li>Size can be runtime-computed</li>
+      <li>Big &mdash; gigabytes</li>
+      <li>One per process (shared by threads)</li>
+      <li>Pointers valid until <code>delete</code>/destructor</li>
+    </ul>
+  </div>
+</div>
+
+<h3>"On the heap" vs. "is a pointer"</h3>
+<p>A pointer doesn't imply heap. <code class="inline">int x = 42; int* p = &amp;x;</code> &mdash; <code class="inline">x</code> is on the stack and <code class="inline">p</code> points into the stack. <em>What</em> a pointer points to is the question; the pointer itself just holds an address. Inside your game, a reference to <code class="inline">game.player.pos</code> is "a pointer into the stack" because <code class="inline">game</code> is a stack local.</p>
+
+<h3>The program stack vs. <code class="inline">std::stack</code></h3>
+<p>Two unrelated things sharing a word. The program stack is the OS-managed memory region we've been discussing. <code class="inline">std::stack&lt;T&gt;</code> is the C++ container class that stores elements LIFO-style &mdash; just like the program stack does &mdash; but it's a normal heap-allocated container under the hood (it's a vector or deque with a different interface). Don't confuse "I'm using <code class="inline">std::stack</code>" with "I'm on the program stack."</p>
+
+<h3>Static / global storage &mdash; the forgotten third region</h3>
+<p>Variables declared at namespace scope or with <code class="inline">static</code> inside a function live in neither stack nor heap. They live in a fixed region set up at program start. String literals like <code class="inline">"qwen2.5:3b-instruct"</code> in your code live there too &mdash; read-only. Lifetime: the whole program run. We won't dwell on this region, but knowing it exists keeps you from getting tripped up by "this isn't on the stack and I didn't <code class="inline">new</code> it &mdash; where is it?"</p>
+
+<h3>Stack overflow vs. heap exhaustion</h3>
+<p>Both are out-of-memory situations but they fail very differently.</p>
+
+<ul>
+  <li><b>Stack overflow.</b> Your call chain grew past the ~1&ndash;8 MB stack limit. Usually unbounded recursion, sometimes a giant local array (<code class="inline">char buf[10*1024*1024]</code>). The OS sees you walking off your own stack and kills the process. Diagnosis: deep crash with a recursive backtrace.</li>
+  <li><b>Heap exhaustion.</b> You asked <code class="inline">new</code>/<code class="inline">malloc</code> for memory and there's none left. <code class="inline">new</code> throws <code class="inline">std::bad_alloc</code>. Diagnosis: a <em>specific</em> allocation that failed. Much rarer in practice; usually points at a leak or a runaway data structure.</li>
+</ul>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">Where does <code class="inline">game.projectiles[0]</code> live, given <code class="inline">GameState game;</code> as a local in <code class="inline">main()</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The vector's INTERNAL pointers are inline (on the stack as part of game), but the Projectile element it points to is on the heap.">
+      Entirely on the stack, since <code class="inline">game</code> is a local.
+    </li>
+    <li data-correct="true" data-why="Correct. game (and its vector members' 3-pointer structs) is on the stack. But the Projectile element itself sits in the vector's heap buffer. Splits like this are the rule, not the exception, for STL containers.">
+      The element is on the heap; the vector's 3-pointer struct that finds it is on the stack inside <code class="inline">game</code>.
+    </li>
+    <li data-correct="false" data-why="Static storage is for globals and string literals — neither applies to a vector member of a stack local.">
+      In static storage, since vectors use a static allocator.
+    </li>
+    <li data-correct="false" data-why="The worker thread doesn't own GameState or its projectiles — main does. Each thread has its own stack but they share the heap.">
+      In the worker thread's stack, because vectors are thread-local.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Each <code class="inline">ChatTurn</code> has two <code class="inline">std::string</code>s. The <code class="inline">role</code> is always <code class="inline">"user"</code> or <code class="inline">"assistant"</code>; the <code class="inline">content</code> is whatever Wren said. Which strings allocate on the heap?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A naive read of std::string would say both, but modern std::string uses SSO — short strings stay inline in the 32-byte struct. The 4- and 9-char role values fit easily; content usually doesn't.">
+      Both, because <code class="inline">std::string</code> always uses the heap.
+    </li>
+    <li data-correct="true" data-why="Right. SSO keeps strings up to ~15 chars inline in the string struct itself. 'user' and 'assistant' fit; Wren's replies are usually longer than 15 chars so they spill to the heap.">
+      Only <code class="inline">content</code> usually allocates; the short <code class="inline">role</code> stays inline thanks to Small String Optimization.
+    </li>
+    <li data-correct="false" data-why="Backwards. The short role values fit in SSO; the long content does not. The reasoning that 'string literals avoid heap' is also confused — std::string copies the literal into its own storage.">
+      Only <code class="inline">role</code> allocates, because string literals always copy to the heap.
+    </li>
+    <li data-correct="false" data-why="The compiler doesn't know what content will be at runtime; it can't predict allocations. SSO is a runtime size check inside std::string's implementation.">
+      Neither &mdash; the compiler interns both strings at compile time.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A C++ beginner writes <code class="inline">Vec3* p = new Vec3{1,2,3}; return p;</code> from a function. Their friend writes <code class="inline">Vec3 v{1,2,3}; return v;</code>. Which is the more idiomatic modern C++ and why?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="raw new without delete leaks. And the pointer version forces every caller to remember to delete — that's the entire reason modern C++ moved away from this.">
+      The pointer version, because it skips a copy and is faster.
+    </li>
+    <li data-correct="false" data-why="Returning a pointer to a local IS a bug (dangling pointer), but the beginner here used new — so the pointer is valid. The issue is ownership/leak, not dangling.">
+      The pointer version, because returning a local by value is a dangling-reference bug.
+    </li>
+    <li data-correct="true" data-why="Right. Return by value is the modern default. NRVO (which you learned in lesson 0003) means there's typically zero copy. No new, no delete, no leak risk, no awkward ownership question for callers.">
+      The value version. Modern C++ returns by value; NRVO usually eliminates the copy entirely, and there's no leak risk because there's no <code class="inline">new</code>.
+    </li>
+    <li data-correct="false" data-why="Both work syntactically. The question is what you'd want in real code — and a raw new without RAII isn't it.">
+      They're equivalent &mdash; pick whichever you prefer stylistically.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Your game crashes deep in a recursive collision-test function. Stack overflow vs. heap exhaustion &mdash; which is more likely and why?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Right. Recursive functions push a stack frame per call. Unbounded recursion blows the ~8 MB stack quickly. Heap exhaustion would point at a specific failing allocation, not a recursion-shaped crash.">
+      Stack overflow &mdash; recursion piles stack frames; if the recursion is unbounded it walks past the stack limit.
+    </li>
+    <li data-correct="false" data-why="Heap exhaustion fails on a specific allocation (new returns bad_alloc). It doesn't look like 'deep in a recursive function'; it looks like 'this exact allocation failed.'">
+      Heap exhaustion &mdash; each call allocates new memory for its parameters.
+    </li>
+    <li data-correct="false" data-why="Static storage is fixed at program startup and isn't relevant to per-call memory.">
+      Static exhaustion &mdash; the global region fills up after enough function calls.
+    </li>
+    <li data-correct="false" data-why="The OS won't reassign one process's memory to another. Whatever's running on another core is irrelevant to your stack.">
+      Cross-process memory pressure &mdash; another program ate your stack.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">In lesson 0005 you saw that the main thread and the worker thread don't share their <em>stacks</em>, but they share the queue at <code class="inline">requests_</code>. Why is sharing the queue OK?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The mutex protects against concurrent access; it doesn't move data between memory regions. The reason sharing is possible is structural.">
+      The mutex copies <code class="inline">requests_</code> into the worker's stack before reading.
+    </li>
+    <li data-correct="true" data-why="Right. The queue's storage lives on the heap (it's a deque-backed container), and threads in the same process share the heap. Both threads can therefore see and modify it — provided they synchronise, which is what requestMutex_ does.">
+      The queue's nodes live on the heap, which is shared by all threads in the process. Both threads can reach it; the mutex makes that safe.
+    </li>
+    <li data-correct="false" data-why="C++ doesn't have a shared/private stack distinction. Stacks are always thread-private.">
+      The worker is on a 'shared stack' specifically marked for cross-thread access.
+    </li>
+    <li data-correct="false" data-why="Atomic protects single-variable read-modify-write, not container access. push() inside std::queue touches multiple pointers; you need a mutex.">
+      <code class="inline">std::queue</code> is internally atomic, so cross-thread access is always safe.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> Sketch the rough memory layout of one <code class="inline">Npc</code> sitting on <code class="inline">main()</code>'s stack. For each field of <code class="inline">Npc</code> &mdash; the <code class="inline">Persona</code> (which contains a <code class="inline">vector&lt;string&gt;</code> of traits), the <code class="inline">LlmClient&amp;</code> reference, the <code class="inline">vector&lt;ChatTurn&gt;</code> history &mdash; say whether the field <em>itself</em> is on the stack or the heap, and whether the <em>data it owns or refers to</em> is on the stack or the heap. One sentence each.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> A new shooter feature: when an enemy dies it spawns 200 particles. You're about to write <code class="inline">std::vector&lt;Particle&gt; spawned;</code> inside the death-handler function and push 200 things into it before passing it to a renderer. Sketch the version that's a problem and the version that isn't. Tie your answer to <em>where each version lives</em>, not just to "is it fast."</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> You add a deep recursive function for navigating a tree of dialog options. Each frame the tree has at most ~30 levels. Plenty of headroom under an 8 MB stack &mdash; why might it still be a problem if you also spawn a worker thread that does the same recursion? (Hint: lesson 0005 + this lesson.)</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can name three properties of each region</label></li>
+  <li><label><input type="checkbox"> Walked through the four-storage example &mdash; the std::vector "mixed case" makes sense</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I can point at Vec3 (pure stack) and std::vector (split) in my real code</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I won't confuse <code class="inline">std::stack</code> with the program stack</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/cpp/language/storage_duration">cppreference: storage duration</a> &middot;
+    <a href="https://en.cppreference.com/cpp/string/basic_string">cppreference: <code>std::basic_string</code></a> &middot;
+    <a href="https://tc-imba.github.io/posts/cpp-sso/">Small String Optimization in libstdc++/libc++</a> &middot;
+    <a href="https://en.cppreference.com/cpp/memory/unique_ptr">cppreference: <code>unique_ptr</code></a>
+  </p>
+  <p>Lesson 0006 &middot; <code class="inline">docs/learning/lessons/0006-stack-vs-heap.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,794 @@
+#!/usr/bin/env python3
+"""Strategy Arena orchestrator (entry point: arena-run).
+
+Runs multiple DailyStrategy implementations through one pipeline:
+
+  arena-run backtest  — walk-forward every selected strategy over the same
+                        window, apply the universal filter bar (lenient by
+                        design: it screens out clear losers only), persist
+                        PASS/EXCLUDED with metrics. Excluded strategies stay
+                        visible in the report — never silently dropped.
+  arena-run live      — one paper-trading tick per surviving strategy:
+                        recompute signals over recent history and append any
+                        equity/trade rows newer than the last recorded date.
+                        Deterministic strategies + INSERT OR IGNORE make this
+                        idempotent and self-backfilling after missed days.
+  arena-run report    — side-by-side comparison table, unranked.
+
+State lives in SQLite (stdlib sqlite3 — no new dependency) under
+arena_state/arena.db by default. Each strategy has its own independent
+paper ledger; there is no shared capital pool.
+
+See .claude/plans/strategy-arena.md for the full design.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import math
+import os
+import sqlite3
+from typing import Dict, List, Tuple
+
+import pandas as pd
+
+from analyze_equity import compute_metrics
+from costs import CostModel
+from regime import regime_series_for_dates
+from strategies.daily import DailyStrategy
+from strategies.registry import available_strategies, get_strategy
+from walkforward_sim import parse_tickers, run_strategy_walkforward
+
+DEFAULT_DB = os.path.join("arena_state", "arena.db")
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS strategies (
+  name            TEXT PRIMARY KEY,
+  status          TEXT NOT NULL,            -- PASS | EXCLUDED
+  backtest_sharpe REAL,
+  backtest_cagr   REAL,
+  backtest_maxdd  REAL,
+  updated         TEXT
+);
+CREATE TABLE IF NOT EXISTS equity (
+  strategy TEXT NOT NULL,
+  date     TEXT NOT NULL,
+  equity   REAL NOT NULL,
+  PRIMARY KEY (strategy, date)
+);
+CREATE TABLE IF NOT EXISTS trades (
+  strategy   TEXT NOT NULL,
+  date       TEXT NOT NULL,
+  ticker     TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  confidence REAL,
+  weight     REAL,
+  fwd_ret    REAL,
+  reason     TEXT,
+  PRIMARY KEY (strategy, date, ticker)
+);
+CREATE TABLE IF NOT EXISTS gaps (
+  strategy TEXT NOT NULL,
+  date     TEXT NOT NULL,
+  cause    TEXT,
+  PRIMARY KEY (strategy, date)
+);
+CREATE TABLE IF NOT EXISTS breaker_events (
+  strategy    TEXT NOT NULL,
+  date        TEXT NOT NULL,
+  event       TEXT NOT NULL,   -- TRIP | RESUME
+  drawdown    REAL,
+  peak_equity REAL,
+  equity      REAL,
+  threshold   REAL,
+  PRIMARY KEY (strategy, date, event)
+);
+CREATE TABLE IF NOT EXISTS regime_log (
+  date   TEXT PRIMARY KEY,
+  regime TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS divergence_events (
+  strategy  TEXT NOT NULL,
+  date      TEXT NOT NULL,
+  event     TEXT NOT NULL,   -- DIVERGED | RECOVERED
+  z         REAL,
+  live_mean REAL,
+  bt_mean   REAL,
+  n_live    INTEGER,
+  threshold REAL,
+  PRIMARY KEY (strategy, date, event)
+);
+"""
+
+
+def _iso(d) -> str:
+    """Normalize a pandas Timestamp / datetime / date to YYYY-MM-DD."""
+    return pd.Timestamp(d).date().isoformat()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Idempotently add a column to an existing table (in-place migration).
+
+    ``CREATE TABLE IF NOT EXISTS`` only helps brand-new databases — an
+    arena.db created before a schema change needs its own ALTER. Guarded on
+    PRAGMA table_info so re-running is always safe.
+    """
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        conn.commit()
+
+
+class ArenaState:
+    """SQLite persistence for the arena's backtest verdicts and live ledgers."""
+
+    def __init__(self, db_path: str) -> None:
+        parent = os.path.dirname(db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        self.conn = sqlite3.connect(db_path)
+        self.conn.executescript(_SCHEMA)
+        self.conn.commit()
+        _ensure_column(self.conn, "strategies", "sizing", "TEXT DEFAULT 'equal'")
+        _ensure_column(self.conn, "strategies", "hwm_anchor", "TEXT")
+        _ensure_column(self.conn, "strategies", "bt_mean_daily", "REAL")
+        _ensure_column(self.conn, "strategies", "bt_std_daily", "REAL")
+        _ensure_column(self.conn, "strategies", "bt_n_days", "INTEGER")
+        _ensure_column(self.conn, "strategies", "diverged", "INTEGER DEFAULT 0")
+
+    def record_backtest(self, name: str, status: str, metrics: dict,
+                        sizing: str = "equal",
+                        bt_mean_daily: float | None = None,
+                        bt_std_daily: float | None = None,
+                        bt_n_days: int | None = None) -> None:
+        """Upsert a strategy's filter verdict, backtest metrics, sizing mode,
+        and backtest daily-return fingerprint.
+
+        Sizing is screened configuration: whatever mode a strategy is
+        screened under is what ``arena-run live`` reuses for it — a live
+        track record never silently switches sizing regimes mid-stream.
+
+        The fingerprint (mean/std/n of the backtest's daily returns) is what
+        ``divergence_z`` tests live returns against — a same-period
+        shadow-backtest would just reproduce the live ledger exactly, since
+        both share one deterministic code path; this statistical comparison
+        is the real overfitting signal. Re-screening resets ``diverged`` to
+        unflagged — a fresh backtest fingerprint deserves a fresh verdict.
+        """
+        self.conn.execute(
+            "INSERT INTO strategies(name,status,backtest_sharpe,backtest_cagr,backtest_maxdd,sizing,"
+            "bt_mean_daily,bt_std_daily,bt_n_days,diverged,updated) "
+            "VALUES(?,?,?,?,?,?,?,?,?,0,date('now')) "
+            "ON CONFLICT(name) DO UPDATE SET status=excluded.status, "
+            "backtest_sharpe=excluded.backtest_sharpe, backtest_cagr=excluded.backtest_cagr, "
+            "backtest_maxdd=excluded.backtest_maxdd, sizing=excluded.sizing, "
+            "bt_mean_daily=excluded.bt_mean_daily, bt_std_daily=excluded.bt_std_daily, "
+            "bt_n_days=excluded.bt_n_days, diverged=0, updated=excluded.updated",
+            (name, status, metrics.get("Sharpe"), metrics.get("CAGR"), metrics.get("MaxDD"), sizing,
+             bt_mean_daily, bt_std_daily, bt_n_days),
+        )
+        self.conn.commit()
+
+    def statuses(self) -> Dict[str, str]:
+        """{strategy name: PASS | EXCLUDED} for every strategy seen in backtest."""
+        return dict(self.conn.execute("SELECT name, status FROM strategies"))
+
+    def sizing_mode(self, name: str) -> str:
+        """Stored sizing mode for a strategy; 'equal' if never screened (legacy)."""
+        row = self.conn.execute("SELECT sizing FROM strategies WHERE name=?", (name,)).fetchone()
+        return row[0] if row and row[0] else "equal"
+
+    def last_equity(self, name: str) -> Tuple[str, float] | None:
+        """(date, equity) of the newest recorded live bar, or None if fresh."""
+        row = self.conn.execute(
+            "SELECT date, equity FROM equity WHERE strategy=? ORDER BY date DESC LIMIT 1",
+            (name,),
+        ).fetchone()
+        return (row[0], float(row[1])) if row else None
+
+    def append_ledger(self, name: str, equity_rows: List[tuple],
+                      trade_rows: List[tuple]) -> int:
+        """Idempotently append (date, equity) and trade rows; returns rows added."""
+        cur = self.conn.executemany(
+            "INSERT OR IGNORE INTO equity(strategy,date,equity) VALUES(?,?,?)",
+            [(name, d, e) for d, e in equity_rows],
+        )
+        added = cur.rowcount
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO trades(strategy,date,ticker,position,confidence,weight,fwd_ret,reason) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            [(name, *t) for t in trade_rows],
+        )
+        self.conn.commit()
+        return added
+
+    def log_gap(self, name: str, date: str, cause: str) -> None:
+        """Record a skipped strategy-day (data failure etc.) without crashing the run."""
+        self.conn.execute("INSERT OR IGNORE INTO gaps(strategy,date,cause) VALUES(?,?,?)",
+                          (name, date, cause))
+        self.conn.commit()
+
+    def set_status(self, name: str, status: str) -> None:
+        """Force a strategy's status (used by the circuit breaker to PAUSE/un-PAUSE)."""
+        self.conn.execute("UPDATE strategies SET status=? WHERE name=?", (status, name))
+        self.conn.commit()
+
+    def anchor(self, name: str) -> str | None:
+        """The strategy's high-water-mark anchor date, or None (full history)."""
+        row = self.conn.execute("SELECT hwm_anchor FROM strategies WHERE name=?", (name,)).fetchone()
+        return row[0] if row else None
+
+    def set_anchor(self, name: str, date: str) -> None:
+        """Move the high-water-mark anchor — resume resets drawdown tracking here."""
+        self.conn.execute("UPDATE strategies SET hwm_anchor=? WHERE name=?", (date, name))
+        self.conn.commit()
+
+    def running_drawdown(self, name: str) -> Tuple[float, float, float] | None:
+        """(drawdown, peak_equity, current_equity) since the anchor date.
+
+        Drawdown is the last recorded equity vs. the highest equity observed
+        since the anchor (anchor NULL ⇒ full history). Returns None when
+        fewer than 2 equity rows exist in the anchored window — no drawdown
+        is defined yet.
+        """
+        anchor = self.anchor(name)
+        if anchor is None:
+            rows = self.conn.execute(
+                "SELECT equity FROM equity WHERE strategy=? ORDER BY date", (name,)
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT equity FROM equity WHERE strategy=? AND date>=? ORDER BY date",
+                (name, anchor),
+            ).fetchall()
+        values = [r[0] for r in rows]
+        if len(values) < 2:
+            return None
+        peak = max(values)
+        current = values[-1]
+        return (current / peak - 1.0), peak, current
+
+    def log_breaker_event(self, name: str, date: str, event: str, drawdown: float | None,
+                          peak_equity: float | None, equity: float | None,
+                          threshold: float | None) -> None:
+        """Record a TRIP or RESUME transition. Idempotent per (strategy, date, event)."""
+        self.conn.execute(
+            "INSERT OR IGNORE INTO breaker_events(strategy,date,event,drawdown,peak_equity,equity,threshold) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (name, date, event, drawdown, peak_equity, equity, threshold),
+        )
+        self.conn.commit()
+
+    def divergence_stats(self, name: str, min_live_days: int = 20) -> dict | None:
+        """Test live daily returns against the strategy's backtest fingerprint.
+
+        One-sided z-test: z = (live_mean - bt_mean) / (bt_std / sqrt(n_live)).
+        Deliberately NOT a same-period shadow backtest — live and backtest
+        share one deterministic code path here, so that comparison would
+        equal the live ledger exactly and measure nothing.
+
+        Returns None when the strategy has no stored backtest fingerprint
+        (never screened under this feature, or bt_std_daily <= 0 — no test
+        possible), or when fewer than ``min_live_days`` live daily returns
+        exist yet (too little live history for the test to mean anything).
+        """
+        row = self.conn.execute(
+            "SELECT bt_mean_daily, bt_std_daily FROM strategies WHERE name=?", (name,)
+        ).fetchone()
+        if row is None or row[0] is None or row[1] is None or not row[1] > 0:
+            return None
+        bt_mean, bt_std = row
+        eq_rows = self.conn.execute(
+            "SELECT equity FROM equity WHERE strategy=? ORDER BY date", (name,)
+        ).fetchall()
+        values = [r[0] for r in eq_rows]
+        if len(values) < 2:
+            return None
+        live_ret = pd.Series(values).pct_change().dropna()
+        n_live = len(live_ret)
+        if n_live < min_live_days:
+            return None
+        live_mean = float(live_ret.mean())
+        live_std = float(live_ret.std())
+        se = bt_std / math.sqrt(n_live)
+        if not se > 0:
+            return None
+        z = (live_mean - bt_mean) / se
+        vol_ratio = (live_std / bt_std) if bt_std > 0 else None
+        return {"z": z, "live_mean": live_mean, "bt_mean": bt_mean,
+               "n_live": n_live, "vol_ratio": vol_ratio}
+
+    def diverged(self, name: str) -> bool:
+        """Current DIVERGED flag (set by the last live-tick evaluation)."""
+        row = self.conn.execute("SELECT diverged FROM strategies WHERE name=?", (name,)).fetchone()
+        return bool(row[0]) if row else False
+
+    def set_diverged(self, name: str, flag: bool) -> None:
+        self.conn.execute("UPDATE strategies SET diverged=? WHERE name=?", (int(flag), name))
+        self.conn.commit()
+
+    def record_regime(self, date: str, regime: str) -> None:
+        """Idempotently log the market regime classified for one date."""
+        self.conn.execute("INSERT OR IGNORE INTO regime_log(date, regime) VALUES(?,?)",
+                          (date, regime))
+        self.conn.commit()
+
+    def log_divergence_event(self, name: str, date: str, event: str, z: float,
+                             live_mean: float, bt_mean: float, n_live: int,
+                             threshold: float) -> None:
+        """Record a DIVERGED or RECOVERED transition. Idempotent per (strategy, date, event)."""
+        self.conn.execute(
+            "INSERT OR IGNORE INTO divergence_events(strategy,date,event,z,live_mean,bt_mean,n_live,threshold) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (name, date, event, z, live_mean, bt_mean, n_live, threshold),
+        )
+        self.conn.commit()
+
+
+def passes_filter(metrics: dict, min_sharpe: float, max_dd: float) -> bool:
+    """Universal (strategy-agnostic) backtest bar.
+
+    Lenient by design — Sharpe must clear min_sharpe and max drawdown must
+    stay above max_dd (both defaults screen out only clear losers; the live
+    arena does the real comparison).
+    """
+    sharpe = metrics.get("Sharpe")
+    maxdd = metrics.get("MaxDD")
+    if sharpe is None or maxdd is None:
+        return False
+    return sharpe > min_sharpe and maxdd >= max_dd
+
+
+def build_strategy(name: str, gbm_bundle: str | None) -> DailyStrategy:
+    """Construct a registered strategy, wiring the GBM bundle path when needed."""
+    if name == "gbm":
+        if not gbm_bundle:
+            raise SystemExit("strategy 'gbm' requires --gbm_bundle <model_bundle.joblib>")
+        return get_strategy(name, bundle_path=gbm_bundle)
+    return get_strategy(name)
+
+
+def live_tick(state: ArenaState, name: str, strategy: DailyStrategy,
+              data: Dict[str, pd.DataFrame], top_n: int, capital: float,
+              trade_cost_bps: float, sizing: str = "equal",
+              max_pos: float = 0.30, vol_window: int = 20,
+              cost_model: CostModel | None = None,
+              since_date: str | None = None,
+              regime_series: pd.Series | None = None) -> int:
+    """One live paper-trading step for one strategy over pre-fetched data.
+
+    Recomputes the walk-forward over the fetched window, then appends only
+    rows newer than the last recorded date, chaining equity multiplicatively
+    from the stored value. Because strategies are deterministic given data,
+    a missed week self-heals on the next run, and re-running the same day is
+    a no-op (PRIMARY KEY + INSERT OR IGNORE).
+
+    ``sizing`` should be the mode the strategy was screened under
+    (``ArenaState.sizing_mode``) — callers should not pick an arbitrary mode
+    for a strategy already trading live.
+
+    ``since_date``, when given, additionally floors the append cutoff (in
+    effect: ``max(last_recorded_date, since_date)``). This is how a resumed
+    strategy avoids retroactively "trading" through the window it was
+    paused for — passing the resume date here means the paused gap's price
+    action is neither credited nor charged; the ledger simply picks back up
+    from the first bar after resume. No-op for a strategy that was never
+    paused (``since_date=None``, the default).
+
+    Returns the number of new equity rows appended.
+    """
+    eq, blotter = run_strategy_walkforward(strategy, data, top_n=top_n,
+                                           capital=capital,
+                                           trade_cost_bps=trade_cost_bps,
+                                           sizing=sizing, max_pos=max_pos,
+                                           vol_window=vol_window,
+                                           cost_model=cost_model,
+                                           regime_series=regime_series)
+    if eq.empty:
+        state.log_gap(name, _iso(dt.date.today()), "no data in fetched window")
+        return 0
+
+    # The window's final bar is provisional: its own forward return doesn't
+    # exist yet, so storing it now would permanently miss that return once
+    # the next bar arrives. Drop it — the next run records it fully realized.
+    eq = eq.iloc[:-1]
+    if eq.empty:
+        return 0
+
+    # Per-bar growth factors are scale-free, so they chain onto any stored
+    # equity regardless of what `capital` the recompute started from.
+    factors = eq["equity"] / eq["equity"].shift(1)
+    factors.iloc[0] = eq["equity"].iloc[0] / capital
+
+    last = state.last_equity(name)
+    if last is None and since_date is None:
+        new = eq
+        chained = eq["equity"]
+    else:
+        last_date, last_equity = last if last is not None else (None, capital)
+        cutoff = last_date
+        if since_date is not None and (cutoff is None or pd.Timestamp(since_date) > pd.Timestamp(cutoff)):
+            cutoff = since_date
+        mask = eq.index > pd.Timestamp(cutoff)
+        new = eq[mask]
+        if new.empty:
+            return 0
+        chained = factors[mask].cumprod() * last_equity
+
+    equity_rows = [(_iso(d), float(v)) for d, v in chained.items()]
+    new_dates = {_iso(d) for d in new.index}
+    trade_rows = []
+    if not blotter.empty:
+        for _, r in blotter.iterrows():
+            if _iso(r["date"]) in new_dates:
+                trade_rows.append((_iso(r["date"]), r["ticker"], int(r["position"]),
+                                   float(r["confidence"]), float(r["weight"]),
+                                   float(r["fwd_ret"]), r["reason"]))
+    return state.append_ledger(name, equity_rows, trade_rows)
+
+
+def _parse_names(arg: str) -> List[str]:
+    """Split and validate a comma-separated strategy list."""
+    names = [s.strip() for s in arg.split(",") if s.strip()]
+    unknown = [n for n in names if n not in available_strategies()]
+    if unknown:
+        raise SystemExit(f"unknown strategies: {', '.join(unknown)} "
+                         f"(available: {', '.join(available_strategies())})")
+    return names
+
+
+def _cost_model_from_args(args: argparse.Namespace) -> CostModel:
+    """Build a CostModel from the shared --cost_model/--*_bps CLI flags."""
+    return CostModel(mode=args.cost_model, flat_bps=args.trade_cost_bps,
+                     commission_bps=args.commission_bps,
+                     half_spread_bps=args.half_spread_bps,
+                     impact_coeff_bps=args.impact_coeff_bps,
+                     fallback_adv=args.fallback_adv)
+
+
+def cmd_backtest(args: argparse.Namespace) -> None:
+    """Backtest all selected strategies over one window and apply the filter."""
+    from paper_trading_sim import fetch_history  # local: network-touching import
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    data = fetch_history(tickers, args.start, args.end)
+    state = ArenaState(args.db)
+    cost_model = _cost_model_from_args(args)
+
+    regime_series = None
+    if not args.no_regime_gate and data:
+        all_dates = sorted(set().union(*[set(df.index) for df in data.values() if "Close" in df.columns]))
+        if all_dates:
+            regime_series = regime_series_for_dates(data, all_dates)
+            for d, r in regime_series.items():
+                state.record_regime(_iso(d), r)
+
+    rows = []
+    for name in _parse_names(args.strategies):
+        strategy = build_strategy(name, args.gbm_bundle)
+        eq, _ = run_strategy_walkforward(strategy, data, top_n=args.top_n,
+                                         capital=args.capital,
+                                         sizing=args.sizing, max_pos=args.max_pos,
+                                         vol_window=args.vol_window,
+                                         cost_model=cost_model,
+                                         regime_series=regime_series)
+        metrics = compute_metrics(eq["equity"]) if not eq.empty else {}
+        gross_metrics = compute_metrics(eq["equity_gross"]) if not eq.empty else {}
+        total_cost = float(eq["cost"].sum()) if not eq.empty else 0.0
+        ok = passes_filter(metrics, args.min_sharpe, args.max_dd)
+        status = "PASS" if ok else "EXCLUDED"
+        bt_ret = eq["equity"].pct_change().dropna() if not eq.empty else pd.Series(dtype=float)
+        state.record_backtest(name, status, metrics, sizing=args.sizing,
+                              bt_mean_daily=float(bt_ret.mean()) if len(bt_ret) else None,
+                              bt_std_daily=float(bt_ret.std()) if len(bt_ret) else None,
+                              bt_n_days=int(len(bt_ret)) if len(bt_ret) else None)
+        rows.append({"strategy": name, "status": status,
+                     "sharpe": metrics.get("Sharpe"), "cagr": metrics.get("CAGR"),
+                     "maxdd": metrics.get("MaxDD")})
+        print(f"{name:12s} {status:8s} sharpe={metrics.get('Sharpe', float('nan')):.2f} "
+              f"cagr(net)={metrics.get('CAGR', float('nan')):.2%} "
+              f"cagr(gross)={gross_metrics.get('CAGR', float('nan')):.2%} "
+              f"maxdd={metrics.get('MaxDD', float('nan')):.2%} "
+              f"total_cost=${total_cost:,.2f}")
+    excluded = [r["strategy"] for r in rows if r["status"] == "EXCLUDED"]
+    if excluded:
+        print(f"\nExcluded from live trading (bar: sharpe>{args.min_sharpe}, "
+              f"maxdd>={args.max_dd:.0%}): {', '.join(excluded)}")
+
+
+def cmd_live(args: argparse.Namespace) -> None:
+    """Run one live paper-trading tick for every PASS strategy."""
+    from paper_trading_sim import fetch_history  # local: network-touching import
+
+    state = ArenaState(args.db)
+    statuses = state.statuses()
+    names = _parse_names(args.strategies) if args.strategies else \
+        [n for n, s in statuses.items() if s == "PASS"]
+    if not names:
+        raise SystemExit("no PASS strategies in the arena DB — run `arena-run backtest` first")
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    start = (dt.date.today() - dt.timedelta(days=args.lookback_days)).isoformat()
+    today = dt.date.today().isoformat()
+    for name in names:
+        if statuses.get(name) != "PASS":
+            print(f"{name}: skipped (status={statuses.get(name, 'never backtested')})")
+            continue
+        if name == "gbm" and not args.gbm_bundle:
+            print("gbm: skipped — pass --gbm_bundle to run it live")
+            continue
+        if name not in available_strategies():
+            # Ensembles (dynamic constituents) can't be rebuilt from the
+            # static registry — their tick recomputes weights and must go
+            # through the dedicated subcommand.
+            print(f"{name}: skipped here — tick it with `arena-run ensemble --name {name} ...`")
+            continue
+        try:
+            data = fetch_history(tickers, start, None)
+            strategy = build_strategy(name, args.gbm_bundle)
+            mode = state.sizing_mode(name)
+            anchor = state.anchor(name)
+
+            regime_series = None
+            if not args.no_regime_gate and data:
+                all_dates = sorted(set().union(*[set(df.index) for df in data.values() if "Close" in df.columns]))
+                if all_dates:
+                    regime_series = regime_series_for_dates(data, all_dates)
+                    for d, r in regime_series.items():
+                        state.record_regime(_iso(d), r)
+
+            added = live_tick(state, name, strategy, data, args.top_n,
+                              args.capital, args.trade_cost_bps, sizing=mode,
+                              max_pos=args.max_pos, vol_window=args.vol_window,
+                              cost_model=_cost_model_from_args(args),
+                              since_date=anchor, regime_series=regime_series)
+            print(f"{name}: {added} new day(s) recorded (sizing={mode})")
+
+            if not args.no_breaker:
+                dd_info = state.running_drawdown(name)
+                if dd_info is not None:
+                    drawdown, peak, current = dd_info
+                    threshold = -abs(args.breaker_dd)
+                    if drawdown <= threshold:
+                        state.set_status(name, "PAUSED")
+                        state.log_breaker_event(name, today, "TRIP", drawdown, peak, current, threshold)
+                        print(f"  !! BREAKER TRIPPED for {name}: drawdown {drawdown:.2%} "
+                              f"breached {threshold:.2%} (peak={peak:,.2f}, current={current:,.2f}). "
+                              f"Paused — run `arena-run resume {name}` to re-enable.")
+
+            div_threshold = -abs(args.divergence_z)
+            stats = state.divergence_stats(name, min_live_days=args.min_live_days)
+            if stats is not None:
+                z = stats["z"]
+                now_diverged = z < div_threshold
+                was_diverged = state.diverged(name)
+                if now_diverged and not was_diverged:
+                    state.set_diverged(name, True)
+                    state.log_divergence_event(name, today, "DIVERGED", z, stats["live_mean"],
+                                               stats["bt_mean"], stats["n_live"], div_threshold)
+                    print(f"  !! DIVERGENCE for {name}: z={z:.2f} (threshold {div_threshold:.2f}) — "
+                          f"live is underperforming its backtest beyond sampling noise. "
+                          f"Flagged, not paused — an overfitting signal for you to review.")
+                elif not now_diverged and was_diverged:
+                    state.set_diverged(name, False)
+                    state.log_divergence_event(name, today, "RECOVERED", z, stats["live_mean"],
+                                               stats["bt_mean"], stats["n_live"], div_threshold)
+                    print(f"  {name}: divergence RECOVERED (z={z:.2f}).")
+        except Exception as exc:  # one strategy's failure must not kill the arena run
+            state.log_gap(name, today, repr(exc))
+            print(f"{name}: gap logged — {exc!r}")
+
+
+def ensemble_weights(state: ArenaState, names: List[str],
+                     min_live_days: int = 20, floor: float = 0.05) -> Dict[str, float]:
+    """Weights from each constituent's live Sharpe, normalized to sum to 1.
+
+    Negative Sharpe is clipped to ``floor`` rather than zero — a currently-
+    losing constituent keeps a token vote, since its recent live performance
+    is itself a noisy estimate. All-or-nothing bootstrap: if ANY constituent
+    has fewer than ``min_live_days`` live equity rows, every constituent
+    gets equal weight for this computation (a partial mix of
+    track-record-weighted and equal-weighted members is harder to reason
+    about for no benefit at this strategy count).
+    """
+    live_sharpes: Dict[str, float] = {}
+    bootstrap = False
+    for name in names:
+        rows = state.conn.execute(
+            "SELECT equity FROM equity WHERE strategy=? ORDER BY date", (name,)
+        ).fetchall()
+        values = [r[0] for r in rows]
+        if len(values) < min_live_days:
+            bootstrap = True
+            break
+        metrics = compute_metrics(pd.Series(values))
+        live_sharpes[name] = metrics.get("Sharpe", 0.0)
+
+    if bootstrap:
+        return {n: 1.0 / len(names) for n in names}
+
+    raw = {n: max(s, floor) for n, s in live_sharpes.items()}
+    total = sum(raw.values())
+    return {n: v / total for n, v in raw.items()}
+
+
+def cmd_ensemble(args: argparse.Namespace) -> None:
+    """Build a track-record-weighted ensemble and run it through the arena.
+
+    Validates every member is currently PASS (fails fast naming offenders —
+    a screened-out strategy must never sneak into an ensemble silently),
+    computes weights from live Sharpe, then reuses cmd_backtest/cmd_live's
+    machinery by running the ensemble under its own --name like any other
+    strategy: same persistence, same filter, same report row.
+    """
+    from strategies.ensemble import EnsembleStrategy
+
+    state = ArenaState(args.db)
+    members = [m.strip() for m in args.members.split(",") if m.strip()]
+    if not members:
+        raise SystemExit("--members must name at least one PASS strategy")
+    _parse_names(",".join(members))  # unknown-name check with the standard message
+    statuses = state.statuses()
+    bad = [m for m in members if statuses.get(m) != "PASS"]
+    if bad:
+        raise SystemExit(
+            f"cannot build ensemble '{args.name}': not PASS in the arena DB: "
+            f"{', '.join(f'{m} ({statuses.get(m, "never backtested")})' for m in bad)}")
+
+    weights = ensemble_weights(state, members, min_live_days=args.min_live_days_weights,
+                               floor=args.weight_floor)
+    constituents = {m: build_strategy(m, args.gbm_bundle) for m in members}
+    strategy = EnsembleStrategy(constituents, weights)
+    print(f"ensemble '{args.name}' weights: " +
+          ", ".join(f"{m}={w:.3f}" for m, w in weights.items()))
+
+    from paper_trading_sim import fetch_history  # local: network-touching import
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    start = (dt.date.today() - dt.timedelta(days=args.lookback_days)).isoformat()
+    data = fetch_history(tickers, start, None)
+    mode = state.sizing_mode(args.name)
+    added = live_tick(state, args.name, strategy, data, args.top_n, args.capital,
+                      args.trade_cost_bps, sizing=mode, max_pos=args.max_pos,
+                      vol_window=args.vol_window,
+                      cost_model=_cost_model_from_args(args),
+                      since_date=state.anchor(args.name))
+    if args.name not in statuses:
+        # First run: register the ensemble as PASS so future plain
+        # `arena-run live` ticks it — screening happened member-by-member.
+        state.record_backtest(args.name, "PASS", {}, sizing=mode)
+    print(f"{args.name}: {added} new day(s) recorded")
+
+
+def cmd_resume(args: argparse.Namespace) -> None:
+    """Manually re-enable a PAUSED strategy, resetting its drawdown anchor.
+
+    This is the ONLY path back to PASS after a breaker trip — the arena
+    never auto-resumes. The high-water-mark anchor moves to today, so
+    drawdown is measured fresh from here forward, and the paused window's
+    price action is neither credited nor charged (see ``live_tick``'s
+    ``since_date``): the ledger just picks up from the next live bar.
+    """
+    state = ArenaState(args.db)
+    name = args.strategy
+    status = state.statuses().get(name)
+    if status != "PAUSED":
+        raise SystemExit(f"'{name}' is not PAUSED (status={status or 'never backtested'}) — nothing to resume")
+    last = state.last_equity(name)
+    if last is None:
+        raise SystemExit(f"'{name}' has no live equity history to resume from — run `arena-run live` first")
+    _, last_equity_value = last
+    today = dt.date.today().isoformat()
+    state.set_anchor(name, today)
+    state.set_status(name, "PASS")
+    state.log_breaker_event(name, today, "RESUME", 0.0, last_equity_value, last_equity_value, None)
+    print(f"{name}: resumed. High-water mark reset at {last_equity_value:,.2f} as of {today} — "
+          f"the paused window will not be backfilled.")
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    """Print the side-by-side comparison table (unranked)."""
+    from analyze_equity import compare_strategies
+
+    state = ArenaState(args.db)
+    table = compare_strategies(state.conn)
+    if table.empty:
+        print("No strategies in the arena DB yet — run `arena-run backtest` first.")
+        return
+    with pd.option_context("display.width", 160, "display.max_columns", None):
+        print(table.to_string(index=False))
+
+
+def main() -> None:
+    """CLI entry point for arena-run."""
+    p = argparse.ArgumentParser(description="Multi-strategy paper-trading arena")
+    p.add_argument("--db", type=str, default=DEFAULT_DB, help="SQLite state path")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--strategies", type=str, default="",
+                        help=f"comma list of {', '.join(available_strategies())}")
+    common.add_argument("--tickers", type=str, default="AAPL,MSFT,GOOG,AMZN,NVDA")
+    common.add_argument("--tickers_file", type=str, default=None)
+    common.add_argument("--top_n", type=int, default=5)
+    common.add_argument("--capital", type=float, default=100000.0,
+                        help="starting paper capital per strategy (equal for all)")
+    common.add_argument("--trade_cost_bps", type=float, default=1.0)
+    common.add_argument("--gbm_bundle", type=str, default=None,
+                        help="model bundle path, required when 'gbm' is selected")
+    common.add_argument("--max_pos", type=float, default=0.30,
+                        help="per-position cap for 'conf_vol' sizing")
+    common.add_argument("--vol_window", type=int, default=20,
+                        help="rolling day window for 'conf_vol' sizing's volatility estimate")
+    common.add_argument("--cost_model", type=str, default="flat",
+                        choices=["none", "flat", "realistic"],
+                        help="'flat' preserves legacy per-day cost (default); "
+                             "'realistic' charges commission+spread+impact on turnover; "
+                             "'none' is gross returns")
+    common.add_argument("--commission_bps", type=float, default=0.0,
+                        help="'realistic' mode: flat commission per trade, bps of notional")
+    common.add_argument("--half_spread_bps", type=float, default=2.5,
+                        help="'realistic' mode: bid-ask spread cost per trade, bps of notional")
+    common.add_argument("--impact_coeff_bps", type=float, default=30.0,
+                        help="'realistic' mode: square-root market-impact coefficient, bps")
+    common.add_argument("--fallback_adv", type=float, default=1_000_000.0,
+                        help="'realistic' mode: assumed dollar volume when a ticker's is unavailable")
+    common.add_argument("--no_regime_gate", action="store_true",
+                        help="disable market-regime gating — run every strategy in every regime")
+
+    b = sub.add_parser("backtest", parents=[common],
+                       help="screen strategies through the walk-forward filter")
+    b.add_argument("--start", type=str, required=True)
+    b.add_argument("--end", type=str, required=True)
+    b.add_argument("--min_sharpe", type=float, default=0.0,
+                   help="universal filter: minimum backtest Sharpe")
+    b.add_argument("--max_dd", type=float, default=-0.30,
+                   help="universal filter: worst tolerated drawdown (negative)")
+    b.add_argument("--sizing", type=str, default="conf_vol", choices=["equal", "conf_vol"],
+                   help="position sizing mode — persisted per strategy; live reuses it, not overridable there")
+    b.set_defaults(func=cmd_backtest)
+    # gbm is opt-in: it needs --gbm_bundle, so a bare backtest runs the rule-based three
+    b.set_defaults(strategies="engulfing,technical,meanrev")
+
+    l = sub.add_parser("live", parents=[common],
+                       help="one idempotent, self-backfilling paper-trading tick")
+    l.add_argument("--lookback_days", type=int, default=200,
+                   help="calendar days of history fetched for warmup + backfill")
+    l.add_argument("--breaker_dd", type=float, default=0.20,
+                   help="pause a strategy when its drawdown from peak (since last "
+                        "resume) exceeds this fraction; sign-insensitive")
+    l.add_argument("--no_breaker", action="store_true",
+                   help="disable the drawdown circuit breaker entirely")
+    l.add_argument("--divergence_z", type=float, default=2.0,
+                   help="flag (not pause) a strategy when live daily returns fall "
+                        "this many standard errors below its backtest mean")
+    l.add_argument("--min_live_days", type=int, default=20,
+                   help="minimum live daily returns before divergence is evaluated")
+    l.set_defaults(func=cmd_live)
+
+    e = sub.add_parser("ensemble", parents=[common],
+                       help="build/tick a track-record-weighted ensemble of PASS strategies")
+    e.add_argument("--name", type=str, required=True,
+                   help="ledger name for this ensemble (its own independent paper account)")
+    e.add_argument("--members", type=str, required=True,
+                   help="comma list of PASS constituent strategies")
+    e.add_argument("--lookback_days", type=int, default=200)
+    e.add_argument("--min_live_days_weights", type=int, default=20,
+                   help="all-or-nothing bootstrap: any member below this many live days "
+                        "means equal weights for this tick")
+    e.add_argument("--weight_floor", type=float, default=0.05,
+                   help="negative live Sharpe is clipped to this before normalizing")
+    e.set_defaults(func=cmd_ensemble)
+
+    rs = sub.add_parser("resume", help="manually re-enable a PAUSED strategy")
+    rs.add_argument("strategy", type=str, help="strategy name to resume")
+    rs.set_defaults(func=cmd_resume)
+
+    r = sub.add_parser("report", help="side-by-side comparison table")
+    r.set_defaults(func=cmd_report)
+
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

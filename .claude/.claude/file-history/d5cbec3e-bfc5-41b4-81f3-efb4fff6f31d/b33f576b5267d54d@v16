@@ -1,0 +1,564 @@
+# Glossary
+
+> Terms the user has demonstrably grasped. Each entry: short definition,
+> the lesson it was introduced in, and where it lives in the codebase.
+> Only promote a term here once the user has used it correctly in
+> conversation or aced the quiz item about it.
+
+> Status legend:
+> `taught` = explained in a lesson  ·
+> `firm` = used correctly unprompted  ·
+> `shaky` = needs revisit
+
+## A
+
+- **Abstract class** — `taught` *(lesson 0007)*
+  A C++ class containing at least one pure virtual method (`= 0`).
+  Cannot be instantiated directly; you instantiate derived classes that
+  implement the pure virtuals. The base of every HAL.
+
+- **Abstraction (vs encapsulation)** — `taught` *(lesson 0007)*
+  Hiding *which of several implementations* is in use behind one
+  interface. Distinct from encapsulation, which hides the internals of
+  *one* class. A HAL is abstraction; private fields are encapsulation.
+
+- **Array decay** — `taught` *(lesson 0002)*
+  When a C-style array is passed to a function, the parameter is silently
+  rewritten to a pointer, losing its size. `void f(int arr[10])` becomes
+  `void f(int* arr)`. `std::array` does not decay.
+
+- **ASIC** — `taught` *(lesson 0004)*
+  Application-Specific Integrated Circuit. A chip fabricated for one
+  fixed job (e.g. NVIDIA H100, phone neural engine). Faster and more
+  efficient than the same design on an FPGA, but unchangeable once
+  shipped. FPGA is the reprogrammable cousin.
+
+## B
+
+- **Bitstream** — `taught` *(lesson 0004)*
+  The binary file that programs an FPGA. Produced by synthesizing an
+  HDL/HLS design through place-and-route. Loading a different bitstream
+  reconfigures the chip into a different circuit.
+
+## C
+
+- **C++ language standard** — `taught` *(lesson 0013)*
+  Three-year-cadence ISO release that defines what features the compiler
+  accepts. Current standards: C++11/14/17/20/23 (C++26 in progress).
+  Controlled via `CMAKE_CXX_STANDARD` / `-std=c++17`. Distinct from
+  compiler version, which controls how completely a standard is
+  implemented.
+
+- **Context switch** — `taught` *(lesson 0009)*
+  The OS suspending one thread/process and resuming another on a CPU
+  core. Thread-to-thread switches in the same process are cheap (~few
+  thousand ns); process-to-process switches require a TLB flush and are
+  ~10× more expensive (softened by PCID on modern x86).
+
+- **Container adapter** — `taught` *(lesson 0008)*
+  Thin wrapper around a real container that restricts the exposed API.
+  `std::queue`/`std::stack`/`std::priority_queue` are adapters. They're
+  not containers themselves and can't be iterated. Used in `LlmClient`
+  via `std::queue<ChatRequest> requests_` to document FIFO discipline.
+
+- **C-style array** — `taught` *(lesson 0002)*
+  Raw `T arr[N]` from C. Fixed size, stack storage, decays to pointer on
+  function call. Still appears at
+  `cpp_game_with_llm_npcs/src/main.cpp:72`.
+
+- **Condition variable (`std::condition_variable`)** — `taught` *(lesson 0005)*
+  Synchronisation primitive that lets a thread sleep cheaply until
+  another thread signals state change. Always paired with a mutex and a
+  predicate (`cv.wait(lock, pred)`) so spurious wakeups are handled
+  automatically. Used at
+  `cpp_game_with_llm_npcs/src/LlmClient.cpp:52`.
+
+## D
+
+- **Deadlock** — `taught` *(lesson 0005)*
+  Two threads each holding a lock the other needs; both wait forever.
+  Cardinal prevention rule: always acquire multiple locks in the same
+  order. `LlmClient` avoids the risk by never holding both mutexes
+  simultaneously.
+
+- **`std::deque`** — `taught` *(lesson 0008)*
+  Segmented sequence container — array of fixed-size blocks, blocks
+  themselves separate heap allocations. O(1) push/pop at *both* ends.
+  Random access is two pointer dereferences (block table, then block).
+  Used in `DialogUI::transcript_` for the push_back/pop_front pattern.
+
+## E
+
+- **`emplace_back(args...)`** — `taught` *(lesson 0012)*
+  Vector member that forwards args to T's constructor, building the
+  element directly in the vector's storage with no temporary. Invokes
+  explicit constructors (push_back refuses), which is its main safety
+  trap. Modern (Chromium/Abseil/Google) advice: prefer `push_back` by
+  default; reach for `emplace_back` only when you have a specific reason.
+
+- **Embedded LLM** — `taught` *(lesson 0001)*
+  A language model whose output is consumed by the running game process,
+  regardless of whether the model lives in the same binary or in a sidecar
+  process on `localhost`.
+
+- **Erase-remove idiom** — `taught` *(lesson 0003)*
+  Pattern for deleting elements from a `std::vector` that match a
+  predicate without shrinking capacity. `v.erase(std::remove_if(b, e,
+  pred), e)`. Used in `cpp_shooter_game/src/main.cpp:686` to clean up
+  dead projectiles per frame.
+
+## F
+
+- **FPGA** — `taught` *(lesson 0004)*
+  Field-Programmable Gate Array. A chip whose internal wiring is
+  reconfigured at boot by loading a bitstream — the chip *becomes* the
+  custom circuit you described, rather than executing instructions on a
+  fixed circuit.
+
+- **Frame budget** — `taught` *(lesson 0003)*
+  The wall-clock time available for one game-loop iteration before the
+  next vsync. 16.67 ms at 60 Hz, 8.33 ms at 120 Hz. Exceeding it once
+  produces visible stutter regardless of average speed.
+
+## H
+
+- **HAL (Hardware Abstraction Layer)** — `taught` *(lesson 0007)*
+  Software layer that hides "where the work physically happens" behind a
+  single interface. Arduino's `digitalWrite`, Linux device drivers,
+  SFML's `window.draw`, and the proposed `LlmBackend` interface are all
+  HALs. Implemented in C++ via an abstract base class + per-hardware
+  derived classes + virtual dispatch.
+
+- **Heap** — `taught` *(lesson 0006)*
+  Free-form memory arena shared by all threads in a process. Variable-
+  cost allocation (typically a few hundred ns; sometimes a syscall),
+  runtime-decided lifetime, gigabytes available. RAII containers like
+  `std::vector` and `std::unique_ptr` manage the lifetime for you.
+
+- **HLS (High-Level Synthesis)** — `taught` *(lesson 0004)*
+  A flow that lets you write FPGA logic in C/C++ instead of Verilog/VHDL.
+  Vitis HLS is the current AMD/Xilinx tool. The compiler converts your
+  C++ kernel into HDL, then through synthesis into a bitstream.
+
+- **Hot loop / hot path** — `taught` *(lesson 0003)*
+  Code that runs many times per frame — per-entity update loops,
+  per-line render code. Allocations and copies that would be invisible
+  elsewhere are budget-eaters here.
+
+## I
+
+- **IPC (Inter-Process Communication)** — `taught` *(lesson 0009)*
+  Mechanisms for processes (separate address spaces) to exchange data.
+  The four common ones: shared files, pipes/sockets, shared memory
+  regions, signals. Your game ↔ Ollama uses option two (TCP socket over
+  loopback).
+
+- **Iterator invalidation** — `taught` *(lesson 0008)*
+  Modifying a container can invalidate iterators (and raw pointers /
+  references) that point into it. `std::vector::push_back` that
+  triggers a realloc moves the buffer to a new address — every iterator
+  into the old buffer is now garbage. Each container has its own rules.
+
+- **In-process LLM** — `taught` *(lesson 0001)*
+  Model linked into the game binary, called via a C/C++ API (e.g.
+  `llama.cpp`). Contrast: **sidecar process**.
+
+## I
+
+- **`inline` (keyword)** — `taught` *(lesson 0014)*
+  Modern meaning is **linkage**, not speed: "this definition may appear
+  in multiple translation units; linker, merge them." Required for
+  functions defined in headers (implicit for in-class definitions like
+  `Persona::renderSystemPrompt`). Compilers ignore it as an optimization
+  hint — actual inlining is their own cost-based decision.
+
+- **Inlining (the optimization)** — `taught` *(lesson 0014)*
+  The optimizer pasting a callee's body into the caller, eliminating all
+  call overhead (argument passing, call/ret, prologue/epilogue) and
+  enabling cross-boundary optimization. Decided by the compiler at
+  `-O2`, not by the `inline` keyword. Why the shooter's `const Vec3&`
+  operators cost nothing despite the "textbook-suboptimal" signature.
+
+## K
+
+- **Kernel space / user space** — `taught` *(lesson 0009)*
+  Two execution modes the CPU itself enforces via a mode bit. User
+  space (where your program runs) cannot touch hardware, other
+  processes' memory, or page tables. Kernel space can. A system call
+  is the controlled door between them.
+
+## L
+
+- **Latency spike** — `taught` *(lesson 0015)*
+  A rare frame that takes several times longer than the median — the
+  thing players feel as stutter. Distinct from chronic slowness:
+  different metric (worst/p99, not average), different causes (rare
+  events: allocation storms, lock waits, blocking syscalls, OS
+  preemption), different fixes (move/amortize the rare event).
+
+- **Latency vs throughput** — `taught` *(lesson 0003)*
+  Latency = time for a single operation (a game frame). Throughput =
+  total operations per second (requests). Games optimize for worst-case
+  latency, not average throughput.
+
+- **LUT (Look-Up Table)** — `taught` *(lesson 0004)*
+  The fundamental cell of an FPGA. A 4- or 6-input table you fill in to
+  implement any boolean function. Combined with flip-flops, DSPs, and
+  BRAM blocks via programmable routing, LUTs build the user's circuit.
+
+## M
+
+- **Mutex (`std::mutex`)** — `taught` *(lesson 0005)*
+  Mutual-exclusion primitive: only one thread holds it at a time.
+  Used with RAII via `std::lock_guard` or `std::unique_lock` so the
+  release is automatic. `LlmClient` uses two independent mutexes
+  (`requestMutex_`, `replyMutex_`) so producer and consumer don't
+  contend on unrelated data.
+
+- **`std::move`** — `taught` *(lesson 0003)*
+  A cast that marks a value as "you may steal from this." Whether
+  anything is actually stolen depends on the destination's move
+  constructor. For `std::string`/`std::vector` it steals the heap buffer
+  in O(1); for trivial types it falls back to a copy.
+
+## N
+
+- **`noexcept`** — `taught` *(lesson 0014)*
+  Promise that a function never throws. Lets the compiler drop
+  exception-path bookkeeping, and — the practical payoff — lets
+  `std::vector` *move* (instead of copy) elements during reallocation,
+  since only a non-throwing move is exception-safe there. Implicit
+  moves on plain structs already qualify; hand-written move constructors
+  must declare it.
+
+- **NRVO (Named Return Value Optimization)** — `taught` *(lessons 0003, 0014)*
+  Compiler optimization that builds a returned *named* local directly in
+  the caller's slot, eliminating the return copy/move entirely. Not
+  guaranteed by the standard (unlike RVO) but near-universal.
+  `LlmClient::drainReplies()`, `wrap()`, and `renderSystemPrompt()` all
+  rely on it. Writing `return std::move(local)` *disables* it — a
+  pessimization compilers warn about (`-Wpessimizing-move`).
+
+## O
+
+- **`override`** — `taught` *(lesson 0007)*
+  C++11 specifier on derived methods that asks the compiler to verify
+  the method is actually overriding a base virtual. Catches silent
+  signature drift (e.g. base changes its parameter type and the derived
+  method becomes a *new unrelated* method). Use on every override.
+
+## O
+
+- **Observer effect (instrumentation)** — `taught` *(lesson 0015)*
+  Measurement code distorting the thing it measures — e.g. logging
+  every frame adds formatting + a syscall to every frame and can cause
+  the spikes being hunted. Managed by spike-*triggered* logging (only
+  emit when over threshold) and by keeping per-frame instrumentation to
+  a couple of clock reads.
+
+## P
+
+- **p99 / worst-frame time** — `taught` *(lesson 0015)*
+  The frame time that the worst 1% of frames exceed (p99), or the
+  single maximum. The metrics that expose spikes — averages
+  arithmetically hide a 100 ms hitch among 999 good frames. Report
+  worst/p99/median; never average FPS.
+
+- **Page cache** — `taught` *(lesson 0009)*
+  Linux kernel cache of file pages in RAM. The first `read()` of a file
+  may hit disk; subsequent reads of the same pages are served from RAM
+  with no disk I/O. Shared across all processes, not per-program.
+
+- **Persona prompt** — `taught` *(lesson 0001)*
+  Static system-prompt text rendered from a `Persona` struct, prepended to
+  every chat request to keep the NPC in character. See
+  `cpp_game_with_llm_npcs/src/Persona.hpp::renderSystemPrompt`.
+
+- **Predicate form of `cv.wait`** — `taught` *(lesson 0005)*
+  `cv.wait(lock, pred)` — sleeps if `pred()` is false, re-checks on
+  every wakeup, ignores spurious wakeups for free. Strictly safer than
+  the no-predicate form. Used at `LlmClient.cpp:52`.
+
+- **Pure virtual method (`= 0`)** — `taught` *(lesson 0007)*
+  A virtual method declared with `= 0` and no body. Derived classes
+  *must* implement it. A class with any pure virtual is abstract and
+  cannot be instantiated.
+
+## R
+
+- **RAII (Resource Acquisition Is Initialization)** — `taught` *(lesson 0006)*
+  C++ pattern where a resource's lifetime is tied to a stack object: the
+  constructor acquires (memory, mutex, thread, file), the destructor
+  releases. `std::vector`, `std::unique_ptr`, `std::lock_guard`,
+  `std::thread` all use it. Why modern C++ has no manual `delete`.
+
+- **Reference counting** — `taught` *(lesson 0010)*
+  Memory-management technique used by `std::shared_ptr`. Each copy of
+  the pointer increments a counter; each destruction decrements. The
+  object is freed when the counter hits zero. The counter is atomic, so
+  thread-safe but not free (~2× a raw pointer copy).
+
+- **Race condition** — `taught` *(lesson 0005)*
+  Two or more threads accessing the same data without synchronisation,
+  with at least one writer. Behaviour becomes nondeterministic and
+  usually wrong. Not the same as a deadlock — race conditions produce
+  bad data, deadlocks freeze.
+
+- **Reallocation (vector growth)** — `taught` *(lesson 0002)*
+  When `std::vector::push_back` exceeds capacity, a new heap buffer is
+  allocated, all existing elements are moved/copied across, and the old
+  buffer is freed. `reserve()` ahead of time avoids the storm.
+
+- **RVO / guaranteed copy elision** — `taught` *(lesson 0014)*
+  Returning a *temporary* (`return std::string{"hi"};`) constructs the
+  result directly in the caller's storage — no copy, no move. Since
+  C++17 this is **mandatory**, not an optimization. The named-local
+  cousin is NRVO. Together they're why "return by value is slow" is
+  obsolete folklore.
+
+## S
+
+- **Sampling vs instrumentation profiler** — `taught` *(lesson 0015)*
+  Sampling (Linux `perf`) statistically interrupts the process and
+  records where it was — low overhead, great for chronic slowness,
+  weak on rare spikes. Instrumentation (Tracy, a hand-rolled RAII
+  SectionTimer) records every entry/exit of marked zones — exact and
+  spike-friendly, but only sees what you marked.
+
+- **`std::chrono::steady_clock`** — `taught` *(lesson 0015)*
+  The monotonic clock: only moves forward, at a constant rate. The
+  correct clock for *all* interval measurement (frame times, timeouts).
+  Contrast `system_clock`, which is wall-clock time and can jump when
+  the OS adjusts it (NTP/DST) — capable of measuring a negative frame.
+  SFML's `sf::Clock` is also monotonic.
+
+- **Scheduler (OS scheduler)** — `taught` *(lesson 0009)*
+  Kernel subsystem that decides which runnable thread runs on which
+  core when. Blocked threads (e.g. those in `cv.wait`, blocking
+  `recv`) are removed from the runnable set entirely until something
+  wakes them — that's why "sleep cheaply" actually works.
+
+- **System call (syscall)** — `taught` *(lesson 0009)*
+  Controlled crossing from user space into the kernel. ~100–200 ns on
+  modern hardware. Examples: `open`, `read`, `write`, `socket`,
+  `connect`, `send`, `recv`, `mmap`, `clone`. Library calls (~1 ns)
+  are ordinary function calls; syscalls flip the CPU into kernel mode.
+
+- **Small String Optimization (SSO)** — `taught` *(lesson 0006)*
+  Implementation technique where `std::string` reserves ~15 bytes of
+  inline storage in its struct (libstdc++ 64-bit). Strings up to that
+  length stay inline — no heap allocation. Above it, the string spills
+  to a heap buffer. Why `ChatTurn::role` ("user"/"assistant") never
+  allocates but `ChatTurn::content` usually does.
+
+- **Stack (program stack)** — `taught` *(lesson 0006)*
+  LIFO memory region tied to the call chain. Allocate by moving a
+  register; free on function return. ~8 MB for the main thread, ~1 MB
+  per worker thread on Linux. One per thread. Fast, automatic, but
+  size-limited.
+
+- **Spurious wakeup** — `taught` *(lesson 0005)*
+  A condition-variable wait that returns without anyone calling notify.
+  Permitted by the standard and by real OS-level CVs. The predicate form
+  of `wait` handles them transparently.
+
+- **`std::atomic<T>`** — `taught` *(lesson 0005)*
+  A variable whose read-modify-write is uninterruptible by other
+  threads, implemented in hardware. Cheaper than a mutex for single
+  values. `LlmClient` uses `std::atomic<bool>` for `stop_`/`inFlight_`
+  and `std::atomic<uint64_t>` for the request-id counter.
+
+- **`std::array<T, N>`** — `taught` *(lesson 0002)*
+  Fixed-size, compile-time-known array wrapper. Stack-allocated, doesn't
+  decay, carries its size in the type. Used in the racing/shooter games
+  for quad corners, matrices, and font candidate lists.
+
+- **`std::unordered_map<K,V>`** — `taught` *(lesson 0008)*
+  Hash-table associative container. Contiguous bucket array, scattered
+  chain nodes per bucket. O(1) average lookup/insert; O(n) worst case
+  on bad hash. Used in both games' config readers
+  (`std::unordered_map<std::string, std::string>`).
+
+- **`std::shared_ptr<T>`** — `taught` *(lesson 0010)*
+  Smart pointer for shared ownership. Refcount goes up on copy, down on
+  destruction; object freed when count hits zero. Refcount is atomic
+  (~2× a raw pointer copy). Cycles between `shared_ptr`s leak — break
+  them with `weak_ptr`. Use only when ownership is genuinely shared.
+
+- **`std::unique_ptr<T>`** — `taught` *(lesson 0010)*
+  Smart pointer for exclusive ownership. One owner; movable but never
+  copyable. Zero runtime overhead. The default for "heap object with one
+  clear owner." Used at `LlmClient::backend_` in the lesson-0007 HAL
+  refactor.
+
+- **`std::vector<T>`** — `taught` *(lesson 0002)*
+  Dynamic-size, heap-backed sequence container. Use when count varies at
+  runtime. Used throughout: shooter `projectiles`/`enemies`/`pickups`/
+  `impacts`, racing's `buildRoundedRectLoop` return, NPC `history_`.
+
+- **`std::counting_semaphore<MaxN>`** — `taught` *(lesson 0011)*
+  C++20 admission-control primitive. Holds a counter; `acquire()`
+  decrements (blocks if zero), `release()` increments. **No ownership** —
+  any thread can release, even one that didn't acquire. Use for
+  resource pools, rate limits, or "max K in flight" patterns.
+
+- **`std::binary_semaphore`** — `taught` *(lesson 0011)*
+  Special case of `counting_semaphore` with max=1. One-shot cross-thread
+  signal ("tap me when X is done"). Looks like a mutex syntactically;
+  semantically different (no ownership, no RAII helper). Use to hand
+  control between threads, not to protect data.
+
+- **Semaphore (general)** — `taught` *(lesson 0011)*
+  Synchronisation primitive that's a counter of available permits with
+  blocking acquire/non-blocking release. Distinct from mutex by having
+  **no ownership semantics** — any thread can release. Two C++20
+  flavors: `std::counting_semaphore<MaxN>` and `std::binary_semaphore`.
+
+- **`std::weak_ptr<T>`** — `taught` *(lesson 0010)*
+  Non-owning observer of a `shared_ptr`-managed object. `lock()`
+  upgrades to a `shared_ptr` if the object still exists; returns null
+  otherwise. Required to break `shared_ptr` cycles.
+
+- **`std::filesystem`** — `taught` *(lesson 0013)*
+  Portable file path / directory / file-info library, added in C++17.
+  Used in `cpp_game_with_llm_npcs/src/main.cpp` for `fs::path`,
+  `fs::exists`, `fs::current_path`. Replaces Boost.Filesystem and
+  hand-rolled platform code.
+
+- **`std::optional<T>`** — `taught` *(lesson 0013)*
+  C++17 type holding either a `T` or no value. Used at
+  `Npc::onReplyArrived` return type. Modern replacement for "magic
+  values" (-1, null pointers) signaling absence.
+
+- **`std::expected<T, E>`** — `taught` *(lesson 0013)*
+  C++23 type holding either a `T` (success) or an `E` (error). Not
+  yet usable in this project (CMake pinned to C++17). Would replace
+  `ChatReply`'s `ok`/`content`/`errorMessage` trio with one type.
+
+- **`std::jthread`** — `taught` *(lesson 0013)*
+  C++20 thread that auto-joins on destruction. Would simplify
+  `LlmClient`'s destructor — no explicit `join()` needed. Not yet
+  usable in this project.
+
+- **`std::span<T>`** — `taught` *(lesson 0013)*
+  C++20 non-owning view over a contiguous range. Cleaner function
+  signatures than `const std::vector<T>&` when the caller has a
+  vector, array, or C-array equivalently.
+
+- **`std::print` / `std::println`** — `taught` *(lesson 0013)*
+  C++23 type-safe formatted output. Replaces `std::cout << ...`
+  chains and `printf` family in most cases.
+
+- **Sequence / associative / adapter (container families)** — `taught` *(lesson 0008)*
+  STL containers group into three families. **Sequence**: ordered,
+  indexable by position (`vector`, `array`, `deque`, `list`).
+  **Associative**: indexable by key (`map`, `unordered_map`, `set`).
+  **Adapter**: restricted API over an underlying container (`queue`,
+  `stack`, `priority_queue`).
+
+- **Sink parameter (by-value + `std::move`)** — `taught` *(lessons 0003, 0014)*
+  Signature idiom for functions that *keep* their argument: take it by
+  value, then `std::move` it into place. Callers passing temporaries pay
+  zero copies; callers passing lvalues pay exactly one. A `const&`
+  version would force a copy in both cases. The textbook example is
+  `LlmClient::submit()` (`LlmClient.cpp:23`).
+
+- **`std::function`** — `taught` *(lesson 0014)*
+  Type-erasing container for any callable matching a signature. The
+  flexibility costs an indirect (practically non-inlinable) call per
+  invocation and a possible heap allocation when storing large captures.
+  Fine for stored, rarely-invoked callbacks; avoid in hot loops — pass
+  lambdas as template parameters instead (as the STL algorithms do).
+
+- **`std::string_view`** — `taught` *(lessons 0013, 0014)*
+  C++17 non-owning 16-byte view (pointer + length) of string data.
+  Passed by value; accepts literals, substrings, and `std::string`s
+  without allocating. The string counterpart of `std::span`.
+
+- **Sidecar process** — `taught` *(lesson 0001)*
+  A separate local process (Ollama, LM Studio, llamafile) that hosts the
+  model and exposes an HTTP API the game POSTs to. Contrast:
+  **in-process LLM**.
+
+- **System prompt** — `taught` *(lesson 0001)*
+  The `role: "system"` message in a chat request. Fixed identity, applied
+  before any user turn.
+
+## T
+
+- **Type erasure** — `taught` *(lesson 0014)*
+  Hiding a concrete type behind a uniform runtime interface so
+  differently-typed things can be stored together. `std::function` is
+  the canonical example: it can hold any callable, but the price is
+  indirect dispatch the optimizer can't see through. Contrast with
+  templates, which preserve the exact type at compile time (zero cost).
+
+- **Thundering herd** — `taught` *(lesson 0005)*
+  Anti-pattern where `notify_all` wakes many waiters even though only
+  one can make progress; they all contend for the lock, find nothing to
+  do, and go back to sleep. Use `notify_one` when only one waiter can
+  consume the event.
+
+## V
+
+- **Virtual memory / address space** — `taught` *(lesson 0009)*
+  Per-process abstraction: each process sees a private 64-bit address
+  space, mapped to real RAM by the OS via page tables and the MMU. The
+  same numeric address means different physical memory in different
+  processes — the reason your game can't directly see Ollama's queue.
+
+- **`virtual` (function)** — `taught` *(lesson 0007)*
+  Base-class keyword that enables dynamic dispatch: calls through a
+  base-class pointer/reference look up the actual derived class's
+  implementation at runtime via a vtable. ~1 ns indirection.
+
+- **`virtual` destructor** — `taught` *(lesson 0007)*
+  Required on every base class that may be deleted through a
+  base-class pointer (e.g. via `std::unique_ptr<Base>`). Without it,
+  only the base destructor runs and derived-class cleanup is silently
+  skipped — the #1 HAL bug.
+
+- **Virtual dispatch / vtable** — `taught` *(lesson 0007)*
+  Mechanism by which C++ resolves a virtual call at runtime. Each
+  polymorphic object carries a hidden pointer to a per-class table of
+  function pointers (the vtable). Cost per call is roughly one
+  indirect-load instruction.
+
+## X
+
+- **XRT (Xilinx Runtime)** — `taught` *(lesson 0004)*
+  The host-side C++ API for talking to an FPGA over PCIe. Provides
+  `xrt::device`, `xrt::kernel`, `xrt::bo` (buffer object). The
+  five-step pattern: load xclbin → allocate BOs → write inputs + sync to
+  device → launch kernel → sync output back. Structurally identical to
+  the LlmClient HTTP pattern.
+
+## Pending promotion
+
+(Terms used in lessons but not yet confirmed grasped in conversation —
+once the user demonstrates understanding, move them above.)
+
+- Async drain pattern (worker thread + thread-safe reply queue)
+- Bounded conversation history
+- Dialogue tree (the pre-LLM baseline being contrasted)
+- GGUF (quantized model file format)
+- llama.cpp (the embedded-inference library)
+- Ollama (the sidecar we're using)
+- Quantization
+- RAG (retrieval-augmented generation)
+- Streaming inference (`"stream": true`)
+- Structured output (grammar-constrained JSON)
+- Concurrency vs parallelism
+- eFPGA / soft core (FPGA fabric inside an SoC; CPU built from LUTs)
+- HBM (high-bandwidth memory on FPGA cards like VHK158, VCU128)
+- Vitis HLS / Verilog / VHDL (the FPGA programming toolchain)
+- LUT-LLM (the 2025 paper that put Qwen 3 1.7B on an Alveo V80)
+- Calling convention / ABI (how arguments physically travel — registers vs memory)
+- Aliasing (why const& params pessimize: the compiler must assume overlap)
+- `[[likely]]` / `[[unlikely]]` (C++20 branch-layout hints, lesson 0014)
+- Internal linkage / anonymous namespace (inlining enabler, lesson 0014)
+- Devirtualization (compiler proving the dynamic type to inline a virtual call)
+- Tracy (game-industry instrumentation frame profiler, lesson 0015 rung 3)
+- `perf` (Linux sampling profiler, lesson 0015 rung 2)
+- dt clamping (the shooter's `std::min(0.03f, ...)` spike mitigation)
+- Pre-warming / cold-start cost (touch a code path during loading to avoid a first-use spike)

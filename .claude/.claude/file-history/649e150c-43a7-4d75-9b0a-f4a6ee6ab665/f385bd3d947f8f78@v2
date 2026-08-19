@@ -1,0 +1,146 @@
+/**
+ * Grading tests — Exercise 04 Part B: SpscRing (lock-free SPSC queue).
+ *
+ * Built and run by run_cpp.sh; -I points at exercises/04_spsc_ring or
+ * solutions/04_spsc_ring depending on HFT_EXERCISE_TARGET.
+ *
+ * Exit codes: 0 = pass, 1 = fail, 42 = not implemented (stub threw).
+ */
+#include "spsc_ring.hpp"
+
+#include <atomic>
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+
+#define ASSERT(cond, msg)                                              \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            std::cerr << "FAIL: " << msg << "\n";                     \
+            return 1;                                                  \
+        }                                                              \
+    } while (0)
+
+int test_single_thread_fifo() {
+    SpscRing<int, 8> ring;
+    ASSERT(ring.try_push(1), "push into empty ring should succeed");
+    ASSERT(ring.try_push(2), "second push should succeed");
+    ASSERT(ring.try_push(3), "third push should succeed");
+    int v = 0;
+    ASSERT(ring.try_pop(v) && v == 1, "first pop should yield 1");
+    ASSERT(ring.try_pop(v) && v == 2, "second pop should yield 2");
+    ASSERT(ring.try_pop(v) && v == 3, "third pop should yield 3");
+    return 0;
+}
+
+int test_empty_and_full_detection() {
+    SpscRing<int, 8> ring;  // usable capacity 7
+    int v = 0;
+    ASSERT(!ring.try_pop(v), "pop from empty ring should fail");
+    for (int i = 0; i < 7; ++i) {
+        ASSERT(ring.try_push(i), "push " + std::to_string(i) + " should fit");
+    }
+    ASSERT(!ring.try_push(99), "8th push must fail: capacity is N-1");
+    ASSERT(ring.try_pop(v) && v == 0, "pop should free a slot");
+    ASSERT(ring.try_push(99), "push should succeed after a pop");
+    return 0;
+}
+
+int test_cache_line_padding() {
+    // With alignas(64) on head_ and tail_, the object must span at least
+    // buf (64B for 8 x uint64) + 64 + 64 = 192 bytes. Without the padding
+    // it would be ~80 bytes — this catches a forgotten alignas.
+    ASSERT(sizeof(SpscRing<std::uint64_t, 8>) >= 192,
+           "head_/tail_ must each sit on their own 64-byte cache line "
+           "(alignas(64)); sizeof = " + std::to_string(sizeof(SpscRing<std::uint64_t, 8>)));
+    return 0;
+}
+
+int test_two_thread_transfer() {
+    constexpr std::uint64_t COUNT = 1'000'000;
+    SpscRing<std::uint64_t, 1024> ring;
+    std::atomic<bool> not_implemented{false};
+    std::atomic<bool> stop{false};  // unblocks the producer's spin on any failure
+    std::atomic<bool> order_ok{true};
+    std::atomic<std::uint64_t> received{0};
+
+    std::thread producer([&] {
+        try {
+            for (std::uint64_t i = 0; i < COUNT; ++i) {
+                while (!ring.try_push(i)) {
+                    if (stop.load(std::memory_order_relaxed)) return;
+                }
+            }
+        } catch (const std::logic_error&) {
+            not_implemented.store(true);
+            stop.store(true);
+        }
+    });
+
+    std::thread consumer([&] {
+        try {
+            std::uint64_t expect = 0;
+            std::uint64_t v = 0;
+            while (expect < COUNT && !stop.load(std::memory_order_relaxed)) {
+                if (ring.try_pop(v)) {
+                    if (v != expect) {
+                        order_ok.store(false);
+                        stop.store(true);
+                        break;
+                    }
+                    ++expect;
+                }
+            }
+            received.store(expect);
+        } catch (const std::logic_error&) {
+            not_implemented.store(true);
+            stop.store(true);
+        }
+    });
+
+    producer.join();
+    consumer.join();
+
+    if (not_implemented.load()) throw std::logic_error("not implemented");
+    ASSERT(order_ok.load(), "items arrived out of order or corrupted");
+    ASSERT(received.load() == COUNT,
+           "consumer received " + std::to_string(received.load())
+           + " of " + std::to_string(COUNT));
+    return 0;
+}
+
+int main() {
+    struct Test {
+        const char* name;
+        int (*fn)();
+    };
+    Test tests[] = {
+        {"single_thread_fifo",       test_single_thread_fifo},
+        {"empty_and_full_detection", test_empty_and_full_detection},
+        {"cache_line_padding",       test_cache_line_padding},
+        {"two_thread_transfer",      test_two_thread_transfer},
+    };
+
+    try {
+        int failed = 0;
+        for (auto& t : tests) {
+            if (t.fn() != 0) {
+                std::cerr << "  [FAILED] " << t.name << "\n";
+                ++failed;
+            } else {
+                std::cout << "  [PASSED] " << t.name << "\n";
+            }
+        }
+        if (failed == 0) {
+            std::cout << "ALL TESTS PASSED\n";
+            return 0;
+        }
+        std::cerr << failed << " TEST(S) FAILED\n";
+        return 1;
+    } catch (const std::logic_error& e) {
+        std::cout << "NOT IMPLEMENTED: " << e.what() << "\n";
+        return 42;
+    }
+}

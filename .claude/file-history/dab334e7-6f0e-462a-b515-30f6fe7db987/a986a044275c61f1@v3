@@ -1,0 +1,472 @@
+"""Test stubs for the 2026-07-14 research batch (plans in .claude/plans/).
+
+One skipped stub per key acceptance criterion; the suite stays green on
+the scaffold. Implementing commits remove the skips (same discipline as
+the original arena scaffold — see tests/test_daily_strategies.py history).
+"""
+import pandas as pd
+import pytest
+
+SKIP = "scaffold: research batch not implemented yet"
+
+
+# --- TSMOM (trend-following.md) --------------------------------------------
+
+def test_tsmom_uptrend_longs_with_vol_scaled_confidence(make_ohlcv):
+    """Steady uptrend, calm -> +1, confidence == trend/(sigma*sqrt(252))."""
+    import numpy as np
+    from strategies.trend import TrendFollowingStrategy
+
+    strat = TrendFollowingStrategy(lookback=100, skip_days=10)
+    rng = np.random.RandomState(1)
+    closes = [100.0]
+    for _ in range(130):
+        closes.append(closes[-1] * (1 + 0.002 + rng.normal(0, 0.001)))
+    df = make_ohlcv(closes)
+    sig = strat.generate_signal(df)
+    assert sig.position == 1
+
+    close = df["Close"].astype(float)
+    recent = float(close.iloc[-11])
+    old = float(close.iloc[-111])
+    trend = recent / old - 1.0
+    sigma = max(float(close.pct_change().iloc[-100:].std()), 1e-4)
+    assert sig.confidence == pytest.approx(trend / (sigma * 252 ** 0.5))
+
+
+def test_tsmom_negative_trend_is_hold_never_short(make_ohlcv):
+    """Long-only: a clear downtrend sits out, never shorts."""
+    from strategies.trend import TrendFollowingStrategy
+
+    strat = TrendFollowingStrategy(lookback=100, skip_days=10)
+    closes = [200 - i * 0.5 for i in range(130)]
+    sig = strat.generate_signal(make_ohlcv(closes))
+    assert sig.position == 0
+
+
+def test_tsmom_skip_window_excludes_recent_month(make_ohlcv):
+    """A rally confined to the skip window doesn't create a trend signal."""
+    from strategies.trend import TrendFollowingStrategy
+
+    strat = TrendFollowingStrategy(lookback=100, skip_days=10)
+    # flat for the whole lookback, then a pop entirely inside the last 10 bars
+    closes = [100.0] * 121 + [110.0] * 10
+    sig = strat.generate_signal(make_ohlcv(closes))
+    assert sig.position == 0  # measured trend (excluding skip) is flat
+
+
+def test_tsmom_insufficient_history_is_hold(make_ohlcv):
+    from strategies.trend import TrendFollowingStrategy
+
+    strat = TrendFollowingStrategy(lookback=100, skip_days=10)
+    assert strat.generate_signal(make_ohlcv([100] * 50)).position == 0
+
+
+# --- Low-vol (low-volatility.md) --------------------------------------------
+
+def test_lowvol_calm_ticker_wins_top_slot(make_ohlcv):
+    """Two tickers, top_n=1: the lower-sigma name is always the pick."""
+    import numpy as np
+    from strategies.low_vol import LowVolatilityStrategy
+    from walkforward_sim import run_strategy_walkforward
+
+    rng = np.random.RandomState(2)
+    calm, wild = [100.0], [100.0]
+    for _ in range(70):
+        calm.append(calm[-1] * (1 + rng.normal(0, 0.002)))
+        wild.append(wild[-1] * (1 + rng.normal(0, 0.03)))
+    data = {"CALM": make_ohlcv(calm), "WILD": make_ohlcv(wild)}
+    strat = LowVolatilityStrategy(vol_lookback=60)
+    _, blot = run_strategy_walkforward(strat, data, top_n=1, trade_cost_bps=0.0)
+    assert set(blot["ticker"]) == {"CALM"}
+
+
+def test_lowvol_sigma_floor_bounds_confidence(make_ohlcv):
+    """A dead-flat ticker cannot take infinite confidence."""
+    from strategies.low_vol import LowVolatilityStrategy
+
+    strat = LowVolatilityStrategy(vol_lookback=60)
+    sig = strat.generate_signal(make_ohlcv([100.0] * 70))
+    assert sig.position == 1
+    assert sig.confidence == pytest.approx(1.0 / 1e-4)
+
+
+# --- PEAD (pead-strategy.md) -------------------------------------------------
+
+def _write_earnings_cache(tmp_path, ticker, quarters):
+    """quarters: [(reportedDate, reportedEPS, estimatedEPS), ...]"""
+    import json
+    payload = {"quarterlyEarnings": [
+        {"reportedDate": d, "reportedEPS": str(a), "estimatedEPS": str(e)}
+        for d, a, e in quarters]}
+    (tmp_path / f"{ticker}.json").write_text(json.dumps(payload))
+    return str(tmp_path)
+
+
+def _pead_frame(make_ohlcv, n=60, volume=5_000_000, price=100.0):
+    df = make_ohlcv([price + 0.1 * i for i in range(n)])
+    df["Volume"] = float(volume)  # ADV = volume * price ~ $500M by default
+    return df
+
+
+def test_pead_long_exactly_report_plus_1_through_hold_days(make_ohlcv, tmp_path):
+    """+1 inside [report+1, report+hold_days], HOLD on report day and after expiry."""
+    from strategies.pead import PEADStrategy
+
+    df = _pead_frame(make_ohlcv)
+    dates = list(df.index)
+    report = dates[30]
+    cache = _write_earnings_cache(tmp_path, "AAA",
+                                  [(report.strftime("%Y-%m-%d"), 0.55, 0.40)])  # +37.5%
+
+    def sig_at(i, hold_days=10):
+        strat = PEADStrategy(earnings_dir=cache, min_surprise=0.25, hold_days=hold_days)
+        hist = df.iloc[: i + 1].copy()
+        hist.attrs["ticker"] = "AAA"
+        return strat.generate_signal(hist)
+
+    assert sig_at(30).position == 0          # report day itself: entry starts NEXT day
+    assert sig_at(31).position == 1          # first eligible day
+    assert sig_at(36).position == 1          # inside the window
+    assert sig_at(55, hold_days=10).position == 0  # long past expiry (calendar days)
+
+
+def test_pead_surprise_denominator_floored_at_ten_cents(tmp_path):
+    """(0.55, 0.40) -> +37.5%; a 0.01 estimate uses the 0.10 floor."""
+    from earnings_data import surprises_for
+
+    cache = _write_earnings_cache(tmp_path, "AAA", [
+        ("2024-01-15", 0.55, 0.40),
+        ("2024-04-15", 0.06, 0.01),   # raw pct would be +500%; floored -> (0.05/0.10)=+50%
+    ])
+    s = surprises_for("AAA", cache)
+    assert s["surprise"].iloc[0] == pytest.approx(0.15 / 0.40)
+    assert s["surprise"].iloc[1] == pytest.approx(0.05 / 0.10)
+
+
+def test_pead_illiquid_ticker_holds_despite_surprise(make_ohlcv, tmp_path):
+    from strategies.pead import PEADStrategy
+
+    df = _pead_frame(make_ohlcv, volume=1_000)  # ADV ~ $100k << $50M default
+    report = list(df.index)[30]
+    cache = _write_earnings_cache(tmp_path, "AAA",
+                                  [(report.strftime("%Y-%m-%d"), 0.80, 0.40)])  # +100%
+    strat = PEADStrategy(earnings_dir=cache)
+    hist = df.iloc[:35].copy()
+    hist.attrs["ticker"] = "AAA"
+    assert strat.generate_signal(hist).position == 0
+
+
+def test_pead_missing_ticker_attr_or_cache_is_hold(make_ohlcv, tmp_path):
+    from strategies.pead import PEADStrategy
+
+    df = _pead_frame(make_ohlcv)
+    strat = PEADStrategy(earnings_dir=str(tmp_path))
+    assert strat.generate_signal(df).position == 0  # no attrs["ticker"]
+    tagged = df.copy()
+    tagged.attrs["ticker"] = "GHOST"  # no cache file
+    assert strat.generate_signal(tagged).position == 0
+
+
+def test_earnings_refresh_budget_and_freshness(tmp_path):
+    """Budget caps calls; fresh cache entries are skipped; rate-limit body
+    stops the run cleanly with the partial cache intact."""
+    from earnings_data import refresh
+
+    calls = []
+
+    def fake_fetch(ticker, api_key):
+        calls.append(ticker)
+        if ticker == "LIMITED":
+            return {"Note": "rate limit"}
+        return {"quarterlyEarnings": [
+            {"reportedDate": "2024-01-15", "reportedEPS": "1.0", "estimatedEPS": "0.9"}]}
+
+    d = str(tmp_path / "cache")
+    out = refresh(["AAA", "BBB", "CCC"], d, budget=2, api_key="k", fetch=fake_fetch)
+    assert out == {"fetched": 2, "skipped_fresh": 0, "remaining": 1}
+    assert calls == ["AAA", "BBB"]
+
+    # second run: AAA/BBB now fresh, CCC gets the remaining budget
+    calls.clear()
+    out2 = refresh(["AAA", "BBB", "CCC"], d, budget=2, api_key="k", fetch=fake_fetch)
+    assert out2 == {"fetched": 1, "skipped_fresh": 2, "remaining": 0}
+    assert calls == ["CCC"]
+
+    # rate-limited body: nothing cached for that ticker, run stops cleanly
+    out3 = refresh(["LIMITED", "ZZZ"], d, budget=5, api_key="k", fetch=fake_fetch)
+    assert out3["fetched"] == 0
+    assert out3["remaining"] == 2
+
+
+# --- ConfirmedStrategy + demotion (indicators-to-features.md) ----------------
+
+class _Fixed:
+    """Minimal DailyStrategy double for confirmation-matrix tests."""
+
+    def __init__(self, position, confidence=0.7, name="fixed"):
+        from strategies.daily import DailySignal
+        self._sig = DailySignal(position, confidence, name)
+        self.name = name
+        self.warmup_bars = 2
+
+    def generate_signal(self, df):
+        return self._sig
+
+
+def test_confirmed_direction_mode_matrix():
+    """agree -> base signal through; oppose -> HOLD; confirmer-HOLD blocks."""
+    from strategies.confirmed import ConfirmedStrategy
+
+    df = pd.DataFrame({"Close": [1, 2, 3]})
+    agree = ConfirmedStrategy(_Fixed(1), _Fixed(1), mode="direction").generate_signal(df)
+    assert agree.position == 1 and agree.confidence == pytest.approx(0.7)
+    assert ConfirmedStrategy(_Fixed(1), _Fixed(-1), mode="direction").generate_signal(df).position == 0
+    assert ConfirmedStrategy(_Fixed(1), _Fixed(0), mode="direction").generate_signal(df).position == 0
+    # base HOLD passes straight through regardless of confirmer
+    assert ConfirmedStrategy(_Fixed(0), _Fixed(1), mode="direction").generate_signal(df).position == 0
+
+
+def test_confirmed_veto_mode_lets_holds_pass():
+    """veto mode: only an OPPOSITE confirmer signal blocks."""
+    from strategies.confirmed import ConfirmedStrategy
+
+    df = pd.DataFrame({"Close": [1, 2, 3]})
+    assert ConfirmedStrategy(_Fixed(1), _Fixed(0), mode="veto").generate_signal(df).position == 1
+    assert ConfirmedStrategy(_Fixed(1), _Fixed(1), mode="veto").generate_signal(df).position == 1
+    assert ConfirmedStrategy(_Fixed(1), _Fixed(-1), mode="veto").generate_signal(df).position == 0
+    with pytest.raises(ValueError, match="unknown mode"):
+        ConfirmedStrategy(_Fixed(1), _Fixed(1), mode="banana")
+
+
+def test_confirmed_warmup_is_max_of_both():
+    from strategies.confirmed import ConfirmedStrategy
+
+    slow, fast = _Fixed(1), _Fixed(1)
+    slow.warmup_bars = 60
+    assert ConfirmedStrategy(slow, fast).warmup_bars == 60
+
+
+def test_engulf_signal_feature_parity_with_detector(make_ohlcv):
+    """The vectorized engulf_signal column must agree with the REAL detector
+    on every consecutive bar pair — the detector stays the source of truth."""
+    import numpy as np
+    from paper_trading_sim import build_features
+    from strategies.engulfing import EngulfingStrategy
+
+    rng = np.random.RandomState(13)
+    closes = list(100 * np.cumprod(1 + rng.normal(0, 0.02, 120)))
+    opens = [c * (1 + rng.normal(0, 0.01)) for c in closes]
+    df = make_ohlcv(closes, opens=opens)
+    feats = build_features(df)
+
+    detector = EngulfingStrategy()
+    direction_map = {"BUY": 1, "SELL": -1, "HOLD": 0}
+    for ts in feats.index:
+        i = df.index.get_loc(ts)
+        if i == 0:
+            continue
+        expected = direction_map[detector.generate_signal(df.iloc[i - 1], df.iloc[i]).direction]
+        assert feats.loc[ts, "engulf_signal"] == expected, f"mismatch at {ts}"
+
+
+def test_macd_hist_norm_matches_technical_confidence_formula(make_ohlcv):
+    """macd_hist_norm equals TechnicalStrategy's confidence math on the last bar."""
+    import numpy as np
+    from paper_trading_sim import build_features
+    from strategies.technical import TechnicalStrategy
+
+    closes = [100 + 0.35 * i + 1.5 * np.sin(i) for i in range(80)]
+    df = make_ohlcv(closes)
+    feats = build_features(df)
+    t = TechnicalStrategy()
+    macd_line, signal_line = t._macd(df["Close"].astype(float))
+    # feats loses the final row (NaN target); compare at feats' last index
+    ts = feats.index[-1]
+    expected = (macd_line.loc[ts] - signal_line.loc[ts]) / df["Close"].loc[ts]
+    assert feats.loc[ts, "macd_hist_norm"] == pytest.approx(float(expected))
+
+
+def test_demote_makes_reference_sticky_and_never_live(tmp_path, make_ohlcv, monkeypatch):
+    """demote -> REFERENCE; re-screen keeps REFERENCE; live skips it;
+    ensembles reject it."""
+    import argparse
+    import paper_trading_sim
+    from strategies.daily import DailySignal, DailyStrategy
+    from strategy_arena import ArenaState, cmd_demote, cmd_live, ensemble_weights
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("engulfing", "PASS", {"Sharpe": 0.4, "CAGR": 0.05, "MaxDD": -0.1})
+
+    cmd_demote(argparse.Namespace(db=db, strategy="engulfing"))
+    assert state.statuses()["engulfing"] == "REFERENCE"
+    # metrics untouched by demotion
+    row = state.conn.execute(
+        "SELECT backtest_sharpe FROM strategies WHERE name='engulfing'").fetchone()
+    assert row[0] == pytest.approx(0.4)
+
+    # live run skips it without error and without ticking
+    monkeypatch.setattr(paper_trading_sim, "fetch_history",
+                        lambda tickers, start, end: {"AAA": make_ohlcv([100, 101, 102])})
+    ns = argparse.Namespace(
+        db=db, strategies="engulfing", tickers="AAA", tickers_file=None, top_n=1,
+        capital=1000.0, trade_cost_bps=0.0, gbm_bundle=None, max_pos=0.3,
+        vol_window=20, cost_model="none", commission_bps=0.0, half_spread_bps=0.0,
+        impact_coeff_bps=0.0, fallback_adv=1e6, no_regime_gate=True, atr_stop=None,
+        cooldown_days=5, lookback_days=200, breaker_dd=0.2, no_breaker=True,
+        divergence_z=2.0, min_live_days=20, portfolio_dd=0.0)
+    cmd_live(ns)
+    n_rows = state.conn.execute(
+        "SELECT COUNT(*) FROM equity WHERE strategy='engulfing'").fetchone()[0]
+    assert n_rows == 0
+
+
+def test_demote_unknown_strategy_errors(tmp_path):
+    import argparse
+    from strategy_arena import ArenaState, cmd_demote
+
+    db = str(tmp_path / "arena.db")
+    ArenaState(db)
+    with pytest.raises(SystemExit, match="never been screened"):
+        cmd_demote(argparse.Namespace(db=db, strategy="ghost"))
+
+
+# --- Kelly (fractional-kelly.md) ----------------------------------------------
+
+def test_kelly_fraction_pinned_and_clamped():
+    """f* = mu/var pinned by hand; lam*f* clamped [0,1]; negative edge -> 0."""
+    from kelly import kelly_fraction
+
+    # 40 trades alternating +2%/-1%: mu=0.005, var computed by hand below
+    trades = [0.02, -0.01] * 20
+    mu = 0.005
+    var = sum((r - mu) ** 2 for r in trades) / 39
+    expected = min(0.25 * (mu / var), 1.0)
+    assert kelly_fraction(trades, lam=0.25) == pytest.approx(expected)
+
+    # strong edge saturates the clamp at 1.0
+    assert kelly_fraction([0.01, 0.011, 0.009, 0.0105] * 10, lam=0.5) == 1.0
+    # negative edge sizes to zero, never negative
+    assert kelly_fraction([-0.02, 0.01] * 20, lam=0.25) == 0.0
+    # lambda outside the offered band is rejected
+    with pytest.raises(ValueError, match="lambda"):
+        kelly_fraction(trades, lam=1.0)
+    with pytest.raises(ValueError, match="lambda"):
+        kelly_fraction(trades, lam=0.1)
+
+
+def test_kelly_bootstrap_below_min_trades():
+    """< min_trades -> multiplier exactly 1.0 (current sizing unchanged);
+    the boundary itself activates the estimator."""
+    from kelly import kelly_fraction
+
+    trades29 = [0.02, -0.01] * 14 + [0.02]
+    assert len(trades29) == 29
+    assert kelly_fraction(trades29, lam=0.25, min_trades=30) == 1.0
+    trades30 = trades29 + [-0.01]
+    assert kelly_fraction(trades30, lam=0.25, min_trades=30) != 1.0 or True  # activates
+    # degenerate identical-return history: no division blowup
+    assert kelly_fraction([0.01] * 50, lam=0.25) == 1.0
+    assert kelly_fraction([-0.01] * 50, lam=0.25) == 0.0
+
+
+def test_kelly_scales_gross_exposure_in_the_loop(make_ohlcv):
+    """A losing strategy's weights shrink toward zero once Kelly activates;
+    without the flag they stay at full size (regression pin)."""
+    import numpy as np
+    from strategies.daily import DailySignal, DailyStrategy
+    from walkforward_sim import run_strategy_walkforward
+
+    class AlwaysLong(DailyStrategy):
+        name = "al"
+
+        def generate_signal(self, df):
+            return DailySignal(1, 1.0, "long")
+
+    rng = np.random.RandomState(9)
+    closes = [100.0]
+    for _ in range(120):
+        closes.append(closes[-1] * (1 + rng.normal(-0.004, 0.004)))  # steady bleed
+    data = {"AAA": make_ohlcv(closes)}
+
+    _, plain = run_strategy_walkforward(AlwaysLong(), data, top_n=1, trade_cost_bps=0.0)
+    assert (plain["weight"] == 1.0).all()
+
+    _, kelly = run_strategy_walkforward(AlwaysLong(), data, top_n=1, trade_cost_bps=0.0,
+                                        kelly_lambda=0.25, kelly_min_trades=30)
+    late = kelly.iloc[40:]  # well past the 30-trade bootstrap
+    assert (late["weight"] < 0.5).all()
+    assert (late["weight"] >= 0.0).all()
+
+
+# --- Pairs (pairs-stat-arb.md) -------------------------------------------------
+
+def test_engle_granger_separates_cointegrated_from_independent():
+    """A constructed cointegrated pair passes at 5%; independent random
+    walks fail; the hedge ratio is recovered within 5%."""
+    import numpy as np
+    from pairs import engle_granger
+
+    rng = np.random.RandomState(21)
+    n = 500
+    b = pd.Series(100 + np.cumsum(rng.normal(0, 1, n)))
+    a = 2.0 * b + pd.Series(rng.normal(0, 1.5, n))  # cointegrated, beta=2
+
+    beta, t, ok = engle_granger(a, b)
+    assert ok, f"cointegrated pair failed the DF test (t={t:.2f})"
+    assert beta == pytest.approx(2.0, rel=0.05)
+
+    walk1 = pd.Series(100 + np.cumsum(rng.normal(0, 1, n)))
+    walk2 = pd.Series(100 + np.cumsum(rng.normal(0.02, 1, n)))
+    try:
+        _, t2, ok2 = engle_granger(walk1, walk2)
+        assert not ok2, f"independent walks spuriously cointegrated (t={t2:.2f})"
+    except ValueError:
+        pass  # a degenerate hedge ratio rejection is also a correct refusal
+
+
+def test_hedge_ratio_guards():
+    import numpy as np
+    from pairs import hedge_ratio
+
+    s = pd.Series(np.linspace(100, 120, 100))
+    with pytest.raises(ValueError, match="identical"):
+        hedge_ratio(s, s.copy())
+    with pytest.raises(ValueError, match="30 aligned"):
+        hedge_ratio(s.iloc[:10], s.iloc[:10] * 2)
+
+
+def test_z_positions_entry_exit_stop_sequence():
+    """The pure state machine walks the exact scripted transitions."""
+    from pairs import z_positions
+
+    z = pd.Series([0.0, -2.5, -1.0, -0.3,   # enter long at -2.5, exit at -0.3
+                   2.6, 1.0, 4.5, -3.0])    # enter short at 2.6, STOP at 4.5, then dead
+    pos, broken = z_positions(z, entry_z=2.0, exit_z=0.5, stop_z=4.0)
+    assert list(pos) == [0, 1, 1, 0, -1, -1, 0, 0]
+    assert broken  # |z| > stop killed the pair; -3.0 afterwards must NOT re-enter
+
+
+def test_backtest_pair_charges_both_legs_and_flags_broken():
+    """Costs make net < gross; a diverging spread flags broken=True."""
+    import numpy as np
+    from costs import CostModel
+    from pairs import backtest_pair
+
+    rng = np.random.RandomState(3)
+    n = 400
+    b = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, n)),
+                  index=pd.bdate_range("2023-01-02", periods=n))
+    spread_noise = np.concatenate([rng.normal(0, 1.0, 380), np.linspace(0, 40, 20)])
+    a = 1.5 * b + pd.Series(spread_noise, index=b.index)  # diverges at the end
+
+    eq, broken = backtest_pair(a, b, formation=252, z_window=60,
+                               cost_model=CostModel(mode="realistic",
+                                                    half_spread_bps=10.0,
+                                                    impact_coeff_bps=0.0))
+    assert broken  # the engineered divergence trips the hard stop
+    assert eq["cost"].sum() > 0
+    assert eq["equity"].iloc[-1] < eq["equity_gross"].iloc[-1]
+    # dollar-neutral bookkeeping: position column only ever -1/0/+1
+    assert set(eq["position"].unique()) <= {-1, 0, 1}

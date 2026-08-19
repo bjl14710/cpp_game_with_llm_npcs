@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""Bench latency history: performance as a time series.
+
+Plan: .claude/plans/bench-latency-history.md. Runs bench_main and
+bench_main_flat K times each, parses their existing latency line, appends
+one row per bench to docs/perf/history.csv, and flags regressions against
+recent SAME-HOST history. Stdlib only — no new dependencies.
+
+Design decisions already fixed by the plan (do not re-litigate):
+- host fingerprint = <hostname>-<arch>-<os>; comparisons never cross hosts
+- regression rule uses MEAN only (macOS timer granularity quantizes
+  percentiles: observed p50=0 at mean=30.9 ns), threshold vs the median of
+  the last N matching rows
+- best-of-K row is recorded; all K means kept in runs_json for forensics
+- rows are appended even when flagged (history keeps bad days), with the
+  `flagged` column set; dirty worktrees record "<hash>-dirty"
+- workload is the deterministic synthetic 100k-add stream the benches run
+  with no argument, so rows stay comparable across runs and machines
+
+Exit codes: 0 ok / insufficient history, 1 regression, 2 build/parse error.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import platform
+import re
+import statistics
+import subprocess
+import sys
+from dataclasses import astuple, dataclass, fields
+from datetime import datetime, timezone
+from pathlib import Path
+
+#: The exact line the benches print today. If this ever fails to match,
+#: fail LOUDLY (exit 2) — never record garbage (plan decision 7).
+LATENCY_RE = re.compile(
+    r"Latency \(ns\):\s+p50=(\d+)\s+p99=(\d+)\s+p99\.9=(\d+)\s+"
+    r"mean=([\d.]+)\s+max=(\d+)"
+)
+
+#: The workload-size line; recorded as `messages` so the regression check
+#: only ever compares rows run over the same number of timed events.
+MESSAGES_RE = re.compile(r"Total timed events:\s+(\d+)")
+
+#: On-disk schema version. The CSV's first physical line is this marker so a
+#: reader refuses to append to a file written under a different schema
+#: (plan edge case: "header mismatch -> exit 2").
+SCHEMA_VERSION = 1
+CSV_SCHEMA_LINE = f"# bench_history schema={SCHEMA_VERSION}"
+
+DEFAULT_RUNS = 5
+DEFAULT_THRESHOLD = 0.20
+DEFAULT_HISTORY_N = 5
+
+#: Benches to track, in report order. Values are the built binary's path
+#: relative to the repo's _build directory.
+BENCHES = ("bench_main", "bench_main_flat")
+
+
+@dataclass(frozen=True)
+class BenchRow:
+    """One recorded benchmark observation (one CSV row)."""
+
+    commit: str
+    date_utc: str
+    host_id: str
+    bench: str
+    messages: int
+    p50_ns: int
+    p99_ns: int
+    p999_ns: int
+    mean_ns: float
+    max_ns: int
+    runs_json: str
+    flagged: bool
+
+
+#: Column order for the CSV header, derived from the dataclass so the two can
+#: never drift apart.
+CSV_COLUMNS = [f.name for f in fields(BenchRow)]
+
+
+def parse_latency_line(output: str) -> dict[str, float]:
+    """Extract p50/p99/p99.9/mean/max from bench stdout; raise on drift.
+
+    Returns ints for the percentiles and max, a float for the mean. Raising
+    on any format change is deliberate (plan decision 7): a silently wrong
+    parse would poison the history far more than a loud failure.
+    """
+    m = LATENCY_RE.search(output)
+    if not m:
+        tail = output.strip().splitlines()[-5:]
+        raise ValueError(
+            "bench latency line did not match expected format; last lines:\n"
+            + "\n".join(tail)
+        )
+    return {
+        "p50": int(m.group(1)),
+        "p99": int(m.group(2)),
+        "p999": int(m.group(3)),
+        "mean": float(m.group(4)),
+        "max": int(m.group(5)),
+    }
+
+
+def parse_messages(output: str) -> int:
+    """Extract the timed-event count (the workload size) from bench stdout."""
+    m = MESSAGES_RE.search(output)
+    if not m:
+        raise ValueError("bench output missing 'Total timed events' line")
+    return int(m.group(1))
+
+
+def regression_verdict(
+    new_mean: float,
+    history_means: list[float],
+    threshold: float = DEFAULT_THRESHOLD,
+    n: int = DEFAULT_HISTORY_N,
+) -> tuple[bool, str]:
+    """(flagged, human message) for a new mean vs recent same-host history.
+
+    Fewer than `n` prior rows is not a pass or a fail — it is recorded but
+    not judged. Otherwise the new mean is flagged iff it exceeds the median
+    of the last `n` matching means by more than `threshold` (a fraction).
+    """
+    if len(history_means) < n:
+        return (
+            False,
+            f"insufficient history — recorded, not judged "
+            f"({len(history_means)} of {n} prior rows)",
+        )
+    baseline = statistics.median(history_means[-n:])
+    limit = (1.0 + threshold) * baseline
+    pct = (new_mean / baseline - 1.0) * 100.0 if baseline else 0.0
+    if new_mean > limit:
+        return (
+            True,
+            f"REGRESSION: mean {new_mean:.1f} ns is {pct:+.1f}% vs median "
+            f"{baseline:.1f} ns of last {n} (threshold {threshold:.0%})",
+        )
+    return (
+        False,
+        f"ok: mean {new_mean:.1f} ns is {pct:+.1f}% vs median "
+        f"{baseline:.1f} ns of last {n} (threshold {threshold:.0%})",
+    )
+
+
+def host_id() -> str:
+    """<hostname>-<arch>-<os>, e.g. brandons-mbp-arm64-darwin.
+
+    Latency numbers are meaningless across machines, so every row carries
+    this fingerprint and the regression check only compares rows that share
+    it (plan decision 1).
+    """
+    node = platform.node().split(".")[0]  # drop any .local / domain suffix
+    parts = [node, platform.machine(), platform.system()]
+    return "-".join(p.lower() for p in parts).replace(" ", "")
+
+
+def git_commit(repo_root: Path) -> str:
+    """Short commit hash, suffixed '-dirty' when the tree has changes.
+
+    An honest row records the state it was measured in; a dirty tree means
+    the numbers may not correspond to any committed code.
+    """
+    try:
+        rev = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        return f"{rev}-dirty" if dirty else rev
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+def read_history(path: Path) -> list[dict[str, str]]:
+    """Read history rows, validating the schema marker; [] if file absent.
+
+    A first line that is not the current schema marker means the file was
+    written under a different format — refuse rather than silently mix
+    (plan edge case). Callers treat that as exit 2.
+
+    Values come back as strings (csv.DictReader); notably `flagged` is the
+    text "True"/"False", so a future reader must not do a bare truthiness
+    check on it. Only `mean_ns` is consumed downstream (via _matching_means),
+    where it is explicitly float()-cast.
+    """
+    if not path.exists():
+        return []
+    with path.open(newline="") as fh:
+        first = fh.readline().rstrip("\n")
+        if first != CSV_SCHEMA_LINE:
+            raise ValueError(
+                f"history schema mismatch: expected '{CSV_SCHEMA_LINE}', "
+                f"found '{first}' in {path}"
+            )
+        return list(csv.DictReader(fh))
+
+
+def append_row(path: Path, row: BenchRow) -> None:
+    """Append one row, creating the file with marker + header if needed."""
+    new_file = not path.exists()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", newline="") as fh:
+        # LF (not the csv default CRLF) keeps the committed file diff-clean
+        # — no invisible ^M creeping into git diffs on each append.
+        writer = csv.writer(fh, lineterminator="\n")
+        if new_file:
+            fh.write(CSV_SCHEMA_LINE + "\n")
+            writer.writerow(CSV_COLUMNS)
+        writer.writerow(astuple(row))
+
+
+def ensure_benches(repo_root: Path) -> dict[str, Path]:
+    """Return {name: binary path}, building any missing bench first.
+
+    Raises subprocess.CalledProcessError on build failure (caller -> exit 2).
+    Reuses the existing _build directory; configures via build_cpp.sh only if
+    it is absent, then builds just the bench targets.
+    """
+    build_dir = repo_root / "_build"
+    paths = {name: build_dir / "cpp" / "itch" / name for name in BENCHES}
+    missing = [name for name, p in paths.items() if not p.exists()]
+    if not missing:
+        return paths
+
+    if not build_dir.exists():
+        subprocess.run(
+            ["bash", str(repo_root / "scripts" / "build_cpp.sh")],
+            check=True,
+        )
+    subprocess.run(
+        ["cmake", "--build", str(build_dir), "--target", *BENCHES],
+        check=True,
+    )
+    return paths
+
+
+def run_bench(binary: Path, runs: int) -> tuple[dict[str, float], int, list[float]]:
+    """Run one bench `runs` times; return best-by-mean metrics, workload, means.
+
+    Best-of-K (lowest mean) is the standard low-noise estimator for "what
+    the code can do"; all K means ride along for forensics (plan decision 3).
+    """
+    best: dict[str, float] | None = None
+    messages = 0
+    means: list[float] = []
+    for _ in range(runs):
+        out = subprocess.run(
+            [str(binary)], capture_output=True, text=True, check=True
+        ).stdout
+        metrics = parse_latency_line(out)
+        messages = parse_messages(out)
+        means.append(metrics["mean"])
+        if best is None or metrics["mean"] < best["mean"]:
+            best = metrics
+    assert best is not None  # runs >= 1 guaranteed by argparse
+    return best, messages, means
+
+
+def _matching_means(
+    history: list[dict[str, str]], host: str, bench: str, messages: int
+) -> list[float]:
+    """Means of prior rows sharing (host_id, bench, workload), in file order.
+
+    Rows from another machine, another bench, or a different workload size
+    are never comparable and must not enter the window (plan decision 1).
+    """
+    out = []
+    for r in history:
+        if (
+            r.get("host_id") == host
+            and r.get("bench") == bench
+            and r.get("messages") == str(messages)
+        ):
+            out.append(float(r["mean_ns"]))
+    return out
+
+
+def main() -> int:
+    """Run benches, append rows, print verdicts. See module docstring."""
+    repo_root = Path(__file__).resolve().parent.parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--check-only", action="store_true",
+        help="judge against history but do not append rows",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=DEFAULT_THRESHOLD,
+        help=f"regression fraction over the median (default {DEFAULT_THRESHOLD})",
+    )
+    parser.add_argument(
+        "--runs", type=int, default=DEFAULT_RUNS,
+        help=f"bench invocations per bench, best-of-K (default {DEFAULT_RUNS})",
+    )
+    parser.add_argument(
+        "--history", type=Path,
+        default=repo_root / "docs" / "perf" / "history.csv",
+        help="path to the history CSV",
+    )
+    args = parser.parse_args()
+    if args.runs < 1:
+        parser.error("--runs must be >= 1")
+
+    # Build (or locate) the benches; a build failure is exit 2, not a crash.
+    try:
+        paths = ensure_benches(repo_root)
+    except subprocess.CalledProcessError as exc:
+        print(f"build failed: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        history = read_history(args.history)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    host = host_id()
+    commit = git_commit(repo_root)
+    date_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    any_regression = False
+    for bench in BENCHES:
+        try:
+            metrics, messages, means = run_bench(paths[bench], args.runs)
+        except (subprocess.CalledProcessError, ValueError) as exc:
+            print(f"{bench}: {exc}", file=sys.stderr)
+            return 2
+
+        prior = _matching_means(history, host, bench, messages)
+        flagged, message = regression_verdict(
+            metrics["mean"], prior, args.threshold
+        )
+        any_regression = any_regression or flagged
+        print(f"{bench} [{host}]: {message}")
+
+        if not args.check_only:
+            append_row(
+                args.history,
+                BenchRow(
+                    commit=commit,
+                    date_utc=date_utc,
+                    host_id=host,
+                    bench=bench,
+                    messages=messages,
+                    p50_ns=int(metrics["p50"]),
+                    p99_ns=int(metrics["p99"]),
+                    p999_ns=int(metrics["p999"]),
+                    mean_ns=metrics["mean"],
+                    max_ns=int(metrics["max"]),
+                    runs_json=json.dumps(means),
+                    flagged=flagged,
+                ),
+            )
+
+    return 1 if any_regression else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,36 @@
+ORIGINAL USER PROMPT (2026-06-11) — city NPC build for cpp_game_with_llm_npcs
+==============================================================================
+
+I want to run this game with some simple npcs, can you install ollama and
+apply it to this game? Please create 10 main characters, don't worry about
+story line, just add them to a map that represents a city, they can be shop
+owners, pedestrians, cops, etc, have a map that I can just run the bat file
+and walk around the city map in the game. Then I can press a button, maybe
+'t' and then it allows for me to talk to them. Add a menu where I can set the
+keys. Use wasd for walking and the mouse for clicking, etc. Add unit tests
+for this and make sure to constantly test. Please make smaller commits, like
+2 to 3 files change, and push them so I can see what changes you are making
+and I can see if there are some that need to be resolved. Include
+documentation on playing the game and add the readmes for the developers.
+Use what you find in the other cpp games to make sure that the latency is low
+if you can. But focus on the characters first and communication with them
+first. If you run out of tokens, then sleep until the session resets. Check
+maybe every 30 minutes or so then continue with this prompt. Save the prompt
+in a text file if you need to and reread it every 30 minutes to make sure
+that you can, if you can't then maybe the usage for the session is done?
+
+DECISIONS MADE WITH USER (2026-06-12)
+- Map style: first-person 3D city (like cpp_shooter_game, SFML + OpenGL)
+- Ollama: install rootless in this container for end-to-end testing
+- Default model: qwen2.5:3b-instruct (unchanged); streaming added for latency
+- Push target: existing branch initial_npcs_and_world
+
+APPROVED PLAN: /home/node/.claude/plans/tender-herding-cupcake.md
+(21-commit sequence; core/app split; tests via tests/Makefile with plain g++)
+
+RESUME PROCEDURE (after interruption/compaction/usage reset)
+1. Read this file and the plan file above.
+2. cd /home/node/work/normal_work/cpp_games/cpp_game_with_llm_npcs
+3. git log --oneline -10  -> find last completed commit number vs plan list.
+4. make -C tests test  -> confirm green before continuing.
+5. Continue with the next commit in the plan sequence; push after each.

@@ -1,0 +1,6 @@
+# CMake / make build outputs
+build/
+tests/build/
+
+# Local cloud API key (never commit secrets); see config/secrets.cfg.example
+config/secrets.cfg

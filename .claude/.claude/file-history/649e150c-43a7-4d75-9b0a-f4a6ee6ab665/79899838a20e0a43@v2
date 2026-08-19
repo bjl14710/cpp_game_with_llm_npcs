@@ -1,0 +1,79 @@
+"""Pytest plumbing for the HFT practice exercises.
+
+Exercise modules live in exercises/<NN_name>/ (user stubs) and
+solutions/<NN_name>/ (reference implementations). Both trees have identical
+filenames, so the same test suite can grade either one:
+
+    uv run pytest tests/exercises/ -v                          # grade your work
+    HFT_EXERCISE_TARGET=solutions uv run pytest tests/exercises/ -v   # verify suite
+
+Stubs raise NotImplementedError; the wrapper hook below turns that into a
+skip, so the default repo-wide test run stays green until you start an
+exercise. A filled-in-but-wrong implementation fails normally.
+"""
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXERCISE_TESTS_DIR = Path(__file__).resolve().parent
+TARGET = os.environ.get("HFT_EXERCISE_TARGET", "exercises")
+
+
+@pytest.fixture(scope="session")
+def exercise_target() -> str:
+    """Which tree is being graded: 'exercises' (default) or 'solutions'."""
+    return TARGET
+
+
+@pytest.fixture(scope="session")
+def load_exercise():
+    """Load an exercise module by file path (dirs like 01_order_book aren't
+    importable package names)."""
+
+    def _load(exercise_dir: str, module: str):
+        path = REPO_ROOT / TARGET / exercise_dir / f"{module}.py"
+        if not path.exists():
+            pytest.fail(f"Exercise module not found: {path}")
+        name = f"{TARGET}_{exercise_dir}_{module}"
+        spec = importlib.util.spec_from_file_location(name, path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    return _load
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_setup(item):
+    # Stubs may raise NotImplementedError from fixtures too (e.g. __init__).
+    try:
+        return (yield)
+    except NotImplementedError:
+        pytest.skip("Exercise not implemented yet — fill in the TODO")
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    try:
+        return (yield)
+    except NotImplementedError:
+        pytest.skip("Exercise not implemented yet — fill in the TODO")
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        path = Path(item.fspath)
+        try:
+            path.relative_to(EXERCISE_TESTS_DIR)
+        except ValueError:
+            continue
+        item.add_marker(pytest.mark.exercise)
+        if path.name == "test_04_spsc_ring.py":
+            item.add_marker(pytest.mark.cpp)
+        elif path.name == "test_05_vhdl.py":
+            item.add_marker(pytest.mark.vhdl)

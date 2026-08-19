@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0018 — Set Dressing as Authored Data</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0018 · World building · from issue #66 (street dressing)</div>
+<h1>Set Dressing as Authored Data</h1>
+<p>Making a game world feel lived-in usually tempts people toward new
+systems — spawners, prop managers, scatter tools. This change added five
+parked cars and three alley props with <em>zero new code</em>: every object
+is a data row in the same authored list that buildings use, and the existing
+render/collision pipeline does the rest.</p>
+
+<h2>The pipeline you already have is the feature</h2>
+<pre><code>City::makeDowntown()      one Building row: id + AABB + height
+        ↓
+Assets curated_           id → model stem  ("police_car" → "car_police")
+Assets sizeSpecs_         id → Uniform world height (1.5)
+        ↓
+drawCity buildings pass   model scaled/centered on the authored AABB
+City collision            the SAME AABB blocks the player</code></pre>
+<p>Because visuals render <em>from</em> collision data, a prop can't be
+walk-through and a collider can't be invisible. Liveliness becomes a data
+authoring problem: pick spots, write rows.</p>
+
+<h2>Constraints make placement a real design task</h2>
+<ul>
+<li><strong>Model orientation</strong>: KayKit cars are Z-long at identity
+and the Uniform path doesn't rotate — so every parking spot must sit on a
+Z-running street. The police car parks <em>beside</em> its station block,
+not on the station-front street. Cheaper than adding rotation support, and
+honest about what the pipeline can express.</li>
+<li><strong>Collision honesty</strong>: the first draft used generous 6.5-
+unit boxes centered mid-lane — the car floated in an invisible cage, visibly
+"parked" in the middle of the road. Boxes now hug the curb and match the
+visual footprint (~4 units).</li>
+<li><strong>Don't trap the actors</strong>: spots avoid zebra tiles,
+junctions, shop doors, and every persona's home position (Hal at (36,0) was
+the close call).</li>
+</ul>
+
+<h2>Lock the invariants with data-driven tests</h2>
+<p>Two cheap tests make the whole category regression-proof:</p>
+<ul>
+<li><strong>Completeness</strong>: every visible obstacle id resolves via
+<code>findBuilding</code> and collides at its probe point — a new prop that
+skips City fails immediately.</li>
+<li><strong>Clearance</strong>: every persona home spot and the four
+crossing centers keep a clear 0.5-radius circle — future set dressing that
+would trap an NPC fails before a screenshot is ever taken.</li>
+</ul>
+<div class="callout good"><strong>The pattern.</strong> When adding content,
+ask "which existing table does this belong to?" before "which new system do
+I write?" A world where props, cars, lights, and bushes are all rows in one
+authored list stays auditable — the tests literally iterate the design.</div>
+</div></body>
+</html>

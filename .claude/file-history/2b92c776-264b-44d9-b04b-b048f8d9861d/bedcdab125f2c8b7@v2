@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Draft PR for issue #65 + issue bookkeeping."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+body = (
+    "Closes #65. Second PR of the city-polish milestone; stacks on #68 "
+    "(base = `feature/issue-64-plaza-fountain`), so this diff is one "
+    "commit.\n\n"
+    "## What changed\n"
+    "- The flat asphalt `DrawCube` strips are replaced by the pack's road "
+    "tiles (`road_straight` / `road_straight_crossing` / `road_junction`, "
+    "all already downloaded) laid over the documented street grid. Tile "
+    "pitch = the 16-unit street width; centers sit at multiples of 16 so "
+    "the four junctions at (±32,±32) land exactly on tile centers; the four "
+    "arm tiles beside each junction carry zebra crossings where the "
+    "sidewalks meet; a compressed end-cap tile covers the final 6 units to "
+    "the ±110 map edge.\n"
+    "- **Thickness is pinned, not Fill-scaled**: the tiles are 2×2×0.1, and "
+    "a true 8× fill would raise a 0.8-unit curb above the flat collision "
+    "plane. XZ scale comes from the model bounds per the Fill contract; Y "
+    "is pinned to 0.05.\n"
+    "- The cube strips remain as the fallback when road models are missing, "
+    "so the assets-not-downloaded path still renders.\n"
+    "- No City/collision changes — streets stay flat and walkable.\n\n"
+    "## Verification\n"
+    "- Down-street screenshot: yellow edge lines, dashed center line, zebra "
+    "crossings, junction art — orientation correct on both street "
+    "directions (~60 tile draws total, no frame cost visible).\n"
+    "- Plaza regression shot unchanged apart from the marked streets.\n"
+    "- Suite green: 127 cases / 824 assertions.\n\n"
+    "Note for the reviewer: the beige slab bottom-right of every smoke "
+    "screenshot is the #60 fist viewmodel (camera-anchored), not a road "
+    "artifact — verified by its fixed screen position across vantages.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+pr = retry(lambda: repo.create_pull(
+    title="feat(render): real road tiles with lane markings (#65)",
+    body=body,
+    head="feature/issue-65-road-tiles",
+    base="feature/issue-64-plaza-fountain",
+    draft=True), "create pr")
+print(f"PR #{pr.number}: {pr.html_url}")
+
+issue = retry(lambda: repo.get_issue(65), "issue")
+retry(lambda: issue.add_to_labels("ai-completed"), "label")
+try:
+    issue.remove_from_labels("ai-in-progress")
+except GithubException:
+    pass
+retry(lambda: issue.create_comment(
+    f"Implemented in draft PR #{pr.number} (stacked on #68). Street-level "
+    "and plaza screenshots verified markings, crossings, and junctions; "
+    "suite green at 127 cases / 824 assertions."), "comment")
+retry(lambda: issue.edit(state="closed"), "close")
+print("issue #65 closed")

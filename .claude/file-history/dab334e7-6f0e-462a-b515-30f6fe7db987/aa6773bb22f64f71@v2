@@ -1,0 +1,69 @@
+"""Read-only data layer for the Streamlit dashboard — scaffold.
+
+Spec: .claude/plans/streamlit-dashboard.md. Everything here is a pure
+function importable WITHOUT streamlit installed (the pytest suite tests
+this module only). Presentation lives in dashboard.py.
+
+Read-only invariant: the arena DB is opened with a SQLite `mode=ro` URI so
+a dashboard bug can never mutate a ledger.
+"""
+from __future__ import annotations
+
+from typing import Dict, List
+
+import pandas as pd
+
+#: Status -> emoji badge (st.dataframe can't render HTML badges).
+STATUS_BADGES: Dict[str, str] = {
+    "PASS": "✅ PASS",
+    "PROBATION": "🟡 PROBATION",
+    "PAUSED": "⏸ PAUSED",
+    "EXCLUDED": "🚫 EXCLUDED",
+    "REFERENCE": "📚 REFERENCE",
+    "RESEARCH": "🔬 RESEARCH",
+}
+
+
+def arena_rows(db_path: str) -> List[dict]:
+    """Comparison rows from the arena DB, badge-decorated, or [] if absent.
+
+    TODO(implement): sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    -> analyze_equity.compare_strategies -> records; map status through
+    STATUS_BADGES into a `badge` key; missing file / empty DB -> [].
+    One locked-DB retry, then raise a FriendlyDashboardError the UI shows.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/streamlit-dashboard.md")
+
+
+def arena_headline(rows: List[dict]) -> Dict[str, int]:
+    """{'tracked': N, 'live': N_pass, 'diverged': N_flagged} for st.metric row.
+
+    TODO(implement): counts over arena_rows() output.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/streamlit-dashboard.md")
+
+
+def equity_metrics(csv_path: str) -> Dict:
+    """{'metrics': compute_metrics dict, 'frame': equity DataFrame}.
+
+    TODO(implement): delegate to analyze_equity.compute_metrics on the
+    'equity' column; include equity_gross in frame when present; missing
+    file or column -> the same error text analyze-equity's CLI gives,
+    raised as FriendlyDashboardError for st.error.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/streamlit-dashboard.md")
+
+
+def live_tape(tickers: List[str], interval: str, strategy_name: str,
+              seen: Dict | None = None) -> List[str]:
+    """One live_watch polling pass, returned as printable lines.
+
+    TODO(implement): STRATEGIES[strategy_name]() + live_watch.watch_once
+    with _default_fetch; per-ticker failure isolation flows through from
+    watch_once unchanged.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/streamlit-dashboard.md")
+
+
+class FriendlyDashboardError(RuntimeError):
+    """Raised for conditions the UI should render as a notice, not a traceback."""

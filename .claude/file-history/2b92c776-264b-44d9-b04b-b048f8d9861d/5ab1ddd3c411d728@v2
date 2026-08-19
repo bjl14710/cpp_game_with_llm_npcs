@@ -1,0 +1,262 @@
+"""Create milestone + 3 ready-for-ai issues for the aim-styles-preview plan."""
+import os, subprocess, re, sys, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+username = os.environ.get("GITHUB_USERNAME")
+if not token or not username:
+    sys.exit("Need GH_TOKEN/TOKEN and GITHUB_USERNAME")
+
+remote = subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", remote).group(1)
+gh = Github(token)
+repo = gh.get_repo(full)
+
+existing_titles = {i.title.lower() for i in repo.get_issues(state="open") if i.pull_request is None}
+
+def retry(fn, *a, **k):
+    """GitHub WAF sometimes throws transient 400s; retry a few times."""
+    for attempt in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if attempt == 4:
+                raise
+            print(f"    transient error ({type(e).__name__}), retrying...")
+            time.sleep(3 + attempt * 2)
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Base & scaffolding
+Base branch: `feature/player-journal` (where combat, the part catalog, and the
+creator preview all live). Skeletons + skipped tests for all three tasks were
+already scaffolded on `feature/aim-styles-preview` (branch from there or reuse
+the stubs). Full spec: `.claude/plans/aim-styles-preview.md`.
+
+## Branch name
+`feature/issue-{number}-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+specs = [
+    {
+        "title": "fix(combat): aim the gun where the camera looks, from eye height",
+        "slug": "aim-from-look-vector",
+        "what": (
+            "The pistol fires from the player's FEET, horizontally, ignoring "
+            "camera pitch — the same class of bug as the moonwalk fix (#61): the "
+            "aim is reconstructed separately from the authoritative look vector "
+            "and has drifted out of sync. The camera builds a full 3D look "
+            "direction from yaw AND pitch (RaylibRenderer.cpp:141-142); combat "
+            "rebuilds a degraded aim `flatForward(player.yawDeg)` (yaw-only, "
+            "horizontal) and spawns the projectile from `player_.position` (feet) "
+            "with the direction flattened to y=0 (World.cpp:34,36). Fix it AT THE "
+            "SOURCE: introduce one shared `lookDirection(yaw,pitch)` (full 3D, "
+            "normalized) that BOTH the camera and the weapon consume, and spawn "
+            "the projectile from eye height along that full 3D aim so every "
+            "current and future weapon aims where you look by construction."
+        ),
+        "where": (
+            "`src/core/Math.hpp` — new `lookDirection(yawDeg,pitchDeg)` + "
+            "`kEyeHeight` (already scaffolded as a placeholder to complete). "
+            "`src/app/RaylibRenderer.cpp:138-144` — camera target derives from "
+            "`lookDirection` + `kEyeHeight` (remove the inline duplicate). "
+            "`src/app/main.cpp` — pass `lookDirection(player.yawDeg, "
+            "player.pitchDeg)` to `world.playerAttack(...)` (TODO(aim) anchor "
+            "in place). `src/core/World.cpp:34-41` — spawn from eye height along "
+            "the full 3D aim, drop the y=0 flatten (TODO(aim) anchor in place). "
+            "`tests/test_aim.cpp` — 4 skipped stubs already scaffolded; un-skip "
+            "and complete them."
+        ),
+        "verify": (
+            "Un-skip and implement the 4 stubs in `tests/test_aim.cpp`, then "
+            "`make -C tests test` is green: (1) `lookDirection(yaw,0)` equals the "
+            "horizontal forward `normalize(sin yaw,0,cos yaw)`; (2) convention "
+            "`lookDirection(0,0)~(0,0,1)`, `(90,0)~(1,0,0)`, pitch>0 -> +y, "
+            "pitch<0 -> -y; (3) `playerAttack` with a downward aim spawns a "
+            "projectile with `direction.y < 0` and `position.y == kEyeHeight`; "
+            "(4) regression — firing pitched-up vs level yields different "
+            "`direction.y`."
+        ),
+        "constraints": (
+            "Derived-value fix at the source, NOT a per-weapon or per-animation "
+            "patch — that is the whole point (a new weapon must not be able to "
+            "reintroduce the bug). Keep `flatForward` for WASD movement (walking "
+            "stays horizontal; only AIM consumes pitch). Do NOT add a stored aim "
+            "field to Player — derive per-shot. Out of scope: crosshair art, "
+            "bullet drop/gravity, NPC vertical aim, multiplayer combat "
+            "replication (solo/host only), changing Fist melee targeting."
+        ),
+        "economy_note": (
+            "One new pure function + one constant in the existing `Math.hpp` "
+            "(reuse `normalize`/`degToRad`); edits to 4 existing call sites; no "
+            "new files beyond the already-scaffolded `tests/test_aim.cpp`. No new "
+            "types, no aim/input abstraction layer."
+        ),
+        "concept": (
+            "Single source of truth for a derived direction vector: deriving aim "
+            "from the authoritative look every frame instead of storing a "
+            "parallel copy that drifts (the moonwalk/aim-drift class)"
+        ),
+    },
+    {
+        "title": "feat(creator): more style-tagged character parts and palettes",
+        "slug": "more-character-styles",
+        "what": (
+            "Extend the character-creator socket/style-tag catalog additively "
+            "with more variety: about two more parts per category "
+            "(Body/Head/Eyes/Hair) and about three more palettes, each with a "
+            "matching primitive recipe in the renderer so it reads as intended "
+            "rather than a plain box. Purely additive within the existing "
+            "contract — no new categories, no new architecture."
+        ),
+        "where": (
+            "`src/core/CharacterParts.cpp` — `partCatalog()` and "
+            "`paletteCatalog()` (TODO(styles) anchors already list the planned "
+            "set: body_slim/body_bulk, head_oval/head_tall, eyes_happy/"
+            "eyes_round, hair_pony/hair_mohawk; palettes berry/slate/mint). "
+            "`src/app/RaylibRenderer.cpp` — `drawCompositeCharacter` bespoke "
+            "shape recipes for the new part ids (parts without a recipe already "
+            "fall back to the generic declared-box cube). "
+            "`tests/test_character_parts.cpp` — the exhaustive combination test "
+            "grows automatically; update any hardcoded count assertions."
+        ),
+        "verify": (
+            "`make -C tests test` green: the existing exhaustive test asserts "
+            "every style-compatible combination (including the new parts) "
+            "assembles (`lookIsValid` == `styleCompatible`); every new part is "
+            "reachable via `partsForCategory` for its category; the >=3 new "
+            "palettes are selectable. Build the game and eyeball the new parts "
+            "and palettes cycling in the Creator page."
+        ),
+        "constraints": (
+            "Additive within the existing contract ONLY: no new PartCategory, no "
+            "new architecture, no textures or skeletal parts. Each new part "
+            "declares id/category/styleTag(round|blocky|any)/localSize/sockets "
+            "(bodies declare a `head` socket; heads declare `eyes` and `hair`). "
+            "Each new part gets a bespoke renderer recipe or relies on the "
+            "documented generic-box fallback."
+        ),
+        "economy_note": (
+            "Add rows to the two existing catalog vectors and shape branches to "
+            "the one existing `drawCompositeCharacter` function. No new files, no "
+            "new types — follow the existing `PartDef`/`PartPalette` row format "
+            "exactly."
+        ),
+        "concept": (
+            "Additive extension of a socket/style-tag content catalog without "
+            "touching the assembly architecture (parts+categories, not parts^2)"
+        ),
+    },
+    {
+        "title": "feat(creator): player-driven preview rotation with idle return-to-front",
+        "slug": "creator-preview-rotation",
+        "what": (
+            "Replace the creator preview's continuous auto-spin with a "
+            "two-state model: rotation is driven ONLY by player input "
+            "(left-drag over the preview, or Left/Right keys); a "
+            "time-since-last-input counter tracks inactivity; and only after an "
+            "idle timeout does the figure EASE toward a fixed default "
+            "orientation (facing the player/camera) — never a continuing spin. "
+            "No code path may advance rotation unconditionally."
+        ),
+        "where": (
+            "`src/app/main.cpp:990-997` — replace `previewSpinDeg += dt*35` with "
+            "the two-state model (TODO(preview) anchor in place, with the exact "
+            "logic). `src/app/Menu.hpp`/`Menu.cpp` — implement the scaffolded "
+            "`Menu::pointOverInteractive(Vector2)` (currently a stub returning "
+            "false) so a drag that starts over a control is a click, not a "
+            "rotate."
+        ),
+        "verify": (
+            "Build the game and check in the Creator page: (1) with no input the "
+            "figure holds still, then after the idle timeout eases to face the "
+            "camera and STOPS (no continuing spin); (2) left-dragging over the "
+            "preview rotates it by the drag delta; Left/Right keys also rotate; "
+            "(3) clicking the cyclers/palette/buttons changes the look WITHOUT "
+            "spinning the preview; (4) there is no frame where rotation advances "
+            "without input or the idle-return ease."
+        ),
+        "constraints": (
+            "Two states only (input-driven, idle-return). No unconditional spin "
+            "anywhere. Do NOT build an opt-in auto-rotate mode now, but structure "
+            "it (e.g. an enum) so adding it later is a clean third case. Defaults "
+            "(logged in the plan, tunable): idle timeout 2.5s, exponential ease "
+            "rate 6.0, drag 0.4 deg/px, arrow keys 90 deg/s, default orientation "
+            "= player.yawDeg + 180 (front toward camera). UI is eyeball-verified "
+            "(raylib window, not unit-testable)."
+        ),
+        "economy_note": (
+            "Implement the scaffolded `Menu::pointOverInteractive` (test the "
+            "point against `layout()` rects) and swap the spin locals in "
+            "main.cpp for `previewYaw`/`previewIdleSeconds`. Reuse existing "
+            "`GetMouseDelta`/`IsKeyDown`; no input abstraction, no new files."
+        ),
+        "concept": (
+            "Input-driven rotation with an idle-timeout return-to-default, "
+            "replacing an unconditional animation loop (state you can extend)"
+        ),
+    },
+]
+
+# Milestone (next is #10).
+ms = retry(repo.create_milestone,
+           title="Aim, styles & creator preview polish",
+           description=("Gun-aim fix (derive aim from the shared look vector), "
+                        "more style-tagged character parts/palettes, and "
+                        "player-driven creator preview rotation with idle "
+                        "return. Plan: .claude/plans/aim-styles-preview.md"))
+print(f"Milestone #{ms.number}: {ms.title}")
+
+created = []
+for spec in specs:
+    if spec["title"].lower() in existing_titles:
+        print(f"SKIP (exists): {spec['title']}")
+        continue
+    body = TEMPLATE.format(number="N", **{k: spec[k] for k in
+        ("what", "where", "verify", "constraints", "economy_note", "slug", "concept")})
+    issue = retry(repo.create_issue, title=spec["title"], body=body,
+                  labels=["ready-for-ai"], assignees=[username], milestone=ms)
+    # Fill the real number into the branch line.
+    retry(issue.edit, body=body.replace(
+        f"feature/issue-N-{spec['slug']}", f"feature/issue-{issue.number}-{spec['slug']}"))
+    print(f"  #{issue.number}: {spec['title']}")
+    print(f"     {issue.html_url}")
+    created.append((issue.number, spec["title"], spec["concept"], issue.html_url))
+
+# Write local planning summary (gitignored .claude/memory/).
+from datetime import datetime
+lines = [f"# Issue Planning Summary",
+         f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+         f"Repo: {repo.full_name}",
+         f"Focus: aim-styles-preview  |  Milestone #{ms.number} {ms.title}", "",
+         "## Issues Created"]
+for n, t, c, u in created:
+    lines += [f"- #{n}: {t}", f"  Concept: {c}", f"  URL: {u}", ""]
+lines += ["## Not planned as separate issues",
+          "- The three tasks share one plan (.claude/plans/aim-styles-preview.md);",
+          "  they are independent so each is its own issue/branch/PR.",
+          "- Scaffolding (skeletons + skipped tests) already lives on",
+          "  feature/aim-styles-preview, stacked on feature/player-journal."]
+import pathlib
+pathlib.Path(".claude/memory/planning-session.md").write_text("\n".join(lines) + "\n")
+print("\nQUEUE (ready-for-ai):")
+for i in repo.get_issues(state="open", labels=["ready-for-ai"]):
+    if i.pull_request is None:
+        print(f"  #{i.number} {i.title}")
+print("\nSaved .claude/memory/planning-session.md")

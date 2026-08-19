@@ -1,0 +1,1159 @@
+#include <SFML/Graphics.hpp>
+#include <SFML/OpenGL.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <iomanip>
+#include <random>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace {
+constexpr unsigned int kWindowWidth = 1280;
+constexpr unsigned int kWindowHeight = 720;
+
+constexpr float kArenaHalfSize = 80.0f;
+constexpr float kPlayerHeight = 6.0f;
+constexpr float kPlayerMoveSpeed = 28.0f;
+constexpr float kBulletSpeed = 95.0f;
+constexpr float kBulletLifetime = 2.0f;
+constexpr float kEnemySpeed = 8.5f;
+constexpr float kEnemyAvoidDistance = 20.0f;
+constexpr float kEnemyPreferredRange = 34.0f;
+constexpr float kEnemyFireCooldownMin = 0.9f;
+constexpr float kEnemyFireCooldownMax = 1.6f;
+constexpr float kEnemyProjectileSpeed = 52.0f;
+constexpr float kEnemyProjectileDamage = 18.0f;
+constexpr int kBaseEnemiesPerWave = 5;
+constexpr int kTargetWave = 4;
+constexpr float kMouseSensitivity = 0.12f;
+constexpr float kMaxPitchDeg = 38.0f;
+constexpr float kPi = 3.1415926535f;
+
+struct Vec3 {
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
+Vec3 operator+(const Vec3& a, const Vec3& b) { return Vec3{a.x + b.x, a.y + b.y, a.z + b.z}; }
+Vec3 operator-(const Vec3& a, const Vec3& b) { return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}; }
+Vec3 operator*(const Vec3& v, float s) { return Vec3{v.x * s, v.y * s, v.z * s}; }
+Vec3 operator/(const Vec3& v, float s) { return Vec3{v.x / s, v.y / s, v.z / s}; }
+Vec3& operator+=(Vec3& a, const Vec3& b) {
+    a.x += b.x;
+    a.y += b.y;
+    a.z += b.z;
+    return a;
+}
+
+float dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+Vec3 cross(const Vec3& a, const Vec3& b) {
+    return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+float length(const Vec3& v) { return std::sqrt(dot(v, v)); }
+Vec3 normalize(const Vec3& v) {
+    const float len = length(v);
+    return len <= 1e-5f ? Vec3{} : v / len;
+}
+float clampf(float value, float minValue, float maxValue) {
+    return std::max(minValue, std::min(maxValue, value));
+}
+float degToRad(float deg) { return deg * kPi / 180.0f; }
+float radToDeg(float rad) { return rad * 180.0f / kPi; }
+
+struct TextureSet {
+    GLuint ground = 0;
+    GLuint wall = 0;
+    GLuint crate = 0;
+    GLuint player = 0;
+    GLuint enemy = 0;
+    GLuint metal = 0;
+    GLuint projectile = 0;
+    GLuint visor = 0;
+};
+
+
+struct HudAssets {
+    sf::Font font;
+    bool hasFont = false;
+};
+
+struct ImpactEffect {
+    Vec3 pos;
+    sf::Color color = sf::Color::White;
+    float age = 0.0f;
+    float lifetime = 0.35f;
+    float size = 2.0f;
+};
+
+TextureSet gTextures;
+
+GLuint createTexture(const std::vector<std::uint8_t>& pixels, int size) {
+    GLuint texture = 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    
+    return texture;
+}
+
+GLuint makeCheckerTexture(const sf::Color& a, const sf::Color& b, int cells) {
+    constexpr int size = 64;
+    std::vector<std::uint8_t> pixels(size * size * 4, 255);
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const int cellX = (x * cells) / size;
+            const int cellY = (y * cells) / size;
+            const sf::Color color = ((cellX + cellY) % 2 == 0) ? a : b;
+            const int i = (y * size + x) * 4;
+            pixels[i + 0] = color.r;
+            pixels[i + 1] = color.g;
+            pixels[i + 2] = color.b;
+            pixels[i + 3] = 255;
+        }
+    }
+    return createTexture(pixels, size);
+}
+
+GLuint makeStripeTexture(const sf::Color& base, const sf::Color& stripe) {
+    constexpr int size = 64;
+    std::vector<std::uint8_t> pixels(size * size * 4, 255);
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const bool inStripe = (x / 8) % 2 == 0;
+            const sf::Color color = inStripe ? stripe : base;
+            const int i = (y * size + x) * 4;
+            pixels[i + 0] = color.r;
+            pixels[i + 1] = color.g;
+            pixels[i + 2] = color.b;
+            pixels[i + 3] = 255;
+        }
+    }
+    return createTexture(pixels, size);
+}
+
+void buildTextures() {
+    gTextures.ground = makeCheckerTexture(sf::Color(42, 120, 54), sf::Color(33, 94, 43), 8);
+    gTextures.wall = makeCheckerTexture(sf::Color(118, 91, 60), sf::Color(86, 62, 40), 6);
+    gTextures.crate = makeCheckerTexture(sf::Color(108, 111, 128), sf::Color(74, 77, 95), 4);
+    gTextures.player = makeStripeTexture(sf::Color(35, 128, 224), sf::Color(24, 82, 170));
+    gTextures.enemy = makeStripeTexture(sf::Color(196, 58, 58), sf::Color(145, 38, 38));
+    gTextures.metal = makeCheckerTexture(sf::Color(76, 76, 82), sf::Color(48, 48, 56), 8);
+    gTextures.projectile = makeCheckerTexture(sf::Color(250, 200, 50), sf::Color(255, 240, 140), 2);
+    gTextures.visor = makeStripeTexture(sf::Color(60, 220, 255), sf::Color(10, 120, 220));
+}
+
+void bindTexture(GLuint texture) {
+    glBindTexture(GL_TEXTURE_2D, texture);
+}
+
+void setupPerspective(float fovDeg, float aspect, float nearPlane, float farPlane) {
+    const float top = nearPlane * std::tan(degToRad(fovDeg) * 0.5f);
+    const float right = top * aspect;
+    glFrustum(-right, right, -top, top, nearPlane, farPlane);
+}
+
+void setupLookAt(const Vec3& eye, const Vec3& center, const Vec3& up) {
+    const Vec3 f = normalize(center - eye);
+    const Vec3 s = normalize(cross(f, up));
+    const Vec3 u = cross(s, f);
+    const std::array<float, 16> matrix = {
+        s.x, u.x, -f.x, 0.0f,
+        s.y, u.y, -f.y, 0.0f,
+        s.z, u.z, -f.z, 0.0f,
+        -dot(s, eye), -dot(u, eye), dot(f, eye), 1.0f,
+    };
+    glLoadMatrixf(matrix.data());
+}
+
+void setColor(const sf::Color& color) {
+    glColor3f(color.r / 255.0f, color.g / 255.0f, color.b / 255.0f);
+}
+
+void vertexTextured(const Vec3& v, float u, float t) {
+    glTexCoord2f(u, t);
+    glVertex3f(v.x, v.y, v.z);
+}
+
+void drawTexturedQuad(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d, float tileU, float tileV) {
+    const Vec3 n = normalize(cross(b - a, c - a));
+    glNormal3f(n.x, n.y, n.z);
+    vertexTextured(a, 0.0f, 0.0f);
+    vertexTextured(b, tileU, 0.0f);
+    vertexTextured(c, tileU, tileV);
+    vertexTextured(d, 0.0f, tileV);
+}
+
+void drawTexturedBox(const Vec3& center,
+                     float halfX,
+                     float halfY,
+                     float halfZ,
+                     GLuint texture,
+                     const sf::Color& tint,
+                     float tileScale = 1.0f) {
+    const Vec3 lbf{center.x - halfX, center.y - halfY, center.z - halfZ};
+    const Vec3 rbf{center.x + halfX, center.y - halfY, center.z - halfZ};
+    const Vec3 rbb{center.x + halfX, center.y - halfY, center.z + halfZ};
+    const Vec3 lbb{center.x - halfX, center.y - halfY, center.z + halfZ};
+    const Vec3 ltf{center.x - halfX, center.y + halfY, center.z - halfZ};
+    const Vec3 rtf{center.x + halfX, center.y + halfY, center.z - halfZ};
+    const Vec3 rtb{center.x + halfX, center.y + halfY, center.z + halfZ};
+    const Vec3 ltb{center.x - halfX, center.y + halfY, center.z + halfZ};
+
+    bindTexture(texture);
+    setColor(tint);
+    glBegin(GL_QUADS);
+    drawTexturedQuad(ltf, rtf, rtb, ltb, tileScale, tileScale);
+    drawTexturedQuad(lbf, rbf, rtf, ltf, tileScale, tileScale);
+    drawTexturedQuad(rbf, rbb, rtb, rtf, tileScale, tileScale);
+    drawTexturedQuad(rbb, lbb, ltb, rtb, tileScale, tileScale);
+    drawTexturedQuad(lbb, lbf, ltf, ltb, tileScale, tileScale);
+    glEnd();
+}
+
+void drawTexturedCylinder(const Vec3& center,
+                          float radius,
+                          float halfHeight,
+                          int segments,
+                          GLuint texture,
+                          const sf::Color& tint) {
+    bindTexture(texture);
+    setColor(tint);
+
+    glBegin(GL_TRIANGLE_FAN);
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    vertexTextured(Vec3{center.x, center.y + halfHeight, center.z}, 0.5f, 0.5f);
+    for (int i = 0; i <= segments; ++i) {
+        const float angle = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
+        const float u = 0.5f + std::cos(angle) * 0.5f;
+        const float v = 0.5f + std::sin(angle) * 0.5f;
+        vertexTextured(Vec3{center.x + std::cos(angle) * radius, center.y + halfHeight, center.z + std::sin(angle) * radius}, u, v);
+    }
+    glEnd();
+
+    glBegin(GL_TRIANGLE_FAN);
+    glNormal3f(0.0f, -1.0f, 0.0f);
+    vertexTextured(Vec3{center.x, center.y - halfHeight, center.z}, 0.5f, 0.5f);
+    for (int i = segments; i >= 0; --i) {
+        const float angle = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
+        const float u = 0.5f + std::cos(angle) * 0.5f;
+        const float v = 0.5f + std::sin(angle) * 0.5f;
+        vertexTextured(Vec3{center.x + std::cos(angle) * radius, center.y - halfHeight, center.z + std::sin(angle) * radius}, u, v);
+    }
+    glEnd();
+
+    glBegin(GL_QUAD_STRIP);
+    for (int i = 0; i <= segments; ++i) {
+        const float angle = (2.0f * kPi * static_cast<float>(i)) / static_cast<float>(segments);
+        const float nx = std::cos(angle);
+        const float nz = std::sin(angle);
+        const float u = static_cast<float>(i) / static_cast<float>(segments) * 2.0f;
+        glNormal3f(nx, 0.0f, nz);
+        vertexTextured(Vec3{center.x + nx * radius, center.y - halfHeight, center.z + nz * radius}, u, 0.0f);
+        vertexTextured(Vec3{center.x + nx * radius, center.y + halfHeight, center.z + nz * radius}, u, 1.0f);
+    }
+    glEnd();
+}
+
+enum class EnemyType {
+    Grunt,
+    Sprinter,
+    Tank,
+};
+
+enum class PickupType {
+    Health,
+    RapidFire,
+};
+
+struct Pickup {
+    Vec3 pos;
+    PickupType type = PickupType::Health;
+    bool active = true;
+};
+
+struct Projectile {
+    Vec3 pos;
+    Vec3 velocity;
+    float lifetime = 0.0f;
+    float damage = 0.0f;
+    bool fromEnemy = false;
+};
+
+struct Enemy {
+    Vec3 pos;
+    EnemyType type = EnemyType::Grunt;
+    float headingDeg = 0.0f;
+    float shootCooldown = 0.0f;
+    float health = 100.0f;
+    bool alive = true;
+};
+
+struct Player {
+    Vec3 pos{0.0f, kPlayerHeight * 0.5f, 0.0f};
+    float yawDeg = 0.0f;
+    float pitchDeg = 8.0f;
+    float health = 100.0f;
+    float shootCooldown = 0.0f;
+    float rapidFireTimer = 0.0f;
+};
+
+struct InputState {
+    bool moveForward = false;
+    bool moveBackward = false;
+    bool strafeLeft = false;
+    bool strafeRight = false;
+    bool shoot = false;
+    bool reset = false;
+};
+
+struct GameState {
+    Player player;
+    std::vector<Projectile> projectiles;
+    std::vector<Enemy> enemies;
+    std::vector<Pickup> pickups;
+    std::vector<ImpactEffect> impacts;
+    int kills = 0;
+    int wave = 1;
+    int layoutIndex = 0;
+    int enemiesRemainingToSpawn = 0;
+    int totalEnemiesThisWave = 0;
+    bool won = false;
+    bool lost = false;
+    float damageFlash = 0.0f;
+    float killFlash = 0.0f;
+};
+
+std::mt19937& rng() {
+    static std::mt19937 engine(1337);
+    return engine;
+}
+
+float randomFloat(float minValue, float maxValue) {
+    std::uniform_real_distribution<float> dist(minValue, maxValue);
+    return dist(rng());
+}
+
+Vec3 forwardFromAngles(float yawDeg, float pitchDeg) {
+    const float yaw = degToRad(yawDeg);
+    const float pitch = degToRad(pitchDeg);
+    const float cp = std::cos(pitch);
+    return normalize(Vec3{std::sin(yaw) * cp, std::sin(pitch), std::cos(yaw) * cp});
+}
+
+Vec3 flatForward(float yawDeg) {
+    return normalize(Vec3{std::sin(degToRad(yawDeg)), 0.0f, std::cos(degToRad(yawDeg))});
+}
+
+Vec3 flatRight(float yawDeg) {
+    const Vec3 f = flatForward(yawDeg);
+    return Vec3{f.z, 0.0f, -f.x};
+}
+
+void initOpenGlState() {
+    glClearDepth(1.0);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LEQUAL);
+    glEnable(GL_NORMALIZE);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    const GLfloat ambient[] = {0.28f, 0.28f, 0.30f, 1.0f};
+    const GLfloat diffuse[] = {0.92f, 0.92f, 0.88f, 1.0f};
+    const GLfloat specular[] = {0.18f, 0.18f, 0.18f, 1.0f};
+    const GLfloat lightPos[] = {40.0f, 90.0f, 30.0f, 1.0f};
+    glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, specular);
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+
+    buildTextures();
+}
+
+HudAssets loadHudAssets() {
+    HudAssets hud;
+    const std::array<const char*, 3> candidates = {
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+    };
+    for (const char* path : candidates) {
+        if (hud.font.loadFromFile(path)) {
+            hud.hasFont = true;
+            break;
+        }
+    }
+    return hud;
+}
+
+void addImpact(GameState& game, const Vec3& pos, const sf::Color& color, float size, float lifetime) {
+    ImpactEffect fx{};
+    fx.pos = pos;
+    fx.color = color;
+    fx.size = size;
+    fx.lifetime = lifetime;
+    game.impacts.push_back(fx);
+}
+int enemiesForWave(int wave) {
+    return kBaseEnemiesPerWave + (wave - 1) * 2;
+}
+
+int aliveEnemyCount(const GameState& game) {
+    int count = 0;
+    for (const auto& enemy : game.enemies) {
+        if (enemy.alive) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int desiredAliveEnemies(const GameState& game) {
+    return std::min(2 + game.wave, 6);
+}
+
+void startWave(GameState& game, int wave) {
+    game.wave = wave;
+    game.layoutIndex = (wave - 1) % 3;
+    game.enemies.clear();
+    game.pickups.clear();
+    game.enemiesRemainingToSpawn = enemiesForWave(wave);
+    game.totalEnemiesThisWave = game.enemiesRemainingToSpawn;
+    game.player.health = std::min(100.0f, game.player.health + 18.0f);
+    game.player.rapidFireTimer = std::max(0.0f, game.player.rapidFireTimer - 1.0f);
+    game.player.pos = Vec3{0.0f, kPlayerHeight * 0.5f, 0.0f};
+}
+
+EnemyType randomEnemyTypeForWave(int wave) {
+    const int roll = static_cast<int>(randomFloat(0.0f, 100.0f));
+    if (wave >= 3 && roll > 72) {
+        return EnemyType::Tank;
+    }
+    if (wave >= 2 && roll > 38) {
+        return EnemyType::Sprinter;
+    }
+    return EnemyType::Grunt;
+}
+
+float enemyBaseHealth(EnemyType type) {
+    switch (type) {
+        case EnemyType::Sprinter: return 70.0f;
+        case EnemyType::Tank: return 220.0f;
+        default: return 100.0f;
+    }
+}
+
+float enemySpeedMultiplier(EnemyType type) {
+    switch (type) {
+        case EnemyType::Sprinter: return 1.45f;
+        case EnemyType::Tank: return 0.72f;
+        default: return 1.0f;
+    }
+}
+
+float enemyCooldownMultiplier(EnemyType type) {
+    switch (type) {
+        case EnemyType::Sprinter: return 0.85f;
+        case EnemyType::Tank: return 1.18f;
+        default: return 1.0f;
+    }
+}
+
+float enemyProjectileDamageForType(EnemyType type) {
+    switch (type) {
+        case EnemyType::Sprinter: return 12.0f;
+        case EnemyType::Tank: return 26.0f;
+        default: return kEnemyProjectileDamage;
+    }
+}
+
+bool shouldDropPickup() {
+    return randomFloat(0.0f, 1.0f) < 0.3f;
+}
+
+PickupType randomPickupType() {
+    return randomFloat(0.0f, 1.0f) < 0.55f ? PickupType::Health : PickupType::RapidFire;
+}
+
+void spawnPickup(GameState& game, const Vec3& pos) {
+    Pickup pickup{};
+    pickup.pos = pos;
+    pickup.pos.y = 2.0f;
+    pickup.type = randomPickupType();
+    game.pickups.push_back(pickup);
+}
+
+Enemy spawnEnemy(int wave) {
+    Enemy enemy{};
+    enemy.pos.x = randomFloat(-kArenaHalfSize + 10.0f, kArenaHalfSize - 10.0f);
+    enemy.pos.y = 3.0f;
+    enemy.pos.z = randomFloat(-kArenaHalfSize + 10.0f, kArenaHalfSize - 10.0f);
+    enemy.headingDeg = randomFloat(0.0f, 360.0f);
+    enemy.shootCooldown = randomFloat(0.35f, 1.1f);
+    return enemy;
+}
+
+void resetGame(GameState& game) {
+    game = GameState{};
+    game.player = Player{};
+    startWave(game, 1);
+}
+
+InputState readInput() {
+    InputState input{};
+    input.moveForward = sf::Keyboard::isKeyPressed(sf::Keyboard::W);
+    input.moveBackward = sf::Keyboard::isKeyPressed(sf::Keyboard::S);
+    input.strafeLeft = sf::Keyboard::isKeyPressed(sf::Keyboard::A);
+    input.strafeRight = sf::Keyboard::isKeyPressed(sf::Keyboard::D);
+    input.shoot = sf::Mouse::isButtonPressed(sf::Mouse::Left);
+    input.reset = sf::Keyboard::isKeyPressed(sf::Keyboard::R);
+    return input;
+}
+
+void keepInsideArena(Vec3& pos) {
+    pos.x = clampf(pos.x, -kArenaHalfSize + 3.0f, kArenaHalfSize - 3.0f);
+    pos.z = clampf(pos.z, -kArenaHalfSize + 3.0f, kArenaHalfSize - 3.0f);
+}
+
+void handleMouseLook(sf::RenderWindow& window, GameState& game) {
+    const sf::Vector2i center(static_cast<int>(window.getSize().x / 2), static_cast<int>(window.getSize().y / 2));
+    const sf::Vector2i mouse = sf::Mouse::getPosition(window);
+    const sf::Vector2i delta = mouse - center;
+
+    game.player.yawDeg += static_cast<float>(delta.x) * kMouseSensitivity;
+    game.player.pitchDeg = clampf(game.player.pitchDeg - static_cast<float>(delta.y) * kMouseSensitivity, -kMaxPitchDeg, kMaxPitchDeg);
+
+    if (window.hasFocus()) {
+        sf::Mouse::setPosition(center, window);
+    }
+}
+
+void spawnPlayerShot(GameState& game) {
+    Projectile shot{};
+    const Vec3 origin = game.player.pos + Vec3{0.0f, 2.6f, 0.0f};
+    const Vec3 dir = forwardFromAngles(game.player.yawDeg, game.player.pitchDeg);
+    shot.pos = origin + dir * 4.0f;
+    shot.velocity = dir * kBulletSpeed;
+    shot.lifetime = kBulletLifetime;
+    shot.damage = 100.0f;
+    shot.fromEnemy = false;
+    game.projectiles.push_back(shot);
+}
+
+void spawnEnemyShot(GameState& game, const Enemy& enemy) {
+    Projectile shot{};
+    const Vec3 muzzle = enemy.pos + Vec3{0.0f, 1.7f, 0.0f};
+    const Vec3 target = game.player.pos + Vec3{0.0f, 2.4f, 0.0f};
+    const Vec3 dir = normalize(target - muzzle);
+    shot.pos = muzzle + dir * 3.0f;
+    shot.velocity = dir * kEnemyProjectileSpeed;
+    shot.lifetime = 2.5f;
+    shot.damage = enemyProjectileDamageForType(enemy.type);
+    shot.fromEnemy = true;
+    game.projectiles.push_back(shot);
+}
+
+void updatePlayer(GameState& game, const InputState& input, float dt) {
+    if (game.won || game.lost) {
+        return;
+    }
+
+    Vec3 moveDir{};
+    if (input.moveForward) {
+        moveDir += flatForward(game.player.yawDeg);
+    }
+    if (input.moveBackward) {
+        moveDir += flatForward(game.player.yawDeg) * -0.75f;
+    }
+    if (input.strafeLeft) {
+        moveDir += flatRight(game.player.yawDeg) * -1.0f;
+    }
+    if (input.strafeRight) {
+        moveDir += flatRight(game.player.yawDeg);
+    }
+    if (length(moveDir) > 0.0f) {
+        game.player.pos += normalize(moveDir) * (kPlayerMoveSpeed * dt);
+        keepInsideArena(game.player.pos);
+    }
+
+    game.player.shootCooldown = std::max(0.0f, game.player.shootCooldown - dt);
+    if (input.shoot && game.player.shootCooldown <= 0.0f) {
+        spawnPlayerShot(game);
+        game.player.shootCooldown = 0.16f;
+    }
+}
+
+void updatePickups(GameState& game, float dt) {
+    game.player.rapidFireTimer = std::max(0.0f, game.player.rapidFireTimer - dt);
+    for (auto& pickup : game.pickups) {
+        if (!pickup.active) {
+            continue;
+        }
+        const Vec3 bob{0.0f, std::sin(static_cast<float>(game.kills) + pickup.pos.x * 0.05f) * 0.0f, 0.0f};
+        const Vec3 playerCenter = game.player.pos + Vec3{0.0f, 2.0f, 0.0f};
+        if (dot(pickup.pos - playerCenter, pickup.pos - playerCenter) <= 16.0f) {
+            pickup.active = false;
+            if (pickup.type == PickupType::Health) {
+                game.player.health = std::min(100.0f, game.player.health + 30.0f);
+                addImpact(game, pickup.pos, sf::Color(80, 255, 120), 3.8f, 0.25f);
+            } else {
+                game.player.rapidFireTimer = 8.0f;
+                addImpact(game, pickup.pos, sf::Color(90, 180, 255), 3.8f, 0.25f);
+            }
+        }
+    }
+    game.pickups.erase(
+        std::remove_if(game.pickups.begin(), game.pickups.end(), [](const Pickup& pickup) {
+            return !pickup.active;
+        }),
+        game.pickups.end());
+}
+
+void updateEffects(GameState& game, float dt) {
+    game.damageFlash = std::max(0.0f, game.damageFlash - dt * 1.8f);
+    game.killFlash = std::max(0.0f, game.killFlash - dt * 2.4f);
+    for (auto& fx : game.impacts) {
+        fx.age += dt;
+    }
+    game.impacts.erase(
+        std::remove_if(game.impacts.begin(), game.impacts.end(), [](const ImpactEffect& fx) {
+            return fx.age >= fx.lifetime;
+        }),
+        game.impacts.end());
+}
+void updateProjectiles(GameState& game, float dt) {
+    for (auto& projectile : game.projectiles) {
+        projectile.pos += projectile.velocity * dt;
+        projectile.lifetime -= dt;
+    }
+
+    for (auto& projectile : game.projectiles) {
+        if (projectile.lifetime <= 0.0f) {
+            continue;
+        }
+
+        if (projectile.fromEnemy) {
+            const Vec3 playerCenter = game.player.pos + Vec3{0.0f, 2.5f, 0.0f};
+            if (dot(projectile.pos - playerCenter, projectile.pos - playerCenter) <= 8.0f * 8.0f) {
+                game.player.health = std::max(0.0f, game.player.health - projectile.damage);
+                projectile.lifetime = 0.0f;
+                addImpact(game, playerCenter, sf::Color(255, 90, 90), 3.4f, 0.28f);
+                game.damageFlash = 0.55f;
+                if (game.player.health <= 0.0f) {
+                    game.lost = true;
+                }
+            }
+            continue;
+        }
+
+        for (auto& enemy : game.enemies) {
+            if (!enemy.alive) {
+                continue;
+            }
+            if (dot(projectile.pos - enemy.pos, projectile.pos - enemy.pos) <= 4.3f * 4.3f) {
+                enemy.health -= projectile.damage;
+                projectile.lifetime = 0.0f;
+                addImpact(game, enemy.pos + Vec3{0.0f, 3.0f, 0.0f}, sf::Color(255, 210, 90), 3.0f, 0.2f);
+                if (enemy.health <= 0.0f) {
+                    enemy.alive = false;
+                    addImpact(game, enemy.pos + Vec3{0.0f, 3.0f, 0.0f}, sf::Color(255, 160, 60), 4.2f, 0.32f);
+                    ++game.kills;
+                    game.killFlash = 0.28f;
+                    if (shouldDropPickup()) {
+                        spawnPickup(game, enemy.pos);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    game.projectiles.erase(
+        std::remove_if(game.projectiles.begin(),
+                       game.projectiles.end(),
+                       [](const Projectile& projectile) {
+                           return projectile.lifetime <= 0.0f ||
+                                  std::abs(projectile.pos.x) > kArenaHalfSize + 12.0f ||
+                                  std::abs(projectile.pos.z) > kArenaHalfSize + 12.0f ||
+                                  projectile.pos.y < -2.0f || projectile.pos.y > 40.0f;
+                       }),
+        game.projectiles.end());
+}
+
+void updateEnemies(GameState& game, float dt) {
+    if (game.won || game.lost) {
+        return;
+    }
+
+    const float waveSpeedScale = 1.0f + 0.12f * static_cast<float>(game.wave - 1);
+    const float cooldownScale = std::max(0.55f, 1.0f - 0.08f * static_cast<float>(game.wave - 1));
+
+    int aliveCount = 0;
+    for (auto& enemy : game.enemies) {
+        if (!enemy.alive) {
+            continue;
+        }
+
+        ++aliveCount;
+        enemy.shootCooldown = std::max(0.0f, enemy.shootCooldown - dt);
+
+        const Vec3 toPlayer = game.player.pos - enemy.pos;
+        const Vec3 flatToPlayer{toPlayer.x, 0.0f, toPlayer.z};
+        const float dist = length(flatToPlayer);
+        const Vec3 dir = dist > 1e-4f ? flatToPlayer / dist : Vec3{};
+        enemy.headingDeg = radToDeg(std::atan2(dir.x, dir.z));
+
+        const float preferredRange = enemy.type == EnemyType::Tank ? 28.0f : (enemy.type == EnemyType::Sprinter ? 22.0f : kEnemyPreferredRange);
+        const float avoidRange = enemy.type == EnemyType::Sprinter ? 12.0f : kEnemyAvoidDistance;
+
+        Vec3 movement{};
+        if (dist > preferredRange) {
+            movement = dir;
+        } else if (dist < avoidRange) {
+            movement = dir * -0.65f;
+        }
+
+        if (length(movement) > 0.0f) {
+            enemy.pos += normalize(movement) * (kEnemySpeed * waveSpeedScale * enemySpeedMultiplier(enemy.type) * dt);
+            keepInsideArena(enemy.pos);
+        }
+
+        if (dist <= (enemy.type == EnemyType::Sprinter ? 32.0f : 48.0f) && enemy.shootCooldown <= 0.0f) {
+            spawnEnemyShot(game, enemy);
+            addImpact(game, enemy.pos + Vec3{0.0f, 1.8f, 2.6f}, sf::Color(255, 160, 60), 2.2f, 0.16f);
+            enemy.shootCooldown = randomFloat(kEnemyFireCooldownMin, kEnemyFireCooldownMax) * cooldownScale * enemyCooldownMultiplier(enemy.type);
+        }
+    }
+
+    while (aliveCount < desiredAliveEnemies(game) && game.enemiesRemainingToSpawn > 0) {
+        Enemy enemy = spawnEnemy(game.wave);
+        if (length(enemy.pos - game.player.pos) < 22.0f) {
+            continue;
+        }
+        game.enemies.push_back(enemy);
+        --game.enemiesRemainingToSpawn;
+        ++aliveCount;
+    }
+
+    if (aliveCount == 0 && game.enemiesRemainingToSpawn == 0) {
+        if (game.wave >= kTargetWave) {
+            game.won = true;
+        } else {
+            addImpact(game, game.player.pos + Vec3{0.0f, 4.0f, 0.0f}, sf::Color(120, 210, 255), 5.0f, 0.4f);
+            game.killFlash = 0.35f;
+            startWave(game, game.wave + 1);
+        }
+    }
+}
+
+std::string buildTitle(const GameState& game) {
+    std::ostringstream out;
+    out << "C++ 3D Shooter | HP " << std::setw(3) << static_cast<int>(std::round(game.player.health))
+        << " | Wave " << game.wave << "/" << kTargetWave
+        << " | Kills " << game.kills
+        << " | Mouse look, WASD move, Left Click shoot, R reset";
+    if (game.won) {
+        out << " | Arena cleared";
+    } else if (game.lost) {
+        out << " | You were eliminated";
+    }
+    return out.str();
+}
+
+void drawArena(const GameState& game) {
+    bindTexture(gTextures.ground);
+    setColor(sf::Color::White);
+    glBegin(GL_QUADS);
+    drawTexturedQuad(Vec3{-kArenaHalfSize, 0.0f, -kArenaHalfSize},
+                     Vec3{kArenaHalfSize, 0.0f, -kArenaHalfSize},
+                     Vec3{kArenaHalfSize, 0.0f, kArenaHalfSize},
+                     Vec3{-kArenaHalfSize, 0.0f, kArenaHalfSize},
+                     8.0f,
+                     8.0f);
+    glEnd();
+
+    drawTexturedBox(Vec3{0.0f, 4.0f, -kArenaHalfSize}, kArenaHalfSize, 4.0f, 1.8f, gTextures.wall, sf::Color::White, 6.0f);
+    drawTexturedBox(Vec3{0.0f, 4.0f, kArenaHalfSize}, kArenaHalfSize, 4.0f, 1.8f, gTextures.wall, sf::Color::White, 6.0f);
+    drawTexturedBox(Vec3{-kArenaHalfSize, 4.0f, 0.0f}, 1.8f, 4.0f, kArenaHalfSize, gTextures.wall, sf::Color::White, 6.0f);
+    drawTexturedBox(Vec3{kArenaHalfSize, 4.0f, 0.0f}, 1.8f, 4.0f, kArenaHalfSize, gTextures.wall, sf::Color::White, 6.0f);
+
+    if (game.layoutIndex == 0) {
+        for (int i = -2; i <= 2; ++i) {
+            drawTexturedBox(Vec3{static_cast<float>(i) * 22.0f, 2.8f, -15.0f}, 3.2f, 2.8f, 3.2f, gTextures.crate, sf::Color::White, 2.0f);
+            drawTexturedBox(Vec3{static_cast<float>(i) * 18.0f, 2.8f, 24.0f}, 3.2f, 2.8f, 3.2f, gTextures.crate, sf::Color::White, 2.0f);
+        }
+    } else if (game.layoutIndex == 1) {
+        for (int i = -2; i <= 2; ++i) {
+            drawTexturedBox(Vec3{0.0f, 2.8f, static_cast<float>(i) * 18.0f}, 3.0f, 2.8f, 3.0f, gTextures.crate, sf::Color::White, 2.0f);
+            drawTexturedBox(Vec3{static_cast<float>(i) * 18.0f, 2.8f, 0.0f}, 3.0f, 2.8f, 3.0f, gTextures.crate, sf::Color::White, 2.0f);
+        }
+    } else {
+        for (int i = -3; i <= 3; ++i) {
+            drawTexturedBox(Vec3{static_cast<float>(i) * 14.0f, 2.8f, static_cast<float>(i) * 10.0f}, 2.8f, 2.8f, 2.8f, gTextures.crate, sf::Color::White, 2.0f);
+            drawTexturedBox(Vec3{static_cast<float>(i) * 14.0f, 2.8f, static_cast<float>(-i) * 10.0f}, 2.8f, 2.8f, 2.8f, gTextures.crate, sf::Color::White, 2.0f);
+        }
+    }
+}
+
+void drawPlayer(const Player& player) {
+    glPushMatrix();
+    glTranslatef(player.pos.x, player.pos.y, player.pos.z);
+    glRotatef(-player.yawDeg, 0.0f, 1.0f, 0.0f);
+    drawTexturedBox(Vec3{0.0f, 0.0f, 0.0f}, 2.2f, 3.0f, 1.8f, gTextures.player, sf::Color::White, 1.0f);
+    drawTexturedBox(Vec3{0.0f, 4.2f, 0.0f}, 1.6f, 1.4f, 1.5f, gTextures.player, sf::Color(255, 225, 200), 1.0f);
+    drawTexturedBox(Vec3{0.0f, 2.4f, 3.2f}, 0.35f, 0.35f, 3.0f, gTextures.metal, sf::Color::White, 1.0f);
+    drawTexturedBox(Vec3{0.0f, 1.7f, 1.6f}, 0.75f, 0.55f, 0.8f, gTextures.metal, sf::Color::White, 1.0f);
+    glPopMatrix();
+}
+
+void drawEnemy(const Enemy& enemy) {
+    glPushMatrix();
+    glTranslatef(enemy.pos.x, enemy.pos.y, enemy.pos.z);
+    glRotatef(-enemy.headingDeg, 0.0f, 1.0f, 0.0f);
+
+    if (enemy.type == EnemyType::Sprinter) {
+        drawTexturedCylinder(Vec3{0.0f, 0.0f, 0.0f}, 2.0f, 2.6f, 20, gTextures.enemy, sf::Color(255, 150, 120));
+        drawTexturedBox(Vec3{0.0f, 3.8f, 0.0f}, 1.2f, 1.0f, 1.2f, gTextures.enemy, sf::Color(255, 220, 190), 1.0f);
+        drawTexturedBox(Vec3{0.0f, 0.8f, 2.4f}, 0.5f, 0.3f, 1.0f, gTextures.metal, sf::Color::White, 1.0f);
+    } else if (enemy.type == EnemyType::Tank) {
+        drawTexturedCylinder(Vec3{0.0f, 0.0f, 0.0f}, 3.0f, 3.8f, 20, gTextures.enemy, sf::Color(170, 70, 70));
+        drawTexturedBox(Vec3{0.0f, 5.2f, 0.0f}, 1.9f, 1.4f, 1.6f, gTextures.enemy, sf::Color(255, 220, 190), 1.0f);
+        drawTexturedBox(Vec3{0.0f, 1.0f, 3.1f}, 0.9f, 0.45f, 1.5f, gTextures.metal, sf::Color(255, 210, 140), 1.0f);
+    } else {
+        drawTexturedCylinder(Vec3{0.0f, 0.0f, 0.0f}, 2.4f, 3.0f, 20, gTextures.enemy, sf::Color::White);
+        drawTexturedBox(Vec3{0.0f, 4.4f, 0.0f}, 1.5f, 1.2f, 1.4f, gTextures.enemy, sf::Color(255, 220, 190), 1.0f);
+        drawTexturedBox(Vec3{0.0f, 1.0f, 2.5f}, 0.65f, 0.35f, 1.1f, gTextures.metal, sf::Color::White, 1.0f);
+    }
+
+    glPopMatrix();
+}
+
+void drawPickup(const Pickup& pickup) {
+    const sf::Color tint = pickup.type == PickupType::Health ? sf::Color(90, 255, 120) : sf::Color(100, 180, 255);
+    drawTexturedBox(pickup.pos, 0.8f, 0.8f, 0.8f, gTextures.projectile, tint, 1.0f);
+}
+
+void drawProjectile(const Projectile& projectile) {
+    const sf::Color tint = projectile.fromEnemy ? sf::Color(255, 120, 80) : sf::Color(255, 255, 210);
+    drawTexturedBox(projectile.pos, 0.3f, 0.3f, 0.9f, gTextures.projectile, tint, 1.0f);
+}
+
+void drawImpact(const ImpactEffect& fx, const Vec3& cameraRight, const Vec3& cameraUp) {
+    const float t = fx.age / std::max(0.001f, fx.lifetime);
+    const float radius = fx.size * (0.4f + t * 1.8f);
+    const sf::Color color(fx.color.r, fx.color.g, fx.color.b, static_cast<sf::Uint8>(255.0f * (1.0f - t)));
+    const Vec3 right = cameraRight * radius;
+    const Vec3 up = cameraUp * radius;
+
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDepthMask(GL_FALSE);
+    setColor(color);
+    glBegin(GL_QUADS);
+    glVertex3f(fx.pos.x - right.x - up.x, fx.pos.y - right.y - up.y, fx.pos.z - right.z - up.z);
+    glVertex3f(fx.pos.x + right.x - up.x, fx.pos.y + right.y - up.y, fx.pos.z + right.z - up.z);
+    glVertex3f(fx.pos.x + right.x + up.x, fx.pos.y + right.y + up.y, fx.pos.z + right.z + up.z);
+    glVertex3f(fx.pos.x - right.x + up.x, fx.pos.y - right.y + up.y, fx.pos.z - right.z + up.z);
+    glEnd();
+    glBegin(GL_LINES);
+    glVertex3f(fx.pos.x - right.x * 1.25f, fx.pos.y - right.y * 1.25f, fx.pos.z - right.z * 1.25f);
+    glVertex3f(fx.pos.x + right.x * 1.25f, fx.pos.y + right.y * 1.25f, fx.pos.z + right.z * 1.25f);
+    glVertex3f(fx.pos.x - up.x * 1.25f, fx.pos.y - up.y * 1.25f, fx.pos.z - up.z * 1.25f);
+    glVertex3f(fx.pos.x + up.x * 1.25f, fx.pos.y + up.y * 1.25f, fx.pos.z + up.z * 1.25f);
+    glEnd();
+    glDepthMask(GL_TRUE);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
+}
+void drawCrosshair(const sf::RenderWindow& window) {
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, static_cast<double>(window.getSize().x), static_cast<double>(window.getSize().y), 0.0, -1.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_DEPTH_TEST);
+    glColor3f(1.0f, 1.0f, 1.0f);
+
+    const float cx = static_cast<float>(window.getSize().x) * 0.5f;
+    const float cy = static_cast<float>(window.getSize().y) * 0.5f;
+    glBegin(GL_LINES);
+    glVertex2f(cx - 10.0f, cy);
+    glVertex2f(cx + 10.0f, cy);
+    glVertex2f(cx, cy - 10.0f);
+    glVertex2f(cx, cy + 10.0f);
+    glEnd();
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void renderHud(sf::RenderWindow& window, const GameState& game, const HudAssets& hud) {
+    window.pushGLStates();
+
+    const sf::Vector2f barPos(28.0f, 24.0f);
+    const sf::Vector2f barSize(280.0f, 24.0f);
+
+    sf::RectangleShape panel(sf::Vector2f(360.0f, 118.0f));
+    panel.setPosition(16.0f, 16.0f);
+    panel.setFillColor(sf::Color(8, 12, 18, 185));
+    panel.setOutlineThickness(2.0f);
+    panel.setOutlineColor(sf::Color(90, 170, 220, 180));
+    window.draw(panel);
+
+    sf::RectangleShape healthBg(barSize);
+    healthBg.setPosition(barPos);
+    healthBg.setFillColor(sf::Color(40, 24, 24, 220));
+    window.draw(healthBg);
+
+    sf::RectangleShape healthFill(sf::Vector2f(barSize.x * clampf(game.player.health / 100.0f, 0.0f, 1.0f), barSize.y));
+    healthFill.setPosition(barPos);
+    healthFill.setFillColor(sf::Color(220, 70, 70));
+    window.draw(healthFill);
+
+    sf::RectangleShape killBg(sf::Vector2f(barSize.x, 18.0f));
+    killBg.setPosition(barPos.x, barPos.y + 42.0f);
+    killBg.setFillColor(sf::Color(28, 36, 52, 220));
+    window.draw(killBg);
+
+    sf::RectangleShape killFill(sf::Vector2f(barSize.x * clampf(static_cast<float>(game.wave - 1) / static_cast<float>(std::max(1, kTargetWave - 1)), 0.0f, 1.0f), 18.0f));
+    killFill.setPosition(barPos.x, barPos.y + 42.0f);
+    killFill.setFillColor(sf::Color(255, 194, 84));
+    window.draw(killFill);
+
+    if (hud.hasFont) {
+        sf::Text hp("HP", hud.font, 18);
+        hp.setPosition(barPos.x, barPos.y - 4.0f);
+        hp.setFillColor(sf::Color::White);
+        window.draw(hp);
+
+        sf::Text hpValue(std::to_string(static_cast<int>(std::round(game.player.health))), hud.font, 18);
+        hpValue.setPosition(barPos.x + barSize.x - 46.0f, barPos.y - 4.0f);
+        hpValue.setFillColor(sf::Color::White);
+        window.draw(hpValue);
+
+        sf::Text kills("KILLS", hud.font, 18);
+        kills.setPosition(barPos.x, barPos.y + 32.0f);
+        kills.setFillColor(sf::Color::White);
+        window.draw(kills);
+
+        std::ostringstream killText;
+        killText << "Wave " << game.wave << " / " << kTargetWave;
+        sf::Text killsValue(killText.str(), hud.font, 18);
+        killsValue.setPosition(barPos.x + barSize.x - 78.0f, barPos.y + 32.0f);
+        killsValue.setFillColor(sf::Color::White);
+        window.draw(killsValue);
+
+        std::ostringstream status;
+        status << "Alive " << aliveEnemyCount(game) << "  |  Incoming " << game.enemiesRemainingToSpawn << "  |  Kills " << game.kills;
+        sf::Text controls(status.str(), hud.font, 16);
+        controls.setPosition(barPos.x, barPos.y + 70.0f);
+        controls.setFillColor(sf::Color(210, 222, 235));
+        window.draw(controls);
+
+        if (game.won || game.lost) {
+            sf::RectangleShape banner(sf::Vector2f(520.0f, 92.0f));
+            banner.setOrigin(banner.getSize() * 0.5f);
+            banner.setPosition(static_cast<float>(window.getSize().x) * 0.5f, 90.0f);
+            banner.setFillColor(sf::Color(10, 15, 24, 210));
+            banner.setOutlineColor(game.won ? sf::Color(255, 194, 84) : sf::Color(240, 90, 90));
+            banner.setOutlineThickness(3.0f);
+            window.draw(banner);
+
+            sf::Text headline(game.won ? "Arena Cleared" : "You Were Eliminated", hud.font, 34);
+            headline.setPosition(banner.getPosition().x - 160.0f, banner.getPosition().y - 34.0f);
+            headline.setFillColor(sf::Color::White);
+            window.draw(headline);
+
+            sf::Text subline("Press R to restart", hud.font, 22);
+            subline.setPosition(banner.getPosition().x - 92.0f, banner.getPosition().y + 8.0f);
+            subline.setFillColor(sf::Color(220, 230, 240));
+            window.draw(subline);
+        }
+    }
+
+    if (game.damageFlash > 0.0f) {
+        sf::RectangleShape damage(sf::Vector2f(static_cast<float>(window.getSize().x), static_cast<float>(window.getSize().y)));
+        damage.setFillColor(sf::Color(255, 40, 40, static_cast<sf::Uint8>(110.0f * game.damageFlash)));
+        window.draw(damage);
+    }
+
+    if (game.killFlash > 0.0f) {
+        sf::RectangleShape kill(sf::Vector2f(static_cast<float>(window.getSize().x), static_cast<float>(window.getSize().y)));
+        kill.setFillColor(sf::Color(255, 214, 80, static_cast<sf::Uint8>(55.0f * game.killFlash)));
+        window.draw(kill);
+    }
+
+    window.popGLStates();
+}
+void renderScene(sf::RenderWindow& window, const GameState& game, const HudAssets& hud) {
+    const sf::Vector2u size = window.getSize();
+    const float aspect = size.y == 0 ? 1.0f : static_cast<float>(size.x) / static_cast<float>(size.y);
+
+    glViewport(0, 0, static_cast<GLint>(size.x), static_cast<GLint>(size.y));
+    glClearColor(0.57f, 0.74f, 0.96f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    setupPerspective(70.0f, aspect, 0.5f, 500.0f);
+
+    const Vec3 aim = forwardFromAngles(game.player.yawDeg, game.player.pitchDeg);
+    const Vec3 cameraTarget = game.player.pos + Vec3{0.0f, 3.8f, 0.0f};
+    const Vec3 eye = cameraTarget - flatForward(game.player.yawDeg) * 15.0f + Vec3{0.0f, 8.0f, 0.0f} - Vec3{0.0f, aim.y * 4.0f, 0.0f};
+    const Vec3 target = cameraTarget + aim * 24.0f;
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    setupLookAt(eye, target, Vec3{0.0f, 1.0f, 0.0f});
+
+    const GLfloat lightPos[] = {40.0f, 90.0f, 30.0f, 1.0f};
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+
+    drawArena(game);
+    drawPlayer(game.player);
+    for (const auto& enemy : game.enemies) {
+        if (enemy.alive) {
+            drawEnemy(enemy);
+        }
+    }
+    for (const auto& projectile : game.projectiles) {
+        drawProjectile(projectile);
+    }
+
+    drawCrosshair(window);
+    window.display();
+}
+}  // namespace
+
+int main() {
+    sf::ContextSettings settings;
+    settings.depthBits = 24;
+    settings.stencilBits = 8;
+    settings.antialiasingLevel = 4;
+    settings.majorVersion = 2;
+    settings.minorVersion = 1;
+
+    sf::RenderWindow window(
+        sf::VideoMode(kWindowWidth, kWindowHeight),
+        "C++ 3D Shooter",
+        sf::Style::Default,
+        settings);
+    window.setVerticalSyncEnabled(true);
+    window.setMouseCursorVisible(false);
+    window.setActive(true);
+
+    initOpenGlState();
+    const HudAssets hud = loadHudAssets();
+
+    GameState game;
+    resetGame(game);
+    sf::Mouse::setPosition(sf::Vector2i(static_cast<int>(window.getSize().x / 2), static_cast<int>(window.getSize().y / 2)), window);
+
+    sf::Clock frameClock;
+    while (window.isOpen()) {
+        sf::Event event{};
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed) {
+                window.close();
+            }
+            if (event.type == sf::Event::LostFocus) {
+                window.setMouseCursorVisible(true);
+            }
+            if (event.type == sf::Event::GainedFocus) {
+                window.setMouseCursorVisible(false);
+                sf::Mouse::setPosition(sf::Vector2i(static_cast<int>(window.getSize().x / 2), static_cast<int>(window.getSize().y / 2)), window);
+            }
+        }
+
+        const float dt = std::min(0.03f, frameClock.restart().asSeconds());
+        if (window.hasFocus()) {
+            handleMouseLook(window, game);
+        }
+
+        const InputState input = readInput();
+        if (input.reset) {
+            resetGame(game);
+            sf::Mouse::setPosition(sf::Vector2i(static_cast<int>(window.getSize().x / 2), static_cast<int>(window.getSize().y / 2)), window);
+        }
+
+        updatePlayer(game, input, dt);
+        updateProjectiles(game, dt);
+        updateEnemies(game, dt);
+
+        window.setTitle(buildTitle(game));
+        renderScene(window, game, hud);
+    }
+
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

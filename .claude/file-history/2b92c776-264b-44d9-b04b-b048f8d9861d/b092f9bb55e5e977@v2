@@ -1,0 +1,54 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace llm_npc {
+
+// Turn-based group conversation state (plan: group-conversations): a
+// participant list over the SAME structured-JSON dialogue pipeline as solo
+// talk. Solo DialogueSession is deliberately untouched — group is additive,
+// and main.cpp dispatches to whichever fits the situation. All state here
+// is renderer-free and unit-testable against a fake client.
+struct GroupLine {
+    // "player" or the participant's persona name — transcripts are always
+    // speaker-labeled, both for the UI and for per-speaker prompt assembly.
+    std::string speaker;
+    std::string text;
+};
+
+class GroupSession {
+   public:
+    // TODO(groups step 2): open with the npc indices present (player is
+    // implicit); closed() when <2 NPCs remain or the player leaves range.
+    void open(std::vector<int> npcIndices);
+    void close();
+    bool active() const;
+    const std::vector<int>& participants() const;
+
+    // TODO(groups step 2): transcript accessors for DialogUI (labeled
+    // lines) and for prompt assembly (rendered with speaker names).
+    const std::vector<GroupLine>& transcript() const;
+    void addLine(const std::string& speaker, const std::string& text);
+
+    // TODO(groups step 2): turn resolution —
+    //  * a player message with a leading participant-name address
+    //    ("Marge, ..." / full-name preferred on ties) gives that NPC the
+    //    turn; otherwise round-robin over participants;
+    //  * after an NPC reply, the next NPC MAY take the floor, but at most
+    //    kMaxConsecutiveNpcTurns before control returns to the player.
+    static constexpr int kMaxConsecutiveNpcTurns = 2;
+    int resolveNextSpeaker(const std::string& playerMessage) const;
+    bool npcMayTakeFloor() const;   // false once the cap is reached
+    void noteNpcTurn();             // advances the consecutive-turn counter
+    void notePlayerTurn();          // resets it
+
+   private:
+    std::vector<int> participants_;
+    std::vector<GroupLine> transcript_;
+    int consecutiveNpcTurns_ = 0;
+    int roundRobinCursor_ = 0;
+    bool active_ = false;
+};
+
+}  // namespace llm_npc

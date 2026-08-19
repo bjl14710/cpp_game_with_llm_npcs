@@ -1,0 +1,47 @@
+// Idle drift test: with NO mouse movement, does the warp-back approach
+// (current code) leave a residual delta each frame? And does the raw HID
+// delta (CGGetLastMouseDelta) read clean zero? Run without touching the mouse.
+#include <SFML/Graphics.hpp>
+#include <ApplicationServices/ApplicationServices.h>
+#include <iostream>
+
+static CGPoint cursorLoc() {
+    CGEventRef ev = CGEventCreate(nullptr);
+    CGPoint p = CGEventGetLocation(ev);
+    CFRelease(ev);
+    return p;
+}
+
+int main() {
+    sf::RenderWindow window(sf::VideoMode(400, 300), "drift test");
+    sf::sleep(sf::milliseconds(400));
+    sf::Event e; while (window.pollEvent(e)) {}
+
+    std::cout << "--- warp-back approach (idle, 10 frames) ---\n";
+    CGPoint anchor = cursorLoc();
+    double yaw = 0.0;
+    for (int i = 0; i < 10; ++i) {
+        while (window.pollEvent(e)) {}
+        CGPoint cur = cursorLoc();
+        double dx = cur.x - anchor.x;
+        yaw += dx * 0.12;
+        CGWarpMouseCursorPosition(anchor);
+        CGAssociateMouseAndMouseCursorPosition(true);
+        std::cout << "frame " << i << " dx=" << dx << " yaw=" << yaw << "\n";
+        sf::sleep(sf::milliseconds(16));
+    }
+
+    std::cout << "--- CGGetLastMouseDelta approach (idle, 10 frames) ---\n";
+    CGAssociateMouseAndMouseCursorPosition(false);
+    double yaw2 = 0.0;
+    for (int i = 0; i < 10; ++i) {
+        while (window.pollEvent(e)) {}
+        int32_t dx = 0, dy = 0;
+        CGGetLastMouseDelta(&dx, &dy);
+        yaw2 += dx * 0.12;
+        std::cout << "frame " << i << " dx=" << dx << " yaw=" << yaw2 << "\n";
+        sf::sleep(sf::milliseconds(16));
+    }
+    CGAssociateMouseAndMouseCursorPosition(true);
+    return 0;
+}

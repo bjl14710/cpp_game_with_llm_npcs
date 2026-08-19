@@ -1,0 +1,288 @@
+"""Code input block — paste C/C++/Python code and extract SCPI calls.
+
+Two input modes are supported:
+
+* **Snippet mode** — double-click the block, paste a single buffer, parse.
+* **Project mode** — right-click → "Load project folder" and point at a
+  flight OS / RTOS / firmware tree. Every recognized source file is parsed
+  and each parsed call can be routed to the connected hardware blocks in
+  file/line order, the way a real HIL/SIL test driver would.
+"""
+
+from __future__ import annotations
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont
+from PyQt6.QtWidgets import (
+    QMenu, QDialog, QVBoxLayout, QHBoxLayout, QTextEdit,
+    QPushButton, QLabel, QComboBox, QListWidget, QSplitter, QFileDialog,
+    QMessageBox,
+)
+
+from silmulator.gui.blocks.base_block import BaseBlock
+from silmulator.code_parser import CodeParser, CodeProject, ParsedCommand
+
+
+class CodeInputBlock(BaseBlock):
+    """A block for pasting user code that drives connected hardware blocks.
+
+    Parses C, C++, and Python code to extract SCPI commands,
+    then routes those commands to connected hardware blocks.
+    """
+
+    BLOCK_WIDTH = 240
+    BLOCK_HEIGHT = 160
+    HEADER_COLOR = QColor(60, 60, 60)
+    BODY_COLOR = QColor(245, 245, 245)
+
+    def __init__(self) -> None:
+        from silmulator.devices.base_device import BaseDevice
+        super().__init__(_NullDevice(), "Code Input")
+        self._source_code: str = ""
+        self._language: str = "auto"
+        self._parsed_commands: List[ParsedCommand] = []
+        self._parser = CodeParser()
+        self._project: Optional[CodeProject] = None
+
+    def _setup_ports(self) -> None:
+        # Output ports to connect to hardware blocks
+        self.add_port("OUT1", "OUT1", 1.0, 0.3)
+        self.add_port("OUT2", "OUT2", 1.0, 0.5)
+        self.add_port("OUT3", "OUT3", 1.0, 0.7)
+
+    def _paint_content(self, painter: QPainter, rect: QRectF) -> None:
+        font = QFont("Consolas", 8)
+        painter.setFont(font)
+        painter.setPen(QPen(QColor(60, 60, 60)))
+
+        y = self.TITLE_HEIGHT + 16
+        if self._project is not None:
+            painter.drawText(int(rect.x() + 8), y,
+                             f"Project: {self._project.root.name}")
+            y += 14
+            painter.drawText(int(rect.x() + 8), y,
+                             f"Files: {self._project.parsed_file_count()}/"
+                             f"{self._project.file_count()}")
+        else:
+            painter.drawText(int(rect.x() + 8), y, f"Language: {self._language}")
+            y += 14
+            painter.drawText(int(rect.x() + 8), y,
+                             f"Code: {len(self._source_code)} chars")
+        y += 14
+        painter.drawText(int(rect.x() + 8), y,
+                         f"SCPI calls found: {len(self._parsed_commands)}")
+
+        if self._parsed_commands:
+            y += 14
+            painter.setPen(QPen(QColor(80, 80, 200)))
+            painter.drawText(int(rect.x() + 8), y, "Recent commands:")
+            for cmd in self._parsed_commands[-4:]:
+                y += 12
+                painter.drawText(int(rect.x() + 14), y,
+                                 f"• {cmd.scpi_command[:28]}")
+
+        # Hint
+        if not self._source_code and self._project is None:
+            painter.setPen(QPen(QColor(160, 160, 160)))
+            painter.drawText(int(rect.x() + 8), int(rect.height() - 12),
+                             "Double-click to edit, right-click to load folder")
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self._open_editor()
+
+    def _add_device_menu_actions(self, menu: QMenu) -> None:
+        menu.addAction("Open code editor", self._open_editor)
+        menu.addAction("Load project folder…", self._load_project)
+        menu.addAction("Refresh project", self._refresh_project)
+        menu.addAction("Run parsed commands", self._run_commands)
+        menu.addAction("Clear code", self._clear_code)
+
+    def _open_editor(self) -> None:
+        dlg = _CodeEditorDialog(self._source_code, self._language, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._source_code = dlg.get_code()
+            self._language = dlg.get_language()
+            self._parse_code()
+            self.update()
+
+    def _parse_code(self) -> None:
+        if not self._source_code:
+            self._parsed_commands = []
+            return
+        self._parsed_commands = self._parser.parse(self._source_code, self._language)
+
+    # ------------------------------------------------------------------
+    # Project (multi-file) support
+    # ------------------------------------------------------------------
+
+    def load_project(self, root: str) -> CodeProject:
+        """Load and parse every recognized source file under ``root``.
+
+        Public so unit tests / scripted callers can drive it without a GUI.
+        """
+        project = CodeProject.from_path(root)
+        self._project = project
+        self._source_code = ""
+        self._language = "auto"
+        self._parsed_commands = project.all_commands()
+        self.update()
+        return project
+
+    def _load_project(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            None, "Select project root (flight OS, RTOS, firmware, …)"
+        )
+        if not path:
+            return
+        try:
+            project = self.load_project(path)
+        except Exception as exc:
+            QMessageBox.warning(None, "Project load failed", str(exc))
+            return
+        QMessageBox.information(
+            None,
+            "Project loaded",
+            f"Loaded {project.parsed_file_count()} of {project.file_count()} "
+            f"files\n{project.total_commands()} SCPI calls extracted from\n"
+            f"{project.root}",
+        )
+
+    def _refresh_project(self) -> None:
+        if self._project is None:
+            return
+        self._project.refresh()
+        self._parsed_commands = self._project.all_commands()
+        self.update()
+
+    @property
+    def project(self) -> Optional[CodeProject]:
+        return self._project
+
+    def _run_commands(self) -> None:
+        """Route parsed SCPI commands to connected blocks."""
+        if not self._parsed_commands:
+            return
+        connected_blocks = self._get_connected_blocks()
+        for parsed_cmd in self._parsed_commands:
+            for block in connected_blocks:
+                block.send_command(parsed_cmd.scpi_command)
+
+    def _clear_code(self) -> None:
+        self._source_code = ""
+        self._parsed_commands = []
+        self._project = None
+        self.update()
+
+    def _get_connected_blocks(self) -> List[BaseBlock]:
+        blocks = []
+        for port in self._ports:
+            if port.connected_to:
+                parent = port.connected_to.parent_block
+                if parent is not self:
+                    blocks.append(parent)
+        return blocks
+
+    def get_parsed_commands(self) -> List[ParsedCommand]:
+        return list(self._parsed_commands)
+
+
+class _NullDevice:
+    """Placeholder device for the code input block."""
+
+    def process(self, cmd: str) -> str:
+        return ""
+
+    def reset(self) -> None:
+        pass
+
+
+class _CodeEditorDialog(QDialog):
+    """Multi-pane code editor with live SCPI extraction preview."""
+
+    def __init__(self, code: str, language: str, block: CodeInputBlock) -> None:
+        super().__init__()
+        self.block = block
+        self.setWindowTitle("Code Input Editor")
+        self.resize(900, 600)
+        self._setup_ui(code, language)
+
+    def _setup_ui(self, code: str, language: str) -> None:
+        layout = QVBoxLayout(self)
+
+        # Top bar
+        top_bar = QHBoxLayout()
+        top_bar.addWidget(QLabel("Language:"))
+        self._lang_combo = QComboBox()
+        self._lang_combo.addItems(["auto", "c", "cpp", "python"])
+        idx = self._lang_combo.findText(language)
+        if idx >= 0:
+            self._lang_combo.setCurrentIndex(idx)
+        top_bar.addWidget(self._lang_combo)
+        top_bar.addStretch()
+        parse_btn = QPushButton("Parse")
+        parse_btn.clicked.connect(self._do_parse)
+        top_bar.addWidget(parse_btn)
+        layout.addLayout(top_bar)
+
+        # Splitter: code on left, extracted commands on right
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Code editor
+        self._editor = QTextEdit()
+        self._editor.setFont(QFont("Consolas", 10))
+        self._editor.setPlaceholderText(
+            "Paste your C, C++, or Python code here.\n\n"
+            "Example (C):\n"
+            '  visa_write(dev, "VOLT 5.0");\n'
+            '  visa_write(dev, "OUTP ON");\n'
+            '  resp = visa_query(dev, "MEAS:VOLT:DC?");'
+        )
+        self._editor.setPlainText(code)
+        splitter.addWidget(self._editor)
+
+        # Extracted commands panel
+        right_pane = QVBoxLayout()
+        right_widget = QDialog()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.addWidget(QLabel("Extracted SCPI Commands:"))
+        self._cmd_list = QListWidget()
+        self._cmd_list.setFont(QFont("Consolas", 9))
+        right_layout.addWidget(self._cmd_list)
+        splitter.addWidget(right_widget)
+        splitter.setSizes([550, 350])
+
+        layout.addWidget(splitter)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addStretch()
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        # Initial parse
+        self._do_parse()
+
+    def _do_parse(self) -> None:
+        from silmulator.code_parser import CodeParser
+        parser = CodeParser()
+        code = self._editor.toPlainText()
+        lang = self._lang_combo.currentText()
+        cmds = parser.parse(code, lang)
+        self._cmd_list.clear()
+        for cmd in cmds:
+            self._cmd_list.addItem(
+                f"[line {cmd.line_number}] {cmd.scpi_command}"
+            )
+
+    def get_code(self) -> str:
+        return self._editor.toPlainText()
+
+    def get_language(self) -> str:
+        return self._lang_combo.currentText()

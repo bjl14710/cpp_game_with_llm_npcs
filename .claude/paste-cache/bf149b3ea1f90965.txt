@@ -1,0 +1,42 @@
+/idea
+
+Goal: Describe a map or cast of characters in natural language, and a local
+LLM generates it — by emitting a structured spec (the sandbox editor's own
+map JSON format, and the character system's persona/trait/look records)
+that existing systems render. The LLM never draws or places anything
+directly; it fills schemas.
+
+Context: Depends on the sandbox map editor (its save format is the output
+contract) and the trait system (its records are the character output
+contract). Schema-as-contract, same as NPC dialogue: model proposes a
+structured spec, validation layer checks it (valid piece ids, in-bounds
+placements, no collision-rule violations), then the normal loaders render
+it. A coding-oriented local model (e.g. Ornith) is a reasonable candidate
+here since the task is structured-output generation, but benchmark it
+against the current dialogue model on schema-validity rate before assuming
+— pick by measured validity, not by label.
+
+Scope:
+1. Map generation — prompt template that takes my description plus the
+   piece catalog (ids, footprints, style tags) and emits a valid map file.
+   Validate before loading; on invalid output, retry with the validation
+   errors fed back (cap retries, then report failure plainly).
+2. Character generation — same pattern emitting persona + traits + look
+   records, constrained to existing part ids and trait names.
+3. Combined flow — "make me a fishing village with a grumpy old sailor and
+   two kids" produces a map with those characters placed in it.
+4. In-game entry point — a simple text-input flow in sandbox mode; results
+   load as an editable sandbox map, not a locked artifact, so I can fix
+   what the model gets wrong by hand.
+
+Autonomy instructions — unattended run:
+- No clarifying questions or /grill-me-style interrogation; pick the most
+  defensible option, log reasoning, keep going.
+- Cloud-first-then-local: validate the prompt templates and schemas against
+  a cloud model first if configured, then confirm on local. Log
+  schema-validity rates for whichever local models were tested.
+- The validation layer is the deliverable as much as the generation —
+  generated output that loads without being validated is a failed ticket
+  even if it happens to look right.
+- Follow existing CLAUDE.md agent routing. Draft PR only, no merge, no
+  main. Standard gitignore rules apply.

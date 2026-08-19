@@ -1,0 +1,13 @@
+# MSP430FR5994 Reference Documents
+
+Downloaded from ti.com on 2026-07-05 for the MSP430 quality-suite plans
+(compliance audit, edge-case tests, fault modeling, block-generator diff).
+
+| File | Document | Revision |
+|------|----------|----------|
+| `slau367_users_guide.pdf` | MSP430FR58xx/59xx/6xx Family User's Guide | SLAU367P |
+| `msp430fr5994_datasheet.pdf` | MSP430FR599x Mixed-Signal Microcontrollers datasheet | SLASE54D |
+
+These revisions are the declared ground truth for `silmulator/devices/msp430.py`
+compliance work. Reports generated against them must cite these literature
+numbers in their headers (see `docs/audits/` and the custom-block diff report).

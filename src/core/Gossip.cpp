@@ -2,6 +2,7 @@
 
 #include <cctype>
 
+#include "AsciiText.hpp"
 #include "json.hpp"
 
 namespace llm_npc {
@@ -50,7 +51,10 @@ std::vector<ProposedFact> validateProposedFacts(const std::string& json) {
         }
         ProposedFact fact;
         fact.subject = normalizeSubject(item["subject"].get<std::string>());
-        fact.content = item["content"].get<std::string>();
+        // Same boundary treatment as dialogue: facts are model-authored and
+        // end up rendered in the Journal, so a curly apostrophe here becomes a
+        // '?' in front of the player.
+        fact.content = toRenderableAscii(item["content"].get<std::string>());
         const std::string direction = item["direction"].get<std::string>();
         if (direction == "player_learned") {
             fact.playerLearned = true;
@@ -94,15 +98,42 @@ int propagateGossip(WorldState& state, const std::vector<AgentAt>& agents,
             // Symmetric pair: each side may pass one eligible fact.
             for (const auto& [teller, hearer] :
                  {std::pair{&agents[a], &agents[b]}, std::pair{&agents[b], &agents[a]}}) {
-                if (roll(rng) >= kGossipChance) continue;
+                // ONE draw per pair-direction, exactly as before, compared
+                // against a threshold chosen per fact.
+                //
+                // Drawing inside the fact loop instead would give a pair with
+                // several candidate facts several chances, which quietly
+                // SPEEDS UP the player-sourced lane this change is required to
+                // leave alone. Keeping the draw here also keeps the number of
+                // rng draws independent of what anyone happens to know, so a
+                // seeded run stays reproducible.
+                const float r = roll(rng);
                 for (const KnownFact* fact : state.factsKnownBy(teller->name)) {
+                    // Rate by PROVENANCE. `source` already distinguishes the
+                    // two kinds — a fact the player introduced is sourced
+                    // "player", seeded testimony is sourced with a persona
+                    // name — so this needs no new field, and a second spelling
+                    // of the same thing is how two spellings drift apart.
+                    //
+                    // Why testimony has to be slower: a match day compresses
+                    // ~11 in-world hours into ~8 real minutes, so the 30
+                    // game-minute age gate elapses in about 20 real seconds
+                    // and the tick runs every 15. At the player rate, seeded
+                    // knowledge homogenises inside day one and every resident
+                    // ends up knowing every account — which flattens the
+                    // per-NPC distinctness the whole mechanic depends on.
+                    const bool testimony = fact->source != "player";
+                    const double minAge =
+                        testimony ? kTestimonyMinAgeSeconds : kGossipMinAgeSeconds;
+                    const float chance = testimony ? kTestimonyChance : kGossipChance;
+
                     // Age gate is wrap-aware only in spirit: facts learned
                     // "in the future" (clock wrapped past midnight) count
                     // as old enough — gossip should not go quiet at 00:00.
                     const double age = now - fact->learnedAtSeconds;
-                    const bool oldEnough =
-                        age >= kGossipMinAgeSeconds || age < 0.0;
-                    if (!oldEnough || state.knows(hearer->name, fact->factId)) {
+                    const bool oldEnough = age >= minAge || age < 0.0;
+                    if (!oldEnough || r >= chance ||
+                        state.knows(hearer->name, fact->factId)) {
                         continue;
                     }
                     state.grantKnowledge(hearer->name, fact->factId);

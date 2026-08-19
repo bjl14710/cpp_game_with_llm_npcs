@@ -1,0 +1,132 @@
+-- =============================================================================
+-- Reference solution — Exercise 05: testbench for fpga/moving_average_trader.vhd
+--
+-- Uses WINDOW=4 to keep warm-up short. Prices are integer x100 (e.g. $100.00
+-- -> 10000); SPREAD=100 ($1.00).
+--
+-- Key DUT behaviors verified:
+--   * valid_out stays low until one sample AFTER warm-up (warmed_s1 lags)
+--   * the average is computed over the PREVIOUS window, excluding the
+--     current sample (sum_s1 registers the old running_sum)
+--   * 2-cycle latency from a sample's input edge to its signal
+--   * BUY when price < avg - spread, SELL when price > avg + spread,
+--     HOLD (valid with no signal) in between
+--
+-- Run:  bash scripts/run_vhdl_tests.sh tb_moving_average_trader
+-- =============================================================================
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity tb_moving_average_trader is
+end entity tb_moving_average_trader;
+
+architecture sim of tb_moving_average_trader is
+
+    constant CLK_PERIOD : time := 10 ns;
+
+    signal clk         : std_logic := '0';
+    signal rst_n       : std_logic := '0';
+    signal price_in    : signed(31 downto 0) := (others => '0');
+    signal valid_in    : std_logic := '0';
+    signal buy_signal  : std_logic;
+    signal sell_signal : std_logic;
+    signal valid_out   : std_logic;
+
+    signal done : boolean := false;
+
+begin
+
+    dut : entity work.moving_average_trader
+        generic map (
+            WINDOW     => 4,
+            PRICE_BITS => 32,
+            SPREAD     => 100   -- $1.00 in x100 units
+        )
+        port map (
+            clk         => clk,
+            rst_n       => rst_n,
+            price_in    => price_in,
+            valid_in    => valid_in,
+            buy_signal  => buy_signal,
+            sell_signal => sell_signal,
+            valid_out   => valid_out
+        );
+
+    clk_gen : process
+    begin
+        while not done loop
+            clk <= '0';
+            wait for CLK_PERIOD / 2;
+            clk <= '1';
+            wait for CLK_PERIOD / 2;
+        end loop;
+        wait;
+    end process clk_gen;
+
+    stimulus : process
+    begin
+        rst_n <= '0';
+        wait until rising_edge(clk);
+        wait until rising_edge(clk);
+        rst_n <= '1';
+        wait until rising_edge(clk);
+
+        -- Warm-up: four samples of $100.00 (sum = 40000, avg = 10000)
+        valid_in <= '1';
+        price_in <= to_signed(10000, 32);
+        wait until rising_edge(clk);   -- edge 1: sample 1
+        wait until rising_edge(clk);   -- edge 2: sample 2
+        wait until rising_edge(clk);   -- edge 3: sample 3
+        wait until rising_edge(clk);   -- edge 4: sample 4 (window now full)
+        wait for 1 ns;
+        assert valid_out = '0'
+            report "valid_out must stay low during warm-up"
+            severity error;
+
+        -- Sample 5: $98.00. Prior-window avg = 10000;
+        -- 9800 < 10000 - 100 -> BUY (visible 2 cycles after this edge)
+        price_in <= to_signed(9800, 32);
+        wait until rising_edge(clk);   -- edge 5: sample 5
+        wait for 1 ns;
+        assert valid_out = '0'
+            report "first valid_out comes one sample after warm-up (warmed flag lags)"
+            severity error;
+
+        -- Sample 6: $102.00. Prior-window avg = (40000 - 10000 + 9800)/4 = 9950;
+        -- 10200 > 9950 + 100 -> SELL
+        price_in <= to_signed(10200, 32);
+        wait until rising_edge(clk);   -- edge 6: sample 6; sample 5's result lands now
+        wait for 1 ns;
+        assert valid_out = '1' and buy_signal = '1' and sell_signal = '0'
+            report "sample 5 ($98 vs avg $100, spread $1) should be a BUY"
+            severity error;
+
+        -- Sample 7: $100.00. Prior-window avg = (39800 + 10200 - 10000)/4 = 10000;
+        -- 10000 within [9900, 10100] -> HOLD (valid, no signal)
+        price_in <= to_signed(10000, 32);
+        wait until rising_edge(clk);   -- edge 7: sample 7; sample 6's result lands now
+        valid_in <= '0';
+        wait for 1 ns;
+        assert valid_out = '1' and sell_signal = '1' and buy_signal = '0'
+            report "sample 6 ($102 vs avg $99.50, spread $1) should be a SELL"
+            severity error;
+
+        wait until rising_edge(clk);   -- edge 8: sample 7's result lands now
+        wait for 1 ns;
+        assert valid_out = '1' and buy_signal = '0' and sell_signal = '0'
+            report "sample 7 ($100 vs avg $100) should be a HOLD (valid, no signal)"
+            severity error;
+
+        wait until rising_edge(clk);   -- edge 9: pipeline drains
+        wait for 1 ns;
+        assert valid_out = '0'
+            report "valid_out must drop once the pipeline drains"
+            severity error;
+
+        done <= true;
+        report "TB PASSED" severity note;
+        wait;
+    end process stimulus;
+
+end architecture sim;

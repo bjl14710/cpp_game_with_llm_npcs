@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0014 — Function-call nuances for low-latency C++</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .step-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0014 &middot; cpp_games / docs / learning</div>
+  <h1>Function-call nuances for low-latency C++</h1>
+  <p class="why">Why this matters: your shooter calls <code class="inline">dot()</code> and the <code class="inline">Vec3</code> operators hundreds of times per frame, and <code class="inline">DialogUI::render</code> calls <code class="inline">wrap()</code> every frame. Whether those calls cost ~0 ns or ~5 ns each is decided by four things you control at the call site: how arguments travel, how the return value travels, how the callable is dispatched, and whether the compiler can inline it. This lesson is those four decisions.</p>
+</header>
+
+<h2>1. What a function call actually costs</h2>
+
+<p>When the compiler can't (or won't) inline a call, the machine does real work that has nothing to do with your function's logic:</p>
+
+<div class="step-diagram">  caller                                          callee
+  ──────                                          ──────
+  1. place arguments                              4. prologue: save registers it
+     - small/trivial args → CPU registers            will clobber, set up stack frame
+     - big or non-trivial args → memory          5. ...your actual logic...
+  2. `call` — push return address, jump           6. epilogue: restore registers
+     (branch predictor must guess right)          7. `ret` — pop address, jump back
+  3. after return: result arrives in a
+     register (small) or memory (big)
+
+  Hidden costs: instruction-cache pressure (jumping to cold code),
+  lost optimization across the boundary (the compiler must assume the
+  callee could do anything), register spills around the call.</div>
+
+<p>Two consequences worth internalizing:</p>
+
+<ul>
+  <li><b>The call overhead itself is tiny</b> — a handful of cycles, low single-digit nanoseconds. One un-inlined call per frame is nothing against your 16.7 ms budget (lesson 0003).</li>
+  <li><b>But it multiplies.</b> A 3 ns call inside a loop that runs 10,000 times per frame is 30 &micro;s/frame &mdash; and the bigger loss is usually the <em>missed optimization</em>: an inlined <code class="inline">dot()</code> lets the compiler keep all six floats in registers and vectorize the surrounding loop; an opaque call forces everything through memory.</li>
+</ul>
+
+<div class="callout">
+  <h3>Inlining is the whole ballgame</h3>
+  <p>When the compiler inlines a call, steps 1&ndash;7 above all disappear &mdash; the callee's body is pasted into the caller and optimized as one unit. Most of this lesson is really about <em>not accidentally preventing inlining</em>, and making un-inlinable calls (virtual, <code class="inline">std::function</code>, cross-library) cheap to pass through.</p>
+</div>
+
+<div class="callout warn">
+  <h3>The <code class="inline">inline</code> keyword does NOT mean "inline this"</h3>
+  <p>Modern compilers ignore <code class="inline">inline</code> as an optimization hint. Its real meaning today is about <em>linkage</em>: "this definition may appear in multiple translation units, merge them." That's why functions defined inside headers (like <code class="inline">Persona::renderSystemPrompt()</code> in <code class="inline">Persona.hpp</code>) are implicitly <code class="inline">inline</code> &mdash; otherwise including the header twice would break the build. Actual inlining is the optimizer's call, driven by function size, call frequency, and optimization level (<code class="inline">-O2</code>).</p>
+</div>
+
+<h2>2. Decision 1 — how arguments travel</h2>
+
+<p>This is the choice you make most often. The rule set (matching the C++ Core Guidelines "F" rules) is small:</p>
+
+<table class="compare">
+  <tr><th>Parameter situation</th><th>Pass it as</th><th>Why</th></tr>
+  <tr>
+    <td>Cheap to copy (a few words: <code>int</code>, <code>float</code>, pointers, small structs like <code>Vec3</code>)</td>
+    <td><b>By value</b> &mdash; <code>f(Vec3 v)</code></td>
+    <td>Fits in registers. No indirection, no aliasing worries for the optimizer.</td>
+  </tr>
+  <tr>
+    <td>Expensive or unknown-size, read only (<code>std::string</code>, <code>std::vector</code>, big structs)</td>
+    <td><b><code>const&amp;</code></b> &mdash; <code>f(const std::string&amp; s)</code></td>
+    <td>One pointer travels instead of a deep copy.</td>
+  </tr>
+  <tr>
+    <td>The function will <b>keep</b> the value (store it in a member, push it into a queue) &mdash; a "sink"</td>
+    <td><b>By value, then <code>std::move</code></b> into place</td>
+    <td>Caller decides: pass an lvalue &rarr; one copy; pass a temporary or <code>std::move(x)</code> &rarr; zero copies. One signature handles both.</td>
+  </tr>
+  <tr>
+    <td>Read-only view of string data that might be a literal, a substring, or a <code>std::string</code></td>
+    <td><b><code>std::string_view</code></b> (C++17, lesson 0013)</td>
+    <td>16 bytes by value (pointer + length). No allocation, accepts anything string-shaped.</td>
+  </tr>
+</table>
+
+<h3>The nuance: "cheap to copy" beats "avoid the copy"</h3>
+
+<p>Beginners overuse <code class="inline">const&amp;</code> because "references avoid copies." But for a small trivially-copyable type, the reference is the slow path when the call isn't inlined:</p>
+
+<pre class="code"><span class="com">// By value: x, y, z arrive in three registers. The callee reads registers.</span>
+<span class="typ">float</span> dot(Vec3 a, Vec3 b);
+
+<span class="com">// By const&: a POINTER arrives in a register. The callee must load from</span>
+<span class="com">// memory through it — and the optimizer must assume a and b might alias</span>
+<span class="com">// (point at) other memory the function touches, blocking reorderings.</span>
+<span class="typ">float</span> dot(<span class="kw">const</span> Vec3&amp; a, <span class="kw">const</span> Vec3&amp; b);</pre>
+
+<p>The crossover point is roughly "two or three machine words" (~16&ndash;24 bytes). <code class="inline">Vec3</code> is 12 bytes of plain floats &mdash; squarely in by-value territory. A <code class="inline">std::string</code> is 32 bytes <em>plus</em> a possible heap allocation on copy (lesson 0006's SSO) &mdash; squarely in <code class="inline">const&amp;</code> territory.</p>
+
+<div class="callout real">
+  <h3>Does your shooter get this "wrong"?</h3>
+  <p><code class="inline">cpp_shooter_game/src/main.cpp:42-58</code> passes <code class="inline">const Vec3&amp;</code> everywhere. By the table, by-value would be the textbook choice. In practice it makes <b>zero difference here</b>: these operators are tiny, defined in the same file, and called at <code class="inline">-O2</code> &mdash; the compiler inlines every one of them, and after inlining, by-value and by-reference compile to identical code. The rule matters at calls the compiler <em>can't</em> see through: across .cpp files without LTO, virtual calls, library boundaries. This is the recurring theme: <b>the guideline picks the better default; inlining usually erases the difference; profile before "fixing" anything</b>.</p>
+</div>
+
+<h2>3. Decision 2 — how the return value travels</h2>
+
+<p>Old C++ folklore says "returning big objects by value is slow &mdash; they get copied." That's been wrong for years, and since C++17 it's <em>guaranteed</em> wrong in the common case:</p>
+
+<ul>
+  <li><b>RVO (mandatory since C++17):</b> <code class="inline">return std::string{"hi"};</code> &mdash; returning a <em>temporary</em> constructs the result directly in the caller's storage. No copy, no move. Not an optimization anymore &mdash; the standard requires it ("guaranteed copy elision").</li>
+  <li><b>NRVO (allowed, near-universal):</b> <code class="inline">std::string out; ...; return out;</code> &mdash; returning a <em>named</em> local usually also builds in place. Not guaranteed, but every major compiler does it when there's a single return object. Worst case: one cheap move.</li>
+</ul>
+
+<pre class="code"><span class="com">// DialogUI.cpp:25 — wrap() returns a vector<string> BY VALUE every frame.</span>
+<span class="com">// NRVO: `out` is constructed directly in the caller. Returning it is free.</span>
+std::vector&lt;std::string&gt; wrap(<span class="kw">const</span> std::string&amp; s, std::size_t maxChars) {
+    std::vector&lt;std::string&gt; out;
+    <span class="com">// ... fill out ...</span>
+    <span class="kw">return</span> out;   <span class="com">// NRVO — no copy of the vector or its strings</span>
+}
+
+<span class="bad"><span class="com">// ANTI-PATTERN: don't "help" with std::move on a local return —</span>
+<span class="com">// it DISABLES NRVO and forces an actual move. Compilers warn about this.</span>
+<span class="kw">return</span> std::move(out);   <span class="com">// pessimization, never do this for locals</span></span></pre>
+
+<p>So return by value, plainly. The out-parameter style (<code class="inline">void wrap(const std::string&amp;, std::vector&lt;std::string&gt;&amp; out)</code>) only wins when the caller can <em>reuse one buffer across calls</em> to avoid repeated allocation &mdash; which is exactly the deferred <code class="inline">DialogUI::render</code> fix from lesson 0003, and a profiling decision, not a default.</p>
+
+<h2>4. Decision 3 — how the callable is dispatched</h2>
+
+<p>"Call a function" can mean four mechanically different things. Sorted from transparent to opaque:</p>
+
+<table class="compare">
+  <tr><th>Mechanism</th><th>Dispatch</th><th>Inlinable?</th><th>You use it in</th></tr>
+  <tr>
+    <td>Direct call / lambda passed to a <b>template</b></td>
+    <td>Resolved at compile time; the lambda's exact type is baked into the instantiation</td>
+    <td><b>Yes</b> &mdash; usually fully</td>
+    <td><code>std::remove_if(..., [](const Projectile&amp; p){...})</code> &mdash; shooter main.cpp:686</td>
+  </tr>
+  <tr>
+    <td>Function pointer</td>
+    <td>Indirect jump through a pointer</td>
+    <td>Only if the compiler can prove which function it points to</td>
+    <td>(none currently &mdash; C-style callbacks, e.g. GLFW APIs)</td>
+  </tr>
+  <tr>
+    <td>Virtual call</td>
+    <td>Load vptr &rarr; load vtable slot &rarr; indirect jump (lesson 0007)</td>
+    <td>Only with devirtualization (compiler proves the dynamic type)</td>
+    <td>The HAL design from lesson 0007</td>
+  </tr>
+  <tr>
+    <td><code>std::function</code></td>
+    <td><b>Type erasure</b>: indirect call through an internal pointer, + possible <b>heap allocation</b> to store a large captured lambda</td>
+    <td>Practically no</td>
+    <td>(none currently &mdash; and that's good for hot paths)</td>
+  </tr>
+</table>
+
+<p>The big trap is <code class="inline">std::function</code>. It's wonderfully flexible &mdash; it can hold <em>any</em> callable with a matching signature &mdash; and that flexibility is bought with type erasure: the concrete callable's type is hidden behind an indirect call, and if the captures don't fit in the small internal buffer (typically ~2&ndash;3 words), it heap-allocates. Compare:</p>
+
+<pre class="code"><span class="com">// (A) Template parameter — the shooter's actual pattern. Zero overhead:</span>
+<span class="com">// remove_if<Iter, Lambda> is stamped out for THIS lambda; the body inlines.</span>
+<span class="ok">game.projectiles.erase(
+    std::remove_if(game.projectiles.begin(), game.projectiles.end(),
+                   [](<span class="kw">const</span> Projectile&amp; p) { <span class="kw">return</span> p.lifetime &lt;= <span class="num">0.0f</span>; }),
+    game.projectiles.end());</span>
+
+<span class="com">// (B) Same logic through std::function — type-erased, indirect call per</span>
+<span class="com">// element, possible allocation when constructed. Fine for "call once per</span>
+<span class="com">// click", wasteful for "call per projectile per frame".</span>
+<span class="bad">std::function&lt;<span class="typ">bool</span>(<span class="kw">const</span> Projectile&amp;)&gt; pred =
+    [](<span class="kw">const</span> Projectile&amp; p) { <span class="kw">return</span> p.lifetime &lt;= <span class="num">0.0f</span>; };
+game.projectiles.erase(
+    std::remove_if(game.projectiles.begin(), game.projectiles.end(), pred),
+    game.projectiles.end());</span></pre>
+
+<p><b>Rule:</b> in hot paths, take callables as template parameters (like the STL does) or call them directly. Reserve <code class="inline">std::function</code> for places that genuinely need to <em>store</em> heterogeneous callbacks &mdash; UI event tables, a reply-callback registry &mdash; where the call happens rarely.</p>
+
+<h2>5. Decision 4 — hints that unlock optimization</h2>
+
+<ul>
+  <li><b><code class="inline">noexcept</code></b> &mdash; promises "this never throws." Two payoffs: the compiler drops exception-path bookkeeping around calls, and (the big one, from lesson 0012's world) <code class="inline">std::vector</code> only <em>moves</em> elements during reallocation if the move constructor is <code class="inline">noexcept</code> &mdash; otherwise it copies to stay exception-safe. Your structs get <code class="inline">noexcept</code> moves implicitly; hand-written move constructors must say it explicitly.</li>
+  <li><b><code class="inline">constexpr</code></b> &mdash; "callable at compile time." Your <code class="inline">kPadding</code>/<code class="inline">kLineHeight</code> constants (DialogUI.cpp:9-12) are <code class="inline">constexpr</code> values; a <code class="inline">constexpr</code> <em>function</em> with constant arguments costs zero at runtime because the answer is computed during compilation.</li>
+  <li><b><code class="inline">static</code> / anonymous namespace</b> &mdash; internal linkage (your <code class="inline">colorFor()</code> and <code class="inline">wrap()</code> live in an anonymous namespace in DialogUI.cpp). The compiler can see <em>every</em> caller, so it inlines aggressively and may delete the standalone function entirely.</li>
+  <li><b><code class="inline">[[likely]]</code> / <code class="inline">[[unlikely]]</code></b> (C++20, lesson 0013) &mdash; tells the compiler which branch to lay out as the fall-through hot path. Use sparingly and only with evidence; mispredicting yourself is worse than letting the compiler guess.</li>
+</ul>
+
+<h2>6. In this project</h2>
+
+<h3>The sink parameter, done right</h3>
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:23-34</small>
+<pre class="code">std::uint64_t LlmClient::submit(std::string systemPrompt,          <span class="com">// by VALUE</span>
+                                std::vector&lt;ChatTurn&gt; history,     <span class="com">// by VALUE</span>
+                                std::string userMessage) {         <span class="com">// by VALUE</span>
+    ChatRequest req;
+    req.systemPrompt = std::move(systemPrompt);   <span class="com">// steal, don't copy</span>
+    req.history     = std::move(history);
+    req.userMessage  = std::move(userMessage);
+    ...
+    requests_.push(std::move(req));               <span class="com">// move all the way in</span>
+}</pre>
+<p><code class="inline">submit()</code> <em>keeps</em> everything it's given &mdash; it's a sink. By-value + <code class="inline">std::move</code> means: a caller passing a temporary pays <b>zero</b> copies (the temporary is moved into the parameter, then moved into the queue); a caller passing a variable it still needs pays exactly <b>one</b> copy (into the parameter), then moves. A <code class="inline">const&amp;</code> signature would force a copy in <em>both</em> cases. Latency-wise this also matters for the right reason: the copy/move happens on the <em>main thread before queuing</em>, so the worker thread never touches caller-owned memory &mdash; passing by reference here wouldn't just be slower to reason about, it would be a use-after-free waiting to happen (lesson 0005).</p>
+
+<h3>The read-only heavyweight</h3>
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.cpp:25</small>
+<pre class="code">std::vector&lt;std::string&gt; wrap(<span class="kw">const</span> std::string&amp; s, std::size_t maxChars)</pre>
+<p>Textbook row 2: <code class="inline">s</code> is big and only read &rarr; <code class="inline">const&amp;</code>. And row "size_t": <code class="inline">maxChars</code> is one machine word &rarr; by value. Note the upgrade path: <code class="inline">std::string_view s</code> would also accept literals and substrings without allocating &mdash; but the caller at line 134 builds <code class="inline">prefix + line.text</code> (a fresh <code class="inline">std::string</code>) anyway, so string_view wouldn't remove the per-frame allocation flagged in lesson 0003. Fixing the caller is the profiling-gated work; changing the signature alone is cosmetic.</p>
+
+<h3>The lambda the compiler eats for free</h3>
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.cpp:29-41 &middot; cpp_shooter_game/src/main.cpp:686</small>
+<pre class="code"><span class="kw">auto</span> flushWord = [&amp;]() {            <span class="com">// captures by reference: out, current,</span>
+    <span class="kw">if</span> (word.empty()) <span class="kw">return</span>;       <span class="com">// word, maxChars — costs 0 to create</span>
+    ...
+};</pre>
+<p><code class="inline">flushWord</code> is a local lambda called directly &mdash; the compiler sees the exact closure type, inlines it, and the "lambda" dissolves into straight-line code. Same story for the <code class="inline">remove_if</code> predicates in the shooter: they travel as template parameters, never as <code class="inline">std::function</code>. Your codebase already has zero <code class="inline">std::function</code> in hot paths &mdash; keep it that way.</p>
+
+<h3>The return-by-value pair</h3>
+<small class="path">cpp_game_with_llm_npcs/src/Persona.hpp:19 &middot; DialogUI.cpp:64</small>
+<pre class="code">std::string renderSystemPrompt() <span class="kw">const</span> {   <span class="com">// returns by value — NRVO,</span>
+    std::string out; ... <span class="kw">return</span> out;       <span class="com">// constructed in caller's slot</span>
+}</pre>
+<p>Both <code class="inline">renderSystemPrompt()</code> and <code class="inline">wrap()</code> build a named local and return it. NRVO makes the return itself free. No out-parameters needed until a profiler says the repeated <em>allocation inside</em> the function (not the return) is the problem.</p>
+
+<h2>7. Often confused</h2>
+
+<h3><code>inline</code> keyword vs. actual inlining</h3>
+<table class="compare">
+  <tr><th></th><th><code>inline</code> keyword</th><th>Inlining (the optimization)</th></tr>
+  <tr><td>What it is</td><td>A <b>linkage</b> property: "definition may repeat across translation units"</td><td>The optimizer pasting a callee's body into the caller</td></tr>
+  <tr><td>Who decides</td><td>You, in source</td><td>The compiler, at <code>-O2</code>, by cost heuristics</td></tr>
+  <tr><td>Relationship</td><td colspan="2">Almost none today. Header-defined functions need <code>inline</code> (or get it implicitly, like methods defined in-class) just to <em>link</em>; whether they're inlined is a separate decision the keyword barely influences.</td></tr>
+</table>
+
+<h3>Pass-by-value vs. pass-by-<code>const&amp;</code></h3>
+<p><b>Share:</b> both give the callee read access to the caller's data. <b>Diverge:</b> by-value copies (registers for small types &mdash; fast; deep copy for big types &mdash; slow); <code class="inline">const&amp;</code> passes a pointer (one word &mdash; but adds indirection and aliasing pessimism). <b>Pick:</b> by size and intent &mdash; small-and-trivial or sink &rarr; value; big-and-read-only &rarr; <code class="inline">const&amp;</code>.</p>
+
+<h3>Lambda vs. <code>std::function</code></h3>
+<p><b>Share:</b> both are "a callable thing you can pass around." <b>Diverge:</b> a lambda is a unique, concrete, compiler-known type (zero-cost when passed to templates); <code class="inline">std::function</code> is a type-erasing <em>container</em> that can hold any matching callable, paying an indirect call and possibly a heap allocation for the privilege. A lambda often gets <em>stored in</em> a <code class="inline">std::function</code> &mdash; that's the moment the cost appears, not when the lambda is written.</p>
+
+<h2>8. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">1. <code>dot(const Vec3&amp; a, const Vec3&amp; b)</code> in your shooter uses <code>const&amp;</code> for a 12-byte struct. Why is this not hurting your frame time?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backwards — for small trivially-copyable types, by-VALUE is the textbook-faster signature (registers, no aliasing). The reference isn't the optimal form; it's just irrelevant here.">const&amp; is always faster than by-value, so it's optimal</li>
+    <li data-correct="true" data-why="Right. dot() is tiny and visible at every call site, so -O2 inlines it; after inlining, the parameter-passing convention disappears entirely and both forms compile to the same code.">The compiler inlines these calls, and after inlining the passing convention doesn't exist anymore</li>
+    <li data-correct="false" data-why="References are not free at runtime when a call is real — they're a pointer, which means an extra load and aliasing assumptions. They cost nothing here only because the call itself is inlined away.">References have no runtime representation, so they're always free</li>
+    <li data-correct="false" data-why="Vec3 has no heap data at all — it's three floats. SSO is a std::string concept (lesson 0006) and doesn't apply.">Vec3's small-size optimization keeps it off the heap, making copies free</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">2. <code>LlmClient::submit</code> takes <code>std::string systemPrompt</code> by value and then does <code>std::move(systemPrompt)</code>. A caller passes a string variable it still needs afterward. How many copies of the string data are made?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Zero copies happens only when the caller passes a temporary or explicitly std::move's — then it's moves all the way down.">Zero — std::move never copies</li>
+    <li data-correct="false" data-why="Two would happen with a const&amp; parameter that's copied into the request AND copied again into the queue — the sink idiom exists precisely to avoid that.">Two — one into the parameter, one into the queue</li>
+    <li data-correct="true" data-why="Exactly one: the lvalue is COPIED into the by-value parameter (caller keeps theirs), then MOVED into the request and MOVED into the queue. Moves shuffle three pointers; only the initial copy touches the character data.">One — copied into the parameter, then moved the rest of the way</li>
+    <li data-correct="false" data-why="std::move doesn't move anything by itself — it's a cast to rvalue reference. The move CONSTRUCTOR does the work, and here it runs on an already-copied parameter, leaving the caller's string intact.">It's undefined — the caller's string was moved-from and can't be used</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">3. <code>wrap()</code> ends with <code>return out;</code> where <code>out</code> is a local <code>std::vector&lt;std::string&gt;</code>. Your teammate "optimizes" it to <code>return std::move(out);</code>. What happened?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="No — moving a vector is cheap (three pointers) but NRVO is cheaper (zero work). The edit replaced free with cheap.">A genuine speedup — moves are faster than copies</li>
+    <li data-correct="true" data-why="Correct. std::move on a returned local disables NRVO: instead of constructing `out` directly in the caller's storage, the compiler must now perform a real move. Strictly worse; GCC/Clang's -Wpessimizing-move warns about exactly this.">A pessimization — it disabled NRVO and forced a real move</li>
+    <li data-correct="false" data-why="It compiles fine — std::move on a local is legal, just counterproductive on a return statement.">A compile error — you can't move a local out of a function</li>
+    <li data-correct="false" data-why="Dangling would happen if you returned a REFERENCE to a local. Returning by value (moved or not) is safe; the problem is performance, not lifetime.">Undefined behavior — the local is destroyed before the caller reads it</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">4. You're adding a per-projectile filter that the player can hot-swap at runtime. A teammate proposes storing it as <code>std::function&lt;bool(const Projectile&amp;)&gt;</code> and calling it inside <code>updateProjectiles</code> for every projectile, every frame. What's the honest cost assessment?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="std::function is not zero-cost: it makes an indirect, practically non-inlinable call, and may heap-allocate to store captures. That's its price for holding ANY callable.">Zero cost — std::function is a thin wrapper the compiler sees through</li>
+    <li data-correct="false" data-why="It won't allocate per CALL — allocation (if any) happens once when the std::function is constructed/assigned. The per-call cost is the indirect dispatch and lost inlining.">It heap-allocates on every call, so it will stutter visibly</li>
+    <li data-correct="true" data-why="Right. Per call: an indirect jump the optimizer can't see through, so no inlining or vectorization across it. With dozens-to-hundreds of projectiles it's likely still affordable — but measure, and know a template/enum-dispatch design avoids the cost entirely.">An indirect, non-inlinable call per projectile — probably affordable at this scale, but it's real overhead the template version wouldn't pay</li>
+    <li data-correct="false" data-why="It works fine for storage — that's std::function's legitimate job (storing heterogeneous callables). The question is only the per-call dispatch cost in a hot loop.">It can't store a capturing lambda, so the design doesn't work</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">5. What does the <code>inline</code> keyword actually guarantee in modern C++?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="No — compilers treat the keyword as (at most) a weak hint and routinely ignore it. Inlining decisions come from -O2 cost heuristics.">The compiler must paste the function body into every caller</li>
+    <li data-correct="true" data-why="Correct. inline today is a LINKAGE property: the same definition may appear in multiple translation units (e.g., a function defined in a header included by many .cpp files) and the linker merges them. Your Persona::renderSystemPrompt gets this implicitly by being defined in-class.">Multiple identical definitions across translation units are allowed and merged</li>
+    <li data-correct="false" data-why="constexpr (not inline) is what makes a function callable at compile time — though constexpr does imply inline.">The function is evaluated at compile time</li>
+    <li data-correct="false" data-why="Nothing about inline affects exceptions — that's noexcept's territory.">The function cannot throw exceptions</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>9. Check your understanding — scenarios</h2>
+
+<div class="scenario">
+  <b>Scenario A.</b> You're writing <code>Npc::setPersona(...)</code> &mdash; it stores the persona in a member and is called once per NPC at startup. Which signature do you pick: <code>const Persona&amp;</code>, <code>Persona</code> by value + move, or <code>Persona&amp;&amp;</code>? Does "called once at startup" change how much you should care?
+</div>
+
+<div class="scenario">
+  <b>Scenario B.</b> Profiling (someday) shows <code>wrap()</code> is hot, and most calls pass a string that already exists unmodified. Walk the upgrade path: what changes first &mdash; the <code>const std::string&amp;</code> parameter, the <code>std::vector&lt;std::string&gt;</code> return, or the caller's <code>prefix + line.text</code> concatenation &mdash; and why that order?
+</div>
+
+<div class="scenario">
+  <b>Scenario C.</b> For the future HAL (lesson 0007), every render call goes through <code>virtual void drawBox(...)</code>. A forum post tells you "virtual calls killed our frame rate, devirtualize everything." Using this lesson's cost model (~ns per indirect call, lost inlining), estimate whether ~500 virtual draw calls per frame threatens your 16.7 ms budget, and name the case where virtual dispatch in a loop <em>would</em> actually hurt.
+</div>
+
+<h2>10. Lesson progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I know what an un-inlined call costs and that <code>inline</code> &ne; inlining</label></li>
+  <li><label><input type="checkbox"> Read section 2 &mdash; I can pick by-value / const&amp; / sink / string_view from the table</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I know RVO is guaranteed and <code>return std::move(local)</code> is a pessimization</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I can rank lambda-as-template vs function-pointer vs virtual vs std::function</label></li>
+  <li><label><input type="checkbox"> Read section 6 &mdash; I can defend submit()'s by-value signature out loud</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#f16-for-in-parameters-pass-cheaply-copied-types-by-value-and-others-by-reference-to-const">C++ Core Guidelines F.16 &mdash; pass cheaply-copied types by value</a> &middot;
+    <a href="https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#f15-prefer-simple-and-conventional-ways-of-passing-information">F.15 &mdash; conventional parameter passing (incl. sink = by value + move)</a> &middot;
+    <a href="https://en.cppreference.com/w/cpp/language/copy_elision">cppreference: copy elision (RVO/NRVO)</a> &middot;
+    <a href="https://en.cppreference.com/w/cpp/utility/functional/function">cppreference: <code>std::function</code></a> &middot;
+    <a href="https://www.agner.org/optimize/">Agner Fog &mdash; software optimization manuals (calling conventions, call cost)</a>
+  </p>
+  <p>Lesson 0014 &middot; <code class="inline">docs/learning/lessons/0014-function-call-cost-and-low-latency.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

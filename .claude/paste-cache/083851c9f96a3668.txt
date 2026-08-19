@@ -1,0 +1,245 @@
+# Crude-Oil Lead-Lag Quant Starter Kit: Data Sources, Methods, the Microstructure Canon, and Interview Estimation
+
+## TL;DR
+- **Start with the no-token trio — yfinance (`CL=F`, `USO`, `XLE`, `XOM`, `CVX`), Stooq via pandas-datareader (`XOM.US`, `XLE.US`), and FRED (`DCOILWTICO` daily WTI spot) — then layer in free-API-key sources (EIA, Alpha Vantage, Tiingo, Twelve Data, FMP) for redundancy.** This gives a working daily dataset for a CL-vs-XLE lead-lag study in minutes, at zero cost.
+- **For the lead-lag study itself, use log returns but guard against the April 20, 2020 negative WTI print (−$37.63/bbl), compute the cross-correlation function and Granger causality on stationary returns, and add cointegration + Hasbrouck/Gonzalo-Granger information shares to measure which series "discovers" price first.** Empirically, futures lead the cash/ETF side under normal conditions.
+- **The microstructure canon runs from Kyle (1985), Glosten-Milgrom (1985), and Roll (1984) through order-flow-imbalance and market-making models (Cont-Kukanov-Stoikov, Avellaneda-Stoikov, Stoikov's microprice) to the HFT arms-race work (Budish-Cramton-Shim 2015; Aquilina-Budish-O'Neill 2022); for interviews, Fermi estimation tests decomposition and calibrated reasoning, not trivia.**
+
+---
+
+## Key Findings
+
+1. **Three sources need NO API token at all**: yfinance (scrapes Yahoo Finance), Stooq (via pandas-datareader, for US equities/ETFs), and direct FRED CSV downloads. FRED's *API* needs a free key, but you can pull CSVs without one.
+2. **Symbols differ by platform** — the single biggest practical gotcha. yfinance uses `CL=F` for WTI futures; Stooq uses `.US` suffixes (`XOM.US`); FRED uses economic series codes (`DCOILWTICO`). Note `WTI` on Yahoo is a *company* (W&T Offshore), not crude.
+3. **Free tiers tightened sharply in 2024–2026**: Alpha Vantage cut its free daily cap to 25 requests/day; Twelve Data offers 800/day; FMP offers 250/day; Tiingo ~50 symbols/hour. yfinance/Stooq/FRED remain the most generous.
+4. **Futures lead spot/ETF** is the robust empirical finding across decades (Stoll-Whaley 1990, Chan 1992) and is what you should expect CL → XLE to show under stable conditions.
+5. **Log returns break on negative prices** — the April 2020 WTI event (−$37.63 settlement) makes `ln(P_t/P_{t-1})` undefined; use proxies (USO, or `DCOILWTICO` spot which bottomed positive) or simple returns over that window.
+6. **Quant interview Fermi questions test process, not answers** — decomposition, anchoring, error bars, and a sanity-check second path matter more than the final number.
+
+---
+
+## Details
+
+### PART 1 — Free Daily Market Data Sources (2026)
+
+A practical ranking for a beginner: **start with yfinance + FRED + Stooq (no friction), then add EIA (best for oil fundamentals) and one general API-key source for redundancy.**
+
+#### Tier A — No API token required
+
+**1. yfinance (Yahoo Finance)**
+- **Install**: `pip install yfinance`; `import yfinance as yf`
+- **Token**: None. It scrapes Yahoo's public endpoints.
+- **Symbols**: WTI futures `CL=F` (continuous/rolled front-month, *not* a single fixed contract — Yahoo automatically rolls to the front month); Brent `BZ=F`; USO ETF `USO`; energy ETF `XLE`; `XOM`; `CVX`. **Do not use `WTI`** — that's W&T Offshore, an oil company stock.
+- **Limitations**: Unofficial/scraped, so it breaks intermittently when Yahoo changes its site. **Critical 2025 change**: the `auto_adjust` default flipped from `False` to `True`, so OHLC columns now come back split/dividend-adjusted and the separate "Adj Close" column is dropped — set `auto_adjust=` explicitly to avoid ambiguity, since older tutorials assume the old default. `CL=F` is a rolled continuous series, so it has roll discontinuities (see "contract roll" below). No hard documented rate limit, but heavy use gets throttled.
+
+**2. Stooq (via pandas-datareader)**
+- **Install**: `pip install pandas-datareader`; `from pandas_datareader import data as web` then `web.DataReader('XOM.US', 'stooq')`, or `pandas_datareader.get_data_stooq(...)`.
+- **Token**: None.
+- **Symbols**: US equities/ETFs take a `.US` suffix — `XOM.US`, `CVX.US`, `XLE.US`, `USO.US` (the reader auto-appends `.US` if no country code is given). Indices use `^` (e.g. `^SPX`). WTI on the Stooq website is `CL.F`.
+- **Limitations**: **Commodity/futures symbols (e.g. `CL.F`) have been broken through the Python API since late 2021** — they return "no data" even though they display on the website, so use Stooq only for equities/ETFs and get crude elsewhere. History via pandas-datareader is limited to roughly 5 years.
+
+**3. FRED (Federal Reserve Economic Data) — daily WTI spot**
+- **Install**: `pip install fredapi`; `from fredapi import Fred`. (Or `pandas_datareader` with the `'fred'` source; or download CSV with no key at all.)
+- **Token**: The API needs a **free** key (register at fredaccount.stlouisfed.org; 32-char alphanumeric, emailed instantly). Direct CSV downloads need no key.
+- **Symbols/series**: `DCOILWTICO` = "Crude Oil Prices: West Texas Intermediate (WTI) – Cushing, Oklahoma," daily, dollars per barrel, sourced from EIA, history back to January 1986. `DCOILBRENTEU` = daily Brent. Monthly variants `MCOILWTICO`; long-history monthly `WTISPLC`.
+- **Limitations**: This is a **spot** price series, not a futures or equity price — conceptually different from `CL=F`. It is not split/dividend relevant (it's a commodity price). Excellent reliability (government source). EIA publishes WTI spot on a one-business-day lag.
+
+#### Tier B — Free API key required
+
+**4. EIA (US Energy Information Administration) API v2** — best for oil fundamentals
+- **Install**: No official Python SDK needed; use `requests` (`pip install requests`), or community wrappers.
+- **Token**: Free key, register at eia.gov/opendata/register.php; emailed automatically. Required for the API (not for bulk file downloads).
+- **Data**: Petroleum prices, production, inventories (including Cushing storage — directly relevant to the 2020 event). Daily/weekly/monthly. Returns max 5,000 rows/request (300 for XML); paginate with `offset`/`length`.
+- **Limitations**: Energy data only (no equities/ETFs). Best paired with a price source for CL/XLE.
+
+**5. Alpha Vantage**
+- **Install**: `pip install alpha-vantage` (note: hyphen in the pip name, underscore in the import: `from alpha_vantage.timeseries import TimeSeries`).
+- **Token**: Free key (instant signup at alphavantage.co).
+- **Limits**: Per Alpha Vantage's own support page, the free tier provides "up to 25 requests per day" plus ~5 requests/minute (the cap fell over time from 500→100→25). `outputsize=full` (20+ yrs) is premium-only on some endpoints; free gets `compact` (100 points). The cheapest premium plan is $49.99/mo (75 rpm) and removes daily caps.
+- **Symbols**: Standard tickers — `USO`, `XLE`, `XOM`, `CVX`. Adjusts for splits + dividends (industry standard); offers both raw and adjusted. Limited direct WTI-futures support (more an equities/FX/crypto/commodities-indicator API).
+- **Limitations**: 25/day is very tight for multi-asset daily pulls; throttle ~12s between calls.
+
+**6. Tiingo**
+- **Install**: `pip install tiingo`; `from tiingo import TiingoClient`.
+- **Token**: Free key (register at tiingo.com, key under Account → API → Token).
+- **Limits**: Free tier ~50 symbols/hour, limited number of unique symbols, with hourly/daily/bandwidth caps Tiingo describes as approximate. 30+ years of EOD stock data even on free.
+- **Symbols**: Standard equity/ETF tickers (`XOM`, `XLE`, `USO`). Clean, error-checked EOD data with corporate actions; well-regarded for backtesting. Internal/personal-use only on the free tier.
+- **Limitations**: No crude futures; focus is equities/ETFs/FX/crypto.
+
+**7. Twelve Data**
+- **Install**: `pip install twelvedata`; `from twelvedata import TDClient`.
+- **Token**: Free key (Basic plan signup).
+- **Limits**: **8 API credits/minute and 800/day** on the free Basic plan (resets midnight UTC) — the most generous general free tier. One `/time_series` symbol = 1 credit. 30+ years EOD history.
+- **Symbols**: `XOM`, `XLE`, `USO`; multi-asset (stocks, FX, crypto, commodities, indices).
+- **Limitations**: Deep historical/advanced features gated to paid tiers.
+
+**8. Financial Modeling Prep (FMP)**
+- **Install**: `pip install fmpsdk` (community) or use `requests`.
+- **Token**: Free key (no credit card; register at site.financialmodelingprep.com).
+- **Limits**: **250 market-data requests/day**, plus a trailing-30-day 500MB bandwidth cap on free. Free gets EOD historical + 150+ endpoints; 5 yrs history (30+ yrs premium).
+- **Symbols**: `XOM`, `XLE`, `USO`. Strong on fundamentals/SEC EDGAR data.
+- **Limitations**: 250/day; deeper history paywalled.
+
+**9. Nasdaq Data Link (formerly Quandl)**
+- **Install**: `pip install Nasdaq-Data-Link`; `import nasdaqdatalink`. (Legacy `quandl` package still works; pandas-datareader has a `quandl` reader.)
+- **Token**: Free key with registration; required (`QUANDL_API_KEY` env var).
+- **Data**: Indexed millions of time series from 400+ sources; free datasets are often daily. Quality core financial + alternative data; many premium datasets paywalled. The old free `WIKI` US-equities database is discontinued.
+- **Limitations**: Much of the genuinely useful price data has moved behind paid products since the 2018 Nasdaq acquisition; free coverage is patchier than it was pre-2018.
+
+**Bottom line for Part 1**: For a CL-vs-XLE daily lead-lag study, the cleanest free stack is **yfinance (`CL=F`, `XLE`, `USO`, `XOM`, `CVX`) cross-checked against FRED (`DCOILWTICO`) and EIA (Cushing inventories for context)**, with Stooq (`.US`) as an equities backup.
+
+---
+
+### PART 2 — Lead-Lag Analysis Methodology and Formulas
+
+**Setup.** Let \(P_t\) be a price level. The question "does CL lead XLE?" is answered by comparing return series \(r^{CL}_t\) and \(r^{XLE}_t\).
+
+**1. Returns: simple vs log.**
+- Simple return: \(r_t = (P_t - P_{t-1})/P_{t-1} = P_t/P_{t-1} - 1\).
+- Log return: \(\ell_t = \ln(P_t/P_{t-1}) = \ln P_t - \ln P_{t-1}\).
+- Log returns are time-additive (sum over days = total log return) and symmetric, which is why they dominate in research.
+- **CRITICAL — negative prices break log returns.** \(\ln(P_t/P_{t-1})\) requires both prices positive. On **April 20, 2020 the NYMEX WTI May contract (CL/CLK20) fell from $17.73 to settle at −$37.63/barrel** — per the CFTC's Interim Report, "the first time the WTI Contract traded at a negative price since being listed for trading 37 years ago" (i.e., since trading began in 1983). It was driven by front-month expiry forcing physical delivery at Cushing, Oklahoma, where, per EIA, commercial crude inventories "rose by 27 million barrels, reaching 83% of the hub's working storage capacity," amid the COVID demand collapse. With a negative price, \(\ln\) is undefined and any ratio crossing zero is nonsense. **Handling**: (a) use a tradeable proxy that stayed positive (USO never went negative; the FRED `DCOILWTICO` *spot* bottomed near $11–$12, not negative); (b) if you must use the front-month future across that date, switch to simple returns or dollar changes for the affected window and flag it; (c) exclude/winsorize the expiry window; (d) never blindly `np.log` a futures series spanning April 2020.
+
+**2. Cross-correlation function (CCF).** For zero-mean return series \(x\) (e.g. CL) and \(y\) (e.g. XLE):
+\[
+\rho_{xy}(k) = \frac{\sum_t (x_{t} - \bar x)(y_{t+k} - \bar y)}{\sqrt{\sum (x_t-\bar x)^2}\sqrt{\sum (y_t-\bar y)^2}}.
+\]
+- **Interpretation depends on your sign convention; state it explicitly.** With \(\rho_{xy}(k)=\text{corr}(x_t, y_{t+k})\): a significant peak at **\(k>0\)** means *today's \(x\) correlates with future \(y\)*, i.e. **\(x\) (CL) leads \(y\) (XLE)**. A peak at \(k<0\) means \(y\) leads \(x\). In Python, `statsmodels.tsa.stattools.ccf(x, y)` — but check its lag convention against a known lead before trusting signs.
+
+**3. Granger causality.** Tests whether lagged \(x\) improves the forecast of \(y\) beyond \(y\)'s own lags. Fit
+\[
+y_t = \alpha + \sum_{i=1}^p \beta_i y_{t-i} + \sum_{i=1}^p \gamma_i x_{t-i} + \varepsilon_t,
+\]
+and F-test \(H_0: \gamma_1=\dots=\gamma_p=0\). Rejecting \(H_0\) ⇒ "x Granger-causes y." **Implementation**: `statsmodels.tsa.stattools.grangercausalitytests(data[['y','x']], maxlag=p)`. **Caveats**: requires *stationary* inputs (use returns, not prices); it is predictive precedence, not true causation; run both directions (CL→XLE and XLE→CL); sensitive to lag choice (use AIC/BIC).
+
+**4. High-frequency / asynchronous estimators.**
+- **Why asynchronicity matters**: at high frequency, two assets trade at irregular, non-aligned times. Sampling onto a fixed grid (the "previous-tick" approach) biases correlation toward zero (the Epps effect) and creates artificial lead-lag. You cannot measure lags finer than your sampling interval.
+- **Hayashi-Yoshida (2005) estimator**: a covariance/cross-correlation estimator for asynchronously observed diffusions that uses *all* tick data without resampling. It sums products of increments whenever their observation intervals overlap:
+\[
+\widehat{\rho}_{HY} = \frac{\sum_{i,j} \Delta X_i\,\Delta Y_j\,\mathbf{1}\{I_i^X \cap I_j^Y \neq \varnothing\}}{\sqrt{\sum_i (\Delta X_i)^2}\sqrt{\sum_j (\Delta Y_j)^2}}.
+\]
+Shift all \(Y\) timestamps by a lag \(\ell\) and recompute to trace the cross-correlation as a function of lag; the lag maximizing \(\widehat\rho_{HY}(\ell)\) is the estimated lead-lag.
+- **Lead-lag ratio (LLR)**: a summary statistic comparing the integrated (positive-lag) vs (negative-lag) cross-correlation; LLR > 1 means one asset leads. Used by Huth & Abergel (2014) on French equities/futures, who found the most liquid asset (futures) leads.
+
+**5. Cointegration.** Correlation is about co-*movement of returns*; cointegration is about a long-run *level* equilibrium. Two I(1) price series are cointegrated if a linear combination is stationary (mean-reverting spread).
+- **Engle-Granger two-step**: (1) regress \(P^{XLE}_t = \alpha + \beta P^{CL}_t + u_t\); (2) ADF-test the residuals \(\hat u_t\) for stationarity. Stationary residuals ⇒ cointegrated, and the spread mean-reverts (pairs-trading basis). `statsmodels.tsa.stattools.coint(y0, y1)` (null = no cointegration; uses augmented Engle-Granger).
+- **Johansen test**: VAR/VECM-based, handles >2 series, allows all variables endogenous, identifies the number of cointegrating vectors via trace and max-eigenvalue statistics. `statsmodels.tsa.vector_ar.vecm.coint_johansen`. More powerful than Engle-Granger and order-independent.
+- **What it adds**: the Vector Error Correction Model (VECM) decomposes dynamics into a long-run equilibrium pull plus short-run lead-lag — the natural home for both the spread (mean reversion) and the price-discovery measures below.
+
+**6. Price discovery — the canonical measures (both built on the VECM).**
+- **Hasbrouck (1995) Information Share (IS)**: when one efficient price is shared across venues/instruments, IS attributes to each market its share of the *variance of innovations to the common efficient price*. The venue contributing more of that variance "discovers" price first. Because it uses a Cholesky factorization of the residual covariance, it is **order-dependent** when residuals are correlated, so Hasbrouck reports **upper and lower bounds**; people often use the midpoint.
+- **Gonzalo-Granger (1995) Permanent-Transitory (PT) / component share**: decomposes the common factor itself, attributing the leading role via the error-correction (adjustment) coefficients — the market that adjusts *least* to disequilibrium is the price leader. Ignores contemporaneous correlation (so it differs from IS when residuals are correlated). The two agree when VECM residuals are uncorrelated.
+- **Why they matter**: these are *the* standard answers to "which venue/asset discovers price first." Recent work confirms the nuance: in "Price Discovery and Time-Varying Causality Dynamics in Energy Markets: Futures Versus ETFs" (*Computational Economics*, Springer, 2025), "futures generally dominate price discovery under stable market conditions… In contrast, ETFs assume a more prominent role during episodes of market turbulence, such as the 2014–2016 oil price collapse and the COVID-19 crisis, where they shift from being passive followers to active price setters." R's `ifrogs::pdshare` implements both measures for two markets; in Python you build the VECM in statsmodels and compute IS/PT from the VMA representation.
+
+**7. Other comparisons worth running.**
+- **Rolling correlation** of CL/XLE returns (e.g. 60-day window) to see regime changes.
+- **Beta of XLE to oil**: slope of \(r^{XLE}_t = \alpha + \beta\, r^{CL}_t + \varepsilon_t\); track its time variation.
+- **Realized volatility** comparison (sum of squared daily/intraday returns) between CL and XLE.
+- **Contract roll**: `CL=F` is a continuous front-month series, so on roll dates the price jumps from the expiring to the next contract — a discontinuity that is *not* a real return. Either use a back-adjusted continuous series, drop roll-day returns, or use a roll-aware proxy (USO embeds its own roll methodology). The 2020 negative print was itself a front-month expiry artifact.
+
+---
+
+### PART 3 — The Microstructure Alpha Canon (a Reading Roadmap)
+
+A staged path from beginner to advanced. Each entry: citation + one-line plain-English contribution.
+
+**Stage 0 — Orientation books.**
+- **O'Hara, *Market Microstructure Theory* (1995)** — the classic theory text; sets up information-based and inventory models.
+- **Hasbrouck, *Empirical Market Microstructure* (2007)** — how to actually estimate microstructure quantities (spreads, impact, information shares) from data.
+- **Cartea, Jaimungal & Penalva, *Algorithmic and High-Frequency Trading* (2015)** — the modern math/stochastic-control bridge to market making and execution.
+- **Bouchaud, Bonart, Donier & Gould, *Trades, Quotes and Prices* (2018)** — empirical "econophysics" view of order books, impact, and price formation.
+- **Aldridge, *High-Frequency Trading* (2nd ed., 2013)** — practitioner overview of HFT strategies and infrastructure.
+- **López de Prado, *Advances in Financial Machine Learning* (2018)** — modern ML workflow (labeling, sample weights, backtest pitfalls) for building alphas without overfitting.
+
+**Stage 1 — Foundations (information & spreads).**
+- **Kyle (1985), "Continuous Auctions and Insider Trading," *Econometrica* 53(6):1315–1335** — the strategic informed-trader model; introduces **Kyle's lambda**, price impact per unit of order flow, the canonical measure of liquidity/information asymmetry.
+- **Glosten & Milgrom (1985), "Bid, Ask and Transaction Prices in a Specialist Market...," *JFE* 14(1):71–100** — the bid-ask spread arises from **adverse selection**: market makers widen quotes to offset expected losses to better-informed traders.
+- **Roll (1984), "A Simple Implicit Measure of the Effective Bid-Ask Spread," *J. Finance* 39(4):1127–1139** — infers the effective spread from the **negative serial covariance of transaction price changes**, no quote data needed.
+
+**Stage 2 — Order flow & order-book signals.**
+- **Cont, Kukanov & Stoikov (2014), "The Price Impact of Order Book Events," *J. Financial Econometrics* 12(1):47–88** — over short horizons, price changes are driven (linearly) by **order flow imbalance (OFI)** at the best bid/ask, with slope inversely proportional to depth; implies the empirical square-root law.
+- **Xu, Gould & Howison (2018), "Multi-level Order-Flow Imbalance in a Limit Order Book"** — extends OFI to deeper book levels for more explanatory power.
+- **Stoikov (2018), "The Micro-Price: A High-Frequency Estimator of Future Prices"** — the **microprice** adjusts the mid-price by expected future mid-moves conditional on imbalance and spread; it is a martingale and a better short-horizon predictor than mid or weighted-mid (code on the author's GitHub).
+- **Sirignano & Cont (2019), "Universal Features of Price Formation... Deep Learning," *Quantitative Finance*** — deep nets on order-book data reveal a near-universal price-formation mapping dominated by OFI.
+
+**Stage 3 — Market-making models.**
+- **Ho & Stoll (1981)** — foundational inventory-control model of dealer quoting (precursor).
+- **Avellaneda & Stoikov (2008), "High-Frequency Trading in a Limit Order Book," *Quantitative Finance* 8(3):217–224** — the workhorse **optimal market-making** model: solve an HJB equation to set bid/ask around a reservation price that tilts with inventory risk (risk-aversion parameter \(\gamma\)).
+
+**Stage 4 — Lead-lag and price discovery (the heart of your project).**
+- **Stoll & Whaley (1990), "The Dynamics of Stock Index and Stock Index Futures Returns," *JFQA* 25:441–468** — index **futures lead the cash index** (by minutes), a seminal lead-lag result.
+- **Chan (1992), "A Further Analysis of the Lead-Lag Relationship...," *Review of Financial Studies* 5:123–152** — confirms and refines: futures lead cash, especially on market-wide information.
+- **Hayashi & Yoshida (2005), "On Covariance Estimation of Non-synchronously Observed Diffusion Processes," *Bernoulli*** — the asynchronous covariance/lead-lag estimator (see Part 2).
+- **Hasbrouck (1995), "One Security, Many Markets: Determining the Contributions to Price Discovery," *J. Finance* 50(4):1175–1199** — the **information share** price-discovery measure.
+- **Gonzalo & Granger (1995), "Estimation of Common Long-Memory Components in Cointegrated Systems," *JBES* 13(1):27–35** — the **permanent-transitory** decomposition / component share.
+- **Engle & Granger (1987), "Co-integration and Error Correction," *Econometrica* 55(2):251–276** — the cointegration/VECM foundation underpinning all of the above.
+
+**Stage 5 — The HFT arms race & market design.**
+- **Budish, Cramton & Shim (2015), "The High-Frequency Trading Arms Race: Frequent Batch Auctions as a Market Design Response," *QJE* 130(4):1547–1621** — argues the continuous limit order book is flawed (correlations break down at sub-second scales, creating mechanical latency-arbitrage races) and proposes **frequent batch auctions** (discrete-time uniform-price double auctions, e.g. every tenth of a second).
+- **Aquilina, Budish & O'Neill (2022), "Quantifying the High-Frequency Trading 'Arms Race'," *QJE* 137(1):493–564** — uses exchange message data to size **latency arbitrage** at, in the authors' words, "on the order of $5 billion per year in global equity markets alone" (sensitivity range $2.3–8.4 billion across race windows of 50µs–3ms; the 2020 COVID-year point estimate was $7 billion). They frame it as roughly a "0.5 basis point tax on trading," with the top 6 firms winning over 80% of races.
+
+---
+
+### PART 4 — Fermi / Mental-Math / Quant Interview Estimation
+
+**The meta-skill being tested** (firms: Jane Street, Optiver, IMC, SIG, Citadel/Citadel Securities). Per multiple interview guides, what matters is not the number but the *process*: (1) **decomposition** into estimable sub-quantities; (2) **anchoring** on known base rates (populations, ratios); (3) **calibrated estimation with error bars**, not false precision; (4) **a second independent path** to sanity-check; (5) **order-of-magnitude discipline** (get the power of 10 right); (6) **narrating reasoning aloud**. Many firms wrap this in a **market-making game**: you quote a bid/ask around the unknown quantity, the interviewer "trades" against you, reveals info, and you tighten your spread — testing whether you anchor, update on new information, and manage inventory/risk while computing under pressure. Mental-math speed is separately screened (e.g. Optiver's timed test, widely regarded as the hardest first-round numerical test; Zetamac-style drills); for Jane Street, failing the mental-math test reportedly ends the process regardless of other strengths.
+
+Worked examples (decomposition → assumptions → range):
+
+**1. Piano tuners in Chicago (the original Fermi problem).**
+- Chicago metro ≈ 9M people → ≈ 3M households (≈3/household).
+- Maybe 1 in 20 households owns a piano → 150k pianos; add institutions (schools, churches) → ~200k pianos.
+- Tuned ~once/year. A tuner does ~4 tunings/day × ~250 days = ~1,000/year.
+- 200,000 / 1,000 ≈ **200 tuners**. **Reasonable range: ~100–300.** (Anchors: household size, ownership rate, tuner throughput.)
+
+**2. Barrels of oil the world consumes per day.**
+- Path A (top-down anchor): world ≈ 8 billion people; rich-world ~ a few barrels/person/year, poor-world far less; blended ≈ 4–5 bbl/person/year. 8B × 4.5 ≈ 36B bbl/yr ÷ 365 ≈ **~100M bbl/day**.
+- Path B (sanity check): US ≈ 330M people uses ~20M bbl/day (~1 gal/person/day, well-known); US is ~20% of world oil → world ≈ 100M bbl/day. ✓ two paths agree.
+- **Answer: ~100 million barrels/day.** True value is higher: per EIA's April 2026 Short-Term Energy Outlook, "world petroleum and other liquid fuels consumption averaged 103.97 million barrels per day last year [2025]" (OPEC's 2026 statistical bulletin puts 2025 demand at ~105 Mbbl/d). State a range of 90–110M — the order of magnitude is the point.
+
+**3. Daily ridership/revenue of a busy subway station.**
+- Major hub: trains every ~3 min in rush, ~20 hrs service. Rush ~4 hrs at high frequency.
+- Say ~150k entries/day at a big hub (anchor: NYC's busiest ~200k+/day pre-2020; mid-tier ~50k).
+- Revenue: 150k × ~$3 fare ≈ **$450k/day**. Range $300k–$700k. (Sanity: × 365 ≈ $150M/yr, plausible for a flagship station.)
+
+**4. Golf balls in a school bus / 747.**
+- School bus interior ≈ 12m × 2.4m × 2m ≈ 58 m³ ≈ 5.8×10⁷ cm³.
+- Golf ball ≈ 4.3cm diameter; bounding cube ≈ 80 cm³; with ~64% random sphere-packing efficiency the effective volume per ball ≈ 67 cm³, but use ~80–125 cm³ to allow for seats/irregularity.
+- 5.8×10⁷ / ~100 ≈ **~500,000 balls**; with packing/seat losses, **~300k–600k**. (Key: estimate volume, divide by ball volume, apply a packing factor — and *say* you're applying one.)
+
+**5. Gas stations in the US.**
+- US ≈ 330M people; ≈ 280M registered vehicles.
+- Anchor on ~1 station per ~2,500 people.
+- 330M / 2,500 ≈ **~130,000 stations.** Range 100k–170k. (Published counts ~115k–150k — order of magnitude nailed.)
+
+**6. Windows in a building / classic volumetric questions.** Same recipe: pick the building (say a 40-story office tower), estimate windows per floor (~50–80 around the perimeter), multiply: 40 × ~70 ≈ **~2,800 windows**. Narrate the perimeter/floor assumption.
+
+**General template to recite in interviews**: *"Let me define the quantity, break it into [population/units] × [rate per unit], anchor each factor on something I know, give a range, and cross-check with an independent estimate."* Knowing classic answers helps, but interviewers vary the numbers to defeat memorization, so demonstrate the framework. Recommended prep references: Timothy Crack, *Heard on the Street*; Xinfeng Zhou, *A Practical Guide to Quantitative Finance Interviews*; the Jane Street puzzles archive; and timed drills (Zetamac).
+
+---
+
+## Recommendations
+
+**Stage 1 — Build the data layer (week 1).** Pull daily `CL=F`, `XLE`, `USO`, `XOM`, `CVX` from yfinance with `auto_adjust=True` set explicitly; cross-check WTI against FRED `DCOILWTICO`; keep Stooq (`.US`) as an equities fallback. Register the free EIA and FRED keys now. **Threshold to advance**: you can reproduce a price series two ways and they agree to within a few bp on common dates.
+
+**Stage 2 — Clean for the known traps (week 1–2).** Convert to log returns *only after* confirming all prices positive; handle the April 2020 window (use USO/spot proxy or simple returns there); drop or back-adjust `CL=F` roll-day jumps. **Threshold**: no infinities/NaNs in the return series; roll dates flagged.
+
+**Stage 3 — Run the lead-lag battery (week 2–3).** In order: (1) CCF of CL vs XLE returns with an explicit sign convention validated against a known lead; (2) Granger causality both directions on stationary returns with AIC-chosen lags; (3) cointegration (Engle-Granger `coint`, then Johansen) on price *levels*; (4) if you later get intraday/tick data, Hayashi-Yoshida and Hasbrouck/Gonzalo-Granger information shares. **Expected result**: CL leads XLE at short lags and dominates price discovery under stable conditions — if you find the opposite, suspect a sign-convention or alignment bug before believing it.
+
+**Stage 4 — Study alongside building.** Read the canon in the staged order above; implement Kyle's lambda and OFI/microprice on any order-book sample you can get; reproduce Avellaneda-Stoikov in simulation. **Threshold to call the project "done for learning"**: you can explain, in plain English, the difference between correlation, Granger causality, cointegration, and information share — and why futures lead.
+
+**Stage 5 — Interview prep in parallel.** Drill timed mental math (Zetamac-style) daily for 4–8 weeks; practice 50–100 Fermi/brainteaser problems out loud with a partner; rehearse the market-making loop (quote, update, tighten). **Benchmark**: ~60+ correct in 2 minutes on mental-math drills is associated with passing the Jane Street test; below ~40 generally is not.
+
+**What would change these recommendations**: if you need *intraday* lead-lag (sub-daily), free daily sources are insufficient — you'd need paid tick data (and Hayashi-Yoshida becomes essential). If Yahoo's endpoints break (yfinance is unofficial), shift the primary price feed to Stooq/Tiingo/Twelve Data. If your study needs >5 years of equity history, prefer Tiingo/yfinance over Stooq.
+
+---
+
+## Caveats
+
+- **Free-tier limits change frequently.** The 2026 figures here (Alpha Vantage 25/day, Twelve Data 800/day, FMP 250/day, Tiingo ~50 symbols/hr) reflect current documentation but are explicitly described by vendors as approximate and subject to change — verify on each provider's pricing page before relying on them.
+- **yfinance and Stooq are unofficial/scraped or community-maintained**; they break without notice, and Stooq's commodity-futures download has been non-functional via the Python API since ~2021. Treat them as convenient, not production-grade.
+- **`CL=F` is a rolled continuous front-month series, and FRED `DCOILWTICO` is a spot price** — they are *not* the same instrument as a single futures contract or as USO (which has its own roll/decay). Mixing them naively distorts lead-lag and beta estimates.
+- **Granger "causality" is predictive precedence, not causation**; cointegration and information-share results are sensitive to lag choice, stationarity, and (for Hasbrouck IS) variable ordering — report ranges/bounds, not point claims.
+- **Price discovery is regime-dependent**: futures dominate under normal conditions, but ETFs/spot can lead during turbulence (2014–16 oil collapse, COVID), so don't assume a fixed leader across your whole sample.
+- **Interview Fermi "answers" are ranges, not facts.** The worked numbers above are illustrative order-of-magnitude estimates; real values vary, and interviewers deliberately change parameters to test the method rather than recall.
+- **The April 2020 settlement figure**: the precise value is **−$37.63/barrel** (CME/CFTC/EIA); one source (Congressional Research Service Insight IN11354) rounds it to −$37.62. Both refer to the same NYMEX WTI May 2020 contract.

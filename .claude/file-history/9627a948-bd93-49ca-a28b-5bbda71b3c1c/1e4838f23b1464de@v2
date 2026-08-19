@@ -1,0 +1,146 @@
+"""Tests for block instantiation on the canvas.
+
+Covers every registered block type plus a tiny "hello world" custom device
+to verify the BaseBlock + BaseDevice contract still holds for new blocks
+that users might author.
+"""
+from __future__ import annotations
+import pytest
+from PyQt6.QtCore import QPointF
+
+from silmulator.gui.canvas import CanvasScene, BLOCK_REGISTRY
+from silmulator.gui.blocks.base_block import BaseBlock, ConnectionPort
+from silmulator.devices.base_device import BaseDevice
+from silmulator.scpi.parser import ScpiCommand
+
+
+@pytest.fixture
+def scene(qapp):
+    return CanvasScene()
+
+
+@pytest.mark.parametrize("device_type", list(BLOCK_REGISTRY.keys()))
+def test_add_block_creates_visible_block(scene, device_type):
+    block = scene.add_block(device_type, QPointF(0, 0))
+
+    assert isinstance(block, BaseBlock)
+    assert block.block_id and len(block.block_id) >= 4
+    # device_type must round-trip through to_dict()/from_dict(): it is the
+    # registry lookup key, so any mismatch silently drops the block (and all
+    # of its wires) when a saved layout is reopened.
+    assert block.device_type == device_type
+    assert scene.get_block(block.block_id) is block
+    assert block in scene.items()
+
+
+@pytest.mark.parametrize("device_type", list(BLOCK_REGISTRY.keys()))
+def test_blocks_have_at_least_one_port(scene, device_type):
+    block = scene.add_block(device_type, QPointF(0, 0))
+    assert len(block.ports) >= 1
+    for p in block.ports:
+        assert isinstance(p, ConnectionPort)
+        assert p.parent_block is block
+
+
+def test_unknown_block_type_returns_none(scene):
+    assert scene.add_block("NotARealDevice") is None
+
+
+def _block_rect(block: BaseBlock):
+    """Scene-space rectangle occupied by a block."""
+    return (block.x(), block.y(),
+            block.x() + block.BLOCK_WIDTH, block.y() + block.BLOCK_HEIGHT)
+
+
+def _rects_overlap(a, b) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def test_auto_placed_blocks_do_not_overlap(scene):
+    """Blocks added without an explicit position (toolbar / menu / library
+    panel) must never stack on top of each other — overlapping blocks hide
+    the first block's ports and any wires between them."""
+    types = ["Oscilloscope", "Power Supply", "Function Generator",
+             "Multimeter", "MSP430", "Code Input"]
+    blocks = [scene.add_block(t) for t in types]
+    assert all(b is not None for b in blocks)
+
+    rects = [_block_rect(b) for b in blocks]
+    for i in range(len(rects)):
+        for j in range(i + 1, len(rects)):
+            assert not _rects_overlap(rects[i], rects[j]), (
+                f"{types[i]} overlaps {types[j]}"
+            )
+
+
+def test_clear_resets_block_and_wire_state(scene):
+    """QGraphicsScene.clear() deletes the C++ items; the scene's registries
+    must reset too or to_dict()/reset-all crash on dangling references."""
+    scene.add_block("Oscilloscope", QPointF(0, 0))
+    scene.add_block("Power Supply", QPointF(500, 0))
+    scene.clear()
+
+    assert scene.blocks == []
+    assert scene.to_dict() == {"blocks": [], "wires": []}
+
+
+def test_layout_round_trip_preserves_blocks_and_wires(scene, qapp):
+    """to_dict() → from_dict() must restore every block type and wire.
+
+    Regression for the Function Generator block registering itself as
+    "Function Gen" while the registry key is "Function Generator": the
+    block and all of its wires silently vanished on reload."""
+    src_block = scene.add_block("Function Generator", QPointF(0, 0))
+    dst_block = scene.add_block("Oscilloscope", QPointF(500, 0))
+    wire = scene.connect_ports(src_block.ports[0], dst_block.ports[0])
+    assert wire is not None
+    data = scene.to_dict()
+
+    restored = CanvasScene()
+    restored.from_dict(data)
+
+    restored_types = sorted(b.device_type for b in restored.blocks)
+    assert restored_types == ["Function Generator", "Oscilloscope"]
+    assert len(restored.to_dict()["wires"]) == 1
+
+
+def test_remove_block_removes_from_scene(scene):
+    block = scene.add_block("Oscilloscope", QPointF(0, 0))
+    bid = block.block_id
+    scene.remove_block(block)
+    assert scene.get_block(bid) is None
+    assert block not in scene.items()
+
+
+# ---------------------------------------------------------------------------
+# Hello-world custom block: smoke test for the user-defined block path.
+# ---------------------------------------------------------------------------
+
+
+class HelloDevice(BaseDevice):
+    MODEL = "HELLO"
+
+    def _setup_handlers(self) -> None:
+        self._register("HELLO", self._hello)
+
+    def _hello(self, cmd: ScpiCommand) -> str:
+        return "world"
+
+
+class HelloBlock(BaseBlock):
+    def __init__(self) -> None:
+        super().__init__(HelloDevice(), "Hello")
+
+    def _setup_ports(self) -> None:
+        self.add_port("OUT", "OUT", 1.0, 0.5)
+
+
+def test_hello_world_custom_block(scene):
+    BLOCK_REGISTRY["Hello"] = HelloBlock
+    try:
+        block = scene.add_block("Hello", QPointF(0, 0))
+        assert isinstance(block, HelloBlock)
+        assert block.send_command("HELLO?") == "world"
+        assert block.command_log[-1] == ("HELLO?", "world")
+    finally:
+        BLOCK_REGISTRY.pop("Hello", None)

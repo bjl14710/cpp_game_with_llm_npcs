@@ -1,0 +1,53 @@
+// Exercise 04 Part A: O(1) ring-buffer moving average.
+//
+// gradient_boosting/sample_with_gradient_boosting.cpp recomputes the moving
+// average over the whole window on every tick — O(window) work and its own
+// comments admit it should be O(1). Your job: a running sum over a fixed
+// array gives O(1) push and O(1) average, no heap, no per-tick loop.
+//
+// Grade yourself: uv run pytest tests/exercises/test_04_spsc_ring.py -v
+//   (or directly: bash tests/exercises/cpp/run_cpp.sh test_ring_ma)
+//
+// Lessons: 0009 (hot-path rules), 0010 (best practices). Once your
+// implementation works, add `noexcept` to the hot-path methods — the
+// throwing placeholder bodies below can't carry it.
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <stdexcept>
+
+template <std::size_t N>
+class RingMA {
+    static_assert(N > 0, "window must be non-empty");
+
+public:
+    // O(1): subtract the value falling out of the window, add the new one.
+    // Hint: keep `head_` pointing at the next write slot — once the window
+    // is full, that slot also holds the OLDEST sample.
+    void push(double x) {
+        (void)x;
+        throw std::logic_error("not implemented");  // TODO
+    }
+
+    // Mean of the samples currently in the window (0.0 before any push).
+    // Must NOT loop over the buffer.
+    double average() const {
+        throw std::logic_error("not implemented");  // TODO
+    }
+
+    // Number of samples currently in the window (saturates at N).
+    std::size_t size() const {
+        throw std::logic_error("not implemented");  // TODO
+    }
+
+    // True once N samples have been pushed.
+    bool warmed_up() const {
+        throw std::logic_error("not implemented");  // TODO
+    }
+
+private:
+    // TODO: fixed storage (std::array — no heap on the hot path),
+    // a running sum, a head index, and a count.
+    std::array<double, N> buf_{};
+};

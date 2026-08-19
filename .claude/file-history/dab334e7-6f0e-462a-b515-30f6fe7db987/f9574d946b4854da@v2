@@ -1,0 +1,128 @@
+# Plan: "Lab" Web Theme — Streamlit Design Language for webapp/, Side by Side
+Date: 2026-07-15
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Borrow the visual language of the HFT learning app's dashboard
+(`HFT_Trading_Practice_Repo/app/dashboard.py`) and offer it as a SECOND
+selectable theme for this repo's FastAPI+Jinja2 webapp — the existing look
+stays intact and remains the default ("have both"). Grounding fact that
+shapes everything: that dashboard uses STOCK Streamlit (no custom CSS, no
+config.toml), so the design language to reproduce is Streamlit's default
+aesthetic plus the app's layout patterns — sidebar-of-controls, metric
+cards in columns with green/red deltas, clean tabs, wide data tables,
+crimson dashed reference lines on charts.
+
+## Goal
+A `Theme: Lab ⇄ Classic` toggle in the webapp header restyles every page
+into the Streamlit-like look (and back), persisted per browser — plus a new
+`/arena` page that showcases it by rendering the arena comparison table
+with metric cards.
+
+## Design Decisions (recommended options, per standing preference)
+- **One DOM, two stylesheets — not duplicated templates.** `base.html`
+  resolves the theme per request in Jinja (no route changes needed):
+  `?theme=lab|classic` query overrides, else `ui_theme` cookie, else
+  `classic`. A tiny inline script persists a `?theme=` visit into the
+  cookie. `<body class="theme-lab|theme-classic">` + conditional second
+  stylesheet. The Tkinter GUI and the current web look are untouched;
+  classic stays default.
+- **Design tokens = Streamlit defaults**, hardcoded as CSS custom
+  properties in `webapp/static/theme-lab.css`:
+  light: bg `#FFFFFF`, secondary/sidebar `#F0F2F6`, text `#31333F`,
+  accent `#FF4B4B`; dark (via `prefers-color-scheme`): bg `#0E1117`,
+  secondary `#262730`, text `#FAFAFA`, same accent. Radius 8px,
+  system-font stack approximating Source Sans (NO CDN fonts — the PWA
+  must stay offline-capable and the repo convention is no external
+  fetches). Metric deltas: green `#09AB3B` / red `#FF2B2B`.
+- **Layout pattern, lab mode only**: the header nav restyles into a left
+  sidebar on wide screens (CSS grid on the same markup; collapses back to
+  the existing hamburger pattern under 900px — the mobile PWA behavior
+  from PR #49 is preserved verbatim in both themes).
+- **Metric cards as a shared Jinja partial** (`_metric.html` macro:
+  label, value, optional delta with sign-based class). Both themes render
+  it — classic styles it as a plain stat line, lab as a Streamlit metric
+  card. Pages adopt it where numbers already appear (analyze results,
+  walkforward summary, home status) — light touch-ups, no logic changes.
+- **New `/arena` page** (the showcase, explicitly named in the idea):
+  reads the arena DB (`ARENA_DB` env or `arena_state/arena.db`) via
+  `analyze_equity.compare_strategies`, renders status-tiered rows
+  (PASS/PROBATION-ready/PAUSED/EXCLUDED/REFERENCE/RESEARCH badges),
+  metric cards for the headline numbers, and a friendly empty state when
+  no DB exists. Read-only — no arena mutations from the web.
+- **First webapp tests ride along** (`tests/test_webapp_theme.py`,
+  FastAPI TestClient): theme resolution (query > cookie > default),
+  stylesheet/body-class switching, `/arena` with a seeded tmp DB and with
+  no DB. The webapp currently has zero tests; this starts the habit
+  without boiling the ocean.
+
+## Out of Scope (this version)
+- Copying any trading/research logic or pages from the oil app (explicit
+  in the idea) — design language only
+- Plotly/chart re-theming beyond CSS (the webapp doesn't render charts
+  today; when it does, the crimson-dashed-reference-line convention is
+  noted here as the pattern to follow)
+- Theming the SaaS static site (`web/`) or the learning materials
+- A user-accounts/preferences system — one cookie is the persistence
+- Making lab the default (revisit after living with it)
+
+## Affected Areas
+- New: `webapp/static/theme-lab.css` — the entire lab look (tokens above,
+  sidebar grid, metric cards, tables, tabs-like section headers, buttons,
+  alerts) with light/dark via `prefers-color-scheme`.
+- `webapp/templates/base.html` — theme resolution block, conditional
+  stylesheet, body class, header toggle link, cookie-persist snippet.
+- New: `webapp/templates/_metric.html` — metric-card macro.
+- New: `webapp/templates/arena.html` + route in `webapp/main.py`
+  (`GET /arena`), nav link in base.
+- `webapp/templates/{index,analyze,walkforward}.html` — adopt the metric
+  macro where numbers render (markup only).
+- `webapp/static/style.css` — additive rules so the macro renders sanely
+  in classic (no visual change to anything existing).
+- New: `tests/test_webapp_theme.py`.
+
+## Implementation Order
+1. Theme plumbing: base.html resolution + toggle + cookie persist +
+   empty theme-lab.css stub; tests for resolution order. (No visual
+   change yet — classic byte-identical.)
+2. The lab stylesheet: tokens, sidebar layout ≥900px, cards, tables,
+   forms, alerts, dark mode.
+3. Metric macro + adoption on index/analyze/walkforward; classic-side
+   additive styles.
+4. `/arena` page + route + nav link + empty-state + tests with seeded
+   tmp arena DB.
+
+## Acceptance Criteria
+- [ ] Default (no cookie, no query) renders exactly today's markup +
+      stylesheet — classic untouched, regression-pinned in a test
+- [ ] `?theme=lab` renders lab (body class + second stylesheet) and
+      persists via cookie for subsequent plain requests
+- [ ] `?theme=classic` switches back and persists
+- [ ] Lab mode ≥900px shows the sidebar layout; <900px keeps the existing
+      hamburger behavior (both themes)
+- [ ] All 8 existing pages render without template errors in BOTH themes
+      (parametrized test hitting every GET route × both themes)
+- [ ] `/arena` renders compare_strategies output with status badges and
+      metric cards; with no DB present it renders the empty state, not a 500
+- [ ] No external network requests introduced (no CDN fonts/scripts) —
+      PWA offline behavior unchanged
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Invalid `?theme=banana` | Falls back to cookie-else-classic; cookie not overwritten with garbage |
+| Arena DB exists but is empty (no strategies) | Empty state with a pointer to `arena-run backtest` |
+| Arena DB from an older schema | compare_strategies' own migration-tolerance applies (ArenaState migrates on open); page renders whatever columns exist |
+| Cookies disabled | Toggle still works per-request via query param; just doesn't persist |
+| Both `?theme=` and cookie present | Query wins for that request AND rewrites the cookie (explicit choice beats memory) |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(webapp): theme plumbing — resolution, toggle, cookie persistence` — base.html + tests, zero visual change
+2. `feat(webapp): lab theme stylesheet — Streamlit design tokens, sidebar, dark mode` — theme-lab.css
+3. `feat(webapp): metric-card macro + adoption on numeric pages` — _metric.html + touch-ups
+4. `feat(webapp): /arena comparison page with status badges + empty state` — route, template, seeded-DB tests

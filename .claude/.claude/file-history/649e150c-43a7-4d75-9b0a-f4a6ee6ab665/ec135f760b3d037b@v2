@@ -1,0 +1,72 @@
+# Glossary — HFT_practice
+
+Terms the learner has been introduced to. A term is promoted from *introduced* to
+*understood* only after they've answered a question about it correctly or used it
+correctly themselves.
+
+Status legend: `intro` = covered in a lesson · `solid` = demonstrably grasped.
+
+---
+
+### Algorithmic trading — `intro`
+Any trading where decisions are made by code rather than a human. A superset of HFT.
+
+### Ask (offer) — `intro`
+The lowest price a seller is currently willing to accept.
+
+### Adverse selection — `intro`
+The risk that the counterparty who hit your quote knew more than you did about
+where the price was about to go. The reason market makers cancel orders aggressively.
+
+### Bid — `intro`
+The highest price a buyer is currently willing to pay.
+
+### Colocation — `intro`
+Renting rack space inside the exchange's data center so your trading server is
+physically next to the matching engine, minimizing wire latency.
+
+### FPGA — `intro`
+Field-Programmable Gate Array. Reconfigurable hardware wired into a fixed
+pipeline at synthesis time. Used in HFT for deterministic nanosecond-scale latency.
+Example in this repo: `fpga/market_maker.vhd`.
+
+### HFT (High-Frequency Trading) — `intro`
+Automated trading defined by microsecond-to-nanosecond latency, very high order
+rates, and short (often sub-second) holding periods.
+
+### Limit order — `intro`
+"Buy/sell at price X or better." Rests passively in the book until matched or
+cancelled. The order type market makers post.
+
+### Limit Order Book (LOB) — `intro`
+The full list of resting buy and sell orders at every price level on a venue.
+The core data structure of modern electronic markets.
+
+### Market maker — `intro`
+A strategy that simultaneously posts both a bid and an ask, earning the spread
+when both sides fill. `fpga/market_maker.vhd` is a hardware example.
+
+### Market order — `intro`
+"Fill me now at the best available price." Crosses the spread and pays for
+immediacy. The order type takers send.
+
+### Mid-price — `intro`
+`(bid + ask) / 2`. A common reference for "fair value" between the two sides of
+the book. Computed explicitly in `fpga/market_maker.vhd`.
+
+### Q16.16 fixed-point — `intro`
+A 32-bit signed integer encoding where the lower 16 bits represent the
+fractional part: `real_value = integer_signal / 65536`. Used in
+`fpga/market_maker.vhd` so all arithmetic stays in one-cycle integer ops.
+
+### Spread — `intro`
+`ask − bid`. The cost of crossing the book; the prize a market maker tries to
+capture on round-trips.
+
+### Tick — `intro`
+A single market data update — a trade, a quote change, a cancel. The unit of
+input to an HFT pipeline.
+
+### Tick-to-trade latency — `intro`
+The time between receiving a market data tick and your responding order leaving
+your NIC. The headline latency number in HFT (top firms: ~100–500 ns on FPGA).

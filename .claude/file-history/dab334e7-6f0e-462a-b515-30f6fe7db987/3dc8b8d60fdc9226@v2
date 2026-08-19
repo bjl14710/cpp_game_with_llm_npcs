@@ -1,0 +1,79 @@
+# Plan: Fractional Kelly Position Sizing (quarter- to half-Kelly)
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Closes the deferral recorded in confidence-position-sizing.md: size each
+strategy's gross exposure by a fraction of the Kelly-optimal bet computed
+from its own realized trade history, capped well below full Kelly because
+the edge estimate itself is noisy. The blotter already records everything
+the estimator needs (per-trade signed forward returns since PR #63).
+
+## Design Decisions
+- **Continuous Kelly, not win/loss Kelly** (my recommended option):
+  `f* = μ/σ²` on per-trade returns (position × fwd_ret, from the blotter)
+  — better suited to variable-magnitude daily returns than the discrete
+  p/b form, and one fewer estimated quantity.
+- **Fraction λ configurable in [0.25, 0.5]**, default 0.25 (quarter-Kelly)
+  — the conservative end, per the estimation-error rationale in the idea.
+  `exposure_mult = clamp(λ · f*, 0, 1)` — long-only, never levered, and a
+  NEGATIVE estimated edge clamps to 0 (the strategy keeps screening but
+  sizes to nothing — a loud fact the report should surface).
+- **Trailing estimation window**: last `kelly_window` trades (default 100,
+  min 30). Below 30 closed trades → multiplier 1.0 (bootstrap: current
+  sizing), same all-or-nothing philosophy as ensemble weights.
+- **Composes with existing sizing**: relative weights from equal/conf_vol
+  as configured; Kelly scales gross, multiplicatively with the
+  vol-target multiplier if both enabled, combined result capped at 1.0
+  (mirror statement lives in vol-targeted-sizing.md).
+- **New sizing flag, screened configuration**: `--kelly 0.25` opt-in;
+  persisted; live reuses. In backtest, the estimator uses the backtest's
+  own accumulating blotter (deterministic, replay-safe); in live, the
+  stored trades table.
+
+## Out of Scope
+- Full Kelly or λ > 0.5 (deliberately not offered); per-ticker Kelly
+  (strategy-level only); drawdown-modulated λ; margin/leverage.
+
+## Affected Areas
+- New: `kelly.py` (py-module) — `kelly_fraction(trade_returns, lam,
+  min_trades) -> float` pure function, hand-pinnable.
+- `walkforward_sim.py` — accumulate trade returns in-loop; apply
+  multiplier to the day's weights when enabled.
+- `strategy_arena.py` — flag, persistence (`kelly_lambda` column, guarded
+  ALTER), live path pulls trade history from the trades table;
+  report: `kelly_mult` column (current multiplier, 0.0 shown loudly).
+- Tests: `tests/test_kelly.py` — pinned f* on synthetic trade sets
+  (μ=0.001, σ²=0.0001 → f*=10 → clamped 1.0 → λ·… etc.), negative edge →
+  0, bootstrap below min_trades, composition-with-vol-target cap.
+
+## Implementation Order
+1. `kelly.py` pure math + pins.
+2. Loop integration (backtest-side accumulator) + tests.
+3. Arena persistence + live trades-table path + report column.
+
+## Acceptance Criteria
+- [ ] f* = μ/σ² pinned by hand on three synthetic distributions
+- [ ] λ outside [0.25, 0.5] rejected at the CLI with a clear error
+- [ ] < 30 trades → multiplier exactly 1.0; ≥ 30 → λ·f* clamped [0, 1]
+- [ ] Negative-edge strategy sizes to 0 and the report says so
+- [ ] Backtest and live replay produce identical multipliers on identical
+      trade histories (determinism)
+- [ ] Off by default: no flag → byte-identical output
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| σ² ≈ 0 (identical trade returns) | f* capped via clamp; no division blowup (guard) |
+| Exactly min_trades boundary | Estimator activates at ≥ min_trades (inclusive), pinned |
+| Kelly 0.0 multiplier for a PASS strategy | Strategy still ticks (rows with zero exposure) — visible anomaly, not a silent skip |
+| Combined Kelly × vol-target > 1 | Impossible — each ≤ 1 and product ≤ 1; test anyway |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(sizing): kelly.py fractional-Kelly estimator from trade history`
+2. `feat(arena): --kelly gross-exposure multiplier, persisted + reported`

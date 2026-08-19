@@ -1,0 +1,134 @@
+"""Native Streamlit research console (presentation only).
+
+Run (after ``uv sync --extra dashboard``):
+
+    uv run streamlit run streamlit_app/dashboard.py
+
+Three tabs mirroring the HFT learning app's oil dashboard patterns (wide
+layout, sidebar controls, st.metric columns, tabs):
+  ① Arena — standings from arena_state/arena.db, strictly read-only
+  ② Equity — metrics + chart for any equity CSV
+  ③ Live signals — manual-refresh tape via live_watch (completed bars only)
+
+All data access goes through streamlit_app/data.py (pure, testable, no
+streamlit imports). This file stays deliberately thin: widgets in, data.py
+out, notices instead of tracebacks.
+"""
+from __future__ import annotations
+
+import sys
+
+
+def _require_streamlit():
+    """Lazy import with a friendly exit — core installs don't carry streamlit."""
+    try:
+        import streamlit as st
+        return st
+    except ImportError:
+        sys.exit("streamlit is not installed — run: uv sync --extra dashboard")
+
+
+def main() -> None:
+    """Build the whole console. Streamlit reruns this top-to-bottom on every
+    interaction — durable state (the live tape's dedupe dict and lines)
+    lives in st.session_state, never in module globals."""
+    st = _require_streamlit()
+    from intraday_sim import STRATEGIES, VALID_INTERVALS
+    from streamlit_app import data
+
+    st.set_page_config(page_title="AlgoTrade Research Console", layout="wide")
+    st.title("AlgoTrade Research Console")
+
+    with st.sidebar:
+        st.header("Sources")
+        db_path = st.text_input("Arena DB", value="arena_state/arena.db")
+        csv_path = st.text_input("Equity CSV", value="walkforward_equity.csv")
+        st.header("Live tape")
+        tickers_raw = st.text_input("Tickers", value="AAPL,MSFT")
+        interval = st.selectbox("Interval", sorted(VALID_INTERVALS), index=1)
+        strategy_name = st.selectbox("Strategy", list(STRATEGIES))
+        refresh = st.button("↻ Refresh tape")
+        st.caption("Read-only console — screening, ticking, and orders stay "
+                   "in the CLI (`arena-run`, `rh-exec`).")
+
+    tab_arena, tab_equity, tab_live = st.tabs(["① Arena", "② Equity", "③ Live signals"])
+
+    with tab_arena:
+        try:
+            rows = data.arena_rows(db_path)
+        except data.FriendlyDashboardError as exc:
+            st.error(str(exc))
+            rows = []
+        if rows:
+            counts = data.arena_headline(rows)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Strategies tracked", counts["tracked"])
+            c2.metric("Live (PASS)", counts["live"])
+            c3.metric("Diverged flags", counts["diverged"],
+                      delta="review needed" if counts["diverged"] else "all clear",
+                      delta_color="inverse" if counts["diverged"] else "normal")
+            import pandas as pd
+
+            table = pd.DataFrame(rows)
+            show = ["strategy", "badge", "live_sharpe", "live_cagr", "live_maxdd",
+                    "win_rate", "trades", "backtest_sharpe", "divergence_z"]
+            st.dataframe(table[[c for c in show if c in table.columns]],
+                         hide_index=True, use_container_width=True)
+        else:
+            st.info("No arena data yet. Screen strategies first:\n\n"
+                    "`uv run arena-run backtest --strategies tsmom,lowvol,meanrev "
+                    "--start 2023-01-01 --end 2025-01-01`\n\nthen tick daily with "
+                    "`uv run arena-run live` and refresh this page.")
+
+    with tab_equity:
+        try:
+            out = data.equity_metrics(csv_path)
+        except data.FriendlyDashboardError as exc:
+            st.info(f"{exc} — run a backtest to produce one, e.g. "
+                    "`uv run walkforward-sim --model models/... --start ... --end ...`")
+            out = None
+        if out:
+            metrics = out["metrics"]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Sharpe", f"{metrics.get('Sharpe', 0):.2f}")
+            m2.metric("CAGR", f"{metrics.get('CAGR', 0):.2%}")
+            m3.metric("Max drawdown", f"{metrics.get('MaxDD', 0):.2%}")
+            m4.metric("Final equity", f"{metrics.get('Final', 0):,.0f}")
+            frame = out["frame"].copy()
+            # The oil app's chart signature is a crimson dashed reference
+            # line; st.line_chart can't dash, so the running peak renders as
+            # a plain reference series (plotly upgrade noted as out of scope).
+            frame["peak"] = frame["equity"].cummax()
+            st.line_chart(frame, use_container_width=True)
+
+    with tab_live:
+        st.caption("Completed bars only (a forming candle can un-engulf — "
+                   "lesson 0038); yfinance runs ~1 minute delayed.")
+        seen = st.session_state.setdefault("tape_seen", {})
+        lines = st.session_state.setdefault("tape_lines", [])
+        if refresh:
+            import datetime as dt
+
+            tickers = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
+            stamp = dt.datetime.now().strftime("%H:%M:%S")
+            for line in data.live_tape(tickers, interval, strategy_name, seen=seen):
+                lines.append(f"[{stamp}] {line}")
+            st.session_state["tape_lines"] = lines[-200:]  # bounded scrollback
+        if lines:
+            st.code("\n".join(lines), language=None)
+        else:
+            st.info("Press ↻ Refresh tape in the sidebar to poll the latest bars.")
+
+
+def _in_streamlit_run() -> bool:
+    """True inside `streamlit run` / AppTest — false for plain imports, so
+    importing this module in a streamlit-less environment stays safe."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
+
+
+if __name__ == "__main__" or _in_streamlit_run():
+    main()

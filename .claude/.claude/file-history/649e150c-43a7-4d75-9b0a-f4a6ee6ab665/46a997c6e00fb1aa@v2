@@ -1,0 +1,169 @@
+/**
+ * Grading tests — Exercise 08: Latency Benchmark Harness.
+ *
+ * Built and run by run_cpp.sh; -I points at exercises/08_latency_bench or
+ * solutions/08_latency_bench depending on HFT_EXERCISE_TARGET.
+ *
+ * Exit codes: 0 = pass, 1 = fail, 42 = not implemented (stub threw).
+ *
+ * Tests cover:
+ *   1. rdtsc() monotonicity
+ *   2. Histogram::record + percentile correctness
+ *   3. Histogram::print produces output containing "p50"
+ */
+#include "latency.hpp"
+
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+#define ASSERT(cond, msg)                                              \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            std::cerr << "FAIL: " << msg << "\n";                     \
+            return 1;                                                  \
+        }                                                              \
+    } while (0)
+
+// ---------------------------------------------------------------------------
+// Test: rdtsc() is monotonically non-decreasing
+// ---------------------------------------------------------------------------
+int test_rdtsc_monotonic() {
+    uint64_t prev = rdtsc();
+    for (int i = 0; i < 1000; ++i) {
+        uint64_t cur = rdtsc();
+        ASSERT(cur >= prev,
+               "rdtsc() went backwards: prev=" + std::to_string(prev)
+               + " cur=" + std::to_string(cur));
+        prev = cur;
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: Histogram::record + percentile — uniform bucket (all same value)
+//
+// Record 100 values all equal to 1000.
+//   1000 in binary: 1111101000 → MSB at bit 9 → bucket 9 → lower bound 512.
+// All percentiles should return 512.
+// ---------------------------------------------------------------------------
+int test_histogram_uniform_bucket() {
+    Histogram h;
+    for (int i = 0; i < 100; ++i) h.record(1000);
+    uint64_t p50  = h.percentile(0.50);
+    uint64_t p99  = h.percentile(0.99);
+    // Bucket 9 covers [512, 1024); lower bound = 512.
+    ASSERT(p50 == 512, "p50 of 100 records of 1000 cycles should be 512 (bucket 9); got "
+                       + std::to_string(p50));
+    ASSERT(p99 == 512, "p99 same as p50 when all in one bucket; got "
+                       + std::to_string(p99));
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: Histogram::percentile correctly separates two distinct buckets.
+//
+// 50 records of 100 cycles → bucket 6 (lower bound 64),
+// 50 records of 1000 cycles → bucket 9 (lower bound 512).
+// p50 should land in the second half → 512.
+// p25 should land in the first half  → 64.
+// ---------------------------------------------------------------------------
+int test_histogram_two_buckets() {
+    Histogram h;
+    for (int i = 0; i < 50; ++i) h.record(100);   // bucket 6: [64, 128)
+    for (int i = 0; i < 50; ++i) h.record(1000);  // bucket 9: [512, 1024)
+
+    uint64_t p25 = h.percentile(0.25);
+    uint64_t p75 = h.percentile(0.75);
+
+    // 100 values; target for p25 = 25 → in the first group (bucket 6 → 64).
+    ASSERT(p25 == 64, "p25 with 50×100 + 50×1000 should be 64; got "
+                      + std::to_string(p25));
+    // target for p75 = 75 → in the second group (bucket 9 → 512).
+    ASSERT(p75 == 512, "p75 with 50×100 + 50×1000 should be 512; got "
+                       + std::to_string(p75));
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: empty histogram
+// ---------------------------------------------------------------------------
+int test_histogram_empty() {
+    Histogram h;
+    ASSERT(h.percentile(0.50) == 0, "empty histogram p50 should return 0");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: Histogram::print produces "p50" in stdout.
+// We redirect stdout briefly using a capture trick.
+// ---------------------------------------------------------------------------
+int test_print_contains_p50() {
+    Histogram h;
+    for (int i = 0; i < 100; ++i) h.record(500);
+
+    // Redirect stdout to a temporary buffer
+    char capture[256]{};
+    FILE* old = stdout;
+    FILE* mem = fmemopen(capture, sizeof(capture) - 1, "w");
+    if (!mem) return 0;  // platform doesn't support fmemopen; skip softly
+    stdout = mem;
+    h.print(3000.0);
+    fflush(mem);
+    fclose(mem);
+    stdout = old;
+
+    ASSERT(std::strstr(capture, "p50") != nullptr,
+           "print() output should contain 'p50'");
+    ASSERT(std::strstr(capture, "p99") != nullptr,
+           "print() output should contain 'p99'");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: record boundary values (0, 1, UINT64_MAX)
+// ---------------------------------------------------------------------------
+int test_record_boundaries() {
+    Histogram h;
+    h.record(0);           // should map to bucket 0, not crash
+    h.record(1);           // bucket 0
+    h.record(UINT64_MAX);  // bucket 63
+    // Just verifying no crash; percentile math is tested above.
+    (void)h.percentile(0.5);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+int main() {
+    struct Test { const char* name; int (*fn)(); };
+    Test tests[] = {
+        {"rdtsc_monotonic",         test_rdtsc_monotonic},
+        {"histogram_uniform_bucket",test_histogram_uniform_bucket},
+        {"histogram_two_buckets",   test_histogram_two_buckets},
+        {"histogram_empty",         test_histogram_empty},
+        {"print_contains_p50",      test_print_contains_p50},
+        {"record_boundaries",       test_record_boundaries},
+    };
+
+    try {
+        int failed = 0;
+        for (auto& t : tests) {
+            if (t.fn() != 0) {
+                std::cerr << "  [FAILED] " << t.name << "\n";
+                ++failed;
+            } else {
+                std::cout << "  [PASSED] " << t.name << "\n";
+            }
+        }
+        if (failed == 0) { std::cout << "ALL TESTS PASSED\n"; return 0; }
+        std::cerr << failed << " TEST(S) FAILED\n";
+        return 1;
+    } catch (const std::logic_error& e) {
+        std::cout << "NOT IMPLEMENTED: " << e.what() << "\n";
+        return 42;
+    }
+}

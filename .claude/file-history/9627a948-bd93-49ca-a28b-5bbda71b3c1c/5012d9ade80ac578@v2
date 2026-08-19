@@ -1,0 +1,137 @@
+"""Function generator hardware block for the GUI canvas."""
+
+from __future__ import annotations
+import math
+import numpy as np
+
+from PyQt6.QtCore import QRectF, Qt, QPointF
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath
+from PyQt6.QtWidgets import QMenu
+
+from silmulator.gui.blocks.base_block import BaseBlock
+from silmulator.devices.function_generator import FunctionGenerator
+from silmulator.utils.waveform import generate_waveform, WaveformType
+
+
+FUNC_TO_WTYPE = {
+    "SIN": WaveformType.SINE,
+    "SQU": WaveformType.SQUARE,
+    "RAMP": WaveformType.RAMP,
+    "PULS": WaveformType.PULSE,
+    "NOIS": WaveformType.NOISE,
+    "DC": WaveformType.DC,
+}
+
+
+class FunctionGeneratorBlock(BaseBlock):
+    """Visual representation of the function generator simulator."""
+
+    BLOCK_WIDTH = 260
+    BLOCK_HEIGHT = 180
+    HEADER_COLOR = QColor(40, 120, 60)
+    BODY_COLOR = QColor(230, 245, 235)
+
+    def __init__(self) -> None:
+        # Must match the BLOCK_REGISTRY key exactly — to_dict() persists
+        # this string and from_dict() resolves it through the registry.
+        super().__init__(FunctionGenerator(), "Function Generator")
+
+    @property
+    def fgen(self) -> FunctionGenerator:
+        return self.device  # type: ignore
+
+    def _setup_ports(self) -> None:
+        self.add_port("CH1_OUT", "CH1", 1.0, 0.35)
+        self.add_port("CH2_OUT", "CH2", 1.0, 0.65)
+        self.add_port("SYNC_OUT", "SYNC", 0.5, 1.0)
+        self.add_port("TRIG_IN", "TRIG", 0.0, 0.5)
+
+    def _paint_content(self, painter: QPainter, rect: QRectF) -> None:
+        fgen = self.fgen
+        font = QFont("Consolas", 8)
+        painter.setFont(font)
+
+        y_start = self.TITLE_HEIGHT + 8
+        ch_height = (rect.height() - y_start - 8) / fgen.NUM_CHANNELS
+
+        for ch_num in range(1, fgen.NUM_CHANNELS + 1):
+            ch = fgen.channels[ch_num]
+            y = y_start + (ch_num - 1) * ch_height
+
+            # Mini waveform preview
+            preview_rect = QRectF(rect.x() + 8, y, 80, ch_height - 4)
+            painter.setBrush(QBrush(QColor(10, 30, 20)))
+            painter.setPen(QPen(QColor(30, 80, 30), 0.5))
+            painter.drawRect(preview_rect)
+
+            wtype = FUNC_TO_WTYPE.get(ch.function, WaveformType.SINE)
+            n_pts = 100
+            wave = generate_waveform(
+                wtype, 5.0, 1.0, 0.0, n_pts, 1000.0,
+                duty_cycle=ch.square_dcycle / 100.0,
+                ramp_symmetry=ch.ramp_symmetry / 100.0,
+            )
+            if len(wave) > 1:
+                pw = preview_rect.width()
+                ph = preview_rect.height()
+                px = preview_rect.x()
+                py_center = preview_rect.y() + ph / 2
+                wave_min = wave.min()
+                wave_max = wave.max()
+                wave_range = max(wave_max - wave_min, 1e-10)
+                path = QPainterPath()
+                for i, v in enumerate(wave):
+                    x = px + i * pw / (len(wave) - 1)
+                    y_val = py_center - (v - (wave_min + wave_max) / 2) / wave_range * ph * 0.9
+                    if i == 0:
+                        path.moveTo(x, y_val)
+                    else:
+                        path.lineTo(x, y_val)
+                color = QColor(0, 255, 100) if ch.output_on else QColor(100, 200, 120)
+                painter.setPen(QPen(color, 1.5))
+                painter.drawPath(path)
+
+            # Channel info text
+            painter.setPen(QPen(QColor(30, 30, 30)))
+            font_bold = QFont("Consolas", 8, QFont.Weight.Bold)
+            painter.setFont(font_bold)
+            painter.drawText(int(rect.x() + 96), int(y + 12), f"CH{ch_num}: {ch.function}")
+            painter.setFont(font)
+            freq_str = _format_freq(ch.frequency)
+            painter.drawText(int(rect.x() + 96), int(y + 24), f"{freq_str}")
+            amp_str = f"{ch.amplitude:.3g}Vpp  offs:{ch.offset:.3g}V"
+            painter.drawText(int(rect.x() + 96), int(y + 36), amp_str)
+
+            # Output state
+            on_color = QColor(0, 220, 60) if ch.output_on else QColor(200, 50, 50)
+            painter.setBrush(QBrush(on_color))
+            painter.setPen(QPen(QColor(20, 20, 20)))
+            painter.drawEllipse(int(rect.width() - 20), int(y + 10), 10, 10)
+
+            if ch_num < fgen.NUM_CHANNELS:
+                painter.setPen(QPen(QColor(160, 200, 160), 0.5))
+                painter.drawLine(
+                    int(rect.x() + 5), int(y + ch_height - 2),
+                    int(rect.width() - 5), int(y + ch_height - 2)
+                )
+
+    def _add_device_menu_actions(self, menu: QMenu) -> None:
+        menu.addAction("CH1: 1kHz Sine 1Vpp ON", lambda: self._quick_set(1, "SIN", 1000, 1.0))
+        menu.addAction("CH1: 1kHz Square 3.3Vpp ON", lambda: self._quick_set(1, "SQU", 1000, 3.3))
+        menu.addAction("CH1 output OFF", lambda: self.send_command("OUTP1 OFF"))
+
+    def _quick_set(self, ch: int, func: str, freq: float, amp: float) -> None:
+        self.send_command(f"SOURCE{ch}:FUNC {func}")
+        self.send_command(f"SOURCE{ch}:FREQ {freq}")
+        self.send_command(f"SOURCE{ch}:VOLT {amp}")
+        self.send_command(f"OUTPUT{ch} ON")
+        self.update()
+
+
+def _format_freq(hz: float) -> str:
+    if hz >= 1e6:
+        return f"{hz / 1e6:.3g} MHz"
+    elif hz >= 1e3:
+        return f"{hz / 1e3:.3g} kHz"
+    else:
+        return f"{hz:.3g} Hz"

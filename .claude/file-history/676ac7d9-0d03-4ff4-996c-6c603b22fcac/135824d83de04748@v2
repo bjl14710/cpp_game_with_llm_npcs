@@ -1,0 +1,225 @@
+"""Tests for canvas navigation: middle-mouse panning and the sceneRect
+maintenance that bounds it.
+
+Panning range is limited by the scene's sceneRect. It used to be fixed at
+construction time, so a block dragged past its edge became unreachable by
+scrolling — "fit view" was the only way back. The scene now recomputes a
+padded sceneRect (never smaller than DEFAULT_SCENE_RECT) as blocks are
+added, removed, and dragged.
+
+Middle-mouse-drag panning itself predates these tests; they pin its
+behavior so it can't regress: middle-drag pans (even when starting on top
+of a block, without moving that block) while left-drag rubber-band
+selection stays intact.
+"""
+from __future__ import annotations
+import pytest
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication, QGraphicsView
+
+from silmulator.gui.canvas import CanvasScene, CanvasView
+
+
+@pytest.fixture
+def scene(qapp):
+    return CanvasScene()
+
+
+@pytest.fixture
+def view(scene):
+    v = CanvasView(scene)
+    v.resize(1000, 700)
+    v.show()
+    yield v
+    v.close()
+
+
+def _send_view_mouse(view: CanvasView, etype: QEvent.Type, view_pt: QPointF,
+                     button: Qt.MouseButton, buttons: Qt.MouseButton) -> None:
+    """Deliver a synthetic mouse event to the view's viewport in viewport
+    coordinates, the same way a real click arrives."""
+    viewport = view.viewport()
+    event = QMouseEvent(
+        etype, view_pt, QPointF(viewport.mapToGlobal(view_pt.toPoint())),
+        button, buttons, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, event)
+
+
+def _middle_drag(view: CanvasView, start: QPointF, delta: QPointF,
+                 steps: int = 4) -> None:
+    _send_view_mouse(view, QEvent.Type.MouseButtonPress, start,
+                     Qt.MouseButton.MiddleButton, Qt.MouseButton.MiddleButton)
+    for i in range(1, steps + 1):
+        _send_view_mouse(view, QEvent.Type.MouseMove, start + delta * (i / steps),
+                         Qt.MouseButton.NoButton, Qt.MouseButton.MiddleButton)
+    _send_view_mouse(view, QEvent.Type.MouseButtonRelease, start + delta,
+                     Qt.MouseButton.MiddleButton, Qt.MouseButton.NoButton)
+
+
+def _scrollbars(view: CanvasView) -> tuple:
+    return (view.horizontalScrollBar().value(),
+            view.verticalScrollBar().value())
+
+
+# ---------------------------------------------------------------------------
+# Middle-mouse panning
+# ---------------------------------------------------------------------------
+
+
+def test_middle_drag_pans_view(scene, view):
+    scene.add_block("Oscilloscope")
+    before = _scrollbars(view)
+
+    _middle_drag(view, QPointF(500, 350), QPointF(-120, -80))
+
+    assert _scrollbars(view) != before, "middle-drag did not pan the view"
+    # Pan mode must fully hand back to rubber-band select on release.
+    assert view.dragMode() == QGraphicsView.DragMode.RubberBandDrag
+
+
+def test_middle_drag_starting_on_block_pans_and_does_not_move_block(scene, view):
+    block = scene.add_block("Oscilloscope")
+    view.centerOn(block.sceneBoundingRect().center())
+    block_pos = block.pos()
+    before = _scrollbars(view)
+
+    on_block = QPointF(view.mapFromScene(block.sceneBoundingRect().center()))
+    _middle_drag(view, on_block, QPointF(-90, -60))
+
+    assert _scrollbars(view) != before, "pan starting on a block did not pan"
+    assert block.pos() == block_pos, "middle-drag must not drag the block"
+
+
+def test_left_drag_on_empty_canvas_still_rubber_bands(scene, view):
+    scene.add_block("Oscilloscope")
+    empty = QPointF(700, 500)
+
+    _send_view_mouse(view, QEvent.Type.MouseButtonPress, empty,
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    _send_view_mouse(view, QEvent.Type.MouseMove, empty + QPointF(60, 40),
+                     Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+
+    assert not view.rubberBandRect().isNull(), (
+        "left-drag on empty canvas must start a rubber-band selection"
+    )
+    _send_view_mouse(view, QEvent.Type.MouseButtonRelease, empty + QPointF(60, 40),
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+
+
+# ---------------------------------------------------------------------------
+# sceneRect maintenance (panning bounds)
+# ---------------------------------------------------------------------------
+
+
+def test_scene_rect_defaults_when_empty_and_covers_content_with_margin(scene):
+    assert scene.sceneRect() == scene.DEFAULT_SCENE_RECT
+
+    block = scene.add_block("Oscilloscope")
+
+    # Content plus the full pan margin is always inside the rect, so a
+    # block can never sit pinned against a hard scroll edge.
+    padded = block.sceneBoundingRect().adjusted(
+        -scene.PAN_MARGIN, -scene.PAN_MARGIN,
+        scene.PAN_MARGIN, scene.PAN_MARGIN)
+    assert scene.sceneRect().contains(padded)
+
+
+def test_block_dragged_past_scene_edge_stays_reachable(scene, view):
+    """Regression: with a fixed sceneRect, a block dragged past its edge
+    could not be scrolled to — panning clamped short of the block."""
+    block = scene.add_block("Oscilloscope", QPointF(1500, 1500))
+    view.centerOn(block.sceneBoundingRect().center())
+
+    grab = QPointF(view.mapFromScene(
+        block.scenePos() + QPointF(block.BLOCK_WIDTH / 2, 8)))
+    _send_view_mouse(view, QEvent.Type.MouseButtonPress, grab,
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+    # One large step is fine: item drag follows the cursor regardless.
+    far = grab + QPointF(400, 300)
+    _send_view_mouse(view, QEvent.Type.MouseMove, far,
+                     Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+    _send_view_mouse(view, QEvent.Type.MouseButtonRelease, far,
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+
+    assert block.scenePos().x() > 1800, "drag did not move the block outward"
+    assert scene.sceneRect().contains(block.sceneBoundingRect()), (
+        f"sceneRect {scene.sceneRect()} does not cover the dragged block "
+        f"{block.sceneBoundingRect()} — it is unreachable by panning"
+    )
+
+    # And the view can actually scroll until the block is visible.
+    # (centerOn clamps to the sceneRect — before the fix this left the
+    # out-of-rect block outside the viewport.)
+    view.centerOn(block.sceneBoundingRect().center())
+    visible = view.mapToScene(view.viewport().rect()).boundingRect()
+    assert visible.intersects(block.sceneBoundingRect())
+
+
+def test_scene_rect_releases_space_when_far_block_removed(scene):
+    block = scene.add_block("Oscilloscope", QPointF(3000, 3000))
+    assert scene.sceneRect() != scene.DEFAULT_SCENE_RECT
+
+    scene.remove_block(block)
+
+    assert scene.sceneRect() == scene.DEFAULT_SCENE_RECT
+
+
+def test_scene_rect_recomputes_fresh_with_multiple_far_blocks(scene):
+    """Removing one of two far blocks keeps the survivor covered but
+    releases the removed block's corner — the rect is recomputed from
+    live content, not grown monotonically."""
+    far_ne = scene.add_block("Oscilloscope", QPointF(3200, -3200))
+    far_sw = scene.add_block("Power Supply", QPointF(-3200, 3200))
+    rect_both = scene.sceneRect()
+    assert rect_both.contains(far_ne.sceneBoundingRect())
+    assert rect_both.contains(far_sw.sceneBoundingRect())
+
+    ne_corner = far_ne.sceneBoundingRect()
+    scene.remove_block(far_ne)
+
+    rect_after = scene.sceneRect()
+    assert rect_after.contains(far_sw.sceneBoundingRect())
+    assert not rect_after.contains(ne_corner), (
+        "removed block's corner should no longer be pannable"
+    )
+
+
+def test_clear_resets_scene_rect_to_default(scene):
+    """New Canvas (scene.clear) must not keep a huge pannable area left
+    over from far-flung blocks in the previous layout."""
+    scene.add_block("Oscilloscope", QPointF(3000, 3000))
+    assert scene.sceneRect() != scene.DEFAULT_SCENE_RECT
+
+    scene.clear()
+
+    assert scene.sceneRect() == scene.DEFAULT_SCENE_RECT
+
+
+def test_deleting_viewed_far_block_snaps_view_back_to_content(scene, view):
+    """Pinned deliberate behavior: deleting a distant block while looking
+    at it shrinks the sceneRect immediately, clamping the viewport back
+    toward the remaining content (see _update_scene_rect docstring)."""
+    scene.add_block("Oscilloscope")  # stays near the default extent
+    far = scene.add_block("Power Supply", QPointF(3500, 3500))
+    view.centerOn(far.sceneBoundingRect().center())
+
+    scene.remove_block(far)
+
+    visible = view.mapToScene(view.viewport().rect()).boundingRect()
+    assert scene.sceneRect().contains(visible), (
+        "viewport must be clamped inside the shrunk sceneRect"
+    )
+
+
+def test_auto_placement_does_not_creep_with_grown_scene_rect(scene):
+    """find_free_position must scan the default extent, not the live
+    (grown) sceneRect, or placement origin would drift outward."""
+    scene.add_block("Oscilloscope", QPointF(3000, 3000))  # grows the rect
+    auto = scene.add_block("Power Supply")  # auto-placed
+
+    assert scene.DEFAULT_SCENE_RECT.contains(auto.sceneBoundingRect()), (
+        f"auto-placed block at {auto.sceneBoundingRect()} landed outside "
+        f"the default extent"
+    )

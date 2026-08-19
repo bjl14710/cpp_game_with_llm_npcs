@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0007 — Neural Networks in Quant &amp; Finance</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  .nn-diagram {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 16px; margin: 16px 0;
+  }
+  .layer {
+    background: var(--panel-2); border-radius: 8px; padding: 12px;
+    border-left: 3px solid var(--accent);
+  }
+  .layer-name { color: var(--accent); font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+  .neurons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .neuron {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent-2); opacity: 0.7;
+  }
+  .layer-desc { font-size: 12px; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0007</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 What is a NN</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Minimal example</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Five applications</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 In this project</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 Contrasts</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Neural Networks in Quant &amp; Finance</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: there's no PyTorch in the repo
+    today — and your flagship gradient booster (Lesson 0003) is the right default for
+    daily tabular alpha. But a neural net is <em>already</em> silently feeding your
+    pipeline: Alpha Vantage's sentiment score in <code>news_features.py</code> is the
+    output of someone else's transformer. Knowing where NNs win, where they lose, and
+    where they'd fit here lets you make that call deliberately.
+  </p>
+
+  <!-- ===================== §1 WHAT IS A NN ===================== -->
+  <h2>1. What a neural network actually is</h2>
+
+  <p>
+    Strip away the marketing and a neural network is a stack of two operations,
+    repeated:
+  </p>
+  <ol>
+    <li>A <strong>linear transform</strong>: <code>z = W·x + b</code></li>
+    <li>A <strong>non-linearity</strong> applied elementwise: <code>h = σ(z)</code> (ReLU, sigmoid, tanh, GELU)</li>
+  </ol>
+
+  <p>
+    Stack <em>L</em> of those, train all the W's and b's so the output matches a
+    target, and you've got a feedforward neural network with <em>L</em> layers.
+    The flexibility comes from the non-linearity — without it, ten stacked linear
+    layers collapse to one linear layer.
+  </p>
+
+  <div class="nn-diagram">
+    <div class="layer">
+      <div class="layer-name">Input</div>
+      <div class="neurons">
+        <div class="neuron"></div><div class="neuron"></div><div class="neuron"></div>
+        <div class="neuron"></div><div class="neuron"></div><div class="neuron"></div>
+        <div class="neuron"></div>
+      </div>
+      <div class="layer-desc">7 features (the same ones your GBM sees)</div>
+    </div>
+    <div class="layer">
+      <div class="layer-name">Hidden 1 + ReLU</div>
+      <div class="neurons">
+        <div class="neuron"></div><div class="neuron"></div><div class="neuron"></div>
+        <div class="neuron"></div><div class="neuron"></div><div class="neuron"></div>
+        <div class="neuron"></div><div class="neuron"></div>
+      </div>
+      <div class="layer-desc">W₁·x + b₁, then ReLU</div>
+    </div>
+    <div class="layer">
+      <div class="layer-name">Hidden 2 + ReLU</div>
+      <div class="neurons">
+        <div class="neuron"></div><div class="neuron"></div><div class="neuron"></div>
+        <div class="neuron"></div>
+      </div>
+      <div class="layer-desc">W₂·h₁ + b₂, then ReLU</div>
+    </div>
+    <div class="layer">
+      <div class="layer-name">Output</div>
+      <div class="neurons">
+        <div class="neuron"></div>
+      </div>
+      <div class="layer-desc">W₃·h₂ + b₃ → fwd_ret_1d</div>
+    </div>
+  </div>
+
+  <p>
+    The training algorithm — <strong>backpropagation + gradient descent</strong> — is
+    just the chain rule applied to the loss function plus a numerical optimizer.
+    Same family as Lesson 0003's gradient boosting (both use gradients), totally
+    different mechanics (boosting builds trees; NN updates weights in place).
+  </p>
+
+  <div class="callout">
+    <strong>The Universal Approximation Theorem</strong> says a network with one
+    sufficiently wide hidden layer can approximate any continuous function. In
+    practice that's a theoretical comfort — depth (more layers) matters more than
+    width for actually learning useful representations from finite data.
+  </div>
+
+  <!-- ===================== §2 MINIMAL EXAMPLE ===================== -->
+  <h2>2. A 20-line standalone example</h2>
+
+  <p>
+    A neural net trying to do exactly what your <code>GradientBoostingRegressor</code>
+    does — predict <code>fwd_ret_1d</code> from the 7 features:
+  </p>
+
+<pre><span class="kw">import</span> torch
+<span class="kw">import</span> torch.nn <span class="kw">as</span> nn
+
+<span class="kw">class</span> <span class="ty">ReturnMLP</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, n_features: <span class="ty">int</span> = <span class="num">7</span>):
+        <span class="fn">super</span>().<span class="fn">__init__</span>()
+        self.net = nn.<span class="fn">Sequential</span>(
+            nn.<span class="fn">Linear</span>(n_features, <span class="num">32</span>),   <span class="com"># W₁ x + b₁ — input → 32 hidden</span>
+            nn.<span class="fn">ReLU</span>(),                  <span class="com"># non-linearity</span>
+            nn.<span class="fn">Linear</span>(<span class="num">32</span>, <span class="num">16</span>),           <span class="com"># W₂ h₁ + b₂ — 32 → 16</span>
+            nn.<span class="fn">ReLU</span>(),
+            nn.<span class="fn">Linear</span>(<span class="num">16</span>, <span class="num">1</span>),            <span class="com"># W₃ h₂ + b₃ — scalar return prediction</span>
+        )
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):
+        <span class="kw">return</span> self.net(x).<span class="fn">squeeze</span>(-<span class="num">1</span>)
+
+model = <span class="fn">ReturnMLP</span>()
+opt   = torch.optim.<span class="fn">Adam</span>(model.<span class="fn">parameters</span>(), lr=<span class="num">1e-3</span>)
+loss_fn = nn.<span class="fn">MSELoss</span>()           <span class="com"># same squared-error target as the GBM</span>
+
+<span class="kw">for</span> epoch <span class="kw">in</span> <span class="fn">range</span>(<span class="num">50</span>):
+    pred = <span class="fn">model</span>(X_train)         <span class="com"># forward pass</span>
+    loss = <span class="fn">loss_fn</span>(pred, y_train)
+    opt.<span class="fn">zero_grad</span>(); loss.<span class="fn">backward</span>(); opt.<span class="fn">step</span>()   <span class="com"># backprop + update</span>
+</pre>
+
+  <p>
+    Notice what this gives you for free that the GBM doesn't:
+    <strong>differentiability end-to-end</strong> — you can plug this model into
+    a bigger system that's also differentiable (a downstream RL agent, a
+    differentiable risk constraint) and train it all jointly. The GBM is a
+    sealed box; the NN is a Lego brick.
+  </p>
+
+  <p>
+    And notice what it gives you <em>nothing</em> of: out-of-the-box robustness on
+    7 tabular features and ~10,000 rows. The GBM will outperform this MLP almost
+    every time on that data regime. Neural nets shine where they have <em>much more
+    data</em>, <em>much richer inputs</em> (sequences, text, images), or both.
+  </p>
+
+  <!-- ===================== §3 FIVE APPLICATIONS ===================== -->
+  <h2>3. Five places neural networks actually win in quant</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>1. Limit-order-book microstructure (DeepLOB / TransLOB / TLOB)</h4>
+      <p>
+        Each LOB snapshot is a 2D grid: 10 price levels × {bid_size, ask_size}, over
+        time. CNNs (DeepLOB, 2018) extract local price-level patterns; transformers
+        (TransLOB, TLOB 2025) capture longer-range dynamics. This is the
+        <strong>natural NN bridge to your FPGA work</strong>: replace
+        <code>market_maker.vhd</code>'s hand-tuned spread logic with a quantized
+        NN trained on LOB snapshots.
+      </p>
+    </div>
+    <div class="card">
+      <h4>2. Sequence forecasting (LSTM / GRU / Transformer)</h4>
+      <p>
+        For multi-step price/volatility forecasting at intraday or daily horizons.
+        LSTMs/GRUs were the dominant choice 2016–2022; transformers and the
+        2024–2025 foundation models (TimesFM, Chronos, Kronos — Lesson 0005)
+        are now state-of-the-art on benchmarks. <em>Not yet</em> consistently
+        beating well-tuned GBM on tabular cross-sectional equity alpha.
+      </p>
+    </div>
+    <div class="card">
+      <h4>3. Text / sentiment (BERT, FinBERT)</h4>
+      <p>
+        Where NNs <strong>flat-out dominate</strong>. Earnings call transcripts,
+        SEC filings, news headlines — all unstructured text that a transformer
+        encodes into vectors that downstream models can use. Alpha Vantage's
+        <code>sentiment</code> score is a number produced by exactly this kind
+        of model.
+      </p>
+    </div>
+    <div class="card">
+      <h4>4. Deep reinforcement learning (execution &amp; market making)</h4>
+      <p>
+        Learn an action policy from reward (P&amp;L − inventory penalty − cost).
+        Useful for execution algorithms (DDQN-style splitting of a parent order)
+        and academic market-making research. Production deployments are
+        cautious because RL is notoriously brittle and hard to backtest honestly.
+      </p>
+    </div>
+    <div class="card">
+      <h4>5. Neural volatility and option pricing</h4>
+      <p>
+        Replace closed-form models (Black–Scholes, Heston) with NNs that learn
+        the implied-vol surface or option price directly from market quotes.
+        Faster inference (no PDE solve at runtime), arbitrage-respecting
+        architectures exist. Used in pricing engines, not return prediction.
+      </p>
+    </div>
+    <div class="card">
+      <h4>The honest summary</h4>
+      <p>
+        On tabular daily features: GBM wins. On raw LOB or text: NN wins. On
+        sequence forecasting: jury still out, GBM is the safe default. RL is
+        promising-but-hard. Vol/options: NN now mainstream. Map every NN proposal
+        you see onto this grid before getting excited.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §4 IN THIS PROJECT ===================== -->
+  <h2>4. In this project — where NNs hide and where they could fit</h2>
+
+  <h3>(a) The hidden NN: Alpha Vantage sentiment</h3>
+  <span class="filepath">news_features.py (lines 32–34)</span>
+<pre><span class="com"># Coerce numeric fields</span>
+<span class="kw">for</span> c <span class="kw">in</span> (<span class="str">"sentiment"</span>, <span class="str">"relevance"</span>):
+    <span class="kw">if</span> c <span class="kw">in</span> df.columns:
+        df[c] = pd.<span class="fn">to_numeric</span>(df[c], errors=<span class="str">"coerce"</span>)
+</pre>
+  <p>
+    That <code>sentiment</code> column is a float in roughly [−1, +1]. <strong>You
+    didn't compute it.</strong> Alpha Vantage's NEWS_SENTIMENT endpoint runs a
+    BERT-family transformer on each article and returns a pre-aggregated score.
+    Your pipeline already includes neural-net output — you just don't own the
+    model, the training data, or the failure modes.
+  </p>
+
+  <span class="filepath">news_features.py (lines 53–58)</span>
+<pre>daily = grp.<span class="fn">agg</span>(
+    news_count=(<span class="str">"ticker"</span>, <span class="str">"count"</span>),
+    sent_mean=(<span class="str">"sentiment"</span>, <span class="str">"mean"</span>),
+    sent_abs_mean=(<span class="str">"sentiment"</span>, <span class="kw">lambda</span> s: np.<span class="fn">nanmean</span>(np.<span class="fn">abs</span>(s))),
+    relevance_sum=(<span class="str">"relevance"</span>, <span class="str">"sum"</span>),
+)
+</pre>
+  <p>
+    You then aggregate those NN outputs into daily features (mean, abs-mean,
+    rolling sums) that get merged into the GBM. So the project's effective
+    architecture is: <strong>someone else's transformer → your hand-built
+    aggregations → your GBM → your portfolio</strong>. A real upgrade path is
+    to replace step 1 with a model you own (FinBERT fine-tuned on financial
+    text), so you control the failure modes.
+  </p>
+
+  <h3>(b) Where you could (but don't) put an NN of your own</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4>Replace the GBM with an MLP — <em>probably not worth it</em></h4>
+      <p>
+        7 tabular features, ~10⁴ rows: a 2-layer MLP will likely match the GBM,
+        not beat it. Lots of code complexity for no win.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Replace the GBM with a transformer over a price sequence — <em>defensible experiment</em></h4>
+      <p>
+        Feed the last 60 days of OHLCV per ticker as a sequence to a small
+        transformer. May capture momentum / mean-reversion patterns the GBM misses.
+        Honest comparison requires walk-forward, which <code>walkforward_sim.py</code>
+        already supports.
+      </p>
+    </div>
+    <div class="card">
+      <h4>FinBERT-fine-tuned text encoder — <em>highest expected value</em></h4>
+      <p>
+        Bypass Alpha Vantage's sentiment, score raw articles yourself with a
+        domain-tuned model. You'd own the signal and could pre-compute embeddings
+        instead of a single scalar.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Quantized NN on the FPGA via hls4ml — <em>the connection to Lesson 0002</em></h4>
+      <p>
+        Train a tiny MLP (~1k weights, INT8 quantized), compile it with
+        <strong>hls4ml</strong> into VHDL alongside <code>linear_regression_predictor.vhd</code>.
+        The README's "ML inference pipeline" roadmap item is exactly this.
+      </p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> none of these NN extensions are wired up.
+    The flagship ~27% number comes from the GBM. Don't let "neural net" excitement
+    push you to abandon a proven model on a dataset where it's the right choice —
+    add NNs where they have a genuine edge (text, LOB), not as a status upgrade.
+  </div>
+
+  <!-- ===================== §5 CONTRASTS ===================== -->
+  <h2>5. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>NN vs Gradient Boosting (on tabular data)</h4>
+      <p>
+        Both fit non-linear functions. <strong>GBM</strong> excels with few features,
+        moderate data, easy hyperparameter tuning, fast training, robust defaults.
+        <strong>NN</strong> excels with many features, lots of data, end-to-end
+        differentiability, raw inputs (no feature engineering). On 7 daily
+        features × 10k rows, GBM wins.
+      </p>
+    </div>
+    <div class="card">
+      <h4>RNN (LSTM/GRU) vs Transformer</h4>
+      <p>
+        Both handle sequences. <strong>RNN</strong> processes step-by-step,
+        carries hidden state forward, struggles with very long contexts.
+        <strong>Transformer</strong> attends to all positions at once via
+        self-attention, parallelizes well, dominates at long-range.
+        For daily OHLCV over 1–2 years (252–504 steps), either works;
+        transformer is the modern default.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Supervised vs Reinforcement Learning</h4>
+      <p>
+        <strong>Supervised</strong>: labelled (x, y) pairs, minimize prediction
+        loss. <strong>RL</strong>: learn an action policy from a reward signal
+        in an environment. The repo's GBM is supervised; a market-making policy
+        on top of <code>market_maker.vhd</code> would be RL.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Pretraining vs Fine-tuning</h4>
+      <p>
+        <strong>Pretraining</strong>: train a large model on a huge generic
+        corpus (BERT on Wikipedia, TimesFM on 100B time-series points).
+        <strong>Fine-tuning</strong>: take that pretrained model and adapt
+        it to your specific task with much less data. FinBERT is BERT fine-tuned
+        on financial text.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Activation vs Loss function</h4>
+      <p>
+        <strong>Activation</strong> (ReLU, sigmoid, GELU) — the elementwise
+        non-linearity inside each layer. <strong>Loss</strong> (MSE, cross-entropy,
+        Huber) — the scalar objective the optimizer minimizes. Different roles;
+        both involve non-linear functions; constantly confused.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Epoch vs Batch vs Iteration</h4>
+      <p>
+        <strong>Batch</strong>: a chunk of training rows used for one gradient
+        step. <strong>Iteration</strong>: one batch processed. <strong>Epoch</strong>:
+        one full pass through the entire training set. With 10k rows and batch
+        size 100, one epoch = 100 iterations.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §6 QUIZ ===================== -->
+  <h2>6. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. <code>news_features.py</code> uses a <code>sentiment</code> column from Alpha Vantage. Which statement is most accurate about what that number is?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="No — the score is a continuous number, and it's pre-computed for each article by Alpha Vantage's NLP pipeline before reaching your CSV.">A hand-labelled +1/0/−1 sentiment tag.</li>
+      <li data-correct="true"  data-why="Right. Alpha Vantage runs a BERT-family transformer (or similar NLP model) on each article and returns a pre-aggregated sentiment score. You're already consuming neural-net output — you just don't own the model.">A continuous score produced by Alpha Vantage's own transformer-based NLP model, which your pipeline silently relies on.</li>
+      <li data-correct="false" data-why="That would be sent_abs_mean computed in your own news_features.py — a hand aggregation of the sentiment field, not the field itself.">The mean absolute value of price movements after each article.</li>
+      <li data-correct="false" data-why="You compute relevance_sum yourself in build_daily_features. The raw sentiment field is something different — a per-article sentiment score.">A self-computed relevance score from your own aggregation step.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. Your colleague proposes replacing <code>GradientBoostingRegressor</code> in <code>paper_trading_sim.py</code> with a 3-layer MLP on the same 7 features. Most likely outcome?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's a common assumption but it's mostly wrong on small tabular data. NNs need either far more data, far richer inputs, or both, to consistently outperform a well-tuned GBM.">The MLP outperforms the GBM by a wide margin because neural networks are universally more powerful.</li>
+      <li data-correct="true"  data-why="Correct. On ~10⁴ rows × 7 features — a small tabular regime — well-tuned GBMs almost always match or beat MLPs. The NN brings differentiability that you don't need here, and a lot more hyperparameter fiddling. No expected edge; lots of complexity added.">The MLP roughly matches the GBM but adds a lot of complexity for no measurable predictive gain.</li>
+      <li data-correct="false" data-why="The training pipeline is straightforward — it's the predictive performance that's the issue. Modern frameworks make NN training easy; the problem is generalization on small tabular data.">The MLP can't be trained at all because the dataset is too small for backprop.</li>
+      <li data-correct="false" data-why="No — sklearn's GradientBoostingRegressor doesn't expose gradients to downstream PyTorch code. Differentiability is a real benefit of NNs in pipelines that need it, but this repo's pipeline doesn't.">The MLP automatically makes the rest of the pipeline differentiable, which is a strict upgrade.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Why is the FPGA roadmap's "ML inference pipeline" item specifically pointing at <strong>hls4ml</strong> rather than at hand-written VHDL?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Both can express the math. The issue isn't whether VHDL can — it's how much human effort it takes for a multi-layer quantized model.">Because VHDL cannot express the matrix multiplications needed for a neural network.</li>
+      <li data-correct="true"  data-why="Right. hls4ml takes a trained Keras/sklearn/PyTorch model and generates the HDL for you, including the quantization and parallelization decisions. Hand-coding a quantized MLP in VHDL is doable but tedious; hls4ml automates it and is the documented bridge from sklearn to FPGA in the repo's README.">Because hls4ml automates converting a trained quantized neural net into HDL — hand-writing the multi-layer pipeline in VHDL would be tedious and error-prone for anything but the smallest networks.</li>
+      <li data-correct="false" data-why="hls4ml is open-source and free; cost isn't the reason. It's chosen because it bridges Python-trained models into HDL automatically.">Because hls4ml is the only free option for FPGA synthesis.</li>
+      <li data-correct="false" data-why="hls4ml is widely used in academic and industrial HFT research. The reason for choosing it is automation, not popularity.">Because hls4ml is the only NN-to-FPGA toolchain anyone uses anymore.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. Which neural-network application is the strongest fit for direct deployment alongside <code>fpga/market_maker.vhd</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="FinBERT works on news text. The FPGA hot path doesn't process text — it processes prices in nanoseconds. The model would never see its input on the right side of the latency budget.">A FinBERT fine-tuned on earnings calls to compute sentiment.</li>
+      <li data-correct="true"  data-why="Correct. DeepLOB/TransLOB/TLOB train on raw LOB snapshots (bid/ask sizes and prices at each level) to predict short-term price moves. That's exactly the data the FPGA already has at line rate. A quantized small variant could plug in next to the market_maker module via hls4ml.">A DeepLOB- or TransLOB-style network trained on raw limit-order-book snapshots, quantized and compiled to HDL via hls4ml.</li>
+      <li data-correct="false" data-why="A 200M-parameter foundation model can't fit on an FPGA, and its inference latency would blow the entire tick-to-trade budget. These models are CPU/GPU-only at inference time.">A full TimesFM or Chronos foundation model loaded into BRAM.</li>
+      <li data-correct="false" data-why="Deep RL has promising research applications but is too unstable to deploy directly on silicon for live trading without a CPU-side safety net.">A deep RL agent trained end-to-end with live exchange P&L as the reward.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. A teammate says "let's stack ten linear layers without activations, since linear is fast on the FPGA." What's wrong with this plan?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Memory isn't the issue on an FPGA for ten small linear layers. The issue is mathematical: without nonlinearities the composition collapses.">FPGAs can't store ten weight matrices at once.</li>
+      <li data-correct="true"  data-why="Right. The composition of linear functions is itself linear. Ten linear layers without nonlinearity in between equal one linear layer, with the same expressive power as your existing linear_regression_predictor.vhd. The nonlinearity is what gives multi-layer networks their power.">Ten stacked linear layers without a nonlinearity collapse mathematically to a single linear layer — you get no extra expressive power, just more weights to store.</li>
+      <li data-correct="false" data-why="It might overfit, but only because you have more parameters than needed. The bigger structural problem is that those parameters are mathematically redundant.">It would overfit catastrophically due to too many parameters.</li>
+      <li data-correct="false" data-why="Backpropagation handles arbitrary linear architectures fine. The math problem is upstream of training — the model is equivalent to a one-layer model regardless of how it's trained.">Backpropagation can't compute gradients through a network without ReLU.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §7 SCENARIOS ===================== -->
+  <h2>7. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A teammate wants to "improve the news features by fine-tuning FinBERT on our own data." How does this change the pipeline conceptually, and what's the upside over the current approach?</summary>
+    <p>
+      Today the pipeline is: Alpha Vantage transformer → scalar sentiment per article →
+      your aggregations → GBM. With a fine-tuned FinBERT you'd own step 1: feed raw
+      headlines/articles into a model you control, emit either your own sentiment
+      scalar or, better, a learned <em>embedding</em> vector that captures more
+      nuance than a single number. Upsides: control over training data and bias,
+      ability to emit richer features (per-article embeddings the GBM can use as
+      additional columns), and the ability to retrain when the world changes
+      (post-election, post-crisis). Downside: you now own the failure modes too —
+      including the GPU bill and the labeled-data problem.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You train a transformer on 5 years of AAPL minute bars and it reports 92% directional accuracy on the test set. Should you ship it?</summary>
+    <p>
+      Almost certainly not without serious scrutiny. Three failure modes to rule out
+      first: (1) <strong>Look-ahead bias</strong> — does any feature contain information
+      from after the prediction time? Easy to introduce with rolling normalizations.
+      (2) <strong>Test-set contamination</strong> — did the model see overlapping
+      windows during training? Common with sliding-window setups. (3)
+      <strong>Survivorship and data quality</strong> — minute bars on a single
+      surviving large-cap drastically overstate strategy quality.
+      92% on directional accuracy is a number so high it's almost certainly a bug;
+      real intraday directional models are happy at 53–55%. The lesson is to trust
+      the methodology, not the headline number.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. The Universal Approximation Theorem says one hidden layer is enough. Why do real networks use ten or more?</summary>
+    <p>
+      Because the theorem is about <em>existence</em>, not <em>learnability</em>.
+      A single-hidden-layer network <em>could</em> represent the target function,
+      but might need exponentially many neurons to do so, and gradient descent has
+      no efficient path to find those weights. Deep networks decompose the problem
+      into a hierarchy of representations — early layers learn local patterns,
+      later layers compose them — which is far more sample-efficient. The theorem
+      is comfort, not a recipe.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidate: <strong>Mean-variance portfolio optimization</strong>,
+    finally — Lesson 0006 set up the covariance matrix, and <code>predict_next.py:meanvar_long_only</code>
+    is sitting there waiting to be unpacked. Closes out the modeling → allocation
+    arc cleanly.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

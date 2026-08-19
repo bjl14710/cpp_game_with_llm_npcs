@@ -1,0 +1,213 @@
+/**
+ * Grading tests — Exercise 07: Binary Feed Handler.
+ *
+ * Built and run by run_cpp.sh; -I points at exercises/07_feed_handler or
+ * solutions/07_feed_handler depending on HFT_EXERCISE_TARGET.
+ *
+ * Exit codes: 0 = pass, 1 = fail, 42 = not implemented (stub threw).
+ */
+#include "feed_handler.hpp"
+
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#define ASSERT(cond, msg)                                              \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            std::cerr << "FAIL: " << msg << "\n";                     \
+            return 1;                                                  \
+        }                                                              \
+    } while (0)
+
+// ---------------------------------------------------------------------------
+// Helpers — encode messages into a byte buffer
+// ---------------------------------------------------------------------------
+static void encode_add(std::vector<uint8_t>& buf, uint64_t oid, char side,
+                       int64_t price, int32_t qty) {
+    MsgAdd m{'A', oid, side, price, qty};
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&m);
+    buf.insert(buf.end(), p, p + sizeof(m));
+}
+
+static void encode_cancel(std::vector<uint8_t>& buf, uint64_t oid) {
+    MsgCancel m{'X', oid};
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&m);
+    buf.insert(buf.end(), p, p + sizeof(m));
+}
+
+static void encode_exec(std::vector<uint8_t>& buf, uint64_t oid, int32_t qty) {
+    MsgExec m{'E', oid, qty};
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&m);
+    buf.insert(buf.end(), p, p + sizeof(m));
+}
+
+static void encode_trade(std::vector<uint8_t>& buf, int64_t price, int32_t qty) {
+    MsgTrade m{'P', price, qty};
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(&m);
+    buf.insert(buf.end(), p, p + sizeof(m));
+}
+
+// ---------------------------------------------------------------------------
+// Test: round-trip — encode then parse, check all fields
+// ---------------------------------------------------------------------------
+int test_roundtrip_all_types() {
+    std::vector<uint8_t> buf;
+    encode_add(buf,    42, 'B', 1'000'000, 100);  // book event
+    encode_cancel(buf, 42);                        // book event
+    encode_exec(buf,   43, 50);                    // book event
+    encode_trade(buf,  1'010'000, 200);            // NOT a book event
+
+    FeedHandler fh;
+    std::vector<BookEvent> events;
+    size_t count = fh.parse_all(buf.data(), buf.size(),
+                                [&](const BookEvent& e) { events.push_back(e); });
+
+    ASSERT(count == 3,
+           "expected 3 book events (trade is skipped), got " + std::to_string(count));
+    ASSERT(events.size() == 3, "vector size should be 3");
+
+    // Add
+    ASSERT(events[0].type == 'A', "first event type should be 'A'");
+    ASSERT(events[0].oid  == 42, "add oid");
+    ASSERT(events[0].side == 'B', "add side");
+    ASSERT(events[0].price == 1'000'000, "add price");
+    ASSERT(events[0].qty == 100, "add qty");
+
+    // Cancel
+    ASSERT(events[1].type == 'X', "second event type should be 'X'");
+    ASSERT(events[1].oid  == 42, "cancel oid");
+
+    // Execute
+    ASSERT(events[2].type == 'E', "third event type should be 'E'");
+    ASSERT(events[2].oid  == 43, "exec oid");
+    ASSERT(events[2].qty  == 50, "exec qty");
+
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: truncated message — parse_one must not advance pos or crash
+// ---------------------------------------------------------------------------
+int test_truncated_message() {
+    std::vector<uint8_t> buf;
+    encode_add(buf, 1, 'A', 1'000'000, 10);
+    // Truncate to 10 bytes (MsgAdd needs 22)
+    buf.resize(10);
+
+    FeedHandler fh;
+    size_t pos = 0;
+    BookEvent ev{};
+    bool result = fh.parse_one(buf.data(), buf.size(), &pos, &ev);
+    ASSERT(!result, "truncated message should return false");
+    ASSERT(pos == 0, "pos must not advance on truncated message");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: trade print is consumed (pos advances) but not emitted as book event
+// ---------------------------------------------------------------------------
+int test_trade_not_a_book_event() {
+    std::vector<uint8_t> buf;
+    encode_trade(buf, 1'010'000, 200);
+
+    FeedHandler fh;
+    size_t pos = 0;
+    BookEvent ev{};
+    bool result = fh.parse_one(buf.data(), buf.size(), &pos, &ev);
+    ASSERT(!result, "trade print should return false (not a book event)");
+    ASSERT(pos == sizeof(MsgTrade),
+           "trade print should still advance pos by " + std::to_string(sizeof(MsgTrade)));
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: mixed stream — interleaved trade prints and book events
+// ---------------------------------------------------------------------------
+int test_mixed_stream() {
+    std::vector<uint8_t> buf;
+    encode_add(buf, 1, 'B', 1'000'000, 10);   // book
+    encode_trade(buf, 1'000'000, 5);            // skip
+    encode_cancel(buf, 1);                     // book
+    encode_trade(buf, 1'005'000, 3);            // skip
+    encode_exec(buf, 2, 7);                    // book
+
+    FeedHandler fh;
+    std::vector<BookEvent> events;
+    size_t count = fh.parse_all(buf.data(), buf.size(),
+                                [&](const BookEvent& e) { events.push_back(e); });
+    ASSERT(count == 3, "3 book events in mixed stream");
+    ASSERT(events[0].type == 'A', "first: Add");
+    ASSERT(events[1].type == 'X', "second: Cancel");
+    ASSERT(events[2].type == 'E', "third: Execute");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test: empty buffer
+// ---------------------------------------------------------------------------
+int test_empty_buffer() {
+    FeedHandler fh;
+    size_t count = fh.parse_all(nullptr, 0, [](const BookEvent&) {});
+    ASSERT(count == 0, "empty buffer should produce 0 events");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Throughput: parse 1,000,000 Add messages in < 0.5 s
+// ---------------------------------------------------------------------------
+int test_throughput_1m_parse() {
+    constexpr int N = 1'000'000;
+    std::vector<uint8_t> buf;
+    buf.reserve(N * sizeof(MsgAdd));
+    for (int i = 0; i < N; ++i)
+        encode_add(buf, i, 'B', 1'000'000 + i, 10);
+
+    FeedHandler fh;
+    auto t0 = std::chrono::steady_clock::now();
+    size_t count = fh.parse_all(buf.data(), buf.size(), [](const BookEvent&) {});
+    auto t1 = std::chrono::steady_clock::now();
+
+    ASSERT(count == static_cast<size_t>(N),
+           "expected " + std::to_string(N) + " events, got " + std::to_string(count));
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    ASSERT(ms < 500,
+           "1M parses took " + std::to_string(ms) + "ms (limit 500ms)");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+int main() {
+    struct Test { const char* name; int (*fn)(); };
+    Test tests[] = {
+        {"roundtrip_all_types",     test_roundtrip_all_types},
+        {"truncated_message",       test_truncated_message},
+        {"trade_not_a_book_event",  test_trade_not_a_book_event},
+        {"mixed_stream",            test_mixed_stream},
+        {"empty_buffer",            test_empty_buffer},
+        {"throughput_1m_parse",     test_throughput_1m_parse},
+    };
+
+    try {
+        int failed = 0;
+        for (auto& t : tests) {
+            if (t.fn() != 0) {
+                std::cerr << "  [FAILED] " << t.name << "\n";
+                ++failed;
+            } else {
+                std::cout << "  [PASSED] " << t.name << "\n";
+            }
+        }
+        if (failed == 0) { std::cout << "ALL TESTS PASSED\n"; return 0; }
+        std::cerr << failed << " TEST(S) FAILED\n";
+        return 1;
+    } catch (const std::logic_error& e) {
+        std::cout << "NOT IMPLEMENTED: " << e.what() << "\n";
+        return 42;
+    }
+}

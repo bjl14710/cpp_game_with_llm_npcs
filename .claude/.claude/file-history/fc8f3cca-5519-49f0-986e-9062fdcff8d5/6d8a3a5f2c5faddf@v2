@@ -1,0 +1,51 @@
+"""Lock the CCF sign convention against a synthetic known lead (paper Part 2.2).
+
+We construct y as a delayed copy of x: y_t = x_{t-LAG}. Then x_t correlates with
+y_{t+LAG}, so the CCF peak must sit at +LAG and the leader must be x.
+"""
+
+import numpy as np
+import pandas as pd
+
+from oil_alpha.analysis.leadlag import ccf_leadlag, granger_both_directions, rolling_beta
+
+
+def _series_pair(n=600, lead=3, seed=0):
+    rng = np.random.default_rng(seed)
+    x = pd.Series(rng.standard_normal(n), name="x")
+    # y follows x by `lead` steps, plus a little noise.
+    y = x.shift(lead) + 0.05 * pd.Series(rng.standard_normal(n), index=x.index)
+    y.name = "y"
+    return x.dropna(), y.dropna()
+
+
+def test_ccf_peak_at_known_positive_lead():
+    x, y = _series_pair(lead=3)
+    res = ccf_leadlag(x, y, max_lag=10)
+    assert res.peak_lag == 3      # x leads y by exactly 3 steps
+    assert res.x_leads
+    assert res.leader == "x"
+    assert abs(res.peak_corr) > 0.8
+
+
+def test_ccf_symmetry_when_y_leads():
+    # Swap roles: now y is the leader, peak should be negative.
+    x, y = _series_pair(lead=3)
+    res = ccf_leadlag(y, x, max_lag=10)
+    assert res.peak_lag == -3
+    assert not res.x_leads
+
+
+def test_granger_detects_direction():
+    x, y = _series_pair(lead=2)
+    gr = granger_both_directions(x, y, maxlag=5)
+    # x predicts y strongly; the reverse should be far weaker.
+    assert gr["x->y"].p_value < gr["y->x"].p_value
+
+
+def test_rolling_beta_recovers_known_slope():
+    rng = np.random.default_rng(1)
+    factor = pd.Series(rng.standard_normal(400), name="factor")
+    asset = (2.0 * factor + 0.01 * pd.Series(rng.standard_normal(400), index=factor.index)).rename("asset")
+    beta = rolling_beta(asset, factor, window=60)
+    assert beta.dropna().median() == __import__("pytest").approx(2.0, abs=0.1)

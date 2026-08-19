@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0003 — Order-Book Reconstruction from Incremental Feeds</title>
+<style>
+  :root { --bg:#fbfaf7; --ink:#1f2430; --muted:#5c6470; --accent:#0e639c; --accent2:#9c4a0e;
+          --ok:#1a7f37; --bad:#c0392b; --border:#e3ded4; --code-bg:#22262e; --code-ink:#d8dee9;
+          --kw:#7fb4e8; --str:#a3be8c; --com:#7a828e; --num:#d08770; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         background:var(--bg); color:var(--ink); line-height:1.6; }
+  .wrap { max-width:860px; margin:0 auto; padding:2rem 1.25rem 5rem; }
+  header.lesson { border-bottom:3px solid var(--accent); padding-bottom:1rem; margin-bottom:2rem; }
+  .kicker { color:var(--accent); font-weight:700; letter-spacing:.08em; text-transform:uppercase; font-size:.8rem; }
+  h1 { font-size:1.8rem; margin:.2rem 0 .4rem; line-height:1.25; }
+  .why { color:var(--muted); font-style:italic; }
+  h2 { font-size:1.3rem; margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--border); }
+  code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.88em; background:#efece4;
+         padding:.1em .35em; border-radius:4px; }
+  pre { background:var(--code-bg); color:var(--code-ink); padding:1rem 1.1rem; border-radius:8px;
+        overflow-x:auto; font-size:.84rem; line-height:1.55; }
+  pre code { background:none; padding:0; color:inherit; }
+  .kw{color:var(--kw)} .str{color:var(--str)} .com{color:var(--com)} .num{color:var(--num)}
+  .path { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; background:#eef4f9;
+          color:var(--accent); border:1px solid #cfe0ec; border-radius:5px; padding:.1em .5em; }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.92rem; }
+  th,td { border:1px solid var(--border); padding:.5rem .65rem; text-align:left; }
+  th { background:#f2efe8; }
+  .scrollbox { overflow-x:auto; }
+  .callout { background:#fdf3e7; border-left:4px solid var(--accent2); padding:.7rem 1rem;
+             border-radius:0 8px 8px 0; margin:1.2rem 0; }
+  .callout.good { background:#eef6ee; border-left-color:var(--ok); }
+  .question { background:#fff; border:1.5px solid var(--border); border-radius:10px;
+              padding:1rem 1.2rem; margin:1.2rem 0; }
+  .question > p:first-child { font-weight:600; margin-top:0; }
+  .options { list-style:none; margin:.6rem 0 0; padding:0; }
+  .options li { border:1.5px solid var(--border); border-radius:8px; padding:.55rem .8rem;
+                margin:.45rem 0; cursor:pointer; font-size:.95rem; }
+  .options li:hover { border-color:var(--accent); background:#f4f9fd; }
+  .options li.right { border-color:var(--ok); background:#eef8ee; }
+  .options li.wrong { border-color:var(--bad); background:#fdeeec; }
+  .options li.locked { cursor:default; opacity:.9; }
+  .feedback { font-size:.9rem; margin:.6rem 0 0; }
+  #score { font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="lesson">
+  <div class="kicker">Lesson 0003 · HFT Trading Practice Repo</div>
+  <h1>Order-Book Reconstruction from Incremental Feeds</h1>
+  <p class="why">Why this matters: this repo now processes a <strong>real</strong> Nasdaq ITCH day, and
+  a single skipped message type silently corrupted the whole book — an 18-share phantom bid froze
+  best-bid for six hours. This lesson is the post-mortem turned into theory.</p>
+</header>
+
+<h2>1 · The concept: a book is a fold over every event</h2>
+<p>Exchanges don't broadcast the order book. They broadcast <strong>events</strong> — add this order,
+execute that one, cancel part of another — and every consumer rebuilds the book by applying each
+event, in order, to its own copy of the state. It's event sourcing at nanosecond scale:</p>
+<pre><code>book_state(t) = fold(apply, empty_book, all events up to t)</code></pre>
+<p>The property that makes this brutal: <strong>there is no error correction</strong>. Miss one event —
+or handle one event type wrong — and your state diverges from the exchange's, permanently, with no
+signal telling you so. Correctness is all-or-nothing over the <em>entire message taxonomy</em>:</p>
+
+<div class="scrollbox"><table>
+  <tr><th>ITCH type</th><th>Meaning</th><th>Book effect</th></tr>
+  <tr><td><code>'A'</code> / <code>'F'</code></td><td>Add order (anonymous / with MPID)</td><td>New resting order; depth += shares</td></tr>
+  <tr><td><code>'E'</code> / <code>'C'</code></td><td>Execute (at book / at other price)</td><td>Depth −= executed; order dies at 0</td></tr>
+  <tr><td><code>'X'</code></td><td><strong>Partial cancel</strong></td><td>Depth −= canceled shares</td></tr>
+  <tr><td><code>'D'</code></td><td>Delete</td><td>Order fully removed</td></tr>
+  <tr><td><code>'U'</code></td><td>Replace</td><td>Old order out, new order in (new ref/price/shares)</td></tr>
+</table></div>
+
+<p>Three of these five <em>remove</em> liquidity. Handling additions but missing any removal type means
+your book only ever grows stale depth — and stale depth at an aggressive price becomes a phantom
+best bid or ask that every downstream signal reads forever.</p>
+
+<h2>2 · Minimal standalone example</h2>
+<pre><code><span class="com"># A book is a fold; every event type must move the state or it rots.</span>
+orders = {}                      <span class="com"># ref -> (side, price, shares)  (live orders)</span>
+depth  = {}                      <span class="com"># (side, price) -> total shares (the book)</span>
+
+<span class="kw">def</span> apply(event):
+    kind = event[<span class="num">0</span>]
+    <span class="kw">if</span> kind == <span class="str">"A"</span>:               <span class="com"># add: ref, side, price, shares</span>
+        _, ref, side, px, sh = event
+        orders[ref] = (side, px, sh)
+        depth[(side, px)] = depth.get((side, px), <span class="num">0</span>) + sh
+    <span class="kw">elif</span> kind <span class="kw">in</span> (<span class="str">"E"</span>, <span class="str">"X"</span>):     <span class="com"># execute OR cancel: both REMOVE shares</span>
+        _, ref, sh = event
+        side, px, left = orders[ref]
+        take = min(sh, left)
+        depth[(side, px)] -= take
+        <span class="kw">if</span> left - take == <span class="num">0</span>: <span class="kw">del</span> orders[ref]
+        <span class="kw">else</span>: orders[ref] = (side, px, left - take)
+    <span class="com"># ...'D' and 'U' likewise. Comment out the "X" above and replay a real</span>
+    <span class="com"># day: the book crosses within minutes and NOTHING tells you why.</span></code></pre>
+
+<h2>3 · In this project: the phantom-depth post-mortem</h2>
+<p>Until branch <code>feature/micro-3-signals-bridge</code>, <span class="path">cpp/itch/itch_parser.cpp</span>
+listed <code>'X'</code> in its enum but routed it to the skip branch — harmless for the synthetic
+benchmarks (which never send X), invisible in 24 green unit tests. Then the first <strong>real</strong>
+AAPL day went through <code>MicrostructureEngine</code> and the top-of-book crossed on
+<strong>100% of post-open events</strong>, with best-bid frozen at $289.75 × 18 shares.</p>
+<p>Tracing that price level in the raw fixture found order <code>6129577</code>:</p>
+<pre><code>A 350 sh @ 289.75   → E 199, X 17, X 1, E 2, E 131
+executed 332 + canceled 18 = 350  → real order: GONE
+our book (X skipped):  350 − 332 = 18 phantom shares, forever</code></pre>
+<p>The fix (<span class="path">cpp/itch/itch_parser.hpp</span>, <span class="path">cpp/itch/microstructure_signals.hpp</span>):
+a <code>CancelOrder</code> struct, an <code>on_cancel</code> visitor callback, and an engine handler that
+reuses <code>book_.execute()</code> — a partial cancel and an execution are the <em>same state
+transition</em> (reduce shares, drop at zero); they differ only in meaning (a trade happened vs. didn't).
+After the fix: <strong>zero crossed events</strong> and a realistic 1–4¢ AAPL spread. The regression test
+<code>MicroEngine.CancelViaParserRemovesPhantomDepth</code>
+(<span class="path">cpp/tests/test_microstructure.cpp</span>) replays exactly this A→E→X pattern.</p>
+
+<div class="callout good"><strong>Design lesson:</strong> the parser's paranoia counters
+(<code>skipped_count</code>, <code>error_count</code>) made the bug <em>survivable</em> but not
+<em>visible</em> — 431 skipped X messages looked identical to 431 skipped irrelevant messages.
+Validation against reality (spread must be positive post-open) is what caught it. Synthetic tests
+verify what you thought of; real data verifies what you didn't.</div>
+
+<h2>4 · Often confused: incremental feed vs snapshot feed</h2>
+<div class="scrollbox"><table>
+  <tr><th></th><th>Incremental (ITCH, this repo)</th><th>Snapshot (e.g. REST "get order book")</th></tr>
+  <tr><td>What arrives</td><td>Every individual event, order by order</td><td>The current top-N levels, on request</td></tr>
+  <tr><td>State</td><td>You maintain it; exchange assumes you're perfect</td><td>Exchange maintains it; you just read</td></tr>
+  <tr><td>A missed message</td><td>Permanent divergence, no signal</td><td>Self-heals on the next snapshot</td></tr>
+  <tr><td>Latency / detail</td><td>Nanosecond, full depth, queue position</td><td>Delayed, truncated, no order identity</td></tr>
+  <tr><td>Also confused:</td><td colspan="2"><code>'E'</code> execute vs <code>'X'</code> cancel vs <code>'D'</code> delete —
+  identical <em>book</em> mechanics family (remove liquidity) but different <em>economics</em>: an E is a trade
+  (prints, moves OFI via consumed depth), an X/D is liquidity withdrawn without trading.</td></tr>
+</table></div>
+
+<h2>5 · Practice quiz</h2>
+<p>Score: <span id="score">0 / 4</span></p>
+
+<div class="question" data-question>
+  <p>Q1. Your reconstructed book shows a crossed top (bid ≥ ask) on nearly every event after the open. Most likely cause?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Exchange books can lock/cross pre-open, but the matching engine prevents persistent crossing in continuous trading — 'the market is weird' doesn't survive six hours.">The market was genuinely crossed that day</li>
+    <li data-correct="true" data-why="Persistent crossing means stale aggressive orders your state never removed — some removal path (X, D, E, or U-out) isn't being applied. Exactly the skipped-'X' bug this repo hit.">Your reconstruction is missing a removal message type, leaving phantom depth</li>
+    <li data-correct="false" data-why="An endianness bug garbles prices wildly and immediately (10000x errors), not a plausible-looking book that slowly rots.">A big-endian/little-endian mixup in the price field</li>
+    <li data-correct="false" data-why="Out-of-range orders are rejected at add and counted — they never enter the book, so they can't sit there crossing it.">The book's declared price range is too wide</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q2. Why could 24 passing unit tests coexist with a book-corrupting bug?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The tests asserted plenty — every value was hand-computed. Coverage of inputs, not weakness of assertions, was the gap.">The tests didn't assert anything meaningful</li>
+    <li data-correct="true" data-why="Every test and benchmark fed the parser messages it handled. No synthetic input contained 'X', so the skip path never mattered — real data is what exercised the taxonomy you forgot.">All test inputs were synthetic and never contained the message type that was mishandled</li>
+    <li data-correct="false" data-why="ctest ran the suites fine; nothing was being skipped at the test-runner level.">The test runner was silently skipping the book tests</li>
+    <li data-correct="false" data-why="The engine wraps the book but both were tested; the bug was upstream in the parser's message routing, which was also tested — just never with an X.">The engine and the book were tested separately, so integration was untested</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q3. ITCH order <code>ref=42</code>: A 100 sh, then E 60, then X 40. What does a correct book hold for ref 42?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="That ignores the partial cancel — the exact phantom-depth failure mode (100−60 = 40 stale shares).">40 shares still resting</li>
+    <li data-correct="true" data-why="60 executed + 40 canceled = 100 = everything. The order is fully gone; depth at its price drops by 100 total and the ref is forgotten.">Nothing — the order is fully removed</li>
+    <li data-correct="false" data-why="X removes 40 more shares; only if X were skipped would anything remain, and it would be 40, not 60.">60 shares still resting</li>
+    <li data-correct="false" data-why="A 'D' is not required to finish an order — reaching zero via E/X removes it. Waiting for a D that never comes is exactly how state rots.">100 shares until a 'D' message arrives</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q4. The engine's fix routes <code>on_cancel</code> through <code>book_.execute()</code>. Why is that legitimate rather than a hack?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Execute and partial-cancel are the identical state transition on the book (reduce shares, erase at zero); they differ in economic meaning (trade vs withdrawal), which the book doesn't model. Same mechanics ⇒ same code path.">Both events perform the same state transition; they differ only in economic meaning, which the book doesn't track</li>
+    <li data-correct="false" data-why="It's not about saving code — if the semantics differed (e.g. the book tracked traded volume), reuse would be wrong.">Because writing a separate cancel method would duplicate code</li>
+    <li data-correct="false" data-why="execute() already clamps to available shares and handles unknown refs via error_count — no special cancel-only safety was needed.">Because cancels need extra safety checks that execute() happens to have</li>
+    <li data-correct="false" data-why="ParseStats counts cancels separately (cancel_count); the stats layer distinguishes them fine.">Because cancels and executions must be counted together in the stats</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6 · Check your understanding</h2>
+<p><strong>Scenario:</strong> You add support for a new venue whose feed has 31 message types; you need
+only the 6 that move the book. A colleague says "parse those 6, skip the rest, ship it." What's the
+one question you must answer about the other 25 before agreeing?
+<em>(Answer: can any of them add, remove, or move liquidity — directly or by implication, like a
+trading halt clearing the book? Every state-mutating type must be handled; only genuinely
+state-neutral types may be skipped. And add a reality check — e.g. "book never stays crossed" — to
+catch the ones you misjudged.)</em></p>
+
+<script>
+(function () {
+  "use strict";
+  var right = 0, answered = 0;
+  var qs = document.querySelectorAll("[data-question]");
+  function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+  qs.forEach(function (q) {
+    var list = q.querySelector(".options");
+    shuffle(Array.prototype.slice.call(list.children)).forEach(function(li){ list.appendChild(li); });
+    var fb = q.querySelector(".feedback");
+    var done = false;
+    list.querySelectorAll("li").forEach(function (li) {
+      li.addEventListener("click", function () {
+        if (done) return;
+        done = true; answered++;
+        var ok = li.dataset.correct === "true";      // attribute, never position
+        if (ok) right++;
+        li.classList.add(ok ? "right" : "wrong");
+        list.querySelectorAll("li").forEach(function (el) {
+          el.classList.add("locked");
+          if (el.dataset.correct === "true") el.classList.add("right");
+        });
+        fb.hidden = false;
+        fb.textContent = (ok ? "✓ Correct. " : "✗ Not quite. ") + li.dataset.why;
+        fb.style.color = ok ? "var(--ok)" : "var(--bad)";
+        document.getElementById("score").textContent = right + " / " + qs.length;
+      });
+    });
+  });
+})();
+</script>
+</div>
+</body>
+</html>

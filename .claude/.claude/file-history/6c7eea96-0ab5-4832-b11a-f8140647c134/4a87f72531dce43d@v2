@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0001 — How to Run and Develop the LLM NPC City Game</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232637;
+    --accent: #7c6af7;
+    --accent2: #4fc3f7;
+    --green: #56c78a;
+    --red: #e05c6e;
+    --text: #e0e2f0;
+    --muted: #8589a8;
+    --code-bg: #141722;
+    --border: #2d3150;
+    --radius: 10px;
+    --font-mono: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.7;
+    padding: 2rem 1rem;
+  }
+
+  .wrap { max-width: 800px; margin: 0 auto; }
+
+  /* Header */
+  .lesson-meta {
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+  }
+  .tagline {
+    color: var(--muted);
+    font-size: 1rem;
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Progress bar */
+  .progress-bar-wrap {
+    background: var(--surface2);
+    border-radius: 100px;
+    height: 8px;
+    margin-bottom: 2rem;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    width: 0%;
+    transition: width 0.4s ease;
+    border-radius: 100px;
+  }
+  .progress-label {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 0.4rem;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Sections */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem 1.75rem;
+    margin-bottom: 1.5rem;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .section-num {
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  h2 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--accent2);
+    margin: 1.25rem 0 0.5rem;
+  }
+  p { margin-bottom: 0.9rem; }
+  p:last-child { margin-bottom: 0; }
+
+  /* Checkboxes */
+  .mark-done {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .mark-done input { accent-color: var(--accent); cursor: pointer; }
+  .mark-done.done { color: var(--green); }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin: 0.75rem 0;
+  }
+  code { font-family: var(--font-mono); font-size: 0.9em; }
+  p code, li code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+
+  /* Syntax colours */
+  .kw  { color: #c792ea; }
+  .cm  { color: #546e7a; font-style: italic; }
+  .str { color: #c3e88d; }
+  .num { color: #f78c6c; }
+  .fn  { color: #82aaff; }
+  .pp  { color: #89ddff; }
+  .var { color: #eeffff; }
+  .op  { color: #89ddff; }
+
+  /* Callout boxes */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--surface2);
+    padding: 0.75rem 1rem;
+    border-radius: 0 8px 8px 0;
+    margin: 1rem 0;
+    font-size: 0.92rem;
+  }
+  .callout.warn { border-color: #f0a050; }
+  .callout.good { border-color: var(--green); }
+  .callout-label {
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--accent);
+    margin-bottom: 0.3rem;
+  }
+  .callout.warn .callout-label { color: #f0a050; }
+  .callout.good .callout-label { color: var(--green); }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.88rem;
+  }
+  th {
+    background: var(--surface2);
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    font-weight: 600;
+    color: var(--accent2);
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* Lists */
+  ul, ol { padding-left: 1.4rem; margin: 0.5rem 0 0.9rem; }
+  li { margin-bottom: 0.3rem; }
+
+  /* Steps (numbered with circles) */
+  .steps { list-style: none; padding: 0; counter-reset: step; }
+  .steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 0.8rem;
+    margin-bottom: 0.9rem;
+    align-items: flex-start;
+  }
+  .steps li::before {
+    content: counter(step);
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    min-width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.22rem;
+    flex-shrink: 0;
+  }
+
+  /* Diagram */
+  .diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.8;
+    color: var(--text);
+    overflow-x: auto;
+    margin: 0.75rem 0;
+  }
+  .diagram .box   { color: var(--accent2); }
+  .diagram .arrow { color: var(--accent); }
+  .diagram .label { color: var(--muted); }
+
+  /* Quiz */
+  .quiz-section h2 { color: var(--accent); }
+  .question {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .question p { font-weight: 500; margin-bottom: 0.75rem; }
+  .options { list-style: none; padding: 0; margin: 0; }
+  .options li {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.55rem 0.9rem;
+    margin-bottom: 0.45rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    font-size: 0.9rem;
+  }
+  .options li:hover { background: var(--surface2); border-color: var(--accent); }
+  .options li.correct  { background: rgba(86,199,138,0.15); border-color: var(--green); color: var(--green); }
+  .options li.wrong    { background: rgba(224,92,110,0.12); border-color: var(--red); color: var(--red); }
+  .options li.disabled { pointer-events: none; }
+  .feedback {
+    margin-top: 0.6rem;
+    font-size: 0.87rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background: var(--surface);
+  }
+
+  .score-display {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    text-align: center;
+    margin-top: 1rem;
+  }
+  .score-display .big { font-size: 2.5rem; font-weight: 700; color: var(--accent); }
+  .score-display p { color: var(--muted); margin-top: 0.3rem; }
+
+  /* Footer */
+  .next-lesson {
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    margin-top: 2rem;
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  .next-icon { font-size: 1.5rem; line-height: 1; margin-top: 0.15rem; }
+  .next-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .next-title { font-weight: 600; margin-top: 0.2rem; color: var(--accent2); }
+  .next-desc  { font-size: 0.88rem; color: var(--muted); margin-top: 0.25rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="lesson-meta">Lesson 0001 · LLM NPC City</div>
+  <h1>How to Run and Develop</h1>
+  <p class="tagline">Why this matters: every change you make to the game must be built, tested, and verified. Two environments exist — knowing when to use each saves hours of confusion.</p>
+
+  <!-- Progress -->
+  <div class="progress-label">
+    <span id="prog-text">Progress: 0 / 6 sections complete</span>
+    <span id="prog-pct">0%</span>
+  </div>
+  <div class="progress-bar-wrap"><div class="progress-bar-fill" id="prog-bar"></div></div>
+
+  <!-- ─── SECTION 1: Two Environments ─── -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <h2>The two environments</h2>
+    </div>
+
+    <p>This project runs in two completely separate environments and you use them for different jobs. Mixing them up is the #1 source of "why doesn't this work?" moments.</p>
+
+    <div class="diagram">
+<span class="box">┌─────────────────────────────┐</span>  <span class="box">┌─────────────────────────────┐</span>
+<span class="box">│  Linux / Dev Container      │</span>  <span class="box">│  Windows (your machine)     │</span>
+<span class="box">│                             │</span>  <span class="box">│                             │</span>
+<span class="box">│  g++, make, git, curl       │</span>  <span class="box">│  MSYS2 UCRT64 + SFML        │</span>
+<span class="box">│  NO cmake, NO SFML          │</span>  <span class="box">│  Ollama (model loaded)      │</span>
+<span class="box">│                             │</span>  <span class="box">│                             │</span>
+<span class="arrow">│  → make -C tests test       │</span>  <span class="arrow">│  → run.bat (double-click)   │</span>
+<span class="box">│    (fast, offline)          │</span>  <span class="box">│    (builds + plays)         │</span>
+<span class="box">└─────────────────────────────┘</span>  <span class="box">└─────────────────────────────┘</span>
+<span class="label">       primary dev loop                  visual + play verification</span>
+    </div>
+
+    <p><strong>Container / Linux</strong> is where you write code and run the unit tests. All 57 tests run in under two seconds, fully offline — no Ollama, no SFML, no window. This is your main feedback loop.</p>
+
+    <p><strong>Windows</strong> is where the game actually renders. The 3D city, the NPC figures, the dialogue overlay — none of that can be verified without SFML and OpenGL. You push your commits, then pull and run <code>run.bat</code> on Windows to see how it looks.</p>
+
+    <div class="callout">
+      <div class="callout-label">Key rule</div>
+      Logic in <code>src/core/</code> is tested in the container. Visual behaviour in <code>src/app/</code> is verified on Windows. Never reverse this.
+    </div>
+
+    <label class="mark-done" id="done-s1">
+      <input type="checkbox" onchange="markDone('s1', this)"> Mark section complete
+    </label>
+  </div>
+
+  <!-- ─── SECTION 2: Running on Windows ─── -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <h2>Running the game on Windows</h2>
+    </div>
+
+    <p>All prerequisites must be in place first. Here is the full one-time setup and the daily run flow.</p>
+
+    <h3>One-time setup</h3>
+    <ol class="steps">
+      <li>
+        <div><strong>Install Ollama</strong> from <code>https://ollama.com/download</code>, then in any terminal:<br>
+        <pre><span class="fn">ollama</span> pull qwen2.5:3b-instruct</pre>
+        This pulls a ~2 GB model. It only happens once (or when you want to try a different model).</div>
+      </li>
+      <li>
+        <div><strong>Install MSYS2</strong> from <code>https://www.msys2.org</code>. Open the <em>UCRT64</em> shell (not the default MSYS shell — ucrt64 specifically) and run:
+        <pre><span class="fn">pacman</span> -S mingw-w64-ucrt-x86_64-gcc \
+           mingw-w64-ucrt-x86_64-cmake \
+           mingw-w64-ucrt-x86_64-sfml</pre>
+        This gives you the compiler, build system, and graphics library the game needs.</div>
+      </li>
+      <li>
+        <div><strong>Clone the repo</strong> (if you haven't):
+        <pre><span class="fn">git</span> clone https://github.com/bjl14710/cpp_game_with_llm_npcs.git
+<span class="fn">cd</span> cpp_game_with_llm_npcs
+<span class="fn">git</span> checkout initial_npcs_and_world</pre>
+        </div>
+      </li>
+    </ol>
+
+    <h3>Every time you want to play</h3>
+    <ol class="steps">
+      <li>Make sure Ollama is running: <code>ollama serve</code> in a terminal (or it may already be running as a service).</li>
+      <li><strong>Double-click <code>run.bat</code></strong> in the repo folder. That's it.</li>
+    </ol>
+
+    <p>What <code>run.bat</code> actually does, step by step:</p>
+
+    <pre><span class="cm">REM 1. Sets MSYS2 ucrt64 tools on PATH so cmake and g++ can be found</span>
+<span class="kw">set</span> <span class="str">"PATH=C:\msys64\ucrt64\bin;%PATH%"</span>
+
+<span class="cm">REM 2. Checks Ollama is reachable — if not, prints a helpful error and pauses</span>
+<span class="fn">curl</span> -fsS --max-time 2 <span class="str">"http://localhost:11434/api/tags"</span>
+
+<span class="cm">REM 3. Configures the build (only matters the first time or after CMakeLists changes)</span>
+<span class="fn">cmake</span> -S . -B build -G <span class="str">"MinGW Makefiles"</span>
+
+<span class="cm">REM 4. Compiles everything (parallel, fast on second run since CMake is incremental)</span>
+<span class="fn">cmake</span> --build build -j
+
+<span class="cm">REM 5. Runs the game</span>
+build\cpp_game_with_llm_npcs.exe</pre>
+
+    <div class="callout warn">
+      <div class="callout-label">Common issue</div>
+      If you get "MSYS2 ucrt64 toolchain not found", the MSYS2 install is at a non-default path or you installed the wrong variant. <code>run.bat</code> looks for <code>C:\msys64\ucrt64\bin</code> — check that path exists.
+    </div>
+
+    <label class="mark-done" id="done-s2">
+      <input type="checkbox" onchange="markDone('s2', this)"> Mark section complete
+    </label>
+  </div>
+
+  <!-- ─── SECTION 3: Development Loop ─── -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <h2>The development loop (day-to-day)</h2>
+    </div>
+
+    <p>You will spend most of your time in the container (Linux), not on Windows. Here is the cycle:</p>
+
+    <ol class="steps">
+      <li>
+        <strong>Edit code</strong> in <code>src/core/</code> or <code>tests/</code>
+      </li>
+      <li>
+        <strong>Run tests</strong> — one command, takes ~1 second:
+        <pre><span class="fn">make</span> -C tests test</pre>
+        You'll see each compiled file scroll by, then a pass/fail summary from doctest.
+      </li>
+      <li>
+        <strong>Fix any failures</strong>, then repeat steps 1–2 until green.
+      </li>
+      <li>
+        <strong>Commit and push</strong> — small commits (2–3 files):
+        <pre><span class="fn">git</span> add src/core/Npc.hpp src/core/Npc.cpp
+<span class="fn">git</span> commit -m <span class="str">"feat(core): add patrol state to Npc"</span>
+<span class="fn">git</span> push origin initial_npcs_and_world</pre>
+      </li>
+      <li>
+        <strong>On Windows</strong>: <code>git pull</code>, then <code>run.bat</code> to see it rendered.
+      </li>
+    </ol>
+
+    <h3>What the test command actually runs</h3>
+    <p>The command <code>make -C tests test</code> is shorthand for "run the Makefile inside the <code>tests/</code> directory, targeting the <code>test</code> rule." That Makefile does:</p>
+    <ol>
+      <li>Compiles every <code>src/core/*.cpp</code> file</li>
+      <li>Compiles every <code>tests/test_*.cpp</code> file</li>
+      <li>Links them all into <code>tests/build/run_tests</code></li>
+      <li>Executes that binary — doctest reports results</li>
+    </ol>
+
+    <p>Notice it does <em>not</em> compile anything in <code>src/app/</code>. That is intentional — the app layer needs SFML which is not in the container.</p>
+
+    <div class="callout good">
+      <div class="callout-label">Current state</div>
+      57 tests, 402 assertions — all pass in this repo as of lesson creation. If you add new logic to <code>src/core/</code>, add tests in the same commit.
+    </div>
+
+    <label class="mark-done" id="done-s3">
+      <input type="checkbox" onchange="markDone('s3', this)"> Mark section complete
+    </label>
+  </div>
+
+  <!-- ─── SECTION 4: Core / App Split ─── -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <h2>The core / app split — why it's designed this way</h2>
+    </div>
+
+    <p>The repo's source tree is divided into two halves with a hard rule between them:</p>
+
+    <table>
+      <tr><th>Folder</th><th>Contains</th><th>Allowed to use</th><th>Tested by</th></tr>
+      <tr><td><code>src/core/</code></td><td>All game logic</td><td>stdlib, httplib, json, pthreads</td><td>doctest in container</td></tr>
+      <tr><td><code>src/app/</code></td><td>Graphics + input</td><td>SFML, OpenGL, <em>plus</em> core</td><td>Manual on Windows</td></tr>
+    </table>
+
+    <p><strong>The rule:</strong> nothing in <code>src/core/</code> may include an SFML or OpenGL header. Ever.</p>
+
+    <p>Why does this matter? Because SFML cannot be installed in the container. If <code>City.cpp</code> included <code>&lt;SFML/Graphics.hpp&gt;</code>, the test suite would fail to compile and you'd have no automated safety net. The split buys you:</p>
+
+    <ul>
+      <li><strong>Fast offline tests</strong> — all logic is reachable from the container, no GUI needed.</li>
+      <li><strong>Portability</strong> — the core could be ported to a mobile game, a web server, a CLI tool. The app layer is the only part that is Windows-locked.</li>
+      <li><strong>Confidence before you see it</strong> — when NPC collision or dialogue logic is green in tests, you know it's correct before you ever run the game.</li>
+    </ul>
+
+    <h3>The CMake structure mirrors this split</h3>
+    <pre><span class="cm"># llm_npc_core: always builds, no SFML</span>
+<span class="fn">add_library</span>(llm_npc_core STATIC
+    src/core/City.cpp    src/core/Config.cpp
+    src/core/LlmClient.cpp  src/core/Npc.cpp  <span class="cm"># ... etc</span>
+)
+
+<span class="cm"># Game executable: only built where SFML + OpenGL exist</span>
+<span class="kw">if</span>(SFML_FOUND AND OPENGL_FOUND)
+    <span class="fn">add_executable</span>(cpp_game_with_llm_npcs
+        src/app/main.cpp  src/app/Renderer3D.cpp  <span class="cm"># ...</span>
+    )
+    <span class="fn">target_link_libraries</span>(...  llm_npc_core  sfml-graphics ...)
+<span class="kw">endif</span>()</pre>
+
+    <p>The container runs CMake and gets only the library. Windows gets both the library and the executable. The tests always link against <code>llm_npc_core</code> directly, bypassing the exe entirely.</p>
+
+    <label class="mark-done" id="done-s4">
+      <input type="checkbox" onchange="markDone('s4', this)"> Mark section complete
+    </label>
+  </div>
+
+  <!-- ─── SECTION 5: Often Confused With ─── -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <h2>Often confused with: <code>make</code> vs <code>cmake</code></h2>
+    </div>
+
+    <p>This project uses both, in different places. They are not the same thing.</p>
+
+    <table>
+      <tr><th></th><th>make</th><th>cmake</th></tr>
+      <tr>
+        <td><strong>What it is</strong></td>
+        <td>A build runner that reads a <code>Makefile</code> you write by hand</td>
+        <td>A build-system <em>generator</em> — it produces a Makefile (or VS project, or Ninja files) from a <code>CMakeLists.txt</code></td>
+      </tr>
+      <tr>
+        <td><strong>In this project</strong></td>
+        <td><code>tests/Makefile</code> — hand-written, directly drives g++ for the test suite in the container</td>
+        <td><code>CMakeLists.txt</code> — used on Windows to produce the MinGW Makefile that builds the full game</td>
+      </tr>
+      <tr>
+        <td><strong>When you run it</strong></td>
+        <td><code>make -C tests test</code> (container, fast, no install needed)</td>
+        <td><code>cmake -S . -B build -G "MinGW Makefiles"</code> (Windows, once — then <code>cmake --build build</code>)</td>
+      </tr>
+      <tr>
+        <td><strong>Why two?</strong></td>
+        <td colspan="2">The container has <code>make</code> but not <code>cmake</code>. The hand-written Makefile gets tests running without requiring an extra install. <code>cmake</code> is only needed on Windows where it handles finding SFML/OpenGL for you.</td>
+      </tr>
+    </table>
+
+    <p><strong>Rule of thumb:</strong> in the container, use <code>make -C tests test</code>. On Windows, use <code>run.bat</code> (which calls cmake internally).</p>
+
+    <label class="mark-done" id="done-s5">
+      <input type="checkbox" onchange="markDone('s5', this)"> Mark section complete
+    </label>
+  </div>
+
+  <!-- ─── SECTION 6: QUIZ ─── -->
+  <div class="section quiz-section" id="s6">
+    <div class="section-header">
+      <div class="section-num">6</div>
+      <h2>Practice — check your understanding</h2>
+    </div>
+
+    <p>Options are shuffled on load. Click an answer to see if you're right and why.</p>
+
+    <!-- Q1 -->
+    <div class="question" data-question>
+      <p>1. You edit <code>src/core/City.cpp</code> to change how buildings are sized. What is the correct next step?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="All core logic is covered by the container test suite. Run make -C tests test first — it's fast, offline, and tells you immediately if the change broke collision or city layout logic.">Run <code>make -C tests test</code> in the container</li>
+        <li data-correct="false" data-why="double-clicking run.bat builds and runs the full game on Windows. That's useful for visual verification, but it's slow and doesn't give you the unit test feedback. Always test logic first.">Double-click <code>run.bat</code> on Windows</li>
+        <li data-correct="false" data-why="City.cpp is in src/core, which the container can compile. It is NOT app-only. The app split only restricts SFML/OpenGL usage — core logic is always testable in the container.">This is an app-only change; only verify it on Windows</li>
+        <li data-correct="false" data-why="Committing unverified code means every collaborator (or future you) starts from a broken state. Always run tests before committing.">Commit and push immediately without running tests</li>
+      </ul>
+      <p class="feedback" style="display:none"></p>
+    </div>
+
+    <!-- Q2 -->
+    <div class="question" data-question>
+      <p>2. A teammate adds a new module <code>src/core/QuestLog.hpp</code> that includes <code>&lt;SFML/Graphics.hpp&gt;</code>. What is wrong?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="The core/app rule is that nothing in src/core/ may include SFML or OpenGL headers. SFML cannot be installed in the container, so this would make make -C tests test fail to compile on Linux.">It violates the core/app split — core must never include SFML</li>
+        <li data-correct="false" data-why="SFML headers are not available in the dev container, so this would cause a compile failure there. The problem is the inclusion itself, not just a recommendation.">Nothing — SFML includes are fine anywhere in the project</li>
+        <li data-correct="false" data-why="The rule is about SFML/OpenGL includes specifically. A quest log is conceptually game logic and belongs in core — but only if it stays SFML-free.">Quest log logic belongs in src/app/ regardless of includes</li>
+        <li data-correct="false" data-why="The container doesn't have cmake at all. The test runner uses the hand-written tests/Makefile. cmake isn't the mechanism that fails here.">CMake will auto-detect and fix this at configure time</li>
+      </ul>
+      <p class="feedback" style="display:none"></p>
+    </div>
+
+    <!-- Q3 -->
+    <div class="question" data-question>
+      <p>3. <code>run.bat</code> says "Ollama is not reachable at localhost:11434". What are the two most likely causes?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="run.bat checks http://localhost:11434/api/tags before building. Either ollama serve was never started, or it exited. The fix is to open a terminal and run: ollama serve">Ollama is not running / <code>ollama serve</code> was never started</li>
+        <li data-correct="false" data-why="run.bat doesn't care about the model pull status for its reachability check — it just hits /api/tags. A missing model would cause a different failure (the game starting but getting errors from the LLM client).">The model <code>qwen2.5:3b-instruct</code> was not pulled</li>
+        <li data-correct="false" data-why="The MSYS2 check is a separate error with a different message. The Ollama check is a curl call to localhost — MSYS2 tools are already on PATH by that point in the script.">MSYS2 is not installed</li>
+        <li data-correct="false" data-why="CMake runs after the Ollama check. A cmake failure produces a different error message entirely.">cmake configuration failed</li>
+      </ul>
+      <p class="feedback" style="display:none"></p>
+    </div>
+
+    <!-- Q4 -->
+    <div class="question" data-question>
+      <p>4. What is the difference between <code>make</code> and <code>cmake</code> in this project?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Exactly right. tests/Makefile is hand-written and drives g++ directly — used in the container. CMakeLists.txt is the cross-platform build description; cmake generates a MinGW Makefile from it on Windows (run.bat does this with cmake -S . -B build -G 'MinGW Makefiles')."><code>make</code> runs the hand-written <code>tests/Makefile</code> in the container; <code>cmake</code> generates the Windows build files from <code>CMakeLists.txt</code></li>
+        <li data-correct="false" data-why="make is not Windows-only. The container uses make (via tests/Makefile) constantly. cmake is the Windows-side generator."><code>make</code> is for Windows; <code>cmake</code> is for Linux</li>
+        <li data-correct="false" data-why="cmake does not run tests. The test runner is doctest, invoked either via tests/Makefile (make) or via the built binary directly. cmake generates build files."><code>cmake</code> runs the tests; <code>make</code> builds the release executable</li>
+        <li data-correct="false" data-why="They are not interchangeable. make reads a Makefile you write; cmake generates that Makefile from a higher-level CMakeLists.txt description. Using make -C tests test on Windows would work only if SFML/OpenGL headers were available there, which they might not be.">They are interchangeable — use whichever you prefer on either platform</li>
+      </ul>
+      <p class="feedback" style="display:none"></p>
+    </div>
+
+    <!-- Q5 -->
+    <div class="question" data-question>
+      <p>5. You want to add an 11th NPC. Which files need to change, and do you need to rebuild <code>run.bat</code>?</p>
+      <ul class="options">
+        <li data-correct="true"  data-why="Exactly. The roster is driven entirely by personas/ — PersonaLoader finds all *.persona files automatically. No code changes needed, and run.bat / CMakeLists.txt don't need to be touched. Just add the file, run tests to verify placement, and commit.">Create a new <code>personas/&lt;id&gt;.persona</code> file — no code changes or build changes needed</li>
+        <li data-correct="false" data-why="The NPC count is not hardcoded in World.cpp. World holds whatever NPCs main.cpp registers, and main.cpp populates them from loadAllPersonas() which scans the directory. No source edit needed.">Edit <code>src/core/World.cpp</code> to increase the hardcoded NPC limit</li>
+        <li data-correct="false" data-why="run.bat only builds and launches — it doesn't need to know how many NPCs there are. CMakeLists.txt also doesn't list individual NPCs.">Update both <code>run.bat</code> and <code>CMakeLists.txt</code></li>
+        <li data-correct="false" data-why="Renderer3D has a kNpcPalettes array of 10 colour pairs. Adding an 11th NPC without extending it would cause a palette index out-of-bounds. You'd want to add a colour pair there — but this is an app-side visual concern, not a core one.">Only edit <code>src/app/Renderer3D.cpp</code> — no .persona file needed</li>
+      </ul>
+      <p class="feedback" style="display:none"></p>
+    </div>
+
+    <div class="score-display" id="score-box" style="display:none">
+      <div class="big" id="score-num">0/5</div>
+      <p id="score-msg"></p>
+    </div>
+
+    <label class="mark-done" id="done-s6">
+      <input type="checkbox" onchange="markDone('s6', this)"> Mark section complete
+    </label>
+  </div>
+
+  <!-- ─── NEXT LESSON ─── -->
+  <div class="next-lesson">
+    <div class="next-icon">→</div>
+    <div>
+      <div class="next-label">Up next</div>
+      <div class="next-title">0002 — Async LLM Client: how 60 FPS survives a 2-second HTTP call</div>
+      <div class="next-desc">Digs into <code>src/core/LlmClient.cpp</code> — worker threads, mutexes, and the drain pattern that keeps the game loop running while Ollama thinks.</div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ─── Progress tracking ───────────────────────────────────────
+const TOTAL = 6;
+let completed = 0;
+
+function markDone(id, cb) {
+  const label = document.getElementById('done-' + id);
+  if (cb.checked) {
+    completed++;
+    label.classList.add('done');
+    label.childNodes[1].nodeValue = ' Section complete ✓';
+  } else {
+    completed = Math.max(0, completed - 1);
+    label.classList.remove('done');
+    label.childNodes[1].nodeValue = ' Mark section complete';
+  }
+  const pct = Math.round((completed / TOTAL) * 100);
+  document.getElementById('prog-bar').style.width = pct + '%';
+  document.getElementById('prog-text').textContent = 'Progress: ' + completed + ' / ' + TOTAL + ' sections complete';
+  document.getElementById('prog-pct').textContent = pct + '%';
+}
+
+// ─── Quiz logic ──────────────────────────────────────────────
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+let quizCorrect = 0;
+let quizAnswered = 0;
+const TOTAL_Q = 5;
+
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  // Shuffle options so correct answer isn't always in the same position
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+  const feedback = q.querySelector('.feedback');
+
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      // Prevent answering twice
+      if (list.querySelector('.correct, .wrong')) return;
+
+      const isCorrect = li.dataset.correct === 'true';
+      if (isCorrect) {
+        li.classList.add('correct');
+        quizCorrect++;
+      } else {
+        li.classList.add('wrong');
+        // Reveal the correct answer
+        list.querySelectorAll('li').forEach(opt => {
+          if (opt.dataset.correct === 'true') opt.classList.add('correct');
+        });
+      }
+
+      // Disable all options
+      list.querySelectorAll('li').forEach(opt => opt.classList.add('disabled'));
+
+      // Show feedback
+      feedback.style.display = 'block';
+      feedback.style.color = isCorrect ? 'var(--green)' : 'var(--red)';
+      feedback.textContent = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+      quizAnswered++;
+      if (quizAnswered === TOTAL_Q) showScore();
+    });
+  });
+});
+
+function showScore() {
+  const box = document.getElementById('score-box');
+  const num = document.getElementById('score-num');
+  const msg = document.getElementById('score-msg');
+  box.style.display = 'block';
+  num.textContent = quizCorrect + ' / ' + TOTAL_Q;
+  if (quizCorrect === TOTAL_Q) {
+    num.style.color = 'var(--green)';
+    msg.textContent = 'Perfect score — you have a solid mental model of the build and run workflow.';
+  } else if (quizCorrect >= 3) {
+    num.style.color = 'var(--accent)';
+    msg.textContent = 'Good foundation. Review the questions you missed — the explanations show exactly where the reasoning diverges.';
+  } else {
+    num.style.color = 'var(--red)';
+    msg.textContent = 'Re-read sections 1–4 focusing on the two environments and the core/app split. Then try again.';
+  }
+}
+</script>
+</body>
+</html>

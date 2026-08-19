@@ -1,0 +1,119 @@
+# Study #5: Sequential Software vs Parallel Hardware — a VHDL Flat Book
+
+## Summary (simulation only — read this first)
+
+This is a **functional-simulation** study, not a silicon-timing one. Nothing
+here is synthesized, placed, routed, or timing-closed, and there is **no claim
+that an FPGA would beat X nanoseconds**. What it does show is a *scaling*
+difference in how software and hardware find the best price level. The C++
+flat book (`order_book_flat.hpp`) finds best-bid/ask with a linear scan whose
+cost grows with the tick range (perf/02 measured exactly that). The same rule
+in hardware is a **parallel priority encoder** over per-side level state:
+constant *cycles* per operation regardless of how many price levels exist. The
+VHDL module is verified in GHDL against golden vectors emitted by the C++ book,
+matches it exactly, and the cycle count is demonstrated flat across a DEPTH
+sweep.
+
+## What was built
+
+- **`hw/vhdl/flat_book.vhd`** — an `flat_book` entity mirroring
+  `order_book_flat.hpp`'s *level* rule: ADD/REMOVE shares at `(side, index)`,
+  REMOVE clamps to zero on a true underflow (removing more than the level
+  holds — the phantom-depth rule from `_remove_level`). Best bid/ask come from
+  a priority scan (bid high→low, ask low→high, the same directions as the C++
+  scans). Order-ref tracking stays in software — a hash table is a different
+  hardware problem and is explicitly out of scope; the entity consumes
+  *pre-resolved level operations*.
+- **`cpp/itch/golden_vectors_main.cpp`** — reuses the flat book's level math as
+  an oracle to emit `(op, side, index, shares → expected best bid/ask, clamp)`
+  CSV for (a) a hand-written edge sequence and (b) a seeded 10k-op random
+  sequence. The CSV header carries a schema version the testbench asserts.
+- **`hw/vhdl/flat_book_tb.vhd`** — file-driven: replays each op one per clock,
+  asserts every output against the oracle, and reports total cycles. Any
+  mismatch is a `severity failure`, so GHDL's exit code *is* the parity test.
+- **`scripts/{setup-vhdl,run_vhdl_sim}.sh`**, **`tests/test_vhdl_flat_book.py`**
+  — install GHDL, run the sim, and wrap it in pytest that **skips** (never
+  fails) when ghdl is absent.
+
+## Parity result
+
+| vectors | ops | GHDL result |
+|---------|----:|-------------|
+| edge (boundary 0 & DEPTH-1, clamp, best-removal, side-emptying) | 12 | **PASS** (exit 0) |
+| random, seeded, DEPTH=4096 | 10,000 | **PASS** (exit 0) |
+| random, seeded, DEPTH=1024 | 10,000 | **PASS** (exit 0) |
+
+Every best-bid/ask index, share total, and clamp pulse matched the C++ oracle
+on all three vector files.
+
+## The comparison that matters — cycles vs range
+
+| | software (`order_book_flat.hpp`) | hardware (`flat_book.vhd`, simulated) |
+|---|---|---|
+| best-of-book | O(range) linear scan | priority encoder over occupancy |
+| cost vs tick range | **grows with range** — perf/02 measured 49,212 → 72,568 ns/event as timed ticks went 135k → 200k | **constant cycles** — 1 cycle/op |
+| DEPTH sweep (this study) | n/a | **10,000 cycles for 10,000 ops at both DEPTH=1024 and DEPTH=4096** |
+| update (ADD/REMOVE) | O(1) array index | 1 cycle, registered |
+
+The load-bearing number is the last row: identical cycle counts at 4× the
+depth. In software, widening the price range lengthens the scan and the
+measured nanoseconds climb (perf/02); in the hardware model, the priority
+encoder evaluates all levels in parallel, so an operation still retires in one
+clock whether there are 1,024 levels or 4,096. That range-independence — not
+any absolute speed — is the architectural point.
+
+## Honest framing of the cycle metric
+
+The VHDL best-scan is written as an unrolled `for` loop over `DEPTH`. In
+*synthesis* that loop is parallel combinational logic feeding a registered
+output (one clock); the DEPTH sweep reports one cycle per op precisely because
+the modelled latency is the clock, not the loop length. In *functional
+simulation* the loop still executes iteration-by-iteration, so GHDL's
+wall-clock run time does grow with DEPTH — but that is simulator overhead, not
+the modelled hardware latency, and it is deliberately not reported as a
+performance number. The metric is **cycles per operation**, which is constant;
+the metric is **not** simulated wall-time or any projected FPGA nanosecond.
+
+## What This Teaches
+
+1. **Different machines, different bottlenecks.** perf/01–02 made the software
+   book fast by respecting the cache (flat array, sequential scan). Hardware
+   removes the scan entirely by making every level a parallel state element —
+   a restructuring, not a constant-factor win.
+
+2. **"O(1) cycles" is a hardware claim, not a wall-time claim.** A parallel
+   priority encoder is constant-latency *in silicon*; simulating it is still
+   linear work. Keeping those two apart is the difference between an honest and
+   a misleading hardware writeup.
+
+3. **Parity against a trusted oracle scales the confidence.** The same
+   discipline as the map-vs-flat book test and the C++-vs-NumPy bridge test:
+   a 10k-op random sequence checked op-by-op against the software book means
+   the RTL isn't "probably right," it's *identical* on that trace.
+
+4. **Scope the hardware problem.** Order-ref tracking (a hash table) stayed in
+   software; only the level arithmetic and best-of-book — the part that maps
+   cleanly to parallel state — went to hardware. Choosing that boundary is
+   most of the design.
+
+## Commands to Reproduce
+
+```bash
+# One-time: install GHDL (Homebrew)
+bash scripts/setup-vhdl.sh
+
+# Build the golden-vector generator
+cmake --build _build --target golden_vectors
+
+# Generate vectors and run the parity sim (exit 0 = matched the C++ book)
+./_build/cpp/itch/golden_vectors edge   4096 /tmp/edge.csv
+./_build/cpp/itch/golden_vectors random 4096 /tmp/rand.csv
+bash scripts/run_vhdl_sim.sh /tmp/edge.csv 4096
+bash scripts/run_vhdl_sim.sh /tmp/rand.csv 4096
+
+# Or via pytest (skips cleanly without ghdl)
+pytest tests/test_vhdl_flat_book.py -v
+```
+
+*Run 2026-07-07 with GHDL 6.0.0 (Homebrew). Vectors are seed-fixed, so the
+parity result reproduces exactly.*

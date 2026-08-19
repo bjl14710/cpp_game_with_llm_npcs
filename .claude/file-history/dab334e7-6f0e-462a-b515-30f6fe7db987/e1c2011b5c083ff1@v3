@@ -1,0 +1,84 @@
+"""Post-earnings-announcement drift strategy — scaffold.
+
+Spec: .claude/plans/pead-strategy.md. Long the big positive earnings
+surprises for a fixed post-report window, liquidity-filtered. Reads ONLY
+the local earnings cache written by `refresh-earnings` (earnings_data.py)
+— strategies never touch the network. Ticker identity arrives via
+df.attrs["ticker"], set by run_strategy_walkforward (engine change in the
+same plan).
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class PEADStrategy(DailyStrategy):
+    """+1 for hold_days after a report whose surprise clears the threshold.
+
+    NOT yet registered in strategies/registry.py — registration (with the
+    earnings_dir constructor kwarg, mirroring gbm's bundle_path) happens in
+    the implementing commit.
+    """
+
+    name = "pead"
+
+    def __init__(self, earnings_dir: str = "data/earnings",
+                 min_surprise: float = 0.25, hold_days: int = 75,
+                 min_adv: float = 50_000_000.0) -> None:
+        self.earnings_dir = earnings_dir
+        self.min_surprise = min_surprise
+        self.hold_days = hold_days
+        self.min_adv = min_adv
+
+    @property
+    def warmup_bars(self) -> int:
+        """ADV(20) warmup dominates; earnings need no price warmup."""
+        return 21
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Long for hold_days after a big positive surprise, liquidity-gated."""
+        ticker = df.attrs.get("ticker")
+        if not ticker:
+            return HOLD  # engine didn't tag the frame — nothing to look up
+
+        if not hasattr(self, "_cache"):
+            self._cache: dict = {}
+            self._warned: set = set()
+        if ticker not in self._cache:
+            from earnings_data import surprises_for
+            self._cache[ticker] = surprises_for(ticker, self.earnings_dir)
+        surprises = self._cache[ticker]
+        if surprises.empty:
+            if ticker not in self._warned:
+                self._warned.add(ticker)
+                print(f"[pead] no cached earnings for {ticker} — holding "
+                      f"(run refresh-earnings)")
+            return HOLD
+
+        today = pd.Timestamp(df.index[-1])
+        if today.tz is not None:
+            today = today.tz_localize(None)
+        # Entry starts the trading day AFTER the report (strictly before
+        # today) — the conservative lookahead guard: reports land pre-market
+        # or post-close and we don't model intraday timing.
+        eligible = surprises[surprises["reportedDate"] < today]
+        if eligible.empty:
+            return HOLD
+        latest = eligible.iloc[-1]  # a newer report resets the window
+        if latest["surprise"] < self.min_surprise:
+            return HOLD
+        days_since = (today - latest["reportedDate"]).days
+        if days_since > self.hold_days:
+            return HOLD
+
+        from costs import adv_dollars
+        adv = adv_dollars(df).iloc[-1]
+        if pd.isna(adv) or adv < self.min_adv:
+            return HOLD  # the small-cap cost trap the research flagged
+
+        surprise = float(latest["surprise"])
+        return DailySignal(position=1, confidence=surprise,
+                           reason=f"PEAD +{surprise:.0%} ({days_since}d post-report)")
+
+
+__all__ = ["PEADStrategy"]

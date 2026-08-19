@@ -1,0 +1,26 @@
+"""Fractional Kelly sizing from realized trade history — scaffold.
+
+Spec: .claude/plans/fractional-kelly.md. Continuous Kelly f* = mu/sigma^2
+on per-trade signed returns (the blotter/trades table already records
+them), scaled by a user fraction lambda in [0.25, 0.5], clamped to [0, 1]:
+long-only, never levered, and a negative estimated edge sizes to zero.
+Composes multiplicatively with the vol-target multiplier; combined gross
+stays capped at 1.0.
+"""
+from __future__ import annotations
+
+from typing import Sequence
+
+
+def kelly_fraction(trade_returns: Sequence[float], lam: float = 0.25,
+                   min_trades: int = 30) -> float:
+    """Gross-exposure multiplier from trade history.
+
+    TODO(implement): fewer than min_trades -> 1.0 (bootstrap: current
+    sizing unchanged). Else f* = mean/var of trade_returns (variance
+    guarded against ~0), return clamp(lam * f*, 0.0, 1.0). lam outside
+    [0.25, 0.5] raises ValueError — the deliberately-not-offered range.
+    Deterministic: identical histories give identical multipliers in
+    backtest and live replay.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/fractional-kelly.md")

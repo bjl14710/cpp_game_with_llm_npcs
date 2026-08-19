@@ -1,0 +1,94 @@
+# Plan: Pairs Trading / Stat-Arb (research-only, margin-gated)
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea (one paragraph)
+Classic Gatev-style pairs trading: find cointegrated stock pairs, trade
+the spread when it stretches beyond its historical norm, profit on
+reversion. Structurally different from every existing strategy — it
+requires simultaneous long AND short legs, hence a margin account
+(~$2,000 minimum) and shorting capability the Robinhood setup doesn't
+have. So it ships as a RESEARCH-tier module: fully backtestable today,
+visible in the arena report, but hard-gated from live paper trading until
+the account prerequisites are explicitly acknowledged.
+
+## Design Decisions
+- **Own module, not a DailyStrategy.** The per-ticker
+  `generate_signal(df)` contract cannot see two tickers at once; forcing
+  pairs through it would be contract vandalism. New `pairs.py` with its
+  own mini walk-forward over the spread, reusing `analyze_equity.compute_
+  metrics` and the CostModel (both legs charged).
+- **Cointegration without new dependencies** (my recommended option):
+  Engle–Granger two-step with numpy OLS for the hedge ratio and a
+  hand-rolled Dickey–Fuller test against hardcoded MacKinnon critical
+  values (published constants, ~15 lines) — statsmodels stays out of the
+  dependency tree. Formation window 252d; candidate pre-filter by
+  correlation (>0.8) before the expensive test; pairs drawn from one
+  `--tickers_file` universe.
+- **Trading rule**: spread z-score over a 60d window; enter long-spread at
+  z < −2 (long A, short hedge_ratio×B), short-spread at z > +2, exit at
+  |z| < 0.5, hard stop at |z| > 4 (divergence = the cointegration broke;
+  the classic pairs blow-up mode). Dollar-neutral legs.
+- **RESEARCH status + margin gate**: results register in arena.db under
+  status `RESEARCH` (shares REFERENCE's never-live semantics from
+  indicators-to-features.md, distinct label for "not yet allowed" vs
+  "demoted"). `arena-run live` refuses it with a message naming the
+  requirements; a `--i_have_margin` acknowledgment flag is the ONLY
+  unlock, and even then it enters as PROBATION-at-best under whatever
+  promotion gate is active. Real-money shorting remains rh-exec's
+  problem, untouched.
+- CLI: `pairs-scan` (find/rank cointegrated pairs → CSV),
+  `pairs-backtest` (spread walk-forward per pair → metrics + arena
+  RESEARCH registration).
+
+## Out of Scope
+- Live ticking of pairs (the entire point of the gate); Johansen /
+  multi-asset baskets; Kalman-filter dynamic hedge ratios; borrow
+  costs/availability modeling (flagged as a known omission in output);
+  options-based synthetic shorts.
+
+## Affected Areas
+- New: `pairs.py` (py-module + `pairs-scan`, `pairs-backtest` entry
+  points) — cointegration test, spread construction, z-score rule,
+  backtest loop with two-leg costs.
+- `strategy_arena.py` — RESEARCH status recognized (never-live set grows
+  to {EXCLUDED, REFERENCE, RESEARCH, PAUSED}); registration helper.
+- `analyze_equity.py` — RESEARCH labeling in report.
+- Tests: `tests/test_pairs.py` — DF test pinned against a known
+  cointegrated synthetic pair (x, x+noise) vs an independent-walks pair;
+  hedge ratio recovery; z-score entry/exit/stop transitions on a scripted
+  spread path; dollar neutrality; both legs pay costs; RESEARCH rows
+  refused by cmd_live.
+
+## Implementation Order
+1. Cointegration math (OLS + DF + criticals) pinned on synthetic pairs.
+2. Spread backtest loop + costs + metrics.
+3. CLIs + arena RESEARCH registration + live refusal + report label.
+
+## Acceptance Criteria
+- [ ] Synthetic cointegrated pair passes the DF test at 5%; independent
+      random walks fail it (seeded, deterministic)
+- [ ] Hedge ratio recovered within 5% on a constructed pair
+- [ ] Scripted spread path produces the exact entry/exit/stop sequence
+- [ ] Both legs incur costs; net equity < gross (CostModel wired)
+- [ ] `arena-run live` refuses RESEARCH rows, naming the margin/shorting
+      requirements; `--i_have_margin` is the only override
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Cointegration breaks mid-trade (z → 4+) | Hard stop exits; pair flagged in output as broken |
+| Fewer than formation-window bars | Pair skipped with reason in scan output |
+| Universe too large (O(n²) pairs) | Correlation pre-filter + `--max_pairs` cap; count reported |
+| Hedge ratio near zero or negative | Pair rejected in scan (economically meaningless for this rule) |
+| Same ticker in both legs via dual listing | Identical-series guard rejects |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(pairs): Engle–Granger cointegration scan without new deps`
+2. `feat(pairs): spread z-score backtest with two-leg costs`
+3. `feat(arena): RESEARCH status + margin acknowledgment gate`

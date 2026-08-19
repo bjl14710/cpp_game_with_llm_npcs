@@ -1,0 +1,41 @@
+"""Grading wrapper — Exercise 05: VHDL testbenches for the fpga/ modules.
+
+Opt-in: skipped entirely when GHDL is not installed (see
+exercises/05_vhdl_testbench/README.md for install instructions).
+HFT_EXERCISE_TARGET is inherited by the subprocess.
+
+Run:  uv run pytest tests/exercises/test_05_vhdl.py -v
+"""
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = REPO_ROOT / "scripts" / "run_vhdl_tests.sh"
+
+
+def _run_testbench(name: str) -> None:
+    if shutil.which("ghdl") is None:
+        pytest.skip("GHDL not installed — see exercises/05_vhdl_testbench/README.md")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), name],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 42:
+        pytest.skip("Exercise not implemented yet — fill in the TODO")
+    assert proc.returncode == 0, f"\n{proc.stdout}\n{proc.stderr}"
+
+
+def test_tb_market_maker():
+    _run_testbench("tb_market_maker")
+
+
+def test_tb_moving_average_trader():
+    _run_testbench("tb_moving_average_trader")
+
+
+def test_tb_linear_regression_predictor():
+    _run_testbench("tb_linear_regression_predictor")

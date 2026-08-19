@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal Path: IQ → Magnitude — readsb</title>
+<style>
+  :root {
+    --bg: #1a1b26; --surface: #1f2335; --border: #2f3549;
+    --text: #c0caf5; --muted: #565f89; --accent: #7aa2f7;
+    --green: #9ece6a; --red: #f7768e; --yellow: #e0af68;
+    --cyan: #7dcfff; --purple: #bb9af7; --orange: #ff9e64;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: Georgia, serif; line-height: 1.75; padding: 2rem 1rem; }
+  .container { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 2rem; color: var(--accent); margin-bottom: 0.25rem; }
+  .tagline { color: var(--muted); font-size: 0.95rem; margin-bottom: 2.5rem; font-style: italic; }
+  h2 { font-size: 1.3rem; color: var(--cyan); margin: 2.5rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; color: var(--yellow); margin: 1.5rem 0 0.5rem; }
+  p { margin-bottom: 1rem; }
+  a { color: var(--accent); }
+  code { font-family: 'Courier New', monospace; font-size: 0.88em; background: var(--border); padding: 0.1em 0.35em; border-radius: 3px; color: var(--orange); }
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem; overflow-x: auto; margin: 1rem 0 1.5rem; font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.6; }
+  .filepath { display: inline-block; background: var(--border); color: var(--purple); font-family: 'Courier New', monospace; font-size: 0.82rem; padding: 0.15em 0.5em; border-radius: 3px; margin-bottom: 0.4rem; }
+  .kw { color: var(--purple); } .ty { color: var(--cyan); } .fn { color: var(--accent); }
+  .str { color: var(--green); } .cm { color: var(--muted); font-style: italic; } .num { color: var(--orange); } .pp { color: var(--yellow); }
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem 1.5rem; font-family: 'Courier New', monospace; font-size: 0.83rem; line-height: 1.6; margin: 1rem 0 1.5rem; white-space: pre; overflow-x: auto; }
+  .callout { background: #202d3d; border-left: 3px solid var(--accent); padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; margin: 1rem 0 1.5rem; font-size: 0.93rem; }
+  .callout.warn { border-color: var(--yellow); } .callout.tip { border-color: var(--green); }
+  .section-header { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; user-select: none; }
+  .section-check { width: 1.1rem; height: 1.1rem; accent-color: var(--green); flex-shrink: 0; }
+  .section-label { font-size: 0.8rem; color: var(--muted); }
+  .quiz-block { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin: 2rem 0; }
+  .question { margin-bottom: 1.75rem; }
+  .question p { font-weight: bold; margin-bottom: 0.75rem; }
+  .options { list-style: none; display: flex; flex-direction: column; gap: 0.4rem; }
+  .options li { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 0.55rem 0.9rem; cursor: pointer; transition: background 0.15s, border-color 0.15s; font-size: 0.92rem; }
+  .options li:hover { border-color: var(--accent); background: #1e2540; }
+  .options li.correct { border-color: var(--green); background: #1c2d1c; color: var(--green); }
+  .options li.wrong { border-color: var(--red); background: #2d1c1c; color: var(--red); }
+  .options li.disabled { pointer-events: none; }
+  .feedback { margin-top: 0.6rem; font-size: 0.88rem; padding: 0.4rem 0.7rem; border-radius: 4px; background: var(--border); }
+  .feedback.correct-fb { color: var(--green); } .feedback.wrong-fb { color: var(--red); }
+  .score-area { text-align: center; padding: 1rem; font-size: 1.1rem; font-weight: bold; color: var(--cyan); border-top: 1px solid var(--border); margin-top: 1rem; }
+  #progress-bar-wrap { position: sticky; top: 0; background: var(--bg); padding: 0.4rem 0; z-index: 10; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+  #progress-bar { height: 4px; background: var(--border); border-radius: 2px; }
+  #progress-fill { height: 100%; background: var(--green); border-radius: 2px; transition: width 0.3s; width: 0%; }
+  #progress-text { font-size: 0.75rem; color: var(--muted); text-align: right; margin-top: 0.2rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; font-size: 0.9rem; }
+  th { background: var(--border); text-align: left; padding: 0.5rem 0.75rem; }
+  td { padding: 0.5rem 0.75rem; border-top: 1px solid var(--border); }
+  tr:nth-child(even) td { background: var(--surface); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div id="progress-bar-wrap">
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+  <div id="progress-text">0 / 6 sections complete</div>
+</div>
+
+<h1>Signal Path: IQ → Magnitude</h1>
+<p class="tagline">How raw USB bytes from the dongle become the uint16_t magnitude values that the decoder actually reads — and how to debug when that pipeline breaks.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="1">
+    <span>1. What Are IQ Samples?</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>Radio signals are waves. To capture them digitally a receiver doesn't just sample the amplitude — it captures two components simultaneously: the <strong>In-phase (I)</strong> and <strong>Quadrature (Q)</strong> channels, offset by 90 degrees. Together they describe the full vector of the signal at every moment.</p>
+
+<p>The RTL-SDR dongle produces these as pairs of unsigned 8-bit values (called <strong>UC8</strong> — Unsigned Complex 8-bit). Each byte represents one channel, biased around 127.5 (so 0 = −1.0, 127 ≈ 0, 255 = +1.0). The USB transfer gives readsb a raw byte stream: <code>I, Q, I, Q, I, Q, …</code></p>
+
+<p>For Mode S decoding, readsb doesn't care about phase — it only cares about <strong>signal magnitude</strong> (signal strength at each moment). Magnitude is calculated as:</p>
+
+<pre><span class="cm">// mathematically: mag = sqrt(I² + Q²), normalized to 0..1</span>
+fI = (raw_I - 127.5) / 127.5;  <span class="cm">// normalize to -1..+1</span>
+fQ = (raw_Q - 127.5) / 127.5;
+magsq = fI*fI + fQ*fQ;
+mag   = sqrtf(magsq);           <span class="cm">// 0..1 range</span>
+
+<span class="cm">// stored as uint16_t scaled to 0..65535</span>
+output = (uint16_t)(mag * 65535.0f + 0.5f);</pre>
+
+<div class="callout">
+  <strong>Why uint16_t?</strong> A 16-bit integer gives enough resolution to distinguish signal from noise, avoids floating-point math in the hot demodulator loop, and keeps the buffer compact — 12 buffers × 128 KiB each still fits comfortably in L3 cache.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="2">
+    <span>2. The Lookup Table Trick — convert_uc8_nodc()</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>Computing <code>sqrt()</code> for every sample pair at 2.4 million samples per second would be expensive. readsb pre-computes all 256×256 = 65536 possible (I, Q) combinations at startup and stores the result in a table: <span class="filepath">convert.c:35</span></p>
+
+<pre><span class="kw">static</span> <span class="ty">uint16_t</span> *uc8_lookup;   <span class="cm">// 65536 entries, each precomputed</span>
+
+<span class="kw">for</span> (<span class="kw">int</span> i = <span class="num">0</span>; i &lt;= <span class="num">255</span>; i++) {
+    <span class="kw">for</span> (<span class="kw">int</span> q = <span class="num">0</span>; q &lt;= <span class="num">255</span>; q++) {
+        fI = (i - <span class="num">127.5</span>) / <span class="num">127.5</span>;
+        fQ = (q - <span class="num">127.5</span>) / <span class="num">127.5</span>;
+        magsq = fI * fI + fQ * fQ;
+        <span class="kw">if</span> (magsq &gt; <span class="num">1</span>) magsq = <span class="num">1</span>;   <span class="cm">// clamp to valid range</span>
+        <span class="cm">// store as uint16_t</span>
+        uc8_lookup[(i * <span class="num">256</span>) + q] = (<span class="ty">uint16_t</span>)(sqrtf(magsq) * <span class="num">65535.0f</span> + <span class="num">0.5f</span>);
+    }
+}</pre>
+
+<p>At runtime, each sample pair is just a single table lookup: <span class="filepath">convert.c:81</span></p>
+
+<pre>mag = uc8_lookup[*in++];   <span class="cm">// *in is uint16_t* pointing to interleaved I,Q pairs</span>
+*mag_data++ = mag;</pre>
+
+<p>The loop also unrolls 4× to hint to the CPU's instruction scheduler:</p>
+
+<pre><span class="kw">for</span> (i = <span class="num">0</span>; i &lt; (nsamples / <span class="num">4</span>); ++i) {
+    DO_ONE_SAMPLE;  DO_ONE_SAMPLE;
+    DO_ONE_SAMPLE;  DO_ONE_SAMPLE;   <span class="cm">// 4 samples per loop iteration</span>
+}</pre>
+
+<div class="callout tip">
+  <strong>DC filter variant:</strong> When <code>--dcfilter</code> is passed, the slower <code>convert_uc8_generic()</code> is used instead. It applies a 1Hz IIR high-pass filter that removes any DC bias from the SDR hardware, at the cost of a <code>sqrtf()</code> per sample and two extra state variables (<code>z1_I</code>, <code>z1_Q</code>). The function pointer <code>RTLSDR.converter</code> points to whichever variant was selected in <code>rtlsdrOpen()</code>.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="3">
+    <span>3. mag_buf — What the Buffer Carries</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>After conversion, the magnitude data lands in a <code>struct mag_buf</code> — <span class="filepath">readsb.h:506</span>. Each buffer carries more than just the samples:</p>
+
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>data</code></td><td><code>uint16_t*</code></td><td>The magnitude samples (0–65535 per sample). Starts with <code>trailing_samples</code> overlap from the previous buffer.</td></tr>
+    <tr><td><code>length</code></td><td><code>unsigned</code></td><td>Count of <em>new</em> samples (not counting the trailing overlap).</td></tr>
+    <tr><td><code>sampleTimestamp</code></td><td><code>int64_t</code></td><td>12 MHz clock count at start of block. Used for precise MLAT timing.</td></tr>
+    <tr><td><code>sysTimestamp</code></td><td><code>int64_t</code></td><td>System wall-clock ms at start of block (estimated, back-corrected by block duration).</td></tr>
+    <tr><td><code>mean_level</code></td><td><code>double</code></td><td>Average normalized magnitude (0–1). Useful for gain monitoring.</td></tr>
+    <tr><td><code>mean_power</code></td><td><code>double</code></td><td>Average normalized power (0–1). Square of amplitude; useful for noise floor monitoring.</td></tr>
+    <tr><td><code>dropped</code></td><td><code>uint32_t</code></td><td>Samples dropped before this buffer due to FIFO overflow. Non-zero = decoder was too slow.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <strong>Trailing samples overlap:</strong> The preamble detector works on a sliding window that crosses buffer boundaries. Each new buffer is prefixed with the last <code>Modes.trailing_samples</code> samples of the previous buffer (copied in the callback). Without this, the demodulator would miss Mode S preambles that span a USB transfer boundary.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="4">
+    <span>4. The Ring Buffer — How Reader and Decoder Share Data</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>The reader (USB callback) and decoder (demod thread) run concurrently. They share data through a circular array of <code>MODES_MAG_BUFFERS = 12</code> buffers, with two index pointers:</p>
+
+<div class="diagram">  Modes.mag_buffers[12]:
+  ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+  │  0   │  1   │  2   │  3   │  4   │  5   │  6   │  7   │  8   │  9   │  10  │  11  │
+  └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+               ↑ first_filled_buffer          ↑ first_free_buffer
+               (decoder reads from here)      (reader writes to here next)</div>
+
+<p>The lock dance — from <span class="filepath">sdr_rtlsdr.c:388</span>:</p>
+
+<pre><span class="cm">// 1. Reader callback checks space WITHOUT holding lock</span>
+next_free_buffer = (Modes.first_free_buffer + <span class="num">1</span>) % MODES_MAG_BUFFERS;
+free_bufs = (Modes.first_filled_buffer - next_free_buffer + MODES_MAG_BUFFERS) % MODES_MAG_BUFFERS;
+
+<span class="cm">// 2. If FIFO is full, drop and wake decoder</span>
+<span class="kw">if</span> (free_bufs == <span class="num">0</span>) {
+    dropping = <span class="num">1</span>;
+    outbuf-&gt;dropped += slen;
+    <span class="fn">wakeDecode</span>();   <span class="cm">// make sure decoder isn't sleeping</span>
+    <span class="kw">return</span>;
+}
+
+<span class="cm">// 3. Convert IQ → magnitude INTO the buffer (no lock needed during conversion)</span>
+RTLSDR.converter(buf, &amp;outbuf-&gt;data[Modes.trailing_samples], slen, ...);
+
+<span class="cm">// 4. Then lock briefly just to advance the pointer and signal the decoder</span>
+<span class="fn">lockReader</span>();
+Modes.first_free_buffer = next_free_buffer;  <span class="cm">// hand buffer to decoder</span>
+<span class="fn">wakeDecode</span>();                               <span class="cm">// pthread_cond_signal</span>
+<span class="fn">unlockReader</span>();</pre>
+
+<div class="callout">
+  <strong>Why check space without the lock?</strong> The conversion step is the most expensive part. Holding a mutex during a 128KB memset/table-lookup would stall the decoder thread. Instead readsb does a <em>optimistic read</em> of the pointers (racy but safe because only the reader writes <code>first_free_buffer</code>), then holds the lock only for the brief pointer update.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="5">
+    <span>5. Debugging the Signal Path</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<h3>The antiSpam pattern</h3>
+<p>The callback fires 35 times per second. Without rate-limiting, debug output would be unreadable. readsb uses a static <code>antiSpam</code> counter throughout the callback — <span class="filepath">sdr_rtlsdr.c:423</span>:</p>
+
+<pre><span class="cm">// antiSpam is a static countdown; starts at some positive value</span>
+<span class="kw">if</span> (--antiSpam &lt;= <span class="num">0</span> &amp;&amp; !Modes.exit) {
+    fprintf(stderr, <span class="str">"FIFO dropped, suppressing for 30 seconds.\n"</span>);
+    antiSpam = <span class="num">300</span>;   <span class="cm">// reset to ~300 callbacks = ~10 seconds</span>
+}</pre>
+
+<p>A time-based variant is also used in some places: <code>if (mstime() &gt; antiSpam) { antiSpam = mstime() + 10*SECONDS; ... }</code>. Both achieve the same goal: one log line per event, not one per callback.</p>
+
+<h3>Available debug flags for the signal layer</h3>
+<table>
+  <thead><tr><th>Flag</th><th>How to enable</th><th>What it prints</th></tr></thead>
+  <tbody>
+    <tr><td><code>debug_sampleCounter</code></td><td><code>--debug K</code></td><td>Prints the raw <code>sampleTimestamp</code> every ~3000 callbacks — confirms sample counting is advancing correctly</td></tr>
+    <tr><td>FIFO overflow message</td><td>(always)</td><td>"FIFO dropped" printed when <code>free_bufs == 0</code> and antiSpam fires — indicates decoder is too slow</td></tr>
+    <tr><td>Weird block size</td><td>(always)</td><td>Prints when USB block size ≠ <code>Modes.sdr_buf_size</code> — hints at USB instability</td></tr>
+    <tr><td><code>mean_level</code> / <code>mean_power</code></td><td>read from stats output</td><td>Per-buffer averages; very high <code>mean_level</code> → overloaded input (reduce gain)</td></tr>
+  </tbody>
+</table>
+
+<h3>Reading the field: when is the signal too loud?</h3>
+<p>When the RTL-SDR tuner is overloaded, many samples saturate at 255/0. In the lookup table, I=255, Q=255 maps to a magnitude of 1.0 (= 65535 in uint16_t). If <code>mean_level</code> stays above ~0.6 consistently, the gain is likely too high and the demodulator will see clipped preambles.</p>
+
+<h3>How to trace a dropped-buffer problem</h3>
+<p>Add a temporary <code>fprintf</code> in <code>rtlsdrCallback()</code> to print <code>outbuf->dropped</code> on every callback, bypassing antiSpam. Or check <code>Modes.stats_current.samples_dropped</code> at exit with <code>--stats</code>.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="6">
+    <span>6. Quiz</span>
+    <span class="section-label">(practice)</span>
+  </label>
+</h2>
+
+<div class="quiz-block">
+
+  <div class="question" data-question="1">
+    <p>Q1. The UC8 lookup table has 65536 entries. Why 65536 specifically?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="65536 = 2^16, but that's not the connection here. The 2^16 entries come from 256 possible I values × 256 possible Q values, not from the uint16_t output range.">Because uint16_t can hold values 0–65535</li>
+      <li data-correct="false" data-why="Not quite — there are 256 I values AND 256 Q values. The table indexes the pair (I, Q) together.">Because each byte has 256 possible values</li>
+      <li data-correct="true" data-why="Correct. 256 possible values for I × 256 possible values for Q = 65536 total unique (I, Q) pairs. Every possible combination of raw dongle bytes has one precomputed entry.">256 I values × 256 Q values = every possible input pair</li>
+      <li data-correct="false" data-why="The sample rate is 2.4 MHz but the table size comes from the input value range, not the sample rate.">Because the RTL-SDR sample rate is 2.4 MHz</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="2">
+    <p>Q2. If <code>outbuf->dropped</code> is non-zero, what happened?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="dropped counts missed USB samples, not decoding errors. CRC failures are tracked separately in stats.">The Mode S CRC failed on this buffer</li>
+      <li data-correct="true" data-why="Correct. dropped is incremented in rtlsdrCallback() when free_bufs == 0 (the ring buffer was full). The decoder thread wasn't consuming buffers fast enough, so the reader had to discard incoming samples.">The ring buffer was full when this block arrived; samples were discarded</li>
+      <li data-correct="false" data-why="The bounce buffer is a Pi-specific workaround for kernel zero-copy issues, not related to the dropped counter.">The bounce buffer was used on a Raspberry Pi</li>
+      <li data-correct="false" data-why="Trailing samples are valid overlap from the previous buffer, deliberately copied. They don't set dropped.">The trailing samples from the previous buffer were invalid</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="3">
+    <p>Q3. <code>wakeDecode()</code> is called inside the lock in the happy path, but also called <em>outside</em> the lock when the FIFO is full. Why is it safe to call outside the lock?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="pthread_cond_signal is not inherently safe without a mutex — but the specific use here is safe because of the reasoning below.">pthread_cond_signal is always lock-free</li>
+      <li data-correct="true" data-why="Correct. When the FIFO is full, calling wakeDecode() without the lock is safe because the goal is just to make sure the decoder isn't sleeping — a spurious wakeup is harmless. The decoder re-checks its condition (buffer available?) under its own lock anyway. The POSIX condition variable model allows signaling outside the mutex for this pattern.">A spurious wakeup is harmless — the decoder re-checks its condition under its own lock</li>
+      <li data-correct="false" data-why="There's no atomic flag here. wakeDecode() calls pthread_cond_signal, not an atomic store.">It uses an atomic store which bypasses mutex requirements</li>
+      <li data-correct="false" data-why="The reader thread is the one calling wakeDecode() — it signals the decode thread, not itself.">The decode thread signals itself</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="4">
+    <p>Q4. What does <code>--debug K</code> enable, and where in the code does it print?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="'K' for keys is not what this flag does. sampleCounter is the specific counter it monitors.">It logs every keyboard input event</li>
+      <li data-correct="false" data-why="Network debug is 'n', not 'K'.">It enables verbose TCP network logging</li>
+      <li data-correct="true" data-why="Correct. 'K' sets Modes.debug_sampleCounter = 1. In rtlsdrCallback() (sdr_rtlsdr.c:435), there's: if (Modes.debug_sampleCounter && --antiSpam2 <= 0) { fprintf(stderr, sampleTimestamp); antiSpam2 = 3000; }">It sets <code>debug_sampleCounter</code>; prints <code>outbuf->sampleTimestamp</code> every ~3000 callbacks</li>
+      <li data-correct="false" data-why="CRC debugging uses 'C' (recent) or other flags — not 'K'.">It logs all CRC checks in the demodulator</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="5">
+    <p>Q5. Why does each <code>mag_buf</code> start with <code>Modes.trailing_samples</code> of data copied from the previous buffer?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Crossfading is an audio concept. The overlap here solves a frame-detection boundary problem, not a click/pop problem.">To prevent audio clicks when the demodulator processes consecutive buffers</li>
+      <li data-correct="true" data-why="Correct. A Mode S preamble is 8 µs (about 19 samples at 2.4 MHz). If a preamble starts near the end of one buffer, the demodulator needs to read samples from both that buffer and the next. By prefixing each new buffer with the tail of the previous one, the demodulator sees a continuous stream regardless of transfer boundaries.">Mode S preambles can span USB transfer boundaries; the overlap lets the demodulator see them without splitting its window</li>
+      <li data-correct="false" data-why="Zero-padding would introduce false-low samples that could corrupt the noise floor estimate. The trailing samples are real signal data.">To zero-pad the buffer so the FFT length is a power of two</li>
+      <li data-correct="false" data-why="DC blocking is done in convert_uc8_generic(), not via buffer overlap.">To allow the DC blocking filter to have state between buffers</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="score-area" id="score-area" hidden>Score: <span id="score-val">0</span> / 5</div>
+</div>
+
+<!-- scenario questions -->
+<h2>Check Your Understanding</h2>
+
+<div class="callout">
+<strong>Scenario A:</strong> You add a <code>fprintf</code> inside the main conversion loop in <code>convert_uc8_nodc()</code>. The program immediately grinds to a halt. Why?
+<br><br>
+<a href="#" id="toggleA" style="color:var(--cyan)">show answer</a>
+<div id="ansA" hidden style="margin-top:0.75rem; color:var(--green)">
+<code>convert_uc8_nodc()</code> is called once per USB transfer (~35 times/second) and processes ~32,000 samples per call. A <code>fprintf</code> per sample = ~1.1 million writes to stderr per second — each involving a syscall, locking the stderr buffer, and flushing. This instantly overwhelms the process. The right approach is to add the print <em>outside</em> the sample loop (once per buffer) or use antiSpam to rate-limit to once per N callbacks.
+</div>
+</div>
+
+<div class="callout" style="margin-top:1rem;">
+<strong>Scenario B:</strong> <code>mean_level</code> is consistently 0.03 (very low). What does this tell you, and what should you check?
+<br><br>
+<a href="#" id="toggleB" style="color:var(--cyan)">show answer</a>
+<div id="ansB" hidden style="margin-top:0.75rem; color:var(--green)">
+A <code>mean_level</code> of 0.03 means the average magnitude is only 3% of full scale — the signal is very quiet. Possible causes: (1) gain is set too low; (2) antenna is disconnected or poorly connected; (3) SDR is tuned to the wrong frequency; (4) the converter is producing invalid output (bug). Start with <code>rtlsdr_set_tuner_gain()</code> — check <code>RTLSDR.curGain</code> or enable the gain debug output. Then verify the frequency (<code>Modes.freq</code>). A totally absent signal (antenna unplugged) will produce near-zero mean_level.
+</div>
+</div>
+
+<br><br>
+<p style="color:var(--muted); font-size:0.85rem; text-align:center;">readsb · convert.c, sdr_rtlsdr.c, readsb.h · lesson 0002</p><br>
+
+</div>
+
+<script>
+const checks = document.querySelectorAll('.section-check');
+const totalSections = checks.length;
+function updateProgress() {
+  const done = [...checks].filter(c => c.checked).length;
+  document.getElementById('progress-fill').style.width = (done/totalSections*100)+'%';
+  document.getElementById('progress-text').textContent = done+' / '+totalSections+' sections complete';
+}
+checks.forEach(c => c.addEventListener('change', updateProgress));
+updateProgress();
+
+function shuffle(arr) {
+  for (let i = arr.length-1; i>0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
+let correct=0, answered=0;
+const totalQ=5;
+
+document.querySelectorAll('[data-question]').forEach(block => {
+  const list = block.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = block.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (block.dataset.done) return;
+      block.dataset.done='true'; answered++;
+      const isCorrect = li.dataset.correct==='true';
+      if (isCorrect) correct++;
+      list.querySelectorAll('li').forEach(o => {
+        o.classList.add('disabled');
+        o.classList.add(o.dataset.correct==='true' ? 'correct' : 'wrong');
+      });
+      feedback.hidden=false;
+      feedback.textContent=(isCorrect?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      feedback.className='feedback '+(isCorrect?'correct-fb':'wrong-fb');
+      if (answered===totalQ) {
+        const sa=document.getElementById('score-area'); sa.hidden=false;
+        document.getElementById('score-val').textContent=correct;
+        sa.style.color=correct>=4?'var(--green)':correct>=2?'var(--yellow)':'var(--red)';
+      }
+    });
+  });
+});
+
+document.getElementById('toggleA').addEventListener('click', e => { e.preventDefault(); document.getElementById('ansA').hidden=!document.getElementById('ansA').hidden; });
+document.getElementById('toggleB').addEventListener('click', e => { e.preventDefault(); document.getElementById('ansB').hidden=!document.getElementById('ansB').hidden; });
+</script>
+</body>
+</html>

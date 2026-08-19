@@ -1,0 +1,69 @@
+"""Reference solution — Exercise 02: inventory-aware market-maker quoting.
+
+Avellaneda-Stoikov-lite: reservation price skews with inventory, spread is
+set by risk aversion + volatility + a liquidity term. Contrast with
+fpga/market_maker.vhd, which quotes mid ± spread/2 with no inventory input.
+
+Peek policy: attempt exercises/02_market_maker/market_maker.py first.
+"""
+import math
+
+
+class InventoryAwareQuoter:
+    """Quotes a bid/ask pair around an inventory-skewed reservation price.
+
+    Parameters
+    ----------
+    gamma : risk aversion (> 0). Higher -> wider spread, stronger skew.
+    sigma : volatility of the mid price (> 0), per unit of `horizon`.
+    horizon : remaining trading horizon T (> 0).
+    max_inventory : position limit; quoting goes one-sided at the limit.
+    k : order-arrival liquidity parameter (> 0, default 1.5).
+    """
+
+    def __init__(self, gamma: float, sigma: float, horizon: float,
+                 max_inventory: int, k: float = 1.5) -> None:
+        if min(gamma, sigma, horizon, k) <= 0:
+            raise ValueError("gamma, sigma, horizon and k must be positive")
+        if max_inventory <= 0:
+            raise ValueError("max_inventory must be positive")
+        self.gamma = gamma
+        self.sigma = sigma
+        self.horizon = horizon
+        self.max_inventory = max_inventory
+        self.k = k
+
+    def reservation_price(self, mid: float, inventory: int) -> float:
+        """r = mid - q * gamma * sigma^2 * T
+
+        Long inventory (q > 0) pushes the reservation price below mid so
+        both quotes skew down and the book leans toward selling out of the
+        position; short inventory skews up.
+        """
+        return mid - inventory * self.gamma * self.sigma ** 2 * self.horizon
+
+    def optimal_spread(self) -> float:
+        """delta = gamma * sigma^2 * T + (2 / gamma) * ln(1 + gamma / k)
+
+        First term: inventory-risk compensation. Second term: how much edge
+        the arrival intensity of orders lets you charge.
+        """
+        return (self.gamma * self.sigma ** 2 * self.horizon
+                + (2.0 / self.gamma) * math.log(1.0 + self.gamma / self.k))
+
+    def quote(self, mid: float, inventory: int) -> tuple[float | None, float | None]:
+        """(bid, ask) centered on the reservation price, half a spread out.
+
+        At the inventory limit the quoter goes one-sided: at or above
+        +max_inventory it stops bidding (bid is None); at or below
+        -max_inventory it stops offering (ask is None).
+        """
+        r = self.reservation_price(mid, inventory)
+        half = self.optimal_spread() / 2.0
+        bid: float | None = r - half
+        ask: float | None = r + half
+        if inventory >= self.max_inventory:
+            bid = None
+        if inventory <= -self.max_inventory:
+            ask = None
+        return (bid, ask)

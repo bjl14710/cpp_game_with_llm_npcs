@@ -1,0 +1,25 @@
+# Plan: issue #21 — GPIO PxREN pull model
+Status: QUEUED (overnight 2026-07-15)
+Branch: feature/issue-21-gpio-pxren (stacked on feature/issue-20-clock-compliance)
+
+## Goal (SLAU367P §12.2.4 / Table 12-1)
+1. Replace independent PULLUP/PULLDOWN masks with one RESISTOR:ENABLE
+   (PxREN) register; PxOUT selects pull direction. Keep PULLUP/PULLDOWN
+   as deprecated aliases that write REN+OUT.
+2. Validate pin indexes 0-7 (-222 otherwise)
+3. Undriven input pins with REN enabled read the pull level
+
+## Touch points
+silmulator/devices/msp430.py: GPIOPort dataclass, _reg_gpio,
+_gpio_pullup/_gpio_pulldown/_gpio_inp/_gpio_pin_*. Keep the
+lambda-registration pattern; model the doc's registers only.
+
+## Acceptance
+1. xfails flip (delete markers): test_pin_index_beyond_port_width_rejected,
+   test_invalid_pin_mode_rejected, test_pullup_pulldown_mutually_exclusive,
+   test_input_reflects_enabled_pullup
+2. Audit probes gpio_pin_index_unvalidated / gpio_pull_both /
+   gpio_input_ignores_pulls go STALE → rescore; gate clean
+3. Vendor-doc diff: GPIO:PORT1:RESISTOR:ENABLE CONFLICT → MATCH
+4. Existing test_msp430.py GPIO tests stay green; .sil save/load unaffected
+5. Full suite green

@@ -1,0 +1,68 @@
+"""Open ONE non-draft consolidation PR: dev -> main."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## What this is
+The stacked feature PRs have been getting merged into each other's BASE
+branches instead of main, so main (last touched by PR #60) is 26 commits
+behind the actual game. `dev` is the tip of the completed chain —
+`origin/feature/punch-and-jump` after #108 was merged into it — and this
+PR brings ALL of it to main in one review.
+
+## What main gains (in landing order)
+- **Journal** (#87/#88, PR #90) — player journal over the shared fact
+  store, conflicts flagged.
+- **Aim fix + creator preview + more styles** (#91-#93, PR #94) — gun
+  fires along the camera's true look vector from eye height; player-driven
+  preview rotation; more style-tagged parts/palettes.
+- **Shared character library** (#95-#98, PR #99) — every roaming NPC and
+  the creator draw from ONE composite parts pool; authored looks for the
+  ten townsfolk; deterministic fallbacks; rigged models retired as the NPC
+  source.
+- **Punch/pistol viewmodel + jumping** (PR #100) — camera-locked
+  viewmodel (fist hidden at rest, punches on click; held pistol with
+  recoil); height-aware collision + Space jump over curb-line props.
+- **Mii-style visual overhaul + player avatar** (#101-#107, PR #108) —
+  Mii proportions, inverted-hull outlines, Mouth category (six-item look
+  format with back-compat), catalog expansion (hair 18 / eyes 10 /
+  bodies 6 / palettes 12), graphics-pack seam, and "Edit My Avatar" with
+  first-person palette tinting.
+
+## Verification
+- Suite at the tip: **182 cases / 31,730 assertions, 0 failed, 1 skipped**
+  (llm_live); game builds clean.
+- Each constituent PR was screenshot-verified and the last two milestones
+  passed visual-qa gates.
+- main has NO divergent content (its only unique commit is the PR #60
+  merge commit), so this merges without conflicts.
+
+## After merging
+- Open drafts #94 and #99 become redundant (their content lands via this
+  PR) — close them once this is in. #100/#108 were already merged into
+  base branches by you.
+- NOT included (separate lines, deliberate): `8-pluggable-llm-and-one-click`
+  (pluggable LLM backends — its own PR/decision) and the abandoned
+  pre-raylib weapons line (`initial_npcs_and_world`, conflict map in #46).
+- Future stacked chains will target `dev` so this consolidation stays a
+  one-click affair.
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="Consolidate the completed feature chain into main (journal -> aim -> shared library -> punch/jump -> Mii overhaul)",
+           body=BODY, base="main", head="dev", draft=False)
+print(f"PR #{pr.number} (ready for your merge): {pr.html_url}")

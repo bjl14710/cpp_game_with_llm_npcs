@@ -1,0 +1,85 @@
+# npc_staging — apply map (written while Bash was blocked)
+
+Staged file contents for `cpp_game_with_llm_npcs`, prepared in advance so the
+21-commit plan (`/home/node/.claude/plans/tender-herding-cupcake.md`) keeps its
+small, reviewable commits. Apply each file at its commit, NOT before — the
+pure `git mv` commits (2, 3, 17, 18) must stay pure moves.
+
+Everything already written directly into the repo working tree (src/core/*,
+tests/* except the two staged below, personas/*, src/app/Renderer3D|InputMap|
+Menu) just needs `git add` of the right files per commit.
+
+## Per-commit apply instructions
+
+- **Commit 1** (`build(tests): vendor doctest...`): download
+  `https://raw.githubusercontent.com/doctest/doctest/v2.4.12/doctest/doctest.h`
+  to `external/doctest.h` (fallback v2.4.11). Add: external/doctest.h,
+  tests/test_main.cpp, tests/Makefile. Gate: `make -C tests test`.
+- **Commit 2** (pure move): `git mv src/LlmClient.hpp src/LlmClient.cpp
+  src/Persona.hpp -> src/core/`; CMakeLists: include dir src/core; update
+  add_executable paths.
+- **Commit 3** (pure move + core lib): `git mv src/Npc.hpp src/Npc.cpp ->
+  src/core/`; CMakeLists gains `llm_npc_core` STATIC lib (see
+  CMakeLists.final.txt for target shape; only core sources that exist yet).
+- **Commit 4**: src/core/Config.{hpp,cpp} (already in tree) + shrink
+  src/main.cpp to use them. Drop `-I../src` from tests/Makefile INCLUDES
+  once includes resolve purely in src/core.
+- **Commit 5**: src/core/PersonaLoader.{hpp,cpp} + tests/test_persona.cpp
+  (already in tree).
+- **Commit 6**: personas/*.persona (10 files, in tree) + `git rm
+  personas/companion.txt` + copy staged `test_persona_roster_addendum.cpp`
+  to tests/test_persona_roster.cpp (self-contained; no append needed).
+- **Commit 7**: src/core/StreamAssembler.hpp + tests/test_stream.cpp (in tree).
+- **Commit 8**: copy staged `LlmClient.hpp` + `LlmClient.cpp` over
+  src/core/LlmClient.*. ALSO: add `keep_alive` parsing to
+  src/core/Config.cpp::loadLlmConfig (`if kv "keep_alive" -> cfg.keepAlive`)
+  and add `keep_alive = 10m` line to config/llm.cfg.
+- **Commit 9**: copy staged `FakeOllama.hpp`, `test_llm_client.cpp`,
+  `test_npc_history.cpp`, `test_llm_live.cpp` (OLLAMA_LIVE=1 gated) into
+  tests/.
+- **Commit 10**: src/core/Math.hpp + City.{hpp,cpp} (in tree).
+- **Commit 11**: tests/test_city.cpp (in tree).
+- **Commit 12**: copy staged `Npc.hpp` over src/core/Npc.hpp (adds placement)
+  + copy staged `World.hpp`/`World.cpp` into src/core/.
+- **Commit 13**: copy staged `test_world.cpp` into tests/.
+- **Commit 14**: src/core/KeyBindings.{hpp,cpp} + tests/test_keybindings.cpp
+  (in tree).
+- **Commit 15**: src/core/DialogueSession.{hpp,cpp} +
+  tests/test_dialogue_session.cpp (in tree).
+- **Commit 16**: src/app/Renderer3D.{hpp,cpp} (in tree). CMake game target
+  switches to conditional SFML+OpenGL (CMakeLists.final.txt shape).
+- **Commit 17**: `git mv src/main.cpp src/app/main.cpp`, then overwrite with
+  staged `main.cpp`; add src/app/InputMap.{hpp,cpp} (in tree); CMake final.
+  NOTE: staged main.cpp needs ALL staged pieces applied (DialogUI ext, World,
+  Npc placement) — if committing 17 before 18, split: commit 17 may need the
+  dialogue blocks stubbed. Simpler: commit 17 = move+InputMap+CMake with the
+  full main.cpp, and land 18's DialogUI move in the same push sequence; keep
+  gates green by running `make -C tests test` (app files aren't built in the
+  container anyway). Windows visual check needed.
+- **Commit 18**: `git mv src/DialogUI.hpp src/DialogUI.cpp -> src/app/`, then
+  overwrite with staged `DialogUI.hpp`/`DialogUI.cpp`.
+- **Commit 19**: src/app/Menu.{hpp,cpp} (in tree) + config/keybindings.cfg
+  (defaults: move_forward = W, move_backward = S, strafe_left = A,
+  strafe_right = D, talk = T, menu = Escape).
+- **Commit 20**: copy staged `run.bat` to repo root.
+- **Commit 21**: README.md rewrite + docs/CONTROLS.md + docs/DEVELOPER.md.
+
+## Ordering constraint found while staging
+
+Commit 17's main.cpp references DialogUI extensions (commit 18), World
+(commit 12), Npc placement (commit 12), Menu (commit 19). Since the app
+target only builds on Windows, container test gates stay green regardless;
+but to keep every commit *logically* buildable on Windows, reorder the app
+commits as: 16 (renderer) -> 18' (DialogUI move+ext) -> 19' (Menu+cfg) ->
+17' (main loop last, ties everything together). Use that order when
+committing, keeping one feature per commit.
+
+## Misc
+
+- Ollama install command (run when Bash classifier recovers):
+  see NPC_CITY_PROMPT.txt / plan; binary to ~/.local/ollama, serve in
+  background, pull qwen2.5:3b-instruct, then OLLAMA_LIVE=1 tests.
+- .gitignore: DONE — written to repo root (build/, tests/build/); include it
+  in commit 1.
+- CMakeLists.final.txt in this dir = target end state; strip the header
+  comment when applying.

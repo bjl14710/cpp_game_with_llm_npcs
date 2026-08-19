@@ -1,0 +1,110 @@
+/**
+ * @file bench.cpp  (exercises/08_latency_bench)
+ * @brief Benchmark driver — measure rdtsc() overhead with your Histogram.
+ *
+ * Prerequisites: complete latency.hpp (record + percentile) first.
+ *
+ * Compile (from repo root, after implementing latency.hpp):
+ *   g++ -std=c++20 -O2 -I exercises/08_latency_bench bench.cpp -o bench_release
+ *   g++ -std=c++20 -O0 -I exercises/08_latency_bench bench.cpp -o bench_debug
+ *
+ * Run both and fill in the results table below.
+ *
+ * -----------------------------------------------------------------------
+ * RESULTS TABLE (fill in after running)
+ *
+ * | Measurement          | -O0 p50 | -O0 p99 | -O2 p50 | -O2 p99 |
+ * |----------------------|---------|---------|---------|---------|
+ * | rdtsc() overhead     |         |         |         |         |
+ * | Histogram::record()  |         |         |         |         |
+ *
+ * Discussion questions (answer in your own words):
+ *   1. How much does -O2 reduce rdtsc overhead compared to -O0?
+ *   2. Why does p99 > p50 even for a trivial operation like rdtsc()?
+ *      (Hint: OS interrupts, CPU power states, cache misses)
+ *   3. If rdtsc() costs ~5 ns, is it safe to time operations that take ~50 ns?
+ * -----------------------------------------------------------------------
+ */
+#include "latency.hpp"
+#include <cstdio>
+#include <ctime>
+
+// ---------------------------------------------------------------------------
+// MHz calibration — pre-filled.  Do not modify.
+// ---------------------------------------------------------------------------
+static double calibrate_mhz() {
+    struct timespec t0{}, t1{};
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    uint64_t c0 = rdtsc();
+    while (true) {
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        uint64_t ns = static_cast<uint64_t>(t1.tv_sec - t0.tv_sec) * 1'000'000'000ULL
+                    + static_cast<uint64_t>(t1.tv_nsec - t0.tv_nsec);
+        if (ns >= 100'000'000ULL) {
+            uint64_t c1 = rdtsc();
+            return static_cast<double>(c1 - c0) / static_cast<double>(ns) * 1000.0;
+        }
+    }
+}
+
+int main() {
+    // ------------------------------------------------------------------
+    // Pre-filled: calibrate, warm up.
+    // ------------------------------------------------------------------
+    std::printf("Calibrating CPU frequency...\n");
+    double mhz = calibrate_mhz();
+    std::printf("  Measured: %.1f MHz\n\n", mhz);
+
+    constexpr int WARMUP = 10'000;
+    constexpr int N      = 1'000'000;
+
+    for (int i = 0; i < WARMUP; ++i) {
+        volatile uint64_t dummy = rdtsc();
+        (void)dummy;
+    }
+
+    // ------------------------------------------------------------------
+    // Benchmark 1: rdtsc() overhead.
+    //
+    // TODO: declare a Histogram named rdtsc_hist.
+    //       In the loop, insert start/stop rdtsc() calls and record.
+    //       Then call rdtsc_hist.print(mhz).
+    // ------------------------------------------------------------------
+    std::printf("rdtsc() overhead (%d samples):\n", N);
+
+    // TODO: Histogram rdtsc_hist;
+    for (int i = 0; i < N; ++i) {
+        // TODO: uint64_t t0 = rdtsc();
+        // TODO: uint64_t t1 = rdtsc();
+        // TODO: __asm__ volatile("" ::: "memory");  // compiler barrier
+        // TODO: rdtsc_hist.record(t1 - t0);
+        (void)i;
+    }
+
+    // TODO: rdtsc_hist.print(mhz);
+    std::printf("  (not instrumented yet)\n\n");
+
+    // ------------------------------------------------------------------
+    // Benchmark 2: Histogram::record() overhead.
+    //
+    // TODO: declare Histogram rec_hist and dummy_hist.
+    //       Time the call to dummy_hist.record(i) and record the delta.
+    // ------------------------------------------------------------------
+    std::printf("Histogram::record() overhead (%d samples):\n", N);
+
+    // TODO: Histogram rec_hist, dummy_hist;
+    for (int i = 0; i < N; ++i) {
+        // TODO: uint64_t t0 = rdtsc();
+        // TODO: dummy_hist.record(static_cast<uint64_t>(i));
+        // TODO: __asm__ volatile("" ::: "memory");
+        // TODO: uint64_t t1 = rdtsc();
+        // TODO: rec_hist.record(t1 - t0);
+        (void)i;
+    }
+
+    // TODO: rec_hist.print(mhz);
+    std::printf("  (not instrumented yet)\n\n");
+
+    std::printf("Fill in the results table in this file after running.\n");
+    return 0;
+}

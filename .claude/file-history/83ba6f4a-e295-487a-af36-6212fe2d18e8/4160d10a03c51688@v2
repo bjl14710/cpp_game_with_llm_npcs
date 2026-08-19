@@ -1,0 +1,317 @@
+"""Structural diff: doc-generated MSP430 block spec vs the hand-built model.
+
+Loads a generated block spec (``msp430fr5994_generated.json`` — extracted
+from SLAU367P/SLASE54D for the pilot scope ADC12_B + Timer_A + GPIO) and
+compares its command surface against what ``silmulator.devices.msp430``
+actually implements, by probing a live device instance. Each doc-derived
+command is classified:
+
+- **MATCH** — the model implements it and every behavioral probe agrees
+  (doc-valid values accepted, doc-invalid values rejected, writes echo).
+- **MISSING_FROM_MODEL** — the doc describes it; the model has no such
+  command (or instance).
+- **MISSING_FROM_GENERATED** — the model implements it within the pilot
+  scope but the generated spec has no doc basis for it (simulator
+  conveniences land here by design).
+- **CONFLICT** — both sides claim the feature but behave differently
+  (different structure, doc-valid rejected, or doc-invalid accepted).
+  Conflicts *warn*; they never block generation.
+
+Known v1 limitation (recorded here rather than silently skipped): per-
+instance capture/compare register *counts* are not diffed — the compliance
+audit (`docs/audits/msp430-compliance-report.md`) tracks that gap.
+
+Usage:
+    python -m silmulator.custom_blocks.diff_report \
+        [--spec PATH] [--output-md PATH] [--output-json PATH]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from silmulator.devices.msp430 import MSP430
+
+MATCH = "MATCH"
+MISSING_FROM_MODEL = "MISSING_FROM_MODEL"
+MISSING_FROM_GENERATED = "MISSING_FROM_GENERATED"
+CONFLICT = "CONFLICT"
+
+DEFAULT_SPEC = Path(__file__).resolve().parent / "msp430fr5994_generated.json"
+
+# Pilot-scope prefixes: only model commands under these are compared.
+SCOPE_PREFIXES = ("ADC:", "GPIO:", "TIMERA", "TA")
+
+# Collapse per-instance model paths onto the spec's representative instance
+# (port 1, channel 0, timer 0, CC 0) so 450 concrete paths diff cleanly
+# against one spec entry each.
+_REPRESENTATIVE_SUBS = [
+    (re.compile(r"PORT\d+"), "PORT1"),
+    (re.compile(r"\bP\d+"), "P1"),
+    (re.compile(r"CHANNEL\d+"), "CHANNEL0"),
+    (re.compile(r"\bCH\d+"), "CH0"),
+    (re.compile(r"TIMERA\d+"), "TIMERA0"),
+    (re.compile(r"\bTA\d+"), "TA0"),
+    (re.compile(r"\bCC\d+"), "CC0"),
+]
+
+
+def representative(path: str) -> str:
+    """Collapse an indexed model path onto the spec's representative instance."""
+    out = path
+    for rx, repl in _REPRESENTATIVE_SUBS:
+        out = rx.sub(repl, out)
+    return out
+
+
+@dataclass
+class DiffItem:
+    """One classified difference (or agreement) between spec and model."""
+
+    kind: str
+    path: str
+    peripheral: str
+    citation: str = ""
+    detail: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "path": self.path,
+            "peripheral": self.peripheral,
+            "citation": self.citation,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class DiffReport:
+    """Full comparison result plus the metadata needed to render it."""
+
+    spec_name: str
+    source_documents: List[dict]
+    scope: List[str]
+    items: List[DiffItem] = field(default_factory=list)
+
+    def counts(self) -> Dict[str, int]:
+        out = {k: 0 for k in (MATCH, MISSING_FROM_MODEL, MISSING_FROM_GENERATED, CONFLICT)}
+        for item in self.items:
+            out[item.kind] += 1
+        return out
+
+    def to_dict(self) -> dict:
+        return {
+            "spec": self.spec_name,
+            "source_documents": self.source_documents,
+            "scope": self.scope,
+            "counts": self.counts(),
+            "items": [i.to_dict() for i in self.items],
+        }
+
+
+def _probe_command(entry: dict) -> Tuple[bool, str]:
+    """Run the spec entry's behavioral probes against a fresh device.
+
+    Returns (agrees, detail). A fresh instance per entry keeps probe writes
+    from leaking state between entries.
+    """
+    dev = MSP430()
+    path = entry["path"]
+
+    for value in entry.get("valid_values", []):
+        before = len(dev._error_queue)
+        dev.process(f"{path} {value}")
+        if len(dev._error_queue) > before:
+            code, msg = dev._error_queue[-1]
+            return False, f"doc-valid value {value!r} rejected ({code}: {msg})"
+        if entry.get("echo_check"):
+            echoed = dev.process(f"{path}?").strip()
+            if echoed.upper() != str(value).upper():
+                return False, (
+                    f"write of doc-valid value {value!r} does not read back "
+                    f"(got {echoed!r}) — write ignored or semantics differ"
+                )
+
+    invalid = entry.get("invalid_probe")
+    if invalid is not None:
+        before = len(dev._error_queue)
+        dev.process(f"{path} {invalid}")
+        if len(dev._error_queue) == before:
+            return False, (
+                f"documented-invalid value {invalid!r} accepted silently "
+                "(doc defines no such encoding)"
+            )
+
+    return True, ""
+
+
+def compare(spec: dict) -> DiffReport:
+    """Compare a generated block spec against the live MSP430 model."""
+    generator = spec.get("generator", {})
+    report = DiffReport(
+        spec_name=spec.get("name", "?"),
+        source_documents=generator.get("source_documents", []),
+        scope=generator.get("scope", []),
+    )
+
+    model_paths = set(MSP430()._handlers.keys())
+
+    # --- doc-derived commands -> MATCH / MISSING_FROM_MODEL / CONFLICT ----
+    claimed: set = set()
+    for entry in generator.get("commands", []):
+        path = entry["path"].upper()
+        peripheral = entry.get("peripheral", "?")
+        citation = entry.get("citation", "")
+        claimed.add(representative(path))
+        for alias in entry.get("aliases", []):
+            claimed.add(representative(alias.upper()))
+
+        equivalents = [e.upper() for e in entry.get("model_equivalent", [])]
+        if equivalents:
+            for e in equivalents:
+                claimed.add(representative(e))
+            if all(e in model_paths for e in equivalents):
+                report.items.append(DiffItem(
+                    CONFLICT, path, peripheral, citation,
+                    f"doc feature exists in the model as {equivalents} with a "
+                    f"different structure: {entry.get('equivalence_note', '')}".strip(),
+                ))
+            else:
+                report.items.append(DiffItem(
+                    MISSING_FROM_MODEL, path, peripheral, citation,
+                    "neither the doc-shaped command nor its model equivalent exists",
+                ))
+            continue
+
+        if path not in model_paths:
+            report.items.append(DiffItem(
+                MISSING_FROM_MODEL, path, peripheral, citation,
+                "doc-described command has no handler in msp430.py",
+            ))
+            continue
+
+        agrees, detail = _probe_command(entry)
+        if agrees:
+            probed = bool(entry.get("valid_values") or entry.get("invalid_probe"))
+            report.items.append(DiffItem(
+                MATCH, path, peripheral, citation,
+                "" if probed else "presence-only match (entry defines no probes)",
+            ))
+        else:
+            report.items.append(DiffItem(CONFLICT, path, peripheral, citation, detail))
+
+    # --- doc-mandated instances -> MISSING_FROM_MODEL ---------------------
+    for group in generator.get("instances", []):
+        prefix = group["prefix"].upper()
+        citation = group.get("citation", "")
+        for idx in group["doc_indexes"]:
+            wanted = f"{prefix}{idx}:"
+            if not any(p.startswith(wanted) for p in model_paths):
+                report.items.append(DiffItem(
+                    MISSING_FROM_MODEL, f"{prefix}{idx}:*", prefix.rstrip(":"),
+                    citation, "documented instance absent from the model",
+                ))
+
+    # --- model commands in scope with no doc basis ------------------------
+    in_scope = sorted({
+        representative(p) for p in model_paths
+        if p.startswith(SCOPE_PREFIXES)
+    })
+    for path in in_scope:
+        if path not in claimed:
+            report.items.append(DiffItem(
+                MISSING_FROM_GENERATED, path, _peripheral_of(path), "",
+                "implemented by the model; no doc-derived entry claims it "
+                "(simulator conveniences are expected to land here)",
+            ))
+
+    return report
+
+
+def _peripheral_of(path: str) -> str:
+    """Best-effort peripheral label for a model-only path."""
+    if path.startswith("ADC"):
+        return "ADC12_B"
+    if path.startswith("GPIO"):
+        return "GPIO"
+    return "Timer_A"
+
+
+def render_markdown(report: DiffReport) -> str:
+    """Render the diff as a Markdown report with the revision header."""
+    lines: List[str] = []
+    a = lines.append
+    a("# MSP430FR5994 Vendor-Doc vs Model Diff Report")
+    a("")
+    a(f"Generated spec: **{report.spec_name}** — pilot scope: {', '.join(report.scope)}.")
+    a("")
+    a("| Ground truth | Revision |")
+    a("|---|---|")
+    for doc in report.source_documents:
+        a(f"| {doc.get('title', '?')} | **{doc.get('lit', '?')}** |")
+    a("")
+    a("Produced by `python -m silmulator.custom_blocks.diff_report`. CONFLICT "
+      "items are warnings — they never block loading or generation.")
+    a("")
+    counts = report.counts()
+    a("## Summary")
+    a("")
+    a("| Classification | Count |")
+    a("|---|---|")
+    for kind in (MATCH, CONFLICT, MISSING_FROM_MODEL, MISSING_FROM_GENERATED):
+        a(f"| {kind} | {counts[kind]} |")
+    a("")
+    for kind, heading in (
+        (CONFLICT, "CONFLICT — same feature, different behavior (warnings)"),
+        (MISSING_FROM_MODEL, "MISSING_FROM_MODEL — documented, not implemented"),
+        (MISSING_FROM_GENERATED, "MISSING_FROM_GENERATED — implemented, no doc basis"),
+        (MATCH, "MATCH"),
+    ):
+        items = [i for i in report.items if i.kind == kind]
+        if not items:
+            continue
+        a(f"## {heading}")
+        a("")
+        a("| Command | Peripheral | Citation | Detail |")
+        a("|---|---|---|---|")
+        for i in items:
+            a(f"| `{i.path}` | {i.peripheral} | {i.citation} | {i.detail} |")
+        a("")
+    return "\n".join(lines)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entry point: load spec, diff against the model, write MD + JSON."""
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--spec", default=str(DEFAULT_SPEC))
+    parser.add_argument("--output-md",
+                        default=str(repo_root / "docs" / "audits" / "msp430-vendor-doc-diff.md"))
+    parser.add_argument("--output-json",
+                        default=str(repo_root / "docs" / "audits" / "msp430-vendor-doc-diff.json"))
+    args = parser.parse_args(argv)
+
+    spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
+    report = compare(spec)
+
+    md_path = Path(args.output_md)
+    md_path.parent.mkdir(parents=True, exist_ok=True)
+    md_path.write_text(render_markdown(report))
+    json_path = Path(args.output_json)
+    json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n")
+
+    counts = report.counts()
+    print(f"report: {md_path}")
+    print(f"        {json_path}")
+    print("  ".join(f"{k}: {v}" for k, v in counts.items()))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

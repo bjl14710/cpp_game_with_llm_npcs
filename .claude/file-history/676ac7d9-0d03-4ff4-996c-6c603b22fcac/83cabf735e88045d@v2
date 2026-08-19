@@ -1,0 +1,24 @@
+# Plan: issue #19 — Timer_A/B compliance
+Status: QUEUED (overnight 2026-07-15)
+Branch: feature/issue-19-timer-compliance (stacked on feature/issue-18-adc-reference-scaling)
+
+## Goal (SLAU367P §25/§26)
+1. TAxR / CCR writes masked to 16 bits (or rejected -222)
+2. Clock divider 128 rejected — ID×TAIDEX max is /64
+3. CC MODE CAPTURE/COMPARE stored as state (CAP bit); no waveform capture
+   simulation (time still does not pass)
+4. PERIOD aliases CCR0 — single store (§25.2.3.1)
+
+## Touch points (existing handlers only, no new files/abstractions)
+silmulator/devices/msp430.py: _timer_count, _timer_cc_val, _timer_clk_div,
+_timer_cc_mode, _timer_period; audit entries TIMERAn:*/TIMERBn:*.
+
+## Acceptance
+1. Delete 4 xfail markers that flip: test_divider_128_rejected,
+   test_count_over_16bit_rejected_or_masked, test_capture_mode_settable,
+   test_period_is_ccr0_in_up_mode (14→10 xfails expected)
+2. Audit probes timer_divider_128 / timer_count_over_16bit /
+   timer_cc_capture_ignored go STALE → rescore entries; gate clean
+3. Vendor-doc diff: TIMERA0:COUNT / CLOCK:DIVIDER / CC0:MODE CONFLICT→MATCH
+   (python -m silmulator.custom_blocks.diff_report)
+4. Full suite green

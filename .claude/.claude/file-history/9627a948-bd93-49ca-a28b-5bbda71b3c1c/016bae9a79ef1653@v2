@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lesson 0007 — Creating New Blocks</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;
+  --green:#34d399;--blue:#60a5fa;--yellow:#fbbf24;--red:#f87171;
+  --orange:#fb923c;--purple:#a78bfa;--teal:#22d3ee;
+  --text:#c9d1d9;--dim:#6e7681;--border:#30363d;--code:#010409;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.72;min-height:100vh}
+
+nav{background:var(--surf);border-bottom:1px solid var(--border);padding:.6rem 1.5rem;
+    display:flex;align-items:center;gap:1rem;font-family:var(--mono);font-size:.78rem;
+    position:sticky;top:0;z-index:50;flex-wrap:wrap}
+.nav-title{color:var(--green)}.nav-lbl{color:var(--dim)}
+.pdots{display:flex;gap:.35rem;margin-left:auto}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--surf2);
+     border:1px solid var(--border);cursor:pointer;transition:background .2s}
+.dot.done{background:var(--green)}.dot.active{background:var(--yellow);border-color:var(--yellow)}
+
+article{max-width:800px;margin:0 auto;padding:2.5rem 1.5rem 6rem}
+h1{font-size:1.9rem;color:#fff;margin-bottom:.3rem;line-height:1.3}
+.why{font-size:.97rem;color:var(--green);margin-bottom:2rem;font-style:italic}
+section{margin-bottom:3.2rem}
+h2{font-size:1.22rem;color:#fff;margin-bottom:1rem;padding-bottom:.4rem;
+   border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.7rem}
+h2 .sn{font-family:var(--mono);font-size:.74rem;color:var(--dim);
+        background:var(--surf2);padding:.1rem .44rem;border-radius:4px}
+.db{font-family:var(--mono);font-size:.72rem;padding:.17rem .54rem;border:1px solid var(--border);
+    border-radius:12px;cursor:pointer;background:transparent;color:var(--dim);
+    transition:all .18s;margin-left:auto}
+.db:hover{border-color:var(--green);color:var(--green)}
+.db.ticked{background:rgba(52,211,153,.11);border-color:var(--green);color:var(--green)}
+
+h3{font-size:1rem;color:#e6edf3;margin:1.5rem 0 .55rem}
+p{margin-bottom:.85rem}
+ul,ol{margin-left:1.5rem;margin-bottom:.85rem}
+li{margin-bottom:.3rem}
+strong{color:#e6edf3}
+em{color:var(--orange);font-style:normal}
+code{font-family:var(--mono);font-size:.85em;background:var(--surf2);
+     padding:.1em .35em;border-radius:3px;color:#a5d6ff}
+
+.note,.warn,.key{border-radius:6px;padding:.75rem 1rem;margin-bottom:1rem;
+                 font-size:.9rem;line-height:1.65;border-left:3px solid}
+.note{background:rgba(96,165,250,.07);border-color:var(--blue);color:#b0c8e8}
+.warn{background:rgba(248,113,113,.07);border-color:var(--red);color:#e8b0b0}
+.key{background:rgba(52,211,153,.07);border-color:var(--green);color:#b0e8cc}
+
+pre{background:var(--code);border:1px solid var(--border);border-radius:7px;
+    padding:1rem 1.2rem;overflow-x:auto;font-family:var(--mono);
+    font-size:.83rem;line-height:1.78;margin:1rem 0 1.2rem}
+.fl{color:var(--dim);user-select:none;margin-right:.9rem}
+.cm{color:#2d4a5a;font-style:italic}.kw{color:#ff7b72}.fn{color:var(--green)}
+.str{color:#a5d6ff}.cls{color:var(--yellow)}.at{color:var(--blue)}.num{color:var(--orange)}
+.op{color:var(--dim)}.pm{color:#d2a8ff}.k2{color:var(--teal)}.me{color:#79c0ff}
+
+.fp{font-family:var(--mono);font-size:.73rem;background:var(--surf2);
+    border:1px solid var(--border);border-radius:4px;padding:.15rem .5rem;
+    color:var(--dim);margin-bottom:.6rem;display:inline-block}
+
+/* step flow */
+.steps{display:grid;grid-template-columns:auto 1fr;gap:.1rem 1.1rem;
+       margin:1rem 0 1.4rem}
+.sn{font-family:var(--mono);font-size:.9rem;color:var(--yellow);text-align:right;
+    padding:.35rem 0;white-space:nowrap}
+.st{padding:.35rem 0;border-bottom:1px solid var(--border);color:var(--text)}
+.sn:last-of-type+.st{border:none}
+
+/* file map */
+.fmap{background:var(--surf);border:1px solid var(--border);border-radius:7px;
+      padding:1rem 1.3rem;font-family:var(--mono);font-size:.82rem;
+      line-height:1.85;margin:1rem 0 1.4rem}
+.fmap .dir{color:var(--blue)}.fmap .new{color:var(--green)}.fmap .cm{color:var(--dim)}
+
+/* comparison table */
+table{width:100%;border-collapse:collapse;margin:1rem 0 1.3rem;font-size:.88rem}
+th{background:var(--surf2);color:#e6edf3;padding:.45rem .75rem;
+   border:1px solid var(--border);text-align:left;font-family:var(--mono);font-size:.79rem}
+td{padding:.4rem .75rem;border:1px solid var(--border);vertical-align:top}
+tr:nth-child(even) td{background:rgba(33,38,45,.5)}
+.yes{color:var(--green)}.no{color:var(--red)}.med{color:var(--yellow)}
+
+/* quiz */
+.quiz{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:1.4rem 1.5rem;margin-top:1.5rem}
+.quiz h3{margin-top:0;color:var(--yellow)}
+.qblock{margin-bottom:1.5rem}
+.qt{font-weight:600;color:#e6edf3;margin-bottom:.65rem;font-size:.94rem}
+.opts{list-style:none}
+.opts li{background:var(--surf2);border:1px solid var(--border);border-radius:5px;
+         padding:.45rem .88rem;margin-bottom:.38rem;cursor:pointer;font-size:.89rem;
+         transition:border-color .13s,background .13s}
+.opts li:hover:not(.lk){border-color:var(--green);background:rgba(52,211,153,.06)}
+.opts li.ok{border-color:var(--green);background:rgba(52,211,153,.09);color:var(--green)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.07);color:var(--red)}
+.opts li.lk{cursor:default}
+.fb{font-size:.83rem;margin-top:.42rem;padding:.38rem .72rem;border-radius:4px;display:none}
+.fb.ok{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.25)}
+.fb.no{background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.25)}
+.score{font-family:var(--mono);font-size:.82rem;color:var(--dim);margin-top:1rem;
+       padding-top:.8rem;border-top:1px solid var(--border)}
+
+.scenario{background:var(--surf2);border:1px solid var(--border);border-radius:7px;
+          padding:1.05rem 1.25rem;margin-bottom:1rem}
+.sc-q{font-weight:600;margin-bottom:.55rem;color:#e6edf3}
+.rev-btn{font-family:var(--mono);font-size:.77rem;padding:.26rem .67rem;border:1px solid var(--border);
+         border-radius:4px;background:none;color:var(--dim);cursor:pointer;transition:all .15s}
+.rev-btn:hover{border-color:var(--green);color:var(--green)}
+.sc-ans{margin-top:.65rem;font-size:.88rem;background:var(--surf);border-radius:4px;
+        padding:.7rem .9rem;display:none;border-left:2px solid var(--green)}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-lbl">Silmulator / Lesson</span>
+  <span class="nav-title">0007 — Creating New Blocks</span>
+  <div class="pdots" id="pdots">
+    <div class="dot active" title="Two paths"></div>
+    <div class="dot" title="Step 1: Device layer"></div>
+    <div class="dot" title="Step 2: Block layer"></div>
+    <div class="dot" title="Step 3: Registration"></div>
+    <div class="dot" title="Real example"></div>
+    <div class="dot" title="Contrast"></div>
+    <div class="dot" title="Practice"></div>
+  </div>
+</nav>
+
+<article>
+<h1>Creating New Blocks</h1>
+<p class="why">Why this matters: every new hardware device your team tests against needs a block — knowing both creation paths means you can add a block in 5 minutes (JSON) or 45 minutes (Python) depending on how much simulation fidelity you need.</p>
+
+<!-- ══ §0 TWO PATHS ══ -->
+<section id="s0">
+<h2><span class="sn">§0</span> Two paths to a new block <button class="db" onclick="tick(0,this)">Mark done</button></h2>
+
+<p>You already know the fast path from lesson 0006 (JSON spec). Here is where both paths lead and when to choose each:</p>
+
+<table>
+  <tr><th>Capability</th><th>JSON spec (5 min)</th><th>Python class (45 min)</th></tr>
+  <tr><td>Stateful simulation (remember VOLT, return it on query)</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Computed/noisy measurements</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Custom block face (live meter, waveform preview)</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Right-click shortcuts</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>No Python required</td><td class="yes">✓</td><td class="no">✗</td></tr>
+  <tr><td>Works without repo change (user dir)</td><td class="yes">✓</td><td class="no">✗</td></tr>
+</table>
+
+<p><strong>Rule of thumb:</strong> start with a JSON spec to verify that your firmware sends the right command structure. Promote to a Python class when you need the device to remember state and compute realistic responses.</p>
+
+<p>A Python block is three files and one registration line:</p>
+<div class="fmap">
+<span class="dir">silmulator/</span>
+├── <span class="dir">devices/</span>
+│   └── <span class="new">my_device.py</span>        <span class="cm">← Step 1: simulation logic (BaseDevice subclass)</span>
+└── <span class="dir">gui/blocks/</span>
+    └── <span class="new">my_block.py</span>         <span class="cm">← Step 2: visual widget (BaseBlock subclass)</span>
+
+<span class="dir">silmulator/gui/canvas.py</span>   <span class="cm">← Step 3: import + add to BLOCK_REGISTRY</span>
+</div>
+</section>
+
+<!-- ══ §1 DEVICE LAYER ══ -->
+<section id="s1">
+<h2><span class="sn">§1</span> Step 1 — The device layer <button class="db" onclick="tick(1,this)">Mark done</button></h2>
+<div class="fp">silmulator/devices/my_device.py  (new file)</div>
+<div class="fp">Reference: silmulator/devices/power_supply.py</div>
+
+<p>The device is pure simulation logic — no Qt, no GUI. It inherits from <code>BaseDevice</code> and must implement two methods: <code>_setup_handlers()</code> and <code>_do_reset()</code>.</p>
+
+<pre>
+<span class="kw">from</span> silmulator.devices.base_device <span class="kw">import</span> BaseDevice, ScpiError, ScpiCommand
+<span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="at">@dataclass</span>
+<span class="kw">class</span> <span class="cls">MyState</span>:                    <span class="cm">← optional: bundle state into a dataclass</span>
+    voltage: float = <span class="num">0.0</span>
+    output_on: bool = <span class="op">False</span>
+
+<span class="kw">class</span> <span class="cls">MyDevice</span>(<span class="cls">BaseDevice</span>):
+    MANUFACTURER = <span class="str">"Acme"</span>         <span class="cm">← returned by *IDN? automatically</span>
+    MODEL        = <span class="str">"AX-1000"</span>
+    SERIAL       = <span class="str">"SIM000001"</span>
+    FIRMWARE     = <span class="str">"1.0.0"</span>
+
+    <span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+        self.state = <span class="cls">MyState</span>()     <span class="cm">← initialise state BEFORE super().__init__()</span>
+        <span class="kw">super</span>().__init__()           <span class="cm">← calls _setup_handlers() and _setup_common_handlers()</span>
+
+    <span class="kw">def</span> <span class="fn">_setup_handlers</span>(self) -> <span class="cls">None</span>:
+        self.<span class="fn">_register</span>(<span class="str">"VOLT"</span>,  self.<span class="fn">_volt</span>)   <span class="cm">← register command → handler</span>
+        self.<span class="fn">_register</span>(<span class="str">"OUTP"</span>,  self.<span class="fn">_outp</span>)
+        self.<span class="fn">_register</span>(<span class="str">"MEAS:VOLT"</span>, self.<span class="fn">_meas_volt</span>)
+
+    <span class="kw">def</span> <span class="fn">_volt</span>(self, cmd: <span class="cls">ScpiCommand</span>) -> <span class="cls">str</span>:
+        <span class="kw">if</span> cmd.is_query:                          <span class="cm">← VOLT? → return set value</span>
+            <span class="kw">return</span> <span class="fn">f</span><span class="str">"{self.state.voltage:.4f}"</span>
+        <span class="kw">if</span> cmd.params:                            <span class="cm">← VOLT 5.0 → store it</span>
+            v = <span class="fn">float</span>(cmd.params[<span class="num">0</span>])
+            <span class="kw">if</span> v < <span class="num">0</span> <span class="kw">or</span> v > <span class="num">32</span>:
+                <span class="kw">raise</span> <span class="cls">ScpiError</span>(-<span class="num">222</span>, <span class="str">"Data out of range"</span>)
+            self.state.voltage = v
+        <span class="kw">return</span> <span class="str">""</span>                                 <span class="cm">← writes return empty string</span>
+
+    <span class="kw">def</span> <span class="fn">_outp</span>(self, cmd: <span class="cls">ScpiCommand</span>) -> <span class="cls">str</span>:
+        <span class="kw">if</span> cmd.is_query:
+            <span class="kw">return</span> <span class="str">"1"</span> <span class="kw">if</span> self.state.output_on <span class="kw">else</span> <span class="str">"0"</span>
+        <span class="kw">if</span> cmd.params:
+            self.state.output_on = cmd.params[<span class="num">0</span>].upper() <span class="kw">in</span> (<span class="str">"1"</span>, <span class="str">"ON"</span>)
+        <span class="kw">return</span> <span class="str">""</span>
+
+    <span class="kw">def</span> <span class="fn">_meas_volt</span>(self, cmd: <span class="cls">ScpiCommand</span>) -> <span class="cls">str</span>:
+        <span class="cm">← queries return measured value + noise</span>
+        measured = self.state.voltage <span class="kw">if</span> self.state.output_on <span class="kw">else</span> <span class="num">0.0</span>
+        noise = measured * <span class="num">1e-4</span>              <span class="cm">← ≈ 0.01% Gaussian noise</span>
+        <span class="kw">import</span> random
+        <span class="kw">return</span> <span class="fn">f</span><span class="str">"{measured + random.gauss(0, noise):.6f}"</span>
+
+    <span class="kw">def</span> <span class="fn">_do_reset</span>(self) -> <span class="cls">None</span>:
+        self.state = <span class="cls">MyState</span>()              <span class="cm">← restore factory defaults</span>
+</pre>
+
+<h3>Three rules for handler functions</h3>
+<ul>
+  <li><strong>Writes always return <code>""</code></strong> — any other non-empty string would be echoed back to the caller as if it were a query response.</li>
+  <li><strong>Queries return a string</strong> — even numeric values must be returned as <code>str(value)</code> because <code>BaseDevice.process()</code> joins responses with <code>"\n".join(responses)</code>.</li>
+  <li><strong>Invalid input raises <code>ScpiError</code></strong> — <code>BaseDevice._dispatch()</code> catches it and pushes the error code into the error queue (reachable via <code>SYSTEM:ERROR?</code>). Don't use regular <code>ValueError</code>.</li>
+</ul>
+
+<h3>Why state must be initialised before super().__init__()</h3>
+<p><code>super().__init__()</code> calls <code>_setup_handlers()</code>, which registers handler methods that reference <code>self.state</code>. If <code>self.state</code> hasn't been created yet, the first call to any handler will raise <code>AttributeError</code>. Always set instance variables before calling <code>super().__init__()</code>.</p>
+
+<h3>_register() and _register_alias()</h3>
+<p><code>_register(path, fn)</code> stores <code>fn</code> in <code>self._handlers[path.upper()]</code>. SCPI devices typically support short-form and long-form paths for the same command (e.g. <code>VOLT</code> and <code>SOURCE:VOLTAGE:LEVEL:IMMEDIATE:AMPLITUDE</code>). Register each variant:</p>
+<pre>
+self.<span class="fn">_register</span>(<span class="str">"VOLT"</span>,                     self.<span class="fn">_volt</span>)
+self.<span class="fn">_register</span>(<span class="str">"SOURCE:VOLTAGE"</span>,           self.<span class="fn">_volt</span>)  <span class="cm">← same handler</span>
+self.<span class="fn">_register_alias</span>(<span class="str">"SOUR:VOLT"</span>, <span class="str">"VOLT"</span>)               <span class="cm">← alias to existing</span>
+</pre>
+</section>
+
+<!-- ══ §2 BLOCK LAYER ══ -->
+<section id="s2">
+<h2><span class="sn">§2</span> Step 2 — The block layer <button class="db" onclick="tick(2,this)">Mark done</button></h2>
+<div class="fp">silmulator/gui/blocks/my_block.py  (new file)</div>
+<div class="fp">Reference: silmulator/gui/blocks/multimeter_block.py</div>
+
+<p>The block is the GUI widget. It inherits from <code>BaseBlock</code> and must implement <code>_setup_ports()</code>. Three optional overrides control appearance and behaviour:</p>
+
+<pre>
+<span class="kw">from</span> PyQt6.QtCore <span class="kw">import</span> QRectF
+<span class="kw">from</span> PyQt6.QtGui  <span class="kw">import</span> QPainter, QColor, QPen, QBrush, QFont
+<span class="kw">from</span> PyQt6.QtWidgets <span class="kw">import</span> QMenu
+<span class="kw">from</span> silmulator.gui.blocks.base_block <span class="kw">import</span> BaseBlock
+<span class="kw">from</span> silmulator.devices.my_device <span class="kw">import</span> MyDevice
+
+
+<span class="kw">class</span> <span class="cls">MyBlock</span>(<span class="cls">BaseBlock</span>):
+
+    BLOCK_WIDTH  = <span class="num">220</span>             <span class="cm">← canvas width in px</span>
+    BLOCK_HEIGHT = <span class="num">160</span>             <span class="cm">← canvas height in px</span>
+    HEADER_COLOR = <span class="cls">QColor</span>(<span class="num">40</span>, <span class="num">80</span>, <span class="num">140</span>)  <span class="cm">← title bar colour</span>
+    BODY_COLOR   = <span class="cls">QColor</span>(<span class="num">240</span>, <span class="num">245</span>, <span class="num">255</span>)  <span class="cm">← body background</span>
+
+    <span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+        <span class="kw">super</span>().__init__(<span class="cls">MyDevice</span>(), <span class="str">"My Block"</span>)
+        <span class="cm">#                  ↑ device    ↑ BLOCK_REGISTRY key / display name</span>
+
+    <span class="kw">def</span> <span class="fn">_setup_ports</span>(self) -> <span class="cls">None</span>:
+        self.<span class="fn">add_port</span>(<span class="str">"IN"</span>,  <span class="str">"IN"</span>,  <span class="num">0.0</span>, <span class="num">0.5</span>)  <span class="cm">← id, label, x_frac, y_frac</span>
+        self.<span class="fn">add_port</span>(<span class="str">"OUT"</span>, <span class="str">"OUT"</span>, <span class="num">1.0</span>, <span class="num">0.5</span>)
+
+    <span class="kw">def</span> <span class="fn">_paint_content</span>(self, painter: <span class="cls">QPainter</span>, rect: <span class="cls">QRectF</span>) -> <span class="cls">None</span>:
+        <span class="cm">← called by BaseBlock.paint() after the title bar is drawn</span>
+        dev = self.device          <span class="cm">← access the device for live readings</span>
+        painter.<span class="fn">setFont</span>(<span class="cls">QFont</span>(<span class="str">"Consolas"</span>, <span class="num">10</span>))
+        painter.<span class="fn">setPen</span>(<span class="cls">QPen</span>(<span class="cls">QColor</span>(<span class="num">30</span>, <span class="num">30</span>, <span class="num">30</span>)))
+
+        <span class="cm"># draw voltage reading below the title bar</span>
+        y = self.TITLE_HEIGHT + <span class="num">24</span>
+        volt_str = <span class="fn">f</span><span class="str">"{dev.state.voltage:.4f} V"</span>
+        painter.<span class="fn">drawText</span>(<span class="fn">int</span>(rect.x() + <span class="num">10</span>), y, volt_str)
+
+        <span class="cm"># output indicator dot</span>
+        color = <span class="cls">QColor</span>(<span class="num">0</span>, <span class="num">220</span>, <span class="num">80</span>) <span class="kw">if</span> dev.state.output_on <span class="kw">else</span> <span class="cls">QColor</span>(<span class="num">80</span>, <span class="num">80</span>, <span class="num">80</span>)
+        painter.<span class="fn">setBrush</span>(<span class="cls">QBrush</span>(color))
+        painter.<span class="fn">setPen</span>(<span class="cls">QPen</span>(<span class="cls">QColor</span>(<span class="num">20</span>, <span class="num">20</span>, <span class="num">20</span>), <span class="num">1</span>))
+        painter.<span class="fn">drawEllipse</span>(<span class="fn">int</span>(rect.right() - <span class="num">24</span>), y - <span class="num">12</span>, <span class="num">10</span>, <span class="num">10</span>)
+
+    <span class="kw">def</span> <span class="fn">_add_device_menu_actions</span>(self, menu: <span class="cls">QMenu</span>) -> <span class="cls">None</span>:
+        <span class="cm">← adds entries below the built-in "Send SCPI", "Reset", "View log" items</span>
+        menu.<span class="fn">addAction</span>(<span class="str">"Set 5V ON"</span>,  <span class="kw">lambda</span>: (
+            self.<span class="fn">send_command</span>(<span class="str">"VOLT 5.0"</span>), self.<span class="fn">send_command</span>(<span class="str">"OUTP ON"</span>), self.<span class="fn">update</span>()))
+        menu.<span class="fn">addAction</span>(<span class="str">"Output OFF"</span>, <span class="kw">lambda</span>: (
+            self.<span class="fn">send_command</span>(<span class="str">"OUTP OFF"</span>), self.<span class="fn">update</span>()))
+</pre>
+
+<h3>Four methods you can override</h3>
+<div class="steps">
+  <span class="sn">_setup_ports()</span>
+  <span class="st"><strong>Required.</strong> Called by <code>BaseBlock.__init__</code>. Use <code>add_port(id, label, x, y)</code> to place connection ports.</span>
+  <span class="sn">_paint_content()</span>
+  <span class="st">Optional. Called by <code>BaseBlock.paint()</code> after the title bar is drawn. Use standard <code>QPainter</code> calls to draw meters, indicators, text. Access live device state via <code>self.device</code>.</span>
+  <span class="sn">_add_device_menu_actions()</span>
+  <span class="st">Optional. Called by <code>BaseBlock.contextMenuEvent()</code>. Add <code>QAction</code>s for frequently-used command sequences.</span>
+  <span class="sn">_do_reset()</span>
+  <span class="st">In the <em>device</em>, not the block. Override to restore device-specific state on <code>*RST</code> or right-click → Reset device.</span>
+</div>
+
+<div class="note"><strong>self.update()</strong> — call this after any command that changes device state that <code>_paint_content</code> reads. It schedules a repaint. Without it, the block face won't refresh until Qt decides to repaint on its own (which may be never for a stationary block).</div>
+</section>
+
+<!-- ══ §3 REGISTRATION ══ -->
+<section id="s3">
+<h2><span class="sn">§3</span> Step 3 — Registration in canvas.py <button class="db" onclick="tick(3,this)">Mark done</button></h2>
+<div class="fp">silmulator/gui/canvas.py:18–35</div>
+
+<p>Two edits to <code>canvas.py</code>:</p>
+<pre>
+<span class="cm"># Add the import alongside the other block imports</span>
+<span class="kw">from</span> silmulator.gui.blocks.my_block <span class="kw">import</span> MyBlock
+
+<span class="cm"># Add the entry to BLOCK_REGISTRY</span>
+BLOCK_REGISTRY = {
+    <span class="str">"Oscilloscope"</span>:       OscilloscopeBlock,
+    <span class="str">"Power Supply"</span>:       PowerSupplyBlock,
+    <span class="str">"Function Generator"</span>: FunctionGeneratorBlock,
+    <span class="str">"Multimeter"</span>:         MultimeterBlock,
+    <span class="str">"MSP430"</span>:             MSP430Block,
+    <span class="str">"Code Input"</span>:         CodeInputBlock,
+    <span class="str">"My Block"</span>:           MyBlock,      <span class="cm">← ADD THIS LINE</span>
+}
+</pre>
+
+<p>The key <code>"My Block"</code> must match the second argument passed to <code>super().__init__()</code> in your block's <code>__init__</code>. It is also the string used in <code>to_dict()</code>/<code>from_dict()</code> — a mismatch causes silent wire loss on reload (the exact same bug as the original "Function Gen" vs "Function Generator" issue).</p>
+
+<h3>Where it appears after registration</h3>
+<p>Once the key is in <code>BLOCK_REGISTRY</code>, the block appears automatically in:</p>
+<ul>
+  <li><strong>Add menu</strong> (menu bar → Add → My Block) — populated from <code>BLOCK_REGISTRY.keys()</code></li>
+  <li><strong>SCPI Console target list</strong> — the dropdown shows all blocks currently on canvas</li>
+  <li><strong>Save/load round-trips</strong> — <code>to_dict()</code>/<code>from_dict()</code> use the registry key</li>
+</ul>
+<div class="note">The <code>BlockLibraryPanel</code> (left side panel) has a <em>hardcoded</em> list of descriptions (main_window.py:41–47). A new block will appear in the Add menu but NOT in the library panel unless you also add an entry there. This is a known inconsistency — the panel was written before <code>BLOCK_REGISTRY</code> was made the single source of truth.</div>
+</section>
+
+<!-- ══ §4 REAL EXAMPLE ══ -->
+<section id="s4">
+<h2><span class="sn">§4</span> Real example — MultimeterBlock anatomy <button class="db" onclick="tick(4,this)">Mark done</button></h2>
+<div class="fp">silmulator/gui/blocks/multimeter_block.py</div>
+
+<p>The Multimeter is the cleanest production example — less complex than PowerSupply, more complete than a minimal stub.</p>
+
+<h3>Device (Multimeter)</h3>
+<pre>
+<span class="cm"># devices/multimeter.py — key parts</span>
+<span class="kw">class</span> <span class="cls">Multimeter</span>(<span class="cls">BaseDevice</span>):
+    MANUFACTURER = <span class="str">"HEWLETT-PACKARD"</span>
+    MODEL        = <span class="str">"34401A"</span>
+
+    <span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+        self.config  = <span class="cls">MeasurementConfig</span>()   <span class="cm">← state first</span>
+        self.trigger = <span class="cls">TriggerConfig</span>()
+        self.sample  = <span class="cls">SampleConfig</span>()
+        self._injected_values: dict = {}       <span class="cm">← inject test values</span>
+        <span class="kw">super</span>().__init__()
+
+    <span class="kw">def</span> <span class="fn">_get_reading</span>(self, func: <span class="cls">str</span>) -> <span class="cls">float</span>:
+        <span class="cm"># Returns injected value if set, else default + noise</span>
+        base = self._injected_values.<span class="fn">get</span>(func, self.DEFAULT_VOLTAGE_DC)
+        noise = abs(base) * <span class="num">1e-4</span>
+        <span class="kw">return</span> base + random.<span class="fn">gauss</span>(<span class="num">0</span>, noise <span class="kw">or</span> <span class="num">1e-6</span>)
+</pre>
+
+<h3>Block (MultimeterBlock)</h3>
+<pre>
+<span class="cm"># gui/blocks/multimeter_block.py — key parts</span>
+<span class="kw">class</span> <span class="cls">MultimeterBlock</span>(<span class="cls">BaseBlock</span>):
+    BLOCK_WIDTH  = <span class="num">200</span>
+    BLOCK_HEIGHT = <span class="num">160</span>
+    HEADER_COLOR = <span class="cls">QColor</span>(<span class="num">80</span>, <span class="num">50</span>, <span class="num">120</span>)       <span class="cm">← purple header</span>
+
+    <span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+        <span class="kw">super</span>().__init__(<span class="cls">Multimeter</span>(), <span class="str">"Multimeter"</span>)
+        self._last_reading: float = <span class="num">0.0</span>        <span class="cm">← block-local display cache</span>
+
+    <span class="kw">def</span> <span class="fn">_setup_ports</span>(self) -> <span class="cls">None</span>:
+        self.<span class="fn">add_port</span>(<span class="str">"HI"</span>,      <span class="str">"HI"</span>, <span class="num">0.5</span>, <span class="num">1.0</span>)  <span class="cm">← bottom edge</span>
+        self.<span class="fn">add_port</span>(<span class="str">"LO"</span>,      <span class="str">"LO"</span>, <span class="num">0.7</span>, <span class="num">1.0</span>)
+        self.<span class="fn">add_port</span>(<span class="str">"CURR_IN"</span>, <span class="str">"A"</span>,  <span class="num">0.3</span>, <span class="num">1.0</span>)
+        self.<span class="fn">add_port</span>(<span class="str">"GUARD"</span>,   <span class="str">"G"</span>,  <span class="num">0.0</span>, <span class="num">0.7</span>)
+
+    <span class="kw">def</span> <span class="fn">_paint_content</span>(self, painter, rect) -> <span class="cls">None</span>:
+        <span class="cm"># Green-on-black LCD display</span>
+        disp_rect = <span class="cls">QRectF</span>(rect.x()+<span class="num">10</span>, self.TITLE_HEIGHT+<span class="num">8</span>, rect.width()-<span class="num">20</span>, <span class="num">70</span>)
+        painter.<span class="fn">setBrush</span>(<span class="cls">QBrush</span>(<span class="cls">QColor</span>(<span class="num">0</span>, <span class="num">30</span>, <span class="num">0</span>)))
+        painter.<span class="fn">drawRect</span>(disp_rect)
+        <span class="cm"># large green readout</span>
+        painter.<span class="fn">setFont</span>(<span class="cls">QFont</span>(<span class="str">"Consolas"</span>, <span class="num">20</span>, <span class="cls">QFont.Weight</span>.Bold))
+        painter.<span class="fn">setPen</span>(<span class="cls">QPen</span>(<span class="cls">QColor</span>(<span class="num">0</span>, <span class="num">255</span>, <span class="num">60</span>)))
+        painter.<span class="fn">drawText</span>(disp_rect, Qt.AlignmentFlag.AlignCenter, <span class="str">"5.0000 V"</span>)
+</pre>
+
+<p>Notice the block-local <code>self._last_reading</code>: this is <em>not</em> device state. It's the last value the block read for display purposes — separate from what the device actually tracks. Blocks can store display caches separately from device state.</p>
+</section>
+
+<!-- ══ §5 CONTRAST ══ -->
+<section id="s5">
+<h2><span class="sn">§5</span> Often confused: device state vs block state <button class="db" onclick="tick(5,this)">Mark done</button></h2>
+
+<p><code>BaseBlock</code> and <code>BaseDevice</code> both live on the canvas. What belongs where?</p>
+
+<table>
+  <tr><th>Belongs in…</th><th>Device (BaseDevice subclass)</th><th>Block (BaseBlock subclass)</th></tr>
+  <tr><td>SCPI command handlers</td><td class="yes">✓</td><td class="no">✗</td></tr>
+  <tr><td>Set voltage, output state, calibration data</td><td class="yes">✓</td><td class="no">✗</td></tr>
+  <tr><td>Measurement noise computation</td><td class="yes">✓</td><td class="no">✗</td></tr>
+  <tr><td>Display cache (<code>_last_reading</code>)</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>BLOCK_WIDTH / BLOCK_HEIGHT / colours</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Right-click menu shortcuts</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Port layout</td><td class="no">✗</td><td class="yes">✓</td></tr>
+</table>
+
+<p>The dividing line: <strong>the device must work correctly with no Qt installed</strong>. You can unit-test <code>MyDevice</code> with <code>pytest</code> and no GUI. The block is untestable without a <code>QApplication</code>. Keep device logic free of Qt imports.</p>
+
+<div class="warn">Putting GUI state (e.g. <code>self._last_reading</code>) in the device, or SCPI state (e.g. <code>self.voltage</code>) in the block, breaks this separation and makes the device ununit-testable. The <code>MultimeterBlock._last_reading</code> is a display cache; the "true" voltage reading lives in <code>Multimeter._injected_values</code> and <code>MeasurementConfig</code>.</div>
+</section>
+
+<!-- ══ §6 PRACTICE ══ -->
+<section id="s6">
+<h2><span class="sn">§6</span> Practice <button class="db" onclick="tick(6,this)">Mark done</button></h2>
+
+<div class="quiz">
+<h3>Quick-fire quiz</h3>
+
+<!-- Q1 -->
+<div class="qblock" data-q="1">
+<div class="qt">Q1. You call <code>super().__init__()</code> before setting <code>self.state = MyState()</code>. What breaks and when?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="super().__init__() doesn't call _volt() or any handler at construction time — it only registers them. The crash happens on the first SCPI command dispatch, not during __init__.">The constructor crashes immediately with AttributeError because BaseDevice.__init__() calls every handler to test them.</li>
+  <li data-correct="true" data-why="Correct. super().__init__() calls _setup_handlers(), which registers references to self._volt, self._outp, etc. The methods themselves aren't called yet. But the first time process('VOLT?') runs, _volt() executes and reads self.state — which doesn't exist yet — raising AttributeError.">The constructor completes fine, but the first SCPI dispatch crashes with AttributeError because _volt() tries to read self.state which doesn't exist.</li>
+  <li data-correct="false" data-why="super().__init__() does not call _do_reset(). _do_reset() is only called by the reset() method, triggered by *RST or right-click → Reset device.">super().__init__() calls _do_reset(), which tries to assign self.state = MyState() — but _do_reset() also reads self.state first, causing AttributeError.</li>
+  <li data-correct="false" data-why="Python attribute access on self doesn't raise NameError — it raises AttributeError. And the crash happens in _volt(), not in _setup_handlers().">Nothing breaks — Python's __init__ methods can be called in any order, and BaseDevice.__init__() doesn't access any attributes before _setup_handlers() is called.</li>
+</ul>
+<div class="fb" id="fb1"></div>
+</div>
+
+<!-- Q2 -->
+<div class="qblock" data-q="2">
+<div class="qt">Q2. A handler for a write command returns <code>"OK"</code> instead of <code>""</code>. What does the caller's firmware see?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="BaseDevice.process() only ignores empty strings. 'OK' is non-empty, so it IS appended to the responses list and returned to the caller.">Nothing — BaseDevice.process() ignores any response from write handlers and only returns query responses.</li>
+  <li data-correct="true" data-why="Correct. BaseDevice._dispatch() returns the handler's return value. process() collects non-empty responses into a list and joins them with newlines. 'OK' is non-empty, so it's included in the return string. The caller's firmware receives 'OK' as if it were a query response.">The caller sees <code>"OK"</code> in the response string — process() joins all non-empty handler return values, whether or not the command was a query.</li>
+  <li data-correct="false" data-why="ScpiError(-113,...) is raised by _dispatch() only when no handler is found for the path. A handler that returns 'OK' is found and called successfully.">ScpiError(-113) is raised because returning a non-empty string from a write handler violates the SCPI protocol contract.</li>
+  <li data-correct="false" data-why="Python strings are never silently dropped. BaseDevice.process() explicitly checks 'if resp is not None and resp != \"\"' and appends to the response list.">Nothing — Python silently discards the return value of methods called as side effects.</li>
+</ul>
+<div class="fb" id="fb2"></div>
+</div>
+
+<!-- Q3 -->
+<div class="qblock" data-q="3">
+<div class="qt">Q3. You register your block in BLOCK_REGISTRY as <code>"My PSU"</code> but pass <code>"MyPSU"</code> as the device_type to <code>super().__init__()</code>. A user saves a layout and reloads. What happens?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="BLOCK_REGISTRY.get('MyPSU') returns None because the registry key is 'My PSU', not 'MyPSU'. from_dict() calls add_block(bdata['type']) where bdata['type'] is whatever device_type was stored — 'MyPSU'. This returns None and the block is skipped.">The block loads correctly — BLOCK_REGISTRY looks up 'My PSU' and the device_type mismatch is ignored at load time.</li>
+  <li data-correct="true" data-why="Correct. to_dict() stores device_type = block.device_type = 'MyPSU'. from_dict() calls add_block('MyPSU'). BLOCK_REGISTRY.get('MyPSU') returns None because the registry key is 'My PSU'. The block is silently skipped and all its wires are dropped — the same bug as the original 'Function Gen' vs 'Function Generator' mismatch.">The block and its wires are silently dropped on reload — to_dict() stores 'MyPSU' but BLOCK_REGISTRY has only 'My PSU', so add_block() returns None.</li>
+  <li data-correct="false" data-why="KeyError is not raised — BLOCK_REGISTRY.get() returns None, not an exception. from_dict() then checks 'if block:' before using it, so None silently drops the block.">A KeyError is raised during from_dict(), alerting the user that the block type doesn't match any registry entry.</li>
+  <li data-correct="false" data-why="The device_type passed to super().__init__() becomes block.device_type, which is stored in to_dict(). The registry key and device_type must match for round-trips to work.">The block saves and loads fine — BLOCK_REGISTRY key and device_type are independent, and from_dict() matches by class type, not string.</li>
+</ul>
+<div class="fb" id="fb3"></div>
+</div>
+
+<!-- Q4 -->
+<div class="qblock" data-q="4">
+<div class="qt">Q4. After calling <code>send_command("OUTP ON")</code> from a right-click menu action, the block face doesn't update visually. What call is missing?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="repaint() forces synchronous repaint, but self.update() is the preferred call — it schedules an async repaint through Qt's event loop. Both work, but update() is preferred for performance."><code>self.repaint()</code> — only repaint() triggers an immediate visual update; update() only queues a future repaint.</li>
+  <li data-correct="false" data-why="QApplication.processEvents() drains the event queue but is not the right tool here. Calling it repeatedly can cause recursive event processing and is a code smell. The correct fix is self.update() after the state-changing command."><code>QApplication.processEvents()</code> — the event loop must be pumped manually after state changes from non-Qt code.</li>
+  <li data-correct="true" data-why="Correct. self.update() tells Qt to schedule a repaint of this item. When the event loop runs, Qt calls paint() → _paint_content() which reads the updated device state. Without update(), the block face only repaints if Qt decides to (e.g. when another window overlaps it)."><code>self.update()</code> — schedules a repaint of the QGraphicsItem so _paint_content() is called again with the new device state.</li>
+  <li data-correct="false" data-why="scene().update() repaints the entire scene, which is wasteful. self.update() is scoped to just this item. Also, _paint_content() is not called directly — it's called by the Qt paint system via BaseBlock.paint()."><code>self.scene().update()</code> then <code>self._paint_content()</code> manually — Qt won't call _paint_content automatically, it must be triggered explicitly.</li>
+</ul>
+<div class="fb" id="fb4"></div>
+</div>
+
+<!-- Q5 -->
+<div class="qblock" data-q="5">
+<div class="qt">Q5. Your new block appears in the Add menu (menu bar → Add) but NOT in the left-side Hardware Blocks library panel. Why?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="The Add menu IS populated from BLOCK_REGISTRY dynamically. If the block appears there, it's correctly registered. The issue is specific to the library panel.">The block wasn't added to BLOCK_REGISTRY — the Add menu shows all installed blocks, but the panel uses a separate source.</li>
+  <li data-correct="false" data-why="discover_specs() is only called for JSON specs in custom_blocks/. Python blocks registered in BLOCK_REGISTRY directly don't go through discover_specs() at all.">discover_specs() hasn't been called since the block was added — the library panel updates on discover_specs() but the Add menu updates on import.</li>
+  <li data-correct="true" data-why="Correct. BlockLibraryPanel._setup_ui() (main_window.py:41-54) has a hardcoded 'descriptions' dict with the six original block names. It doesn't iterate BLOCK_REGISTRY. Adding a new Python block to the registry won't update the panel unless you also add an entry to that dict. This is a known inconsistency in the codebase.">BlockLibraryPanel has a hardcoded descriptions dict with the original six blocks. It doesn't read BLOCK_REGISTRY — new blocks must be added there manually too.</li>
+  <li data-correct="false" data-why="BLOCK_HEIGHT has no effect on whether a block appears in the library panel. The panel list is built from the hardcoded descriptions dict, not from block geometry.">The block's BLOCK_HEIGHT is too large — blocks taller than 200px are excluded from the library panel to prevent layout overflow.</li>
+</ul>
+<div class="fb" id="fb5"></div>
+</div>
+
+<div class="score" id="score">0 / 5 answered</div>
+</div>
+
+<h3 style="margin-top:2rem;color:#e6edf3">Scenario questions</h3>
+
+<div class="scenario">
+  <div class="sc-q">You want to add a Signal Generator block. It needs to remember its current frequency (default 1 kHz) and return it on FREQ? Which file do you create first, what class do you subclass, and what instance variable do you add?</div>
+  <button class="rev-btn" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">First file: silmulator/devices/signal_generator.py — create class SignalGenerator(BaseDevice). Instance variable: self._freq_hz: float = 1000.0 (set BEFORE super().__init__()). Register "FREQ" in _setup_handlers(). Handler: if cmd.is_query → return f"{self._freq_hz:.6f}"; if cmd.params → self._freq_hz = float(cmd.params[0]); return "". Then create the block (silmulator/gui/blocks/signal_generator_block.py) and register in canvas.py. Device first, because it has no GUI dependencies and can be tested standalone.</div>
+</div>
+
+<div class="scenario">
+  <div class="sc-q">A colleague adds their <code>TemperatureLogger</code> device. The device class sets <code>self._temps = []</code> after calling <code>super().__init__()</code>. They report that everything works in normal use but <code>*RST</code> crashes the device. Diagnose the bug and give the fix.</div>
+  <button class="rev-btn" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">Bug: _do_reset() is called by BaseDevice.reset() (triggered by *RST). If _do_reset() tries to clear or replace self._temps, it executes successfully the first time — but only because the attribute was set in __init__ before the crash. Wait: actually if self._temps is set AFTER super().__init__(), it never exists when _setup_handlers() or _do_reset() is first called from super().__init__(). The *RST crash occurs because _do_reset() references self._temps but super().__init__() called it before self._temps existed. Fix: move self._temps = [] to BEFORE super().__init__(). Pattern: ALL instance variables must be set before super().__init__() in every BaseDevice subclass.</div>
+</div>
+
+<div class="scenario">
+  <div class="sc-q">You want to write a unit test for your <code>MyDevice</code> class (not the block). What import do you need, how do you call process(), and what do you assert?</div>
+  <button class="rev-btn" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">from silmulator.devices.my_device import MyDevice
+dev = MyDevice()
+# Test write
+dev.process("VOLT 5.0")
+assert dev.state.voltage == 5.0
+# Test query
+resp = dev.process("VOLT?")
+assert resp == "5.0000"
+# Test output
+dev.process("OUTP ON")
+assert dev.state.output_on is True
+# Test measurement
+resp = dev.process("MEAS:VOLT")
+assert abs(float(resp) - 5.0) < 0.01  # within 1% (noise)
+No QApplication needed — the device has no Qt imports. This is the value of the device/block separation.</div>
+</div>
+</section>
+
+</article>
+
+<script>
+const N=7;const dots=document.querySelectorAll('.dot');
+function tick(i,btn){btn.classList.toggle('ticked');dots[i].classList.toggle('done');}
+let answered=0;const total=5;
+function upScore(){document.getElementById('score').textContent=`${answered} / ${total} answered`;}
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+document.querySelectorAll('.qblock').forEach(qb=>{
+  const list=qb.querySelector('.opts');
+  shuf([...list.children]).forEach(li=>list.appendChild(li));
+  const qn=qb.dataset.q;const fb=document.getElementById('fb'+qn);
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('ok');
+      fb.style.display='block';fb.className='fb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      answered++;upScore();
+    });
+  });
+});
+function rev(btn){
+  const ans=btn.nextElementSibling;
+  ans.style.display=ans.style.display==='block'?'none':'block';
+  btn.textContent=ans.style.display==='block'?'Hide':'Show answer';
+}
+</script>
+</body>
+</html>

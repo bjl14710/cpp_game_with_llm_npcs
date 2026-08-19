@@ -1,0 +1,170 @@
+#include "itch_parser.hpp"
+#include <cstring>
+
+namespace itch {
+
+// ─── Big-endian read helpers ─────────────────────────────────────────────────
+
+static inline uint16_t be16(const uint8_t* p) {
+    return static_cast<uint16_t>(p[0] << 8 | p[1]);
+}
+static inline uint32_t be32(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24 |
+            static_cast<uint32_t>(p[1]) << 16 |
+            static_cast<uint32_t>(p[2]) <<  8 |
+            static_cast<uint32_t>(p[3]));
+}
+static inline uint64_t be64(const uint8_t* p) {
+    return (static_cast<uint64_t>(be32(p)) << 32 |
+            static_cast<uint64_t>(be32(p + 4)));
+}
+static inline uint64_t be48(const uint8_t* p) {
+    return (static_cast<uint64_t>(be16(p)) << 32 |
+            static_cast<uint64_t>(be32(p + 2)));
+}
+
+// Timestamp: 6 bytes at offset 5 in every ITCH 5.0 message
+// (after type 1B + stock locate 2B + tracking number 2B).
+static constexpr int OFF_TIMESTAMP = 5;
+
+// ─── ITCH 5.0 message sizes (bytes, excluding the 2-byte length prefix) ─────
+// Sizes from Nasdaq TotalView-ITCH 5.0 specification §4.
+// Only the types we care about are listed; everything else falls through to
+// the skip branch which reads the declared length from the frame header.
+
+static constexpr uint16_t SIZE_ADD_ORDER          = 36;
+static constexpr uint16_t SIZE_ADD_ORDER_MPID     = 40;
+static constexpr uint16_t SIZE_EXECUTE_ORDER      = 31;
+static constexpr uint16_t SIZE_EXECUTE_ORDER_PRICE= 36;
+static constexpr uint16_t SIZE_CANCEL_ORDER       = 23;
+static constexpr uint16_t SIZE_DELETE_ORDER       = 19;
+static constexpr uint16_t SIZE_REPLACE_ORDER      = 35;
+
+// Field offsets within each message body (after the 1-byte type field).
+// Timestamp (6 bytes) follows the type at offset 1; fields begin at offset 7
+// for most types.
+
+// Add Order (type 'A', 36 bytes)
+//   [0]  type 1B
+//   [1]  stock locate 2B
+//   [3]  tracking number 2B
+//   [5]  timestamp 6B
+//   [11] order ref 8B
+//   [19] side 1B
+//   [20] shares 4B
+//   [24] stock 8B
+//   [32] price 4B
+static constexpr int OFF_A_REF    = 11;
+static constexpr int OFF_A_SIDE   = 19;
+static constexpr int OFF_A_SHARES = 20;
+static constexpr int OFF_A_PRICE  = 32;
+
+// Execute Order (type 'E', 31 bytes)
+//   [0]  type 1B, [1] stock locate 2B, [3] tracking 2B, [5] ts 6B
+//   [11] order ref 8B
+//   [19] executed shares 4B
+//   [23] match number 8B
+static constexpr int OFF_E_REF    = 11;
+static constexpr int OFF_E_SHARES = 19;
+
+// Delete Order (type 'D', 19 bytes)
+//   [11] order ref 8B
+static constexpr int OFF_D_REF = 11;
+
+// Replace Order (type 'U', 35 bytes)
+//   [11] original order ref 8B
+//   [19] new order ref 8B
+//   [27] shares 4B
+//   [31] price 4B
+static constexpr int OFF_U_OLD_REF = 11;
+static constexpr int OFF_U_NEW_REF = 19;
+static constexpr int OFF_U_SHARES  = 27;
+static constexpr int OFF_U_PRICE   = 31;
+
+// ─── Parser implementation ───────────────────────────────────────────────────
+
+ParseStats parse_buffer(
+        const uint8_t* buf,
+        std::size_t    len,
+        MessageVisitor visitor) {
+
+    ParseStats stats;
+    std::size_t pos = 0;
+
+    while (pos + 2 <= len) {
+        const uint16_t msg_len = be16(buf + pos);
+        pos += 2;
+
+        if (msg_len == 0) {
+            // Padding / heartbeat frame — skip without error.
+            continue;
+        }
+        if (pos + msg_len > len) {
+            // Truncated message at end of buffer — stop cleanly.
+            ++stats.error_count;
+            break;
+        }
+
+        const uint8_t* msg = buf + pos;
+        const MsgType  typ = static_cast<MsgType>(msg[0]);
+
+        switch (typ) {
+        case MsgType::AddOrder:
+        case MsgType::AddOrderMPID: {
+            if (msg_len < SIZE_ADD_ORDER) { ++stats.error_count; break; }
+            AddOrder a;
+            a.timestamp_ns = be48(msg + OFF_TIMESTAMP);
+            a.order_ref = be64(msg + OFF_A_REF);
+            a.side      = static_cast<char>(msg[OFF_A_SIDE]);
+            a.shares    = be32(msg + OFF_A_SHARES);
+            a.price     = be32(msg + OFF_A_PRICE);
+            ++stats.add_count;
+            if (visitor.on_add) visitor.on_add(a);
+            break;
+        }
+        case MsgType::ExecuteOrder:
+        case MsgType::ExecuteOrderPrice: {
+            if (msg_len < SIZE_EXECUTE_ORDER) { ++stats.error_count; break; }
+            ExecuteOrder e;
+            e.timestamp_ns   = be48(msg + OFF_TIMESTAMP);
+            e.order_ref      = be64(msg + OFF_E_REF);
+            e.executed_shares = be32(msg + OFF_E_SHARES);
+            ++stats.execute_count;
+            if (visitor.on_execute) visitor.on_execute(e);
+            break;
+        }
+        case MsgType::DeleteOrder: {
+            if (msg_len < SIZE_DELETE_ORDER) { ++stats.error_count; break; }
+            DeleteOrder d;
+            d.timestamp_ns = be48(msg + OFF_TIMESTAMP);
+            d.order_ref = be64(msg + OFF_D_REF);
+            ++stats.delete_count;
+            if (visitor.on_delete) visitor.on_delete(d);
+            break;
+        }
+        case MsgType::ReplaceOrder: {
+            if (msg_len < SIZE_REPLACE_ORDER) { ++stats.error_count; break; }
+            ReplaceOrder r;
+            r.timestamp_ns  = be48(msg + OFF_TIMESTAMP);
+            r.old_order_ref = be64(msg + OFF_U_OLD_REF);
+            r.new_order_ref = be64(msg + OFF_U_NEW_REF);
+            r.shares        = be32(msg + OFF_U_SHARES);
+            r.price         = be32(msg + OFF_U_PRICE);
+            ++stats.replace_count;
+            if (visitor.on_replace) visitor.on_replace(r);
+            break;
+        }
+        case MsgType::CancelOrder:
+        default:
+            // Known-cancel and all unrecognised types: skip silently.
+            ++stats.skipped_count;
+            break;
+        }
+
+        pos += msg_len;
+    }
+
+    return stats;
+}
+
+}  // namespace itch

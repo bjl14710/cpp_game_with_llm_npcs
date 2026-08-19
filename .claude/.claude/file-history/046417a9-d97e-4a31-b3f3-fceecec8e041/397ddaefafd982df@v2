@@ -1,0 +1,63 @@
+# Skill: Procedural Textures (CPU-side OpenGL)
+
+## When to use
+When adding a new surface type that needs a distinct look without
+loading image files from disk. All textures in this project are
+generated in CPU memory and uploaded via `createTexture()`.
+
+## The Pattern
+
+```cpp
+GLuint makeXxxTexture() {
+    constexpr int kSize = 64;                          // always 64×64
+    std::vector<std::uint8_t> pixels(kSize*kSize*4, 255);
+    for (int y = 0; y < kSize; ++y) {
+        for (int x = 0; x < kSize; ++x) {
+            const int i = (y * kSize + x) * 4;
+            // compute R, G, B
+            pixels[i+0] = R;
+            pixels[i+1] = G;
+            pixels[i+2] = B;
+            pixels[i+3] = 255;                         // always opaque
+        }
+    }
+    return createTexture(pixels, kSize);               // defined in main.cpp
+}
+```
+
+## Noise helper — `hashNoise(x, y, seed)`
+Defined in `src/textures_proc.hpp`. Maps (x, y, seed) → [0,255] via
+Wang hash. Deterministic, no `<random>` needed.
+
+```cpp
+// Two-octave grain example:
+const float n = (hashNoise(x/8, y/8, 0) * 0.65f +
+                 hashNoise(x/3, y/3, 1) * 0.35f) / 255.0f;
+const std::uint8_t r = static_cast<std::uint8_t>(baseR + n * 24.0f - 12.0f);
+```
+
+## Existing generators (src/textures_proc.hpp)
+| Function | Surface | Base colour |
+|---|---|---|
+| `makeConcreteTexture()` | load-bearing walls | grey (105,102,98) |
+| `makeBrickTexture()` | site walls | terracotta (162,94,68) |
+| `makeMetalTexture()` | cover objects | steel (100,100,108) |
+| `makeGroundTexture()` | floor | warm tan (196,176,128) |
+
+## Registering a new texture
+1. Add a field to `TextureSet` in `main.cpp`
+2. Write `makeXxxTexture()` in `textures_proc.hpp`
+3. Assign in `buildTextures()`: `gTextures.xxx = makeXxxTexture();`
+4. Bind with `bindTexture(gTextures.xxx)` before drawing
+
+## Tile scale guideline
+- Large flat surfaces (floor, ceiling): `tileScale = 8.0f`
+- Medium walls: `tileScale = 3.0f–4.0f`
+- Small props / crates: `tileScale = 1.0f–2.0f`
+
+## Gotchas
+- `createTexture()` expects the pixel buffer to outlive the GL upload call —
+  pass by const-ref and let it copy; do not pass a temporary.
+- `GL_REPEAT` wrap mode is set automatically by `createTexture()`, so tiling
+  just works as long as you pass `tileScale > 1`.
+- Adding a new texture does not require touching `CMakeLists.txt`.

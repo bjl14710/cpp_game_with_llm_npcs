@@ -1,0 +1,149 @@
+#pragma once
+/**
+ * @file feed_handler.hpp  (solutions/07_feed_handler)
+ * @brief ITCH-inspired binary feed parser — Exercise 07 reference solution.
+ *
+ * Key design constraints on the hot path:
+ *   1. Zero heap allocation — all fields extracted via std::memcpy into local
+ *      structs (memcpy into misaligned pointers is undefined behaviour in C++).
+ *   2. No branching beyond the type-dispatch switch.
+ *   3. No STL containers that allocate (std::vector return is fine for the
+ *      public API; the inner loop does no allocation).
+ *
+ * Message format — ITCH-inspired, little-endian, packed:
+ *
+ *   type  fields                                       total bytes
+ *   'A'   type(1) oid(8) side(1) price_ticks(8) qty(4)    22
+ *   'X'   type(1) oid(8)                                    9
+ *   'E'   type(1) oid(8) qty(4)                            13
+ *   'P'   type(1) price_ticks(8) qty(4)   [trade print]    13
+ *
+ * parse_one returns true only for book-relevant events (A, X, E).
+ * 'P' (trade print) advances pos but returns false — it is informational only.
+ *
+ * @see exercises/07_feed_handler/feed_handler.hpp  — the practice stub
+ * @see tests/exercises/cpp/test_07_feed_handler.cpp — grading tests
+ */
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
+// ---------------------------------------------------------------------------
+// Packed message structs — must NOT be accessed via reinterpret_cast on an
+// unaligned pointer (undefined behaviour).  Always memcpy into a local copy.
+// ---------------------------------------------------------------------------
+#pragma pack(push, 1)
+struct MsgAdd {
+    char     type;         // 'A'
+    uint64_t oid;
+    char     side;         // 'B' or 'A'
+    int64_t  price_ticks;
+    int32_t  qty;
+};  // 22 bytes
+
+struct MsgCancel {
+    char     type;         // 'X'
+    uint64_t oid;
+};  // 9 bytes
+
+struct MsgExec {
+    char     type;         // 'E'
+    uint64_t oid;
+    int32_t  qty;
+};  // 13 bytes
+
+struct MsgTrade {
+    char    type;          // 'P' — trade print, not a book event
+    int64_t price_ticks;
+    int32_t qty;
+};  // 13 bytes
+#pragma pack(pop)
+
+// ---------------------------------------------------------------------------
+// BookEvent — unified output type for all book-relevant messages.
+// ---------------------------------------------------------------------------
+struct BookEvent {
+    char     type;         // 'A', 'X', or 'E'
+    uint64_t oid;          // 0 for types that have no oid
+    char     side;         // 'B' or 'A' for 'A' events; '\0' otherwise
+    int64_t  price;        // price_ticks for 'A'; 0 otherwise
+    int32_t  qty;          // qty for 'A' and 'E'; 0 for 'X'
+};
+
+// ---------------------------------------------------------------------------
+// FeedHandler
+// ---------------------------------------------------------------------------
+class FeedHandler {
+public:
+    /**
+     * Parse one message from buf starting at *pos.
+     *
+     * On success (including non-book 'P' messages that we skip):
+     *   - Advances *pos by the message length.
+     *   - Returns true if *out was written (book-relevant: A, X, E).
+     *   - Returns false if the message was consumed but not book-relevant ('P').
+     *
+     * On failure (truncated message at buffer boundary or unknown type):
+     *   - Leaves *pos unchanged.
+     *   - Returns false.
+     */
+    bool parse_one(const uint8_t* buf, size_t buf_len,
+                   size_t* pos, BookEvent* out) noexcept {
+        if (*pos >= buf_len) return false;
+        const char type = static_cast<char>(buf[*pos]);
+
+        switch (type) {
+        case 'A': {
+            if (*pos + sizeof(MsgAdd) > buf_len) return false;
+            MsgAdd m;
+            std::memcpy(&m, buf + *pos, sizeof(MsgAdd));
+            *pos += sizeof(MsgAdd);
+            *out = {'A', m.oid, m.side, m.price_ticks, m.qty};
+            return true;
+        }
+        case 'X': {
+            if (*pos + sizeof(MsgCancel) > buf_len) return false;
+            MsgCancel m;
+            std::memcpy(&m, buf + *pos, sizeof(MsgCancel));
+            *pos += sizeof(MsgCancel);
+            *out = {'X', m.oid, '\0', 0, 0};
+            return true;
+        }
+        case 'E': {
+            if (*pos + sizeof(MsgExec) > buf_len) return false;
+            MsgExec m;
+            std::memcpy(&m, buf + *pos, sizeof(MsgExec));
+            *pos += sizeof(MsgExec);
+            *out = {'E', m.oid, '\0', 0, m.qty};
+            return true;
+        }
+        case 'P': {
+            // Trade print — advance past it but don't emit a book event.
+            if (*pos + sizeof(MsgTrade) > buf_len) return false;
+            *pos += sizeof(MsgTrade);
+            return false;
+        }
+        default:
+            return false;  // unknown type; pos unchanged so caller can bail
+        }
+    }
+
+    /**
+     * Parse all messages in the buffer; call callback(event) for each
+     * book-relevant event.
+     *
+     * @return  Number of book events emitted.
+     */
+    template<typename Fn>
+    size_t parse_all(const uint8_t* buf, size_t buf_len, Fn callback) noexcept {
+        size_t pos = 0, count = 0;
+        BookEvent ev{};
+        while (pos < buf_len) {
+            const size_t prev = pos;
+            const bool book = parse_one(buf, buf_len, &pos, &ev);
+            if (pos == prev) break;  // no progress — truncated or unknown
+            if (book) { callback(ev); ++count; }
+        }
+        return count;
+    }
+};

@@ -1,0 +1,137 @@
+"""Create milestone + 4 issues for the shared-character-library plan."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+gh = Github(token)
+repo = gh.get_repo(full)
+username = gh.get_user().login
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+milestone = retry(repo.create_milestone,
+    title="Shared character library",
+    description=("Unify NPCs and the creator onto the one composite CharacterParts "
+                 "pool, then expand hairstyles inside it. Plan: "
+                 ".claude/plans/shared-character-library.md. Branch: "
+                 "feature/shared-character-library (stacked on feature/aim-styles-preview)."))
+print(f"Milestone #{milestone.number}: {milestone.title}")
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`feature/shared-character-library` (one atomic commit per issue, stacked on `feature/aim-styles-preview`)
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    dict(
+        title="feat(persona): optional authored look with deterministic fallback",
+        what=("Add an optional `look = body, head, eyes, hair, palette` header key to the "
+              ".persona format: parsed into LoadedPersona, round-tripped by renderPersonaText. "
+              "Add `lookForPersona(name, authored)` to CharacterParts: returns the authored look "
+              "when valid, otherwise a deterministic randomizeLook(hash(name)) so every persona "
+              "(and any future procedural NPC) gets a stable, valid, style-consistent look with "
+              "zero manual gaps. An authored look naming an unknown part/palette is rejected with "
+              "a reason and falls back — the NPC still spawns."),
+        where=("src/core/PersonaLoader.{hpp,cpp} (parse + render), "
+               "src/core/CharacterParts.{hpp,cpp} (lookForPersona), "
+               "new tests/test_persona_look.cpp"),
+        verify=("tests/test_persona_look.cpp: look line parses and round-trips; malformed look "
+                "(wrong item count) is a parse error like a bad position; authored-valid wins; "
+                "authored-invalid falls back with a reason; no-look personas get deterministic, "
+                "valid looks stable across calls. make -C tests test green."),
+        constraints=("PersonaLoader stays free of catalog VALIDATION (structural parse only); "
+                     "validation lives in lookForPersona so the catalogs stay in CharacterParts. "
+                     "Round-trip guarantee of renderPersonaText must hold."),
+        economy=("Follow the existing header-key pattern (position/schedule) exactly; one new "
+                 "helper in CharacterParts, one new test file, no new abstractions."),
+        concept="authored data with a deterministic derived fallback",
+    ),
+    dict(
+        title="feat(npc): render every NPC from the shared composite parts library",
+        what=("Every roaming NPC gets a CharacterLook (authored-or-fallback via lookForPersona; "
+              "player-created characters keep their stored look) and renders through "
+              "drawCompositeCharacter — the rigged drawCharacter path is no longer dispatched "
+              "for NPCs (its loading stays dormant; remote players still use it, out of scope). "
+              "Extend drawCompositeCharacter so composite NPCs keep mood-face billboards and a "
+              "readable death pose."),
+        where=("src/app/main.cpp NPC render loop (~970-995) + startup look assignment; "
+               "src/app/RaylibRenderer.{hpp,cpp} drawCompositeCharacter signature"),
+        verify=("Smoke run + screenshot: all ten townsfolk render as composites (no rigged "
+                "models, no marker cylinders); moods still float above heads. "
+                "make -C tests test green; game builds."),
+        constraints=("Do NOT delete rigged-model loading in Assets.cpp (remote players + revival "
+                     "path). Creator preview call site keeps working unchanged (defaulted params)."),
+        economy=("The unification hook already exists (customLooks branch) — this issue widens "
+                 "it to all NPCs; no new render system, no new files."),
+        concept="collapsing two render paths onto one shared asset library behind an existing dispatch hook",
+    ),
+    dict(
+        title="feat(parts): expand the shared hairstyle pool",
+        what=("Add six new style-tagged hair parts to the shared catalog — hair_cap (any), "
+              "hair_buzz (any), hair_bob (round), hair_curls (round), hair_bun (round), "
+              "hair_side (blocky) — with bespoke drawCompositeCharacter recipes, additive within "
+              "the existing socket/size contract. Creator picker and NPCs pick them up from the "
+              "same pool automatically."),
+        where=("src/core/CharacterParts.cpp partCatalog(); src/app/RaylibRenderer.cpp recipes; "
+               "tests/test_character_parts.cpp exhaustive combo test auto-covers them"),
+        verify=("Exhaustive combination test still green over the grown catalog; screenshot of "
+                "the new hair parts rendering in-engine. Hair count 6 -> 12."),
+        constraints=("Additive only — no changes to existing parts or the assembly/socket code. "
+                     "Every new part must satisfy the style gate and the generic-box fallback "
+                     "must remain the safety net."),
+        economy=("Data rows + recipe branches only, exactly the #92 pattern; no new categories, "
+                 "no new palettes unless a look needs one."),
+        concept="additive style-tagged catalog growth in a single shared pool",
+    ),
+    dict(
+        title="feat(personas): author ten distinct in-character looks",
+        what=("Give each of the ten .persona files an authored `look = ...` line that reads "
+              "in-character (cop uniformed: visor + cap + slate; baker motherly: bun + warm; "
+              "etc.), all pairwise-distinct and style-valid. Extend the roster test to assert "
+              "every shipped persona has a valid authored look and no two looks are identical."),
+        where=("personas/*.persona (all ten); tests/test_persona_roster.cpp"),
+        verify=("Roster test asserts: each persona parses with an authored look, lookIsValid "
+                "passes, and the ten look tuples are pairwise distinct (variety >= the old "
+                "five-model baseline). make -C tests test green."),
+        constraints=("Looks must pass the style gate (no round/blocky mixing). The cop must "
+                     "still read as uniformed authority without the Knight model."),
+        economy=("One header line per persona file plus test assertions — no code changes."),
+        concept="art-directing a cast within a constrained part system",
+    ),
+]
+
+created = []
+for spec in SPECS:
+    body = TEMPLATE.format(economy=spec["economy"], **{k: spec[k] for k in
+                           ("what", "where", "verify", "constraints", "concept")})
+    issue = retry(repo.create_issue, title=spec["title"], body=body,
+                  labels=["ready-for-ai"], assignees=[username], milestone=milestone)
+    created.append(issue.number)
+    print(f"  #{issue.number}: {spec['title']}")
+
+print("ISSUES:", created)

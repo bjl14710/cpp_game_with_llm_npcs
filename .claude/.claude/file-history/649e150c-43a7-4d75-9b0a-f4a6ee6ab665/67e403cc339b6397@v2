@@ -1,0 +1,30 @@
+"""Grading wrapper — Exercise 08: Latency Benchmark Harness.
+
+Compiles and runs tests/exercises/cpp/test_08_latency.cpp via run_cpp.sh.
+
+Run:  uv run pytest tests/exercises/test_08_latency.py -v
+"""
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+CPP_DIR = Path(__file__).resolve().parent / "cpp"
+
+
+def _run_cpp_test(name: str) -> None:
+    if shutil.which("g++") is None:
+        pytest.skip("g++ not installed")
+    proc = subprocess.run(
+        ["bash", str(CPP_DIR / "run_cpp.sh"), name],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 42:
+        pytest.skip("Exercise not implemented yet — fill in the TODOs")
+    assert proc.returncode == 0, f"\n{proc.stdout}\n{proc.stderr}"
+
+
+def test_latency():
+    _run_cpp_test("test_08_latency")

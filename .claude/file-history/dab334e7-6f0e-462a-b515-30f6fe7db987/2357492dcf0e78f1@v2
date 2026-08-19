@@ -1,0 +1,134 @@
+# Plan: Track-Record-Weighted Ensemble Strategy
+Date: 2026-07-07
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Instead of the human picking one winning strategy out of the arena's
+survivors, an `EnsembleStrategy` combines several constituents' signals via
+weighted voting, where each constituent's weight comes from its own live
+paper-trading track record (Sharpe) rather than a fixed or equal split. The
+ensemble is constructed and run through the exact same arena machinery
+(backtest, live, report) as any other strategy — it just happens to be made
+of other strategies.
+
+## Goal
+Brandon can register an ensemble of currently-live strategies and let their
+relative live performance automatically tilt how much each one's vote
+counts, without hand-picking a single winner or building new
+orchestration machinery.
+
+## Design Decisions
+- **`EnsembleStrategy` stays a pure function of `(constituents, weights) ->
+  DailySignal`, with no database access.** It lives in `strategies/` and must
+  not import `strategy_arena` (avoids a circular import and keeps the
+  `DailyStrategy` contract dependency-free, consistent with every other
+  strategy). Weight computation — which needs the arena's SQLite state — is a
+  separate function that lives in `strategy_arena.py` and is called before
+  constructing the ensemble each tick.
+- **Combination rule**: for a given day, call every constituent's
+  `generate_signal(df)`; combine as
+  `score = Σ weight_i * position_i * confidence_i`, `position = sign(score)`,
+  `confidence = |score|` (already weight-normalized since weights sum to 1).
+  A score of exactly 0 (perfect disagreement) is `HOLD`. This keeps the
+  combination in the same units the rest of the arena already uses
+  (confidence for top-N ranking) without inventing new semantics.
+- **Weight source: live Sharpe, normalized, with a floor.** `ensemble_weights`
+  pulls each constituent's live equity from `ArenaState`, computes Sharpe via
+  the existing `analyze_equity.compute_metrics`, clips negative Sharpe to a
+  small floor (default 0.05, not zero — a currently-losing constituent still
+  gets a token vote rather than being fully silenced, since its recent
+  performance is itself noisy), and normalizes to sum to 1.
+- **All-or-nothing track-record bootstrap.** If every constituent has at
+  least `min_live_days` (default 20, matching the divergence plan's default)
+  of live history, use track-record weights; if even one constituent is too
+  fresh, the whole ensemble falls back to equal weights for that tick. A
+  partial mix of "some by track record, some equal" was considered and
+  rejected as a harder-to-reason-about rule for no real benefit at this
+  strategy count.
+- **Rebalanced every live tick.** Weights are recomputed fresh each
+  `arena-run live` call from whatever live history exists at that moment —
+  no separate rebalance schedule to maintain, and it directly matches
+  "weight comes from track record" as an ongoing, not one-time, computation.
+- **Constructed via a dedicated arena subcommand, not the static registry.**
+  `EnsembleStrategy` takes a dynamic, user-named set of constituents, so it
+  doesn't fit `strategies/registry.py`'s static name→class map. A new
+  `arena-run ensemble --name my_ensemble --members engulfing,technical,gbm`
+  command builds it, requiring every named member to currently be `PASS` in
+  the arena DB (fails fast, with the missing/excluded names listed, rather
+  than silently dropping a member — matches the project's existing
+  human-in-the-loop philosophy for consequential state changes).
+
+## Out of Scope (this version)
+- Meta-learning / stacking (this is a weighted vote, not a trained model)
+- Dynamic constituent membership changes without recreating the ensemble
+- Shared capital allocation between an ensemble and its own constituents run
+  standalone (each stays an independent ledger, per existing arena convention)
+- Nested ensembles (an ensemble containing another ensemble) — constituents
+  must be non-ensemble `DailyStrategy` instances this version
+
+## Affected Areas
+- New: `strategies/ensemble.py` — `EnsembleStrategy(DailyStrategy)`:
+  `__init__(self, constituents: Dict[str, DailyStrategy], weights: Dict[str,
+  float])`; `warmup_bars` = max of constituents' `warmup_bars` (needs enough
+  history for the slowest member); `generate_signal` implements the weighted
+  vote above. Not added to `strategies/registry.py`'s static map (constructed
+  dynamically only).
+- `strategy_arena.py` — `ensemble_weights(state: ArenaState, names:
+  List[str], min_live_days=20, floor=0.05) -> Dict[str, float]`; new
+  subcommand `ensemble` (`--name`, `--members`, plus the existing
+  backtest/live-shared flags) that validates every member is `PASS`,
+  builds constituents via `build_strategy`, computes weights, constructs
+  `EnsembleStrategy`, and screens/runs it through the existing
+  `cmd_backtest`/`cmd_live` code paths under the given `--name` — reusing all
+  persistence, filtering, and reporting machinery unchanged.
+- New tests: `tests/test_ensemble.py` — combination-rule cases (agreement,
+  disagreement/hold, weighted majority), `ensemble_weights` normalization and
+  floor behavior, the all-or-nothing bootstrap fallback, and the fail-fast
+  behavior when a named member is missing or `EXCLUDED`.
+
+## Implementation Order
+1. `strategies/ensemble.py` — `EnsembleStrategy` + combination-rule unit
+   tests using hand-built constituent doubles (not real strategies) so the
+   math is tested in isolation.
+2. `ensemble_weights` in `strategy_arena.py` + tests: track-record weighting
+   on synthetic ArenaState equity, the floor clipping negative Sharpe, the
+   all-or-nothing bootstrap fallback when one constituent is too fresh.
+3. `arena-run ensemble` subcommand: member validation (fail-fast on
+   missing/EXCLUDED), construction, and reuse of `cmd_backtest`/`cmd_live`;
+   end-to-end test building a 2-constituent ensemble from a seeded arena DB
+   and running one live tick.
+
+## Acceptance Criteria
+- [ ] Given two constituents that agree in direction, the ensemble emits
+      that direction with confidence reflecting the combined weighted score
+- [ ] Given two constituents that disagree with equal weighted magnitude,
+      the ensemble emits `HOLD`
+- [ ] `ensemble_weights` returns weights summing to 1, with a losing
+      constituent's raw negative Sharpe clipped to the floor before
+      normalization, not excluded outright
+- [ ] If any named constituent has fewer than `min_live_days` live rows, all
+      constituents receive equal weight for that computation
+- [ ] `arena-run ensemble --members a,b,missing` fails fast, naming `missing`
+      as not found/not PASS, and creates nothing
+- [ ] An ensemble built from 2 PASS constituents backtests and live-ticks
+      through the existing `cmd_backtest`/`cmd_live` paths with no special
+      casing visible in the report (it's just another row)
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Only one constituent named | Degenerates to that strategy's own signal at weight 1.0 — valid, if a slightly pointless ensemble |
+| A constituent's `generate_signal` needs more warmup than others | `EnsembleStrategy.warmup_bars` is the max across constituents, so the arena skips days none of them are ready for |
+| All constituents currently at 0 live Sharpe exactly | Floor value applies uniformly; normalizes to equal weights, same effective result as the bootstrap fallback |
+| A named constituent exists in the registry but its arena status is `EXCLUDED` | Treated the same as "not found" for ensemble construction — fails fast, doesn't silently include a screened-out strategy |
+| GBM constituent named without `--gbm_bundle` | Same existing error as running `gbm` standalone — clear `SystemExit` naming the missing flag |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(strategies): EnsembleStrategy weighted-vote combination` — pure combination logic + unit tests, no DB coupling
+2. `feat(arena): ensemble_weights from live Sharpe with floor + bootstrap fallback` — track-record weighting
+3. `feat(arena): arena-run ensemble subcommand with fail-fast member validation` — reuses existing backtest/live/report paths

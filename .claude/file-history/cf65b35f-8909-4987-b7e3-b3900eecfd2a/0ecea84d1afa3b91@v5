@@ -1,0 +1,108 @@
+// pybind11 bridge: microstructure signal stream -> Python.
+// Plan: .claude/plans/microstructure-signals.md, step 4.
+//
+// events_from_file() parses a symbol-filtered framed ITCH 5.0 file with
+// MicrostructureEngine and returns the event stream as COLUMNAR lists —
+// one list per MicroEvent field rather than one Python object per event.
+// The filtered AAPL golden day has ~1.5M messages; a struct-of-arrays dict
+// crosses the boundary as 7 list conversions instead of millions of tiny
+// object allocations, and feeds pd.DataFrame(result) directly.
+//
+// The file is read in one gulp: symbol-filtered days are ~45 MB. Do NOT
+// hand this function the unfiltered multi-GB exchange day — filter first
+// with scripts/fetch_itch_sample.sh / itch_filter.
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#include "microstructure_signals.hpp"
+
+#include <cstdio>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace py = pybind11;
+
+namespace {
+
+// Read an entire file into memory. Throws std::runtime_error (-> Python
+// RuntimeError) on any IO failure so callers never see a partial parse.
+std::vector<uint8_t> read_file(const std::string& path) {
+    std::unique_ptr<std::FILE, int (*)(std::FILE*)> f(
+        std::fopen(path.c_str(), "rb"), &std::fclose);
+    if (!f) throw std::runtime_error("cannot open ITCH file: " + path);
+    if (std::fseek(f.get(), 0, SEEK_END) != 0)
+        throw std::runtime_error("cannot seek ITCH file: " + path);
+    const long size = std::ftell(f.get());
+    if (size < 0) throw std::runtime_error("cannot stat ITCH file: " + path);
+    std::rewind(f.get());
+    std::vector<uint8_t> buf(static_cast<std::size_t>(size));
+    if (!buf.empty() &&
+        std::fread(buf.data(), 1, buf.size(), f.get()) != buf.size())
+        throw std::runtime_error("short read on ITCH file: " + path);
+    return buf;
+}
+
+// Parse `path` and return the columnar event dict documented in the module.
+py::dict events_from_file(const std::string& path,
+                          uint32_t min_price_raw,
+                          uint32_t max_price_raw,
+                          uint32_t tick_size) {
+    const std::vector<uint8_t> buf = read_file(path);
+
+    itch::MicrostructureEngine engine(min_price_raw, max_price_raw, tick_size);
+    itch::parse_buffer(buf.data(), buf.size(), engine.visitor());
+
+    const std::vector<itch::MicroEvent>& events = engine.events();
+    const std::size_t n = events.size();
+
+    // Struct-of-arrays: one contiguous column per field.
+    std::vector<uint64_t> timestamp_ns(n);
+    std::vector<double>   ofi(n), microprice(n), best_bid(n), best_ask(n);
+    std::vector<uint32_t> bid_size(n), ask_size(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const itch::MicroEvent& e = events[i];
+        timestamp_ns[i] = e.timestamp_ns;
+        ofi[i]          = e.ofi;
+        microprice[i]   = e.microprice;
+        best_bid[i]     = e.best_bid;
+        best_ask[i]     = e.best_ask;
+        bid_size[i]     = e.bid_size;
+        ask_size[i]     = e.ask_size;
+    }
+
+    py::dict out;
+    out["timestamp_ns"]      = py::cast(timestamp_ns);
+    out["ofi"]               = py::cast(ofi);
+    out["microprice"]        = py::cast(microprice);
+    out["best_bid"]          = py::cast(best_bid);
+    out["best_ask"]          = py::cast(best_ask);
+    out["bid_size"]          = py::cast(bid_size);
+    out["ask_size"]          = py::cast(ask_size);
+    out["skipped_one_sided"] = py::cast(engine.skipped_one_sided());
+    out["book_error_count"]  = py::cast(engine.book().error_count());
+    return out;
+}
+
+}  // namespace
+
+PYBIND11_MODULE(signals_cpp, m) {
+    m.doc() = "C++ microstructure signal stream (OFI, microprice) for oil_alpha "
+              "(pybind11 bridge; see cpp/itch/microstructure_signals.hpp)";
+
+    m.def(
+        "events_from_file",
+        &events_from_file,
+        py::arg("path"),
+        py::arg("min_price_raw"),
+        py::arg("max_price_raw"),
+        py::arg("tick_size") = 1,
+        "Parse a symbol-filtered framed ITCH 5.0 file and return the per-update\n"
+        "microstructure event stream as columnar lists (DataFrame-ready dict),\n"
+        "plus 'skipped_one_sided' and 'book_error_count' diagnostic ints.\n"
+        "Prices are ITCH fixed-point (dollars * 10000); the [min, max] bounds\n"
+        "must cover the symbol's session range or events are dropped as errors."
+    );
+}

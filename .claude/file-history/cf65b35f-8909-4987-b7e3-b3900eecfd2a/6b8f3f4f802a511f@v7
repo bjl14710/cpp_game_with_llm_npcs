@@ -1,0 +1,120 @@
+# Learning Progress
+
+Tracks which concepts have been covered with lesson, drill, and vocab files.
+
+---
+
+## Covered
+
+### 0001 — pybind11 + CMake FetchContent: Compiling a C++ Extension Importable from Python
+
+**Date added:** 2026-06-28
+**Status:** Complete
+
+**Context:** Added after the repo received its first C++ build layer — the `oil_volume_cpp` extension exposing `rolling_mean(values, window)` via pybind11 + scikit-build-core.
+
+**Files:**
+- Lesson: [lessons/0001-pybind11-cmake-extension.html](lessons/0001-pybind11-cmake-extension.html)
+- Drill: [drills/0001-pybind11-cmake-extension.html](drills/0001-pybind11-cmake-extension.html)
+- Vocab: [vocab/0001-pybind11-cmake-extension.html](vocab/0001-pybind11-cmake-extension.html)
+
+**Key concepts covered:**
+- Why C++ extensions in a Python trading system (performance, memory layout, SIMD, GIL release)
+- How pybind11 works: PYBIND11_MODULE macro, type casters, py::arg, return_value_policy
+- CMake structure: root CMakeLists.txt + subdirectory, pybind11_add_module
+- PYBIND11_FINDPYTHON=ON vs legacy FindPythonLibs
+- FetchContent vs find_package hybrid strategy
+- scikit-build-core as the pyproject.toml build backend
+- The editable install flow and its limitations for C++ code
+- The parity test pattern: C++ result vs NumPy reference within 1e-9
+- ABI tags and why upgrading Python requires a recompile
+
+**Source files studied:**
+- `cpp/oil_volume/bindings.cpp`
+- `cpp/oil_volume/CMakeLists.txt`
+- `CMakeLists.txt` (root)
+- `pyproject.toml`
+- `scripts/build_cpp.sh`
+- `tests/test_cpp_bridge.py`
+
+---
+
+## Backlog
+
+_(Add future concepts here as the repo grows)_
+
+### 0003 — Order-Book Reconstruction from Incremental Feeds
+
+**Date added:** 2026-07-06 (overnight session)
+**Status:** Lesson + drill + vocab generated autonomously; not yet attempted by the user
+
+**Context:** Generated after issue micro-3, where validating against the real AAPL
+golden day exposed that the parser skipped ITCH 'X' partial cancels — phantom
+depth froze best-bid at $289.75 and crossed the book on 100% of post-open events.
+The lesson is that post-mortem turned into theory.
+
+**Files:** [lessons/0003-order-book-reconstruction.html](lessons/0003-order-book-reconstruction.html) ·
+[drills/0003-order-book-reconstruction.html](drills/0003-order-book-reconstruction.html) ·
+[vocab/0003-order-book-reconstruction.html](vocab/0003-order-book-reconstruction.html)
+
+**Key concepts:** incremental vs snapshot feeds; the book as an event-sourced fold;
+all-or-nothing message-taxonomy coverage; phantom depth; market-invariant checks
+(uncrossed post-open book) as the tripwire synthetic tests can't provide;
+E vs X vs D — same mechanics, different economics.
+
+### 0004 — Kyle's Lambda & Price Impact
+
+**Date added:** 2026-07-06 (overnight session)
+**Status:** Lesson + drill + vocab generated autonomously; not yet attempted by the user
+
+**Context:** Generated after issue micro-4. Real-day result worth remembering:
+AAPL 2019-12-30 RTH λ = 1.48e-5 $/share of OFI, r² = 0.61, 78/78 five-minute
+windows ok, per-window λ varying ~5× intraday.
+
+**Files:** [lessons/0004-kyles-lambda-price-impact.html](lessons/0004-kyles-lambda-price-impact.html) ·
+[drills/0004-kyles-lambda-price-impact.html](drills/0004-kyles-lambda-price-impact.html) ·
+[vocab/0004-kyles-lambda-price-impact.html](vocab/0004-kyles-lambda-price-impact.html)
+
+**Key concepts:** λ as OLS slope of Δprice on signed flow; OFI vs signed trade
+volume; bar-close-to-bar-close telescoping (attenuation bias); rolling windows +
+ok-gating; λ (impact) vs spread (cost); r² vs λ; synthetic injected-coefficient
+validation mirroring the CCF sign-convention test.
+
+### 0005 — The Cost of Observability
+
+**Date added:** 2026-07-06 (overnight session)
+**Status:** Lesson + drill + vocab generated autonomously; not yet attempted by the user
+
+**Context:** Generated after issue micro-5's perf write-up (docs/perf/02): the
+per-event top_of_book O(range) scan is ~100% of the engine's cost — 72,568 ns/event
+at 200k ticks vs 49,212 at 135k (ratio 1.47 vs 1.48) against a 30.9 ns book update.
+
+**Files:** [lessons/0005-cost-of-observability.html](lessons/0005-cost-of-observability.html) ·
+[drills/0005-cost-of-observability.html](drills/0005-cost-of-observability.html) ·
+[vocab/0005-cost-of-observability.html](vocab/0005-cost-of-observability.html)
+
+**Key concepts:** frequency multiplies everything; complexity constants hide in
+domain parameters; parameter-variation experiments; O(N·R) trap; decimation vs
+aggregation; why hot-path optimizations land as their own measured change.
+
+**Next suggested:** attempt drills 0003–0005 and record scores; then either
+`/teach` the incremental best-index optimization when it lands, or the
+Granger/cointegration statistics from the daily layer.
+
+### Pending /teach target — Look-ahead bias, measured
+
+**Date flagged:** 2026-07-07
+**Status:** Numbers now exist (not yet taught)
+
+**Context:** `analysis/walkforward.py` + `docs/perf/03-backtest-vs-live.md`
+turn "look-ahead bias" from a warning into concrete numbers: on real daily
+CL/XLE the backtest-vs-live gap is **zero** (contemporaneous at every window,
+`leader_agreement_rate=1.000`), while a synthetic regime-flip control shows the
+tool *can* detect divergence (`agreement=0.489`, `lag_drift=2.044`,
+`mean_oos_gap=−0.237` — the frozen full-sample lag scores *worse* out-of-sample).
+
+**Concept to teach:** point-in-time / walk-forward evaluation — bias lives in
+*parameter instability*, not in the mere use of full-sample data; a null result
+is a result; the bias can cut both ways. Good contrast pair: backtest (full
+sample visible) vs walk-forward (information-set restricted). Grounded in
+`walkforward_ccf`'s strict-slicing guard (the poison-the-future test).

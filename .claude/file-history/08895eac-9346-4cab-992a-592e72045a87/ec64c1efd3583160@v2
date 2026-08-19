@@ -1,0 +1,64 @@
+"""Tests for bench-history parser and regression rule (scaffold — skipped).
+
+Pure-logic tests on canned output and synthetic history — never runs the
+real benches (plan: .claude/plans/bench-latency-history.md).
+TODO(bench-1): un-skip as implemented.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import pathlib
+import sys
+
+import pytest
+
+# scripts/ is not a package; load the module by path (stdlib pattern).
+# Registering in sys.modules BEFORE exec is required for @dataclass under
+# `from __future__ import annotations` to resolve its module namespace.
+_SPEC = importlib.util.spec_from_file_location(
+    "bench_history",
+    pathlib.Path(__file__).parent.parent / "scripts" / "bench_history.py",
+)
+bench_history = importlib.util.module_from_spec(_SPEC)
+sys.modules["bench_history"] = bench_history
+_SPEC.loader.exec_module(bench_history)
+
+CANNED = (
+    "=== ITCH Bench (flat-array book): tick-to-trade latency ===\n"
+    "Messages parsed:  add=100000  execute=0  delete=0  replace=0\n"
+    "Latency (ns):  p50=0  p99=1000  p99.9=2000  mean=30.9  max=170000\n"
+    "Total timed events: 100000\n"
+)
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(bench-1)")
+def test_parser_extracts_all_fields_exactly() -> None:
+    """Canned output (with the real macOS p50=0 quirk) parses field-perfect."""
+    got = bench_history.parse_latency_line(CANNED)
+    assert got == {"p50": 0, "p99": 1000, "p999": 2000, "mean": 30.9, "max": 170000}
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(bench-1)")
+def test_parser_raises_loudly_on_format_drift() -> None:
+    """A changed latency line must raise, never record garbage."""
+    with pytest.raises(ValueError):
+        bench_history.parse_latency_line("Latency (us): median=1 avg=2\n")
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(bench-1)")
+def test_regression_rule_thresholds() -> None:
+    """25% above the 5-row median flags; 15% passes (threshold=20%)."""
+    history = [30.0, 31.0, 29.0, 30.5, 30.0]      # median 30.0
+    flagged, _ = bench_history.regression_verdict(37.5, history)   # +25%
+    assert flagged
+    flagged, _ = bench_history.regression_verdict(34.5, history)   # +15%
+    assert not flagged
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(bench-1)")
+def test_insufficient_history_is_recorded_not_judged() -> None:
+    """Fewer than N prior matching rows -> not flagged, explicit message."""
+    flagged, msg = bench_history.regression_verdict(999.0, [30.0, 31.0])
+    assert not flagged
+    assert "insufficient" in msg.lower()

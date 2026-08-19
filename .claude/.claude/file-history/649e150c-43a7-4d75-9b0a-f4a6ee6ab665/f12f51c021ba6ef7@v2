@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0023 — AI: Segmentation</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}pre .kw{color:var(--code-kw)}pre .str{color:var(--code-str)}pre .num{color:var(--code-num)}pre .com{color:var(--code-com);font-style:italic}pre .fn{color:var(--code-fn)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0023</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>AI: Segmentation</h1>
+<p class="lead">Why this matters: object detection (Lesson 0022) draws boxes around objects. Segmentation goes a level deeper — it labels every pixel. For alt-data pipelines like crop NDVI (Lesson 0020) or oil-tank fill detection (Lesson 0015), segmentation is the natural tool because the question is "what is this pixel?" not "where is this object?"</p>
+
+<h2>1. The three segmentation tasks</h2>
+<table>
+<tr><th>Task</th><th>Output</th><th>Distinguishes individual instances?</th></tr>
+<tr><td>Semantic segmentation</td><td>Every pixel gets a class label.</td><td>No. All "car" pixels are the same class.</td></tr>
+<tr><td>Instance segmentation</td><td>Every pixel gets a class + instance ID.</td><td>Yes. "Car 1" and "Car 2" are separate.</td></tr>
+<tr><td>Panoptic segmentation</td><td>Combines the two. "Things" (countable: cars, ships) get instance IDs; "stuff" (uncountable: sky, road, water) gets only a class.</td><td>For things, yes; for stuff, no.</td></tr>
+</table>
+
+<h2>2. Why segmentation for alt-data</h2>
+<div class="grid2">
+<div class="card"><h4>Crop NDVI (Lesson 0020)</h4><p>You want the NDVI <em>only over crop pixels</em>, not over roads, buildings, or water. Semantic segmentation produces a crop mask which you then apply to the NDVI map.</p></div>
+<div class="card"><h4>Oil-tank fill detection</h4><p>The tank's outline is needed to measure the shadow length of the floating roof. Semantic segmentation gives the tank's boundary; analysis runs on the bounded region.</p></div>
+<div class="card"><h4>Port activity</h4><p>Counting ships needs <em>instance</em> segmentation — touching ships need to be distinguished from one another. Box-based detection alone fails when ships are docked side-by-side.</p></div>
+<div class="card"><h4>Building footprint extraction</h4><p>Urbanization signals for property markets. Semantic seg gives building/non-building pixels; instance seg gives individual buildings.</p></div>
+</div>
+
+<h2>3. The model families</h2>
+
+<h3>(a) U-Net (2015): the OG semantic segmentation architecture</h3>
+<p>An encoder-decoder convnet with skip connections between corresponding encoder and decoder layers. The encoder downsamples (gathering context); the decoder upsamples (recovering resolution); skip connections preserve fine detail. Still a strong baseline for satellite imagery; trivially small to train.<sup><a class="fn" href="#fn-1">[1]</a></sup></p>
+
+<h3>(b) Mask R-CNN (2017): instance segmentation by extension</h3>
+<p>Take Faster R-CNN's two-stage detection, add a mask-prediction head on top of each detected box. Outputs per-instance pixel masks. Slower than YOLO but the standard baseline for instance segmentation in research.</p>
+
+<h3>(c) SAM — Segment Anything Model (Meta, 2023)</h3>
+<p>A foundation model for segmentation. Trained on 11M images with 1.1B masks. Given a prompt (a point, a box, or text), SAM produces a high-quality mask for the indicated region — without per-domain fine-tuning.<sup><a class="fn" href="#fn-2">[2]</a></sup></p>
+<p>SAM is a step-change for alt-data:</p>
+<ul>
+<li>You can prompt with a point ("segment whatever's here") and SAM produces a mask.</li>
+<li>Combine with Grounding DINO (Lesson 0022) for text-driven prompts → fully open-vocabulary instance segmentation.</li>
+<li>Fine-tuning is optional for many tasks; it works zero-shot.</li>
+</ul>
+
+<h3>(d) Transformer-based (Mask2Former, SegFormer)</h3>
+<p>Adopt the DETR-style set-prediction approach for segmentation. Strong on panoptic tasks; competitive with CNNs in 2024–25.</p>
+
+<h2>4. The standard output</h2>
+<pre><span class="com"># Semantic segmentation output: a 2D array same size as the input image,</span>
+<span class="com"># each cell holds an integer class label.</span>
+mask = model(image)            <span class="com"># shape: (H, W), values in [0, num_classes-1]</span>
+
+<span class="com"># Instance segmentation output: a list of (binary_mask, class_id, confidence)</span>
+instances = model(image)
+<span class="kw">for</span> inst <span class="kw">in</span> instances:
+    binary_mask = inst[<span class="str">"mask"</span>]   <span class="com"># shape: (H, W), boolean</span>
+    class_id    = inst[<span class="str">"cls"</span>]
+    score       = inst[<span class="str">"score"</span>]
+</pre>
+
+<h2>5. Evaluation metrics</h2>
+<table>
+<tr><th>Metric</th><th>Definition</th><th>Use</th></tr>
+<tr><td>Pixel accuracy</td><td>Fraction of pixels classified correctly.</td><td>Bad for imbalanced classes (background dominates).</td></tr>
+<tr><td>mIoU (mean IoU)</td><td>Mean of IoU across all classes.</td><td>Headline metric for semantic segmentation.</td></tr>
+<tr><td>Dice coefficient</td><td>2·|A∩B| / (|A|+|B|). Equivalent to F1 for binary masks.</td><td>Common in medical imaging; also fine for satellite.</td></tr>
+<tr><td>AP@mask</td><td>Average precision computed on mask-IoU rather than box-IoU.</td><td>Instance segmentation benchmark.</td></tr>
+</table>
+
+<h2>6. Illustrative pipeline: oil-tank fill from satellite</h2>
+<pre><span class="com"># 1. Detect tanks (box-level) with a YOLO-family model.</span>
+boxes = yolo(satellite_tile, classes=[<span class="str">"oil_tank"</span>])
+
+<span class="kw">for</span> box <span class="kw">in</span> boxes:
+    <span class="com"># 2. Crop to the tank box, run SAM with the box as prompt → fine mask.</span>
+    tank_crop = <span class="fn">crop</span>(satellite_tile, box)
+    mask      = <span class="fn">sam</span>(tank_crop, prompt=box)
+
+    <span class="com"># 3. Find the floating-roof shadow inside the tank mask.</span>
+    shadow_mask = <span class="fn">detect_shadow</span>(tank_crop, mask)
+
+    <span class="com"># 4. Convert shadow length + tank diameter + sun angle → roof height → fill level.</span>
+    fill_pct = <span class="fn">geometry</span>(shadow_mask, box.w, sun_elevation)
+    <span class="fn">emit</span>(box.center_latlon, fill_pct)
+</pre>
+<p>That's the structure of one of the most lucrative alt-data feeds in the industry — Ursa Space's oil-tank inventory product (Lesson 0015) is a polished production version of this pattern.</p>
+
+<h2>7. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Semantic vs Instance segmentation</h4><p><strong>Semantic</strong>: all "car" pixels look identical in the output. <strong>Instance</strong>: each individual car has its own ID. Counting requires instance.</p></div>
+<div class="card"><h4>Panoptic vs Instance</h4><p><strong>Panoptic</strong>: includes "stuff" classes (sky, road) for which instance IDs make no sense. <strong>Instance</strong>: typically only outputs masks for the things you care about, ignoring backgrounds.</p></div>
+<div class="card"><h4>SAM vs U-Net</h4><p><strong>SAM</strong>: prompt-driven foundation model, zero-shot for many tasks. <strong>U-Net</strong>: train per task, much smaller, deployable on edge devices.</p></div>
+<div class="card"><h4>Mask R-CNN vs YOLO-seg</h4><p>Both do instance segmentation. <strong>Mask R-CNN</strong>: two-stage, more accurate, slower. <strong>YOLO-seg</strong> (v8/v11): single-stage, fast, real-time. YOLO-seg has largely supplanted Mask R-CNN in production.</p></div>
+</div>
+
+<h2>8. Practice</h2>
+<div class="question" data-question><p class="q">Q1. You need to count ships in a satellite image of a port. Two ships are docked side-by-side. Which task is the minimum required?</p><ul class="options">
+<li data-correct="false" data-why="Semantic segmentation would label both ships as 'ship' pixels with no way to count them as two — they'd merge into one connected region.">Semantic segmentation.</li>
+<li data-correct="true" data-why="Right. Side-by-side ships in semantic seg are one connected component — uncountable. Instance segmentation gives each ship its own mask + instance ID, which lets you count them as 2 distinct objects.">Instance segmentation.</li>
+<li data-correct="false" data-why="Classification gives one label for the whole image; can't count ships at all.">Image classification.</li>
+<li data-correct="false" data-why="Object detection (bounding boxes) works if the ships are clearly separated, but adjacent docked ships often produce overlapping boxes that NMS may incorrectly suppress. Instance segmentation is more robust here.">Object detection with NMS.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. SAM (Segment Anything Model) is described as a "foundation model for segmentation." What does that mean operationally?</p><ul class="options">
+<li data-correct="true" data-why="Right. SAM was pretrained on 11M images with 1.1B masks. It produces high-quality masks for arbitrary prompts (points, boxes, text via Grounding DINO) on most natural-image domains without fine-tuning. For alt-data exploration this is enormous because it removes the per-domain training step.">It produces high-quality masks zero-shot or with simple prompts (point, box, text) across many domains without per-task training.</li>
+<li data-correct="false" data-why="No model achieves 100% accuracy on every domain. SAM has limitations on highly specialized imagery (SAR, ultrasound) where fine-tuning helps.">It achieves 100% accuracy on any imagery domain.</li>
+<li data-correct="false" data-why="SAM is computationally heavy and is typically deployed on GPUs in the cloud, not embedded devices.">It's so small it fits on embedded hardware.</li>
+<li data-correct="false" data-why="SAM is supervised on images with masks. It's not a self-supervised approach in the language-model sense.">It learns segmentation without any labeled data.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. For crop NDVI estimation, you need to mask out non-crop pixels (roads, buildings, water) before averaging NDVI. Which segmentation task is the right fit?</p><ul class="options">
+<li data-correct="true" data-why="Right. You don't care about distinguishing individual crop fields from each other — only about whether a pixel IS or ISN'T crop. Semantic segmentation produces exactly that mask: crop / non-crop per pixel. Cheap to train; cheap to deploy.">Semantic segmentation — a binary crop/non-crop mask per pixel.</li>
+<li data-correct="false" data-why="Instance segmentation distinguishes individual crop fields, which isn't needed for an NDVI average across the region. Semantic is sufficient and cheaper.">Instance segmentation of every individual field.</li>
+<li data-correct="false" data-why="Object detection boxes would include some non-crop pixels (around the edges of each field), defeating the purpose of masking. Semantic seg gives pixel-precise masks.">Object detection with bounding boxes around each field.</li>
+<li data-correct="false" data-why="Image-level classification doesn't tell you which pixels are crop — and that's exactly what you need.">Image classification: 'this image contains crops or it doesn't'.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. Why is pixel accuracy a misleading metric for satellite segmentation tasks?</p><ul class="options">
+<li data-correct="false" data-why="Pixel accuracy is well-defined for satellite images at any resolution. The problem isn't resolution.">Satellite images are too high-resolution.</li>
+<li data-correct="true" data-why="Right. Most satellite images are dominated by background classes (forest, water, soil). A model that predicts everything as background gets 90%+ pixel accuracy without doing anything useful. mIoU (or Dice) is robust to imbalance because it computes per-class IoU and averages.">Background classes typically dominate, so a model that predicts everything as background scores ~90% pixel accuracy without learning anything. mIoU and Dice are robust to imbalance.</li>
+<li data-correct="false" data-why="Pixel accuracy is what you'd want to measure for some segmentation tasks; it's just misleading when classes are imbalanced.">It doesn't measure what you actually want to measure.</li>
+<li data-correct="false" data-why="Computation cost is irrelevant — accuracy is just summing correct predictions. Imbalance is the real issue.">It's too expensive to compute at scale.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>9. Scenarios</h2>
+<details class="scenario"><summary>S1. You build a SAM-based pipeline for cargo-container counting at a port. Throughput is too slow for daily updates over global ports. How do you accelerate?</summary>
+<p>Two-stage cascade. Use a fast lightweight detector (YOLO) to box candidate ports/containers; only run SAM on the cropped boxes. SAM is computationally expensive at full image scale but cheap on small crops. Expected speedup: 10–100× depending on how empty the imagery is. Second-line speedup: use SAM's smaller variants (MobileSAM, FastSAM) which trade some mask quality for big speed wins.</p></details>
+
+<details class="scenario"><summary>S2. Your panoptic segmentation model trained on aerial urban imagery shows excellent mIoU but the segmentation looks visually wrong on edges. What's wrong with the metric?</summary>
+<p>mIoU is averaged across the whole mask area. A large object with a slightly wrong boundary loses very little IoU because the boundary pixels are a small fraction of the total. So the model can have great mIoU and ugly edges. Two fixes: (1) use the boundary-IoU metric explicitly, which penalizes boundary errors; (2) add a boundary-aware loss term during training (DiceBoundaryLoss, Focal-edge). For applications like building-footprint extraction the boundary IS the product, so this matters a lot.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://arxiv.org/abs/1505.04597">U-Net: Convolutional Networks for Biomedical Image Segmentation (Ronneberger et al, 2015)</a></li>
+<li id="fn-2"><a href="https://arxiv.org/abs/2304.02643">Segment Anything (Kirillov et al, Meta AI, 2023)</a></li>
+<li><a href="https://docs.ultralytics.com/tasks/segment/">Ultralytics YOLO segmentation docs</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

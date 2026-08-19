@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0033 — Bar-by-Bar Simulation Without Lookahead</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #252836;
+    --green: #26a269; --red: #c01c28; --yellow: #e9b96e; --blue: #3584e4;
+    --text: #e0e0e0; --muted: #888; --radius: 8px; --mono: monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: Georgia, serif;
+         line-height: 1.7; max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 1.9rem; color: #fff; margin-bottom: 0.3rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; }
+  h2 { font-size: 1.3rem; color: var(--yellow); margin: 2.2rem 0 0.8rem;
+       border-bottom: 1px solid #333; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; color: var(--blue); margin: 1.4rem 0 0.5rem; }
+  p { margin-bottom: 1rem; }
+  code { font-family: var(--mono); background: var(--surface2); padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.87em; }
+  pre { background: var(--surface); border: 1px solid #333; border-radius: var(--radius);
+        padding: 1.2rem; overflow-x: auto; margin: 1rem 0; }
+  pre code { background: none; padding: 0; font-size: 0.84rem; line-height: 1.5; }
+  .kw { color: #c792ea; } .fn { color: #82aaff; } .str { color: #c3e88d; }
+  .cm { color: #637777; font-style: italic; } .num { color: #f78c6c; }
+  .cls { color: #ffcb6b; }
+  .callout { border-left: 3px solid var(--yellow); background: var(--surface);
+             padding: 0.8rem 1.2rem; border-radius: var(--radius); margin: 1rem 0; }
+  .callout.danger { border-color: var(--red); }
+  .callout.good { border-color: var(--green); }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.88rem; }
+  th { background: var(--surface2); padding: 0.5rem 0.8rem; text-align: left; color: var(--yellow); }
+  td { padding: 0.5rem 0.8rem; border-top: 1px solid #2a2a2a; font-family: var(--mono); }
+  .quiz-section { background: var(--surface); border-radius: var(--radius); padding: 1.5rem; margin: 1.5rem 0; }
+  .question { margin-bottom: 1.8rem; }
+  .question p { font-weight: bold; margin-bottom: 0.7rem; }
+  .options { list-style: none; }
+  .options li { background: var(--surface2); border: 1px solid #333; border-radius: 6px;
+                padding: 0.6rem 0.9rem; margin-bottom: 0.4rem; cursor: pointer;
+                font-family: var(--mono); font-size: 0.88rem; transition: border-color 0.12s; }
+  .options li:hover { border-color: var(--blue); }
+  .options li.correct { border-color: var(--green); background: #0d2b1a; }
+  .options li.wrong { border-color: var(--red); background: #2b0d0d; }
+  .feedback { margin-top: 0.5rem; font-size: 0.85rem; display: none; }
+  .score-bar { margin-top: 1rem; font-family: var(--mono); font-size: 0.9rem; color: var(--yellow); }
+  .timeline { display: flex; gap: 0; overflow-x: auto; margin: 1.2rem 0; }
+  .bar-box { min-width: 90px; border: 1px solid #333; background: var(--surface); padding: 0.6rem; font-size: 0.75rem; font-family: var(--mono); }
+  .bar-box.signal { border-color: var(--yellow); background: #2b2700; }
+  .bar-box.entry { border-color: var(--green); background: #0d2b1a; }
+  .bar-box.exit { border-color: var(--red); background: #2b0d0d; }
+  .bar-box.flat { border-color: #333; }
+  .bar-box .label { font-size: 0.65rem; color: var(--muted); margin-bottom: 0.3rem; }
+</style>
+</head>
+<body>
+
+<h1>Bar-by-Bar Simulation Without Lookahead</h1>
+<p class="subtitle">Lesson 0033 — Why this matters: <code>strategies/paper_engine.py</code> is the test bed for every intraday strategy before real money is involved. Correct simulation mechanics are the difference between a trustworthy backtest and an optimistic fantasy.</p>
+
+<h2>1. What Bar-by-Bar Simulation Is</h2>
+<p>A bar-by-bar simulation replays historical price data one bar at a time, pretending you are watching the market in real-time with only past and current information visible. At each step you can decide to enter or exit a position, just as you would in live trading.</p>
+
+<p>The key invariant: <strong>at bar index <code>i</code>, you may only use data from bars 0 through <code>i</code></strong>. Bars <code>i+1</code> onward do not exist yet.</p>
+
+<div class="callout">
+  The simulation in <code>PaperEngine.run(df)</code> processes a yfinance OHLCV DataFrame — one row per intraday bar — grouping by calendar date to handle multi-day datasets. Each bar has Open, High, Low, Close, Volume and a DatetimeIndex timestamp.
+</div>
+
+<h2>2. The Entry Rule — Why N+1 Open</h2>
+<p>Suppose an engulfing signal fires at bar N (the pattern is confirmed when bar N closes). When can you realistically enter the trade?</p>
+
+<div class="timeline">
+  <div class="bar-box flat"><div class="label">Bar N-1</div>prev bar<br>(red candle)</div>
+  <div class="bar-box signal"><div class="label">Bar N ← signal fires</div>curr bar closes<br>BUY confirmed</div>
+  <div class="bar-box entry"><div class="label">Bar N+1 ← ENTRY</div>Open = first<br>tradeable price</div>
+  <div class="bar-box flat"><div class="label">Bar N+2</div>position held<br>check SL/TP</div>
+  <div class="bar-box exit"><div class="label">Bar N+k ← EXIT</div>SL / TP / EOD<br>force-close</div>
+</div>
+
+<p>You cannot enter at bar N's Close because:</p>
+<ul style="margin-left:1.4rem; line-height:2;">
+  <li>The pattern isn't confirmed until bar N <em>closes</em></li>
+  <li>In live trading you submit a market order <em>after</em> the bar closes — it fills at the next available price</li>
+  <li>Using bar N's Close as the entry price is subtle lookahead</li>
+</ul>
+
+<p>Bar N+1's Open is the first price that exists after the signal is confirmed. This is the correct, no-lookahead entry.</p>
+
+<h2>3. Stop-Loss and Take-Profit — Using High and Low</h2>
+<p>Once in a position, each new bar is checked against the stop and target prices. We use the bar's <strong>High</strong> and <strong>Low</strong> — not the Close — because price may have crossed the threshold intrabar even if the close was elsewhere.</p>
+
+<table>
+  <tr><th>Position</th><th>Stop-Loss triggers when</th><th>Take-Profit triggers when</th></tr>
+  <tr><td>LONG</td><td>bar.Low ≤ stop_price</td><td>bar.High ≥ tp_price</td></tr>
+  <tr><td>SHORT</td><td>bar.High ≥ stop_price</td><td>bar.Low ≤ tp_price</td></tr>
+</table>
+
+<p>When both stop and take-profit trigger on the same bar, <strong>stop-loss wins</strong>. This is the conservative choice — in real markets, if the price gap is large enough to hit both in one bar, you assume the worse fill.</p>
+
+<pre><code><span class="cm"># strategies/paper_engine.py — simplified position-check logic</span>
+<span class="kw">if</span> position.direction == <span class="str">"LONG"</span>:
+    sl_hit = bar[<span class="str">"Low"</span>]  <= position.stop_price
+    tp_hit = bar[<span class="str">"High"</span>] >= position.tp_price
+    <span class="kw">if</span> sl_hit:          <span class="cm"># stop wins over TP on same bar</span>
+        exit_at(position.stop_price, reason=<span class="str">"stop_loss"</span>)
+    <span class="kw">elif</span> tp_hit:
+        exit_at(position.tp_price, reason=<span class="str">"take_profit"</span>)
+<span class="kw">elif</span> position.direction == <span class="str">"SHORT"</span>:
+    sl_hit = bar[<span class="str">"High"</span>] >= position.stop_price
+    tp_hit = bar[<span class="str">"Low"</span>]  <= position.tp_price
+    <span class="kw">if</span> sl_hit:
+        exit_at(position.stop_price, reason=<span class="str">"stop_loss"</span>)
+    <span class="kw">elif</span> tp_hit:
+        exit_at(position.tp_price, reason=<span class="str">"take_profit"</span>)</code></pre>
+
+<h2>4. End-of-Session Force-Close</h2>
+<p>This is a day-trading engine — positions must not be held overnight. Any position open at the last bar of a trading session is force-closed at that bar's Close price, regardless of stop or target.</p>
+
+<pre><code><span class="cm"># Session boundary detection from yfinance timestamps</span>
+<span class="kw">for</span> date, session_df <span class="kw">in</span> df.groupby(df.index.date):
+    bars = session_df.iterrows()
+    <span class="kw">for</span> i, (ts, bar) <span class="kw">in</span> <span class="fn">enumerate</span>(bars):
+        is_last = (i == <span class="fn">len</span>(session_df) - <span class="num">1</span>)
+        <span class="kw">if</span> is_last <span class="kw">and</span> open_position:
+            exit_at(bar[<span class="str">"Close"</span>], reason=<span class="str">"eod_close"</span>)</code></pre>
+
+<div class="callout good">
+  <strong>Session boundaries from timestamps, not hard-coded hours.</strong> Grouping by <code>df.index.date</code> means the engine works correctly on any asset whose intraday data is in the DataFrame — US stocks, crypto, etc. — without needing to know NYSE hours.
+</div>
+
+<h2>5. P&L Calculation</h2>
+<table>
+  <tr><th>Position</th><th>P&L formula</th></tr>
+  <tr><td>LONG</td><td><code>(exit_price - entry_price) / entry_price × position_dollars</code></td></tr>
+  <tr><td>SHORT</td><td><code>(entry_price - exit_price) / entry_price × position_dollars</code></td></tr>
+</table>
+
+<p>For a SHORT, P&L is positive when the price <em>falls</em> (you sold high, bought back low). The sign flip is the key difference: profit = entry − exit, not exit − entry.</p>
+
+<h2>6. The Equity Curve</h2>
+<p>The equity curve is the <strong>cumulative sum</strong> of trade P&Ls over time, indexed by the close timestamp of each trade. It shows you how your capital would have grown (or shrunk) if you had followed this strategy with a fixed <code>position_dollars</code> per trade.</p>
+
+<pre><code>trade_log = pd.DataFrame(trades)  <span class="cm"># each row: one completed trade</span>
+equity = trade_log.set_index(<span class="str">"close_time"</span>)[<span class="str">"pnl_dollars"</span>].cumsum()
+<span class="cm"># equity[t] = total P&L from all trades closed on or before timestamp t</span></code></pre>
+
+<h2>7. Often Confused With: Vectorised vs. Bar-by-Bar</h2>
+<table>
+  <tr><th></th><th>Vectorised (pandas)</th><th>Bar-by-bar (PaperEngine)</th></tr>
+  <tr><td>How it works</td><td>Apply signals to entire DataFrame at once with shift/rolling</td><td>Explicit loop, one bar at a time</td></tr>
+  <tr><td>Lookahead risk</td><td>High — easy to accidentally peek ahead</td><td>Low — structural constraint limits data access</td></tr>
+  <tr><td>Speed</td><td>Fast (numpy under the hood)</td><td>Slower (Python loop)</td></tr>
+  <tr><td>Best for</td><td>Simple entry/exit rules, large datasets, no open-position state</td><td>Complex state (stop-loss, partial fills, EOD close), correctness first</td></tr>
+  <tr><td>In this project</td><td><code>paper_trading_sim.py</code> daily GBM backtest</td><td><code>strategies/paper_engine.py</code> intraday sim</td></tr>
+</table>
+
+<h2>8. Quiz</h2>
+<div class="quiz-section">
+  <div class="question" data-question>
+    <p>A LONG trade enters at $100. stop_loss_pct=0.01. A bar has Low=$98.50, High=$101.80. What happens?</p>
+    <ul class="options">
+      <li data-correct="true" data-why="stop_price = 100 × (1-0.01) = $99. bar.Low=98.50 ≤ 99 → stop triggered. Exit at $99, P&L = (99-100)/100 × position_dollars = -1% × position_dollars.">Stop-loss triggers — exit at $99 (1% below entry).</li>
+      <li data-correct="false" data-why="Take-profit only triggers when bar.High ≥ tp_price. Without knowing tp_price we can't confirm TP, but stop was hit first regardless.">Take-profit triggers — bar.High exceeds entry.</li>
+      <li data-correct="false" data-why="bar.Low=98.50 is below stop_price=99. The stop IS triggered on this bar.">Position held — bar.Low didn't reach the stop price.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>Why does PaperEngine group bars with <code>df.groupby(df.index.date)</code> instead of using NYSE hours?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="pandas does know about timezones — but that's not the reason. The data-driven approach is chosen for generality.">pandas doesn't support timezone-aware comparisons reliably.</li>
+      <li data-correct="false" data-why="Cron is for scheduling external jobs. PaperEngine is a pure data processing function.">It avoids the need for cron-based scheduling.</li>
+      <li data-correct="true" data-why="Grouping by date derived from the DataFrame's own timestamps means the engine works for any asset (crypto, international equities) without hard-coding US market hours. If the data ends at 16:00, the session ends at 16:00.">Session boundaries come from the data itself — works for any asset, not just NYSE-hours stocks.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>A SHORT trade enters at $200. A bar has High=$203, Low=$191. take_profit_pct=0.02. What happens?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="For a SHORT, stop-loss triggers when price goes UP (bar.High ≥ stop_price). We'd need to know stop_price to check that. But TP for SHORT is bar.Low ≤ tp_price = 200×(1-0.02) = $196. bar.Low=191 ≤ 196 → TP triggers.">Stop-loss — bar.High went above entry.</li>
+      <li data-correct="true" data-why="SHORT take-profit = entry × (1 - tp_pct) = 200 × 0.98 = $196. bar.Low=191 ≤ 196 → TP triggered. P&L = (200-196)/200 × position = +2% × position.">Take-profit — bar.Low fell to the target price for the short.</li>
+      <li data-correct="false" data-why="bar.Low=191 is well below tp_price=196. Take-profit definitely triggers here.">Position held — neither SL nor TP triggered this bar.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>The equity curve is the cumulative sum of pnl_dollars indexed by close_time. What does it tell you that the trade log alone doesn't?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Individual trade P&L is directly in the trade log. The equity curve adds time-dimension context.">The P&L of each individual trade.</li>
+      <li data-correct="true" data-why="The equity curve shows running capital. A string of losses followed by wins looks different from alternating wins and losses — even if total P&L is the same. The shape reveals drawdown depth and recovery time.">How capital accumulates (or erodes) over time — drawdown depth and recovery patterns are visible.</li>
+      <li data-correct="false" data-why="The trade log has entry/exit prices. The equity curve shows running capital, not raw prices.">The exact entry and exit prices of each trade.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>Both stop-loss and take-profit trigger on the same bar. PaperEngine exits at…</p>
+    <ul class="options">
+      <li data-correct="true" data-why="When both SL and TP are hit in the same bar, PaperEngine conservatively assumes the worst case: stop-loss filled first. This prevents inflating backtest returns by assuming optimal fills.">Stop-loss price — conservative tie-break prevents inflated backtest P&L.</li>
+      <li data-correct="false" data-why="Using TP when SL also triggered overestimates live performance — in real markets the stop would typically fill first when the price crossed it.">Take-profit price — the favourable outcome.</li>
+      <li data-correct="false" data-why="The bar's Close is used only for EOD force-close, not for SL/TP exits.">Bar Close — the last price of the bar.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="score-bar" id="score-display"></div>
+</div>
+
+<script>
+function shuffle(a) { for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+let totalQ=0;
+document.querySelectorAll('[data-question]').forEach(q=>{
+  totalQ++;
+  const list=q.querySelector('.options'), fb=q.querySelector('.feedback');
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(q.dataset.answered)return;
+      q.dataset.answered='1';
+      const correct=li.dataset.correct==='true';
+      li.classList.add(correct?'correct':'wrong');
+      if(!correct)list.querySelectorAll('[data-correct="true"]').forEach(r=>r.classList.add('correct'));
+      fb.style.display='block';
+      fb.style.color=correct?'var(--green)':'var(--red)';
+      fb.textContent=(correct?'✓ ':'✗ ')+li.dataset.why;
+      document.getElementById('score-display').textContent=
+        `Score: ${document.querySelectorAll('[data-answered]').length} / ${totalQ} answered`;
+    });
+  });
+});
+document.getElementById('score-display').textContent=`Score: 0 / ${totalQ} answered`;
+</script>
+</body>
+</html>

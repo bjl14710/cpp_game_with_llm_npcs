@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "Full gameplay parity on raylib. DialogUI keeps its transcript/wrap/streaming "
+    "logic behind a per-frame pollInput; Menu ports all three pages (controls "
+    "rebinding via GetKeyPressed capture, multiplayer host/join with the editable "
+    "address field) behind the unchanged MenuResult/MultiplayerHooks interfaces; "
+    "main.cpp restores LLM dialogue with streaming + stage directions, CallPolice "
+    "mobilization, arrests + jail countdown, nameplates, and the complete "
+    "multiplayer wiring (host publish/router drains, joined-mode snapshot "
+    "rendering/chat). warmUp() is back.\n\n"
+    "**Verified:** clean build, 100-frame smoke run with the full loop, screenshot "
+    "shows city/characters/emotes, suite green.\n\n"
+    "**Your interactive checklist** (GL window, needs hands):\n"
+    "- [ ] Talk to an NPC: streamed reply, Enter sends, Esc leaves\n"
+    "- [ ] Ask an NPC to wave/follow: gesture + stage direction line\n"
+    "- [ ] Insult the cop twice: arrest chase -> jail countdown HUD\n"
+    "- [ ] Rebind a key, relaunch, still bound\n"
+    "- [ ] Host + join from a second instance (this is #41's full pass)\n\n"
+    "**Stack position:** bases on #51. Merge in order.\n\n"
+    "Closes #40\n\n---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(title="feat(ui): DialogUI, Menu, and HUD parity on raylib",
+                              body=body, head="feature/issue-40-raylib-ui-parity",
+                              base="feature/issue-39-raylib-mood-faces", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)
+
+issue = repo.get_issue(40)
+issue.remove_from_labels("ai-in-progress")
+issue.add_to_labels("ai-completed")
+issue.create_comment(f"Implemented. Draft PR: #{pr.number} — closes on merge.")
+
+# #41 needs human eyes for the two-instance pass; say so now.
+i41 = repo.get_issue(41)
+i41.remove_from_labels("ready-for-ai")
+i41.add_to_labels("needs-human")
+i41.create_comment(
+    "Skipped overnight: this issue IS the human verification pass — two live "
+    f"instances, eyes on both windows. Everything it verifies now exists on PR #{pr.number}'s "
+    "branch (checklist in that PR). Run the pass after merging the stack; file "
+    "fixes as new issues or reopen this one.")
+print("issue 40 ai-completed; issue 41 needs-human")

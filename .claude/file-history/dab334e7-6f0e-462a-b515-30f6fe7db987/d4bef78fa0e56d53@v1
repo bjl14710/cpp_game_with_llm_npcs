@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AlgoTrade">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='/icons/icon-180.png') }}">
+  <link rel="manifest" href="{{ url_for('static', path='/manifest.json') }}">
+  <title>{{ title or "HFT Practice Web" }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>HFT Practice Web</h1>
+    <input type="checkbox" id="nav-toggle" class="nav-toggle">
+    <label for="nav-toggle" class="nav-hamburger" aria-label="Toggle navigation">&#9776;</label>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/walkforward">Walkforward</a>
+      <a href="/train">Train</a>
+      <a href="/universe">Universe</a>
+      <a href="/news">News</a>
+      <a href="/download">Download</a>
+      <a href="/execute">Execution</a>
+      <a href="/analyze">Analyze</a>
+    </nav>
+  </header>
+  <main>
+    {% if message %}
+      <div class="alert success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+      <div class="alert error">{{ error }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <small>Runs locally. Protect access before deploying to the internet.</small>
+  </footer>
+</body>
+</html>

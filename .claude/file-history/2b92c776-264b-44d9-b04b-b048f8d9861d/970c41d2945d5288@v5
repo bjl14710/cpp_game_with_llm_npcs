@@ -1,0 +1,81 @@
+@echo off
+REM One-click launcher (Windows): double-click to play. Uses the MSYS2 UCRT64
+REM toolchain for SFML; for the local provider it starts Ollama if needed and
+REM pulls the configured model before building and running.
+setlocal enabledelayedexpansion
+cd /d "%~dp0"
+
+set "UCRT_BIN=C:\msys64\ucrt64\bin"
+if not exist "%UCRT_BIN%" (
+    echo MSYS2 ucrt64 toolchain not found at %UCRT_BIN%.
+    echo Install MSYS2 from https://www.msys2.org and the gcc/cmake packages.
+    pause
+    exit /b 1
+)
+set "PATH=%UCRT_BIN%;%PATH%"
+
+call :getcfg provider ollama PROVIDER
+call :getcfg host localhost HOST
+call :getcfg port 11434 PORT
+call :getcfg model qwen2.5:3b-instruct MODEL
+if not "%OLLAMA_HOST%"=="" set "HOST=%OLLAMA_HOST%"
+if not "%OLLAMA_PORT%"=="" set "PORT=%OLLAMA_PORT%"
+
+if /i "%PROVIDER%"=="ollama" (
+    curl -fsS --max-time 2 "http://%HOST%:%PORT%/api/tags" >nul 2>&1
+    if errorlevel 1 (
+        where ollama >nul 2>&1
+        if errorlevel 1 (
+            echo Ollama is not installed. Get it from https://ollama.com/download
+            pause
+            exit /b 1
+        )
+        echo Starting Ollama...
+        start "" /b ollama serve
+        for /l %%i in (1,1,20) do (
+            curl -fsS --max-time 1 "http://%HOST%:%PORT%/api/tags" >nul 2>&1
+            if not errorlevel 1 goto :ollama_up
+            ping -n 2 127.0.0.1 >nul
+        )
+        :ollama_up
+        curl -fsS --max-time 2 "http://%HOST%:%PORT%/api/tags" >nul 2>&1
+        if errorlevel 1 (
+            echo Ollama did not come up at %HOST%:%PORT%.
+            pause
+            exit /b 1
+        )
+    )
+    ollama list 2>nul | findstr /b /l /c:"%MODEL%" >nul 2>&1
+    if errorlevel 1 (
+        echo Pulling model %MODEL% (first run only)...
+        ollama pull "%MODEL%"
+    )
+)
+
+cmake -S . -B build -G "MinGW Makefiles"
+if errorlevel 1 (
+    echo CMake configure failed.
+    pause
+    exit /b 1
+)
+cmake --build build -j
+if errorlevel 1 (
+    echo Build failed.
+    pause
+    exit /b 1
+)
+
+build\cpp_game_with_llm_npcs.exe
+endlocal
+exit /b 0
+
+REM ---- getcfg key default outvar : read "key = value" from config\llm.cfg ----
+:getcfg
+set "RAW="
+for /f "tokens=1,* delims==" %%A in ('findstr /b /r /c:"^[ ]*%~1[ ]*=" "config\llm.cfg" 2^>nul') do set "RAW=%%B"
+if defined RAW (
+    for /f "tokens=1 delims=#" %%C in ("!RAW!") do set "RAW=%%C"
+    for /f "tokens=* delims= " %%D in ("!RAW!") do set "RAW=%%D"
+)
+if defined RAW ( set "%~3=!RAW!" ) else ( set "%~3=%~2" )
+goto :eof

@@ -1,0 +1,122 @@
+{
+  "version": 2,
+  "plugins": {
+    "clangd-lsp@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/clangd-lsp/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-05-10T00:26:45.223Z",
+        "lastUpdated": "2026-05-10T00:26:45.223Z"
+      }
+    ],
+    "frontend-design@claude-plugins-official": [
+      {
+        "scope": "project",
+        "projectPath": "/Users/brandonlee/development/repos/products/Claude_Builds",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/frontend-design/unknown",
+        "version": "unknown",
+        "installedAt": "2026-05-11T07:18:25.889Z",
+        "lastUpdated": "2026-05-11T07:18:25.889Z"
+      },
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/frontend-design/unknown",
+        "version": "unknown",
+        "installedAt": "2026-07-05T18:00:29.684Z",
+        "lastUpdated": "2026-07-07T02:36:52.369Z"
+      }
+    ],
+    "github@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/github/unknown",
+        "version": "unknown",
+        "installedAt": "2026-07-05T18:05:35.120Z",
+        "lastUpdated": "2026-07-07T02:36:52.371Z"
+      }
+    ],
+    "commit-commands@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/commit-commands/unknown",
+        "version": "unknown",
+        "installedAt": "2026-07-05T21:04:02.885Z",
+        "lastUpdated": "2026-07-07T02:36:52.372Z"
+      }
+    ],
+    "pr-review-toolkit@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/pr-review-toolkit/unknown",
+        "version": "unknown",
+        "installedAt": "2026-07-05T21:04:09.127Z",
+        "lastUpdated": "2026-07-07T02:36:52.371Z"
+      }
+    ],
+    "claude-md-management@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/claude-md-management/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-07-05T21:04:13.613Z",
+        "lastUpdated": "2026-07-05T21:04:13.613Z"
+      }
+    ],
+    "ralph-loop@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/ralph-loop/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-07-05T21:04:18.823Z",
+        "lastUpdated": "2026-07-05T21:04:18.823Z"
+      }
+    ],
+    "pyright-lsp@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0",
+        "version": "1.0.0",
+        "installedAt": "2026-07-05T21:04:33.883Z",
+        "lastUpdated": "2026-07-05T21:04:33.883Z"
+      }
+    ],
+    "feature-dev@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/feature-dev/unknown",
+        "version": "unknown",
+        "installedAt": "2026-07-05T21:04:40.063Z",
+        "lastUpdated": "2026-07-07T02:36:52.372Z"
+      }
+    ],
+    "security-guidance@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/security-guidance/2.0.6",
+        "version": "2.0.6",
+        "installedAt": "2026-07-05T21:04:45.489Z",
+        "lastUpdated": "2026-07-05T21:04:45.489Z"
+      }
+    ],
+    "skill-creator@claude-plugins-official": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/claude-plugins-official/skill-creator/unknown",
+        "version": "unknown",
+        "installedAt": "2026-07-05T21:04:50.029Z",
+        "lastUpdated": "2026-07-07T02:36:52.371Z"
+      }
+    ],
+    "codex@openai-codex": [
+      {
+        "scope": "user",
+        "installPath": "/Users/brandonlee/.claude/plugins/cache/openai-codex/codex/1.0.5",
+        "version": "1.0.5",
+        "installedAt": "2026-07-06T08:01:04.720Z",
+        "lastUpdated": "2026-07-06T08:01:04.720Z",
+        "gitCommitSha": "80c31f99570876c3ef40327838b0a2ca1ae2cd9c"
+      }
+    ]
+  }
+}

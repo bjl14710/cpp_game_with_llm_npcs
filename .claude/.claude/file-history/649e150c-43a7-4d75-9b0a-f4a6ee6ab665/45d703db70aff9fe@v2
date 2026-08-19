@@ -1,0 +1,99 @@
+-- =============================================================================
+-- Exercise 05a: write a testbench for fpga/market_maker.vhd
+--
+-- The scaffolding (entity, DUT instantiation, clock, reset, Q16.16 helper)
+-- is done. YOUR JOB: the stimulus process — drive prices through the valid
+-- handshake and assert the DUT's behavior:
+--
+--   1. order_valid_out asserts exactly ONE cycle after valid_in (1-cycle
+--      pipeline) and is a one-cycle pulse.
+--   2. buy_price_out  = mid - spread/2   where mid = (bid + ask) / 2
+--      sell_price_out = mid + spread/2   (all Q16.16)
+--   3. Check at least two different price/spread combinations.
+--
+-- Pick values that are exact in Q16.16 (multiples of 1/65536 — e.g. .00,
+-- .25, .50) so the arithmetic shifts lose nothing.
+--
+-- Grade yourself:
+--   uv run pytest tests/exercises/test_05_vhdl.py -v        (needs ghdl)
+--   bash scripts/run_vhdl_tests.sh tb_market_maker
+-- =============================================================================
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity tb_market_maker is
+end entity tb_market_maker;
+
+architecture sim of tb_market_maker is
+
+    constant CLK_PERIOD : time := 10 ns;
+
+    signal clk             : std_logic := '0';
+    signal rst_n           : std_logic := '0';
+    signal bid_price_in    : signed(31 downto 0) := (others => '0');
+    signal ask_price_in    : signed(31 downto 0) := (others => '0');
+    signal spread_in       : signed(31 downto 0) := (others => '0');
+    signal valid_in        : std_logic := '0';
+    signal buy_price_out   : signed(31 downto 0);
+    signal sell_price_out  : signed(31 downto 0);
+    signal order_valid_out : std_logic;
+
+    signal done : boolean := false;
+
+    -- Q16.16 encode: real dollars -> signed(31 downto 0)
+    function q16(x : real) return signed is
+    begin
+        return to_signed(integer(x * 65536.0), 32);
+    end function;
+
+begin
+
+    dut : entity work.market_maker
+        port map (
+            clk             => clk,
+            rst_n           => rst_n,
+            bid_price_in    => bid_price_in,
+            ask_price_in    => ask_price_in,
+            spread_in       => spread_in,
+            valid_in        => valid_in,
+            buy_price_out   => buy_price_out,
+            sell_price_out  => sell_price_out,
+            order_valid_out => order_valid_out
+        );
+
+    clk_gen : process
+    begin
+        while not done loop
+            clk <= '0';
+            wait for CLK_PERIOD / 2;
+            clk <= '1';
+            wait for CLK_PERIOD / 2;
+        end loop;
+        wait;
+    end process clk_gen;
+
+    stimulus : process
+    begin
+        -- Synchronous active-low reset for two cycles
+        rst_n <= '0';
+        wait until rising_edge(clk);
+        wait until rising_edge(clk);
+        rst_n <= '1';
+        wait until rising_edge(clk);
+
+        -- TODO: drive bid/ask/spread with valid_in for one cycle, then
+        --       `wait until rising_edge(clk); wait for 1 ns;` and assert
+        --       order_valid_out and both quotes (severity error).
+        --       Then verify the valid pulse drops, and run a second case.
+
+        -- Delete this line once your stimulus is written:
+        report "EXERCISE-NOT-IMPLEMENTED: write the stimulus and assertions"
+            severity failure;
+
+        done <= true;
+        report "TB PASSED" severity note;
+        wait;
+    end process stimulus;
+
+end architecture sim;

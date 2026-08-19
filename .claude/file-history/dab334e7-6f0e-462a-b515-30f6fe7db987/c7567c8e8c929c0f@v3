@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+import argparse
+import math
+from dataclasses import dataclass
+from typing import List, Tuple
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import r2_score
+import joblib
+
+"""Paper trading backtest using yfinance and Gradient Boosting.
+
+Summary
+- Downloads daily OHLCV data with yfinance for a list of tickers.
+- Builds simple technical features per ticker (returns, moving averages, RSI).
+- Splits each ticker's history into train/test by time, trains one model,
+  and produces out-of-sample predictions on the test segment for every ticker.
+- Forms a daily long-only portfolio by picking the top-N predicted names and
+  rolls the equity curve forward net of a simple trade cost.
+
+Usage
+- Example: python paper_trading_sim.py --tickers AAPL,MSFT,NVDA --start 2019-01-01 --out_csv equity.csv
+- All data fetching is via yfinance (Option 1), so no separate data step required.
+"""
+
+
+def _rsi(series: pd.Series, window: int = 14) -> pd.Series:
+    """Compute a simple RSI indicator.
+
+    Args:
+        series: Price series (e.g., close).
+        window: RSI lookback window.
+
+    Returns:
+        RSI values in [0, 100] as a Series.
+    """
+    delta = series.diff()
+    gain = (delta.clip(lower=0)).rolling(window).mean()
+    loss = (-delta.clip(upper=0)).rolling(window).mean()
+    rs = gain / (loss.replace(0, np.nan))
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Create per-ticker features and 1-day-ahead return target.
+
+    Features: close price, 1d return, 5/10d MAs, MA gap, 10d volatility,
+    and RSI(14). The target is next-day return (fwd_ret_1d).
+
+    Args:
+        df: Ticker-level OHLCV DataFrame from yfinance with column 'Close'.
+
+    Returns:
+        Feature frame indexed by date with column 'fwd_ret_1d' as target.
+    """
+    out = pd.DataFrame(index=df.index)
+    out["close"] = df["Close"]
+    out["ret_1d"] = out["close"].pct_change()
+    out["ma_5"] = out["close"].rolling(5).mean()
+    out["ma_10"] = out["close"].rolling(10).mean()
+    out["ma_gap"] = (out["ma_5"] / out["ma_10"]) - 1
+    out["vol_10"] = out["ret_1d"].rolling(10).std()
+    out["rsi_14"] = _rsi(out["close"], 14) / 100.0
+
+    # Demoted-indicator features (see .claude/plans/indicators-to-features.md):
+    # candlestick/technical information feeds the model instead of trading
+    # standalone. engulf_signal vectorizes the SAME rules as
+    # strategies/engulfing.py (a parity test pins them equal — the detector
+    # stays the source of truth); macd_hist_norm is TechnicalStrategy's
+    # confidence formula. NOTE per CLAUDE.md: changing this function means
+    # retrain + ONNX re-export + C++ rebuild before live inference.
+    if "Open" in df.columns:
+        from strategies.engulfing import DOJI_THRESHOLD
+
+        prev_o, prev_c = df["Open"].shift(1), df["Close"].shift(1)
+        o, c = df["Open"], df["Close"]
+        doji_prev = (prev_c - prev_o).abs() < DOJI_THRESHOLD * prev_c
+        doji_curr = (c - o).abs() < DOJI_THRESHOLD * c
+        clean = ~doji_prev & ~doji_curr
+        bull = clean & (prev_o > prev_c) & (c > o) & (o <= prev_c) & (c >= prev_o)
+        bear = clean & (prev_o < prev_c) & (c < o) & (o >= prev_c) & (c <= prev_o)
+        out["engulf_signal"] = np.where(bull, 1, np.where(bear, -1, 0)).astype(float)
+    else:
+        out["engulf_signal"] = 0.0
+    macd_line = (out["close"].ewm(span=12, adjust=False).mean()
+                 - out["close"].ewm(span=26, adjust=False).mean())
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    out["macd_hist_norm"] = (macd_line - signal_line) / out["close"]
+
+    out["fwd_ret_1d"] = out["ret_1d"].shift(-1)
+    return out.dropna()
+
+
+def chunk(lst: List[str], n: int) -> List[List[str]]:
+    """Split a list into batches of size n (last may be smaller)."""
+    return [lst[i : i + n] for i in range(0, len(lst), n)]
+
+
+def fetch_history(tickers: List[str], start: str, end: str) -> dict:
+    """Fetch daily OHLCV history via yfinance for a list of tickers.
+
+    Handles batching and both multi-index and single-index return formats.
+
+    Args:
+        tickers: Symbols like ["AAPL", "MSFT"].
+        start: Start date (YYYY-MM-DD).
+        end: End date (YYYY-MM-DD) or None for latest.
+
+    Returns:
+        Dict[ticker, DataFrame] where each frame is date-indexed OHLCV.
+    """
+    data = {}
+    for batch in chunk(tickers, 50):
+        df = yf.download(batch, start=start, end=end, interval="1d", group_by="ticker", auto_adjust=True, threads=True, progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            for t in batch:
+                if t in df:
+                    sub = df[t].dropna()
+                    if not sub.empty:
+                        data[t] = sub
+        else:
+            data[batch[0]] = df.dropna()
+    return data
+
+
+@dataclass
+class BacktestConfig:
+    """Configuration for the paper trading backtest."""
+    initial_cash: float = 100000.0
+    top_n: int = 5
+    trade_cost_bps: float = 1.0
+    train_ratio: float = 0.7
+
+
+def train_model(X: np.ndarray, y: np.ndarray) -> GradientBoostingRegressor:
+    """Train a Gradient Boosting regressor to predict 1-day ahead returns.
+
+    Args:
+        X: 2D numeric feature array [n_samples, n_features].
+        y: 1D numeric target array [n_samples].
+
+    Returns:
+        Fitted GradientBoostingRegressor instance.
+    """
+    model = GradientBoostingRegressor(random_state=42)
+    model.fit(X, y)
+    return model
+
+
+def prepare_xy(feat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    """Extract numeric feature matrix X and target y from a feature frame.
+
+    Excludes the target column ('fwd_ret_1d') and any non-numeric columns
+    such as the per-row 'ticker' label to avoid string-to-float errors.
+
+    Args:
+        feat: Feature DataFrame containing 'fwd_ret_1d' and other columns.
+
+    Returns:
+        (X, y, feature_names) where X is float64 numpy array.
+    """
+    ignore = {"fwd_ret_1d", "ticker"}
+    cols = [
+        c for c in feat.columns
+        if c not in ignore and pd.api.types.is_numeric_dtype(feat[c])
+    ]
+    X = feat[cols].astype(float).values
+    y = feat["fwd_ret_1d"].astype(float).values
+    return X, y, cols
+
+
+def align_panel(datas: dict) -> pd.DatetimeIndex:
+    """Deprecated: previously returned the intersection of all dates.
+
+    Keeping this for backward-compatibility, but most workflows should NOT
+    intersect all tickers, as it collapses history to the youngest IPOs.
+    """
+    idx = None
+    for df in datas.values():
+        idx = df.index if idx is None else idx.union(df.index)
+    return idx if idx is not None else pd.DatetimeIndex([])
+
+
+def build_feature_panel(datas: dict) -> dict:
+    """Build feature frames per ticker from raw OHLCV data."""
+    return {t: build_features(df) for t, df in datas.items()}
+
+
+def split_by_time(feat: pd.DataFrame, ratio: float) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Time-based split into train/test by a ratio of the index length."""
+    n = len(feat)
+    k = max(1, int(n * ratio))
+    return feat.iloc[:k].copy(), feat.iloc[k:].copy()
+
+
+def simulate(tickers: List[str], start: str, end: str, cfg: BacktestConfig) -> pd.DataFrame:
+    """Run the end-to-end backtest with yfinance data and GBM signals.
+
+    Steps:
+    - Fetch data, build features per ticker; do NOT force common intersection.
+    - Split each ticker into train/test, stack, and train a single model.
+    - Score the test set daily, pick top-N names, and update equity.
+
+    Args:
+        tickers: List of ticker symbols.
+        start: Start date (YYYY-MM-DD).
+        end: End date (YYYY-MM-DD) or None.
+        cfg: Backtest configuration.
+
+    Returns:
+        DataFrame indexed by date with columns like 'equity' and 'n_picks'.
+    """
+    raw = fetch_history(tickers, start, end)
+    feats = build_feature_panel(raw)
+    # Do not force intersection; keep each ticker on its own timeline.
+    feats = {t: f.copy() for t, f in feats.items() if not f.empty}
+    if not feats:
+        raise RuntimeError("No data fetched; check tickers or dates.")
+
+    stacked = []
+    for t, f in feats.items():
+        f2 = f.copy()
+        f2["ticker"] = t
+        stacked.append(f2)
+    panel = pd.concat(stacked).dropna()
+
+    groups = panel.groupby("ticker")
+    train_frames = []
+    test_frames = []
+    for t, g in groups:
+        tr, te = split_by_time(g, cfg.train_ratio)
+        train_frames.append(tr)
+        test_frames.append(te)
+    train_df = pd.concat(train_frames)
+    test_df = pd.concat(test_frames)
+
+    X_train, y_train, feat_cols = prepare_xy(train_df)
+    model = train_model(X_train, y_train)
+
+    preds = []
+    for t, g in test_df.groupby("ticker"):
+        X = g[feat_cols].values
+        p = model.predict(X)
+        tmp = pd.DataFrame({"pred": p, "fwd_ret_1d": g["fwd_ret_1d"].values}, index=g.index)
+        tmp["ticker"] = t
+        preds.append(tmp)
+    pred_df = pd.concat(preds).sort_index()
+
+    equity = cfg.initial_cash
+    daily = []
+    for dt, day_df in pred_df.groupby(level=0):
+        day_sorted = day_df.sort_values("pred", ascending=False)
+        picks = day_sorted.head(cfg.top_n)
+        if picks.empty:
+            daily.append({"date": dt, "equity": equity, "n_picks": 0})
+            continue
+        weight = 1.0 / len(picks)
+        day_ret = float((picks["fwd_ret_1d"].mean()))
+        traded_cost = (cfg.trade_cost_bps / 10000.0)
+        equity *= (1 + weight * day_ret * len(picks))
+        equity *= (1 - traded_cost)
+        daily.append({"date": dt, "equity": equity, "n_picks": int(len(picks))})
+
+    result = pd.DataFrame(daily).set_index("date")
+    # Attach auxiliary objects to return alongside result for optional saving
+    result._pred_df = pred_df  # type: ignore[attr-defined]
+    result._model = model      # type: ignore[attr-defined]
+    result._feat_cols = feat_cols  # type: ignore[attr-defined]
+    result._train_df = train_df  # type: ignore[attr-defined]  # for the drift reference
+    return result
+
+
+def metrics(equity: pd.Series) -> dict:
+    """Compute simple performance metrics on an equity curve.
+
+    Returns CAGR (approx), annualized volatility, Sharpe (mean/vol),
+    and max drawdown of the cumulative return series.
+    """
+    ret = equity.pct_change().dropna()
+    ann = 252
+    cagr = (equity.iloc[-1] / equity.iloc[0]) ** (ann / max(1, len(ret))) - 1 if len(ret) else 0.0
+    vol = ret.std() * math.sqrt(ann) if len(ret) else 0.0
+    sharpe = (ret.mean() * ann) / vol if vol > 0 else 0.0
+    cum = (1 + ret).cumprod()
+    roll_max = cum.cummax()
+    dd = (cum / roll_max - 1).min() if len(cum) else 0.0
+    return {"CAGR": cagr, "Vol": vol, "Sharpe": sharpe, "MaxDD": dd}
+
+
+def main() -> None:
+    """CLI entrypoint for the paper trading backtest."""
+    p = argparse.ArgumentParser(description="AI-driven paper trading backtest (historical)")
+    p.add_argument("--tickers", type=str, default="AAPL,MSFT,GOOG,AMZN,NVDA")
+    p.add_argument("--start", type=str, default="2019-01-01")
+    p.add_argument("--end", type=str, default=None)
+    p.add_argument("--initial_cash", type=float, default=100000)
+    p.add_argument("--top_n", type=int, default=5)
+    p.add_argument("--trade_cost_bps", type=float, default=1.0)
+    p.add_argument("--train_ratio", type=float, default=0.7)
+    p.add_argument("--out_csv", type=str, default="paper_backtest_equity.csv")
+    p.add_argument("--save_model", type=str, default=None, help="Path to save trained model (joblib).")
+    p.add_argument("--save_preds", type=str, default=None, help="Path to save test set predictions CSV.")
+    args = p.parse_args()
+
+    cfg = BacktestConfig(
+        initial_cash=args.initial_cash,
+        top_n=args.top_n,
+        trade_cost_bps=args.trade_cost_bps,
+        train_ratio=args.train_ratio,
+    )
+
+    tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+    result = simulate(tickers, args.start, args.end, cfg)
+    result.to_csv(args.out_csv)
+
+    # Optional artifacts
+    if getattr(result, "_pred_df", None) is not None and args.save_preds:
+        result._pred_df.to_csv(args.save_preds)
+        print(f"Saved predictions to {args.save_preds}")
+    if getattr(result, "_model", None) is not None and args.save_model:
+        bundle = {"model": result._model, "features": result._feat_cols}
+        train_df = getattr(result, "_train_df", None)
+        if train_df is not None:
+            # Additive: {feature: [decile edges]} drift reference so
+            # `predict-next --check_drift` can compare live inputs against
+            # what the model trained on. Old bundles lacking this key keep
+            # loading exactly as before.
+            from drift import compute_reference
+            bundle["feature_reference"] = compute_reference(train_df, result._feat_cols)
+        joblib.dump(bundle, args.save_model)
+        print(f"Saved model bundle to {args.save_model}")
+
+    m = metrics(result["equity"]) if not result.empty else {}
+    print(f"Days: {len(result)} | Final Equity: {result['equity'].iloc[-1]:.2f}" if len(result) else "No results")
+    if m:
+        print(f"CAGR: {m['CAGR']:.2%}  Vol: {m['Vol']:.2%}  Sharpe: {m['Sharpe']:.2f}  MaxDD: {m['MaxDD']:.2%}")
+    print(f"Saved equity curve to {args.out_csv}")
+
+
+if __name__ == "__main__":
+    main()

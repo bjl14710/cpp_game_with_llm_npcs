@@ -1,0 +1,33 @@
+/idea
+
+Goal: A shared world-time value and NPC schedules driven by it, plus a
+day/night visual cycle. This should establish the "world bus" pattern that
+gossip and the journal will also plug into later, not a one-off clock.
+
+Context: NPCs currently have no purposeful movement tied to time of day.
+Build a single authoritative world_time value that everything reads from —
+NPC schedule logic, day/night lighting/rendering, anything else time-based
+later — rather than each system tracking its own private notion of time.
+
+Scope:
+1. World clock — one shared world_time value, advancing at a defined rate,
+   exposed as part of the same shared-state store that later gossip/journal
+   tickets will use (design the store generically now: a place other
+   systems can read/write shared facts, with world_time as its first entry).
+2. NPC schedules — each NPC gets a simple schedule (location + activity per
+   time-of-day range). Schedule logic reads world_time; it must not track
+   its own separate clock.
+3. Day/night visuals — lighting/color shift driven by the same world_time
+   value, not a separate timer.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Pick the most defensible option yourself, log the
+  decision and reasoning in OVERNIGHT_REPORT.md, and keep going.
+- Design the shared store generically enough to hold future fact types
+  (gossip facts, journal-relevant facts), not hardcoded to only hold time.
+  Don't over-build it tonight — just don't paint it into a time-only corner.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

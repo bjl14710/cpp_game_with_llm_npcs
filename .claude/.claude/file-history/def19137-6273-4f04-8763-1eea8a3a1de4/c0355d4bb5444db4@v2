@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embedded Debug Hierarchy — readsb</title>
+<style>
+  :root {
+    --bg:#1a1b26; --surface:#1f2335; --border:#2f3549;
+    --text:#c0caf5; --muted:#565f89; --accent:#7aa2f7;
+    --green:#9ece6a; --red:#f7768e; --yellow:#e0af68;
+    --cyan:#7dcfff; --purple:#bb9af7; --orange:#ff9e64;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:Georgia,serif; line-height:1.75; padding:2rem 1rem; }
+  .container { max-width:840px; margin:0 auto; }
+  h1 { font-size:2rem; color:var(--accent); margin-bottom:0.25rem; }
+  .tagline { color:var(--muted); font-size:0.95rem; margin-bottom:2rem; font-style:italic; }
+  h2 { font-size:1.3rem; color:var(--cyan); margin:2.5rem 0 0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.3rem; }
+  h3 { font-size:1.05rem; color:var(--yellow); margin:1.5rem 0 0.5rem; }
+  p { margin-bottom:1rem; }
+  a { color:var(--accent); }
+  code { font-family:'Courier New',monospace; font-size:0.87em; background:var(--border); padding:0.1em 0.35em; border-radius:3px; color:var(--orange); }
+  pre { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:1.25rem; overflow-x:auto; margin:0.75rem 0 1.25rem; font-family:'Courier New',monospace; font-size:0.84rem; line-height:1.6; }
+  .filepath { display:inline-block; background:var(--border); color:var(--purple); font-family:'Courier New',monospace; font-size:0.82rem; padding:0.15em 0.5em; border-radius:3px; }
+  .kw{color:var(--purple);} .ty{color:var(--cyan);} .fn{color:var(--accent);}
+  .str{color:var(--green);} .cm{color:var(--muted);font-style:italic;} .num{color:var(--orange);} .pp{color:var(--yellow);}
+  .callout { background:#202d3d; border-left:3px solid var(--accent); padding:0.75rem 1rem; border-radius:0 6px 6px 0; margin:1rem 0 1.5rem; font-size:0.93rem; }
+  .callout.warn { border-color:var(--yellow); }
+  .callout.tip  { border-color:var(--green); }
+  .callout.red  { border-color:var(--red); }
+  .section-header { display:flex; align-items:center; gap:0.75rem; cursor:pointer; user-select:none; }
+  .section-check { width:1.1rem; height:1.1rem; accent-color:var(--green); flex-shrink:0; }
+  .section-label { font-size:0.8rem; color:var(--muted); }
+  /* Pyramid */
+  .pyramid { margin:1.5rem 0; }
+  .level-row { display:flex; align-items:stretch; margin-bottom:3px; }
+  .level-badge {
+    width:180px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Courier New',monospace; font-size:0.78rem;
+    font-weight:bold; border-radius:4px 0 0 4px;
+    padding:0.5rem 0.6rem; text-align:center;
+  }
+  .level-body {
+    flex:1; background:var(--surface); border:1px solid var(--border);
+    border-left:none; border-radius:0 4px 4px 0;
+    padding:0.4rem 0.75rem; font-size:0.87rem;
+  }
+  .level-body strong { color:var(--yellow); }
+  .l1 { background:#1a3a1a; color:var(--green); border:1px solid var(--green); border-right:none; }
+  .l2 { background:#1e2a1a; color:#8fc870; border:1px solid #8fc870; border-right:none; }
+  .l3 { background:#2a2a1a; color:var(--yellow); border:1px solid var(--yellow); border-right:none; }
+  .l4 { background:#2a221a; color:var(--orange); border:1px solid var(--orange); border-right:none; }
+  .l5 { background:#2a1a1a; color:#e07070; border:1px solid #e07070; border-right:none; }
+  .l6 { background:#3a1a1a; color:var(--red); border:1px solid var(--red); border-right:none; }
+  /* Cost/availability axes */
+  .axes { display:flex; gap:2rem; margin:1rem 0 1.5rem; font-size:0.85rem; }
+  .axis { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:0.75rem 1rem; }
+  .axis-label { color:var(--muted); font-size:0.75rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:0.4rem; }
+  /* quiz */
+  .quiz-block { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1.5rem; margin:2rem 0; }
+  .question { margin-bottom:1.75rem; }
+  .question p { font-weight:bold; margin-bottom:0.75rem; }
+  .options { list-style:none; display:flex; flex-direction:column; gap:0.4rem; }
+  .options li { background:var(--bg); border:1px solid var(--border); border-radius:5px; padding:0.55rem 0.9rem; cursor:pointer; transition:background .15s,border-color .15s; font-size:0.92rem; }
+  .options li:hover { border-color:var(--accent); background:#1e2540; }
+  .options li.correct { border-color:var(--green); background:#1c2d1c; color:var(--green); }
+  .options li.wrong   { border-color:var(--red);   background:#2d1c1c; color:var(--red); }
+  .options li.disabled { pointer-events:none; }
+  .feedback { margin-top:.6rem; font-size:.88rem; padding:.4rem .7rem; border-radius:4px; background:var(--border); }
+  .feedback.correct-fb { color:var(--green); }
+  .feedback.wrong-fb   { color:var(--red); }
+  .score-area { text-align:center; padding:1rem; font-size:1.1rem; font-weight:bold; color:var(--cyan); border-top:1px solid var(--border); margin-top:1rem; }
+  #progress-bar-wrap { position:sticky; top:0; background:var(--bg); padding:.4rem 0; z-index:10; border-bottom:1px solid var(--border); margin-bottom:1rem; }
+  #progress-bar { height:4px; background:var(--border); border-radius:2px; }
+  #progress-fill { height:100%; background:var(--green); border-radius:2px; transition:width .3s; width:0%; }
+  #progress-text { font-size:.75rem; color:var(--muted); text-align:right; margin-top:.2rem; }
+  table { width:100%; border-collapse:collapse; margin:1rem 0 1.5rem; font-size:.9rem; }
+  th { background:var(--border); text-align:left; padding:.5rem .75rem; }
+  td { padding:.5rem .75rem; border-top:1px solid var(--border); vertical-align:top; }
+  tr:nth-child(even) td { background:var(--surface); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div id="progress-bar-wrap">
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+  <div id="progress-text">0 / 6 sections complete</div>
+</div>
+
+<h1>The Embedded Debug Hierarchy</h1>
+<p class="tagline">Why readsb has six distinct levels of debug output — and why the order is determined by cost, not preference.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="1">
+    <span>1. The Core Problem: You Can't Always Attach a Debugger</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>In desktop software, when something goes wrong you attach <code>gdb</code>, set a breakpoint, and inspect state interactively. In embedded and systems software — and readsb runs on Raspberry Pis, NAS boxes, minimal Linux containers — this is often impossible or impractical:</p>
+
+<ul style="margin:0 0 1rem 1.5rem; line-height:2;">
+  <li>The device may have no interactive shell during normal operation</li>
+  <li>Attaching a debugger pauses the process — a 35-callbacks-per-second USB read loop will drop data</li>
+  <li>The bug may only appear after hours of runtime, not during a debug session</li>
+  <li>The hardware may be headless, remote, or both</li>
+</ul>
+
+<p>The solution is <strong>built-in instrumentation</strong> — output mechanisms baked into the binary itself, ranging from "always on" to "requires recompile." Each level has a cost/availability tradeoff. The hierarchy exists because not every question is worth the same price to answer.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="2">
+    <span>2. The Six Levels — Overview</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>From lowest cost/highest availability at the top, to highest cost/lowest availability at the bottom:</p>
+
+<div class="pyramid">
+  <div class="level-row">
+    <div class="level-badge l1">Level 1<br>#ifdef compile</div>
+    <div class="level-body"><strong>Compile-time guards</strong> — zero runtime overhead; removed from binary entirely. Used when the debug code itself is expensive or changes behaviour.</div>
+  </div>
+  <div class="level-row">
+    <div class="level-badge l2">Level 2<br>always-on stderr</div>
+    <div class="level-body"><strong>Unconditional fprintf to stderr</strong> — FATAL errors and one-time startup messages. Low-frequency, always needed, no rate limiting required.</div>
+  </div>
+  <div class="level-row">
+    <div class="level-badge l3">Level 3<br>antiSpam stderr</div>
+    <div class="level-body"><strong>Rate-limited stderr</strong> — warnings in tight loops. The antiSpam pattern suppresses repeats; one message per "episode" instead of one per callback.</div>
+  </div>
+  <div class="level-row">
+    <div class="level-badge l4">Level 4<br>--debug flags</div>
+    <div class="level-body"><strong>Modes.debug_* runtime flags</strong> — enabled with <code>--debug &lt;chars&gt;</code>. Zero cost when off; verbose when on. No recompile needed.</div>
+  </div>
+  <div class="level-row">
+    <div class="level-badge l5">Level 5<br>commented-out</div>
+    <div class="level-body"><strong>Commented-out fprintf</strong> — too spammy even for debug mode. Uncomment and recompile to see every loop iteration. Left in the code as breadcrumbs for the next developer.</div>
+  </div>
+  <div class="level-row">
+    <div class="level-badge l6">Level 6<br>crash on demand</div>
+    <div class="level-body"><strong>Intentional crash / segfault</strong> — <code>--devel provokeSegfault</code>. Tests that crash reporting, core dumps, and monitoring infrastructure actually work.</div>
+  </div>
+</div>
+
+<div class="axes">
+  <div class="axis">
+    <div class="axis-label">↑ Cost increases downward</div>
+    Levels 1→6: more disruptive, requires more from the developer (recompile, restart, data loss)
+  </div>
+  <div class="axis">
+    <div class="axis-label">↑ Availability decreases downward</div>
+    Level 2 is always there; Level 5–6 requires you to act before you can observe
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="3">
+    <span>3. Levels 1–3 — Always-Available Output</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<h3>Level 1 — Compile-time #ifdef</h3>
+<p>The most extreme version: the debug code literally does not exist in the binary unless you define the flag at compile time. Used in <span class="filepath">crc.c</span> for the CRC syndrome table construction — an expensive, verbose process that runs only once at startup but would produce hundreds of lines:</p>
+
+<pre><span class="pp">#ifdef CRCDEBUG</span>
+    fprintf(stderr, <span class="str">"Preparing syndrome table to correct up to %d-bit errors "</span>
+            <span class="str">"(detecting %d-bit errors) in a %d-bit message (max %d entries)\n"</span>,
+            max_correct, max_detect, bits, maxsize);
+<span class="pp">#endif</span>
+
+    <span class="cm">/* ... hundreds of lines later ... */</span>
+
+<span class="pp">#ifdef CRCDEBUG</span>
+    fprintf(stderr, <span class="str">"Sorting syndromes..\n"</span>);
+<span class="pp">#endif</span>
+    qsort(table, usedsize, <span class="kw">sizeof</span>(struct errorinfo), syndrome_compare);
+
+<span class="pp">#ifdef CRCDEBUG</span>
+    fprintf(stderr, <span class="str">"Discarded %d collisions.\n"</span>, usedsize - j);
+<span class="pp">#endif</span></pre>
+
+<p>Also in <span class="filepath">threadpool.c</span>: <code>#undef DEBUG</code> at the top — the developer explicitly <em>removes</em> a debug define before shipping, rather than relying on the define not being set:</p>
+<pre><span class="pp">#undef DEBUG</span>   <span class="cm">// intentional: force off even if -DDEBUG is in CFLAGS</span>
+
+<span class="pp">#ifdef DEBUG</span>
+<span class="pp">#include</span> <span class="str">&lt;stdio.h&gt;</span>
+<span class="pp">#endif</span></pre>
+
+<p><strong>Why use level 1?</strong> When the debug output is so verbose it would obscure normal startup messages, when the debug code adds measurable overhead (extra allocations, extra loops), or when it changes observable timing.</p>
+
+<h3>Level 2 — Unconditional stderr: FATAL and startup</h3>
+<p>Unconditional prints serve two categories: <strong>fatal errors</strong> (the program cannot continue) and <strong>startup confirmation</strong> (one-time messages that confirm the system initialized correctly). From <span class="filepath">sdr_rtlsdr.c</span>:</p>
+
+<pre><span class="cm">// Fatal — these fire once, then the function returns false</span>
+fprintf(stderr, <span class="str">"FATAL: rtlsdr: no supported devices found.\n"</span>);
+
+<span class="cm">// Startup confirmation — also fires once, on success</span>
+fprintf(stderr, <span class="str">"rtlsdr: using device #%d: %s (%s, %s, SN %s)\n"</span>,
+        dev_index, rtlsdr_get_device_name(dev_index),
+        manufacturer, product, serial);
+
+<span class="cm">// Unusual hardware warning — fires once</span>
+fprintf(stderr, <span class="str">"\n\nrtlsdr: BAD TUNER, 1090 reception will be TERRIBLE\n\n\n"</span>);</pre>
+
+<p><strong>Why unconditional?</strong> These events happen at most once per process lifetime. There is no spam risk. And users <em>always</em> need to know about fatal errors — gating them behind a flag would hide startup failures from production deployments.</p>
+
+<h3>Level 3 — Rate-limited (antiSpam) stderr</h3>
+<p>Some conditions occur constantly in hot paths. Without rate-limiting, one warning per USB callback = 35 identical lines per second flooding the terminal and drowning out everything else. readsb uses two antiSpam patterns:</p>
+
+<p><strong>Pattern A — time-based</strong> (from <span class="filepath">sdr_rtlsdr.c:398</span>):</p>
+<pre><span class="kw">static</span> <span class="ty">int64_t</span> antiSpam;            <span class="cm">// stores the "next allowed print" timestamp</span>
+
+<span class="kw">if</span> (len != Modes.sdr_buf_size) {
+    <span class="kw">if</span> (mstime() &gt; antiSpam) {      <span class="cm">// only print if enough time has passed</span>
+        antiSpam = mstime() + <span class="num">10</span> * SECONDS;
+        fprintf(stderr, <span class="str">"weirdness: rtlsdr gave us a block with unusual size\n"</span>);
+    }
+}</pre>
+
+<p><strong>Pattern B — count-based</strong> (from <span class="filepath">sdr_rtlsdr.c:423</span>):</p>
+<pre><span class="kw">static int</span> antiSpam;               <span class="cm">// a countdown counter</span>
+
+<span class="kw">if</span> (--antiSpam &lt;= <span class="num">0</span> &amp;&amp; !Modes.exit) {
+    fprintf(stderr, <span class="str">"FIFO dropped, suppressing for 30 seconds.\n"</span>);
+    antiSpam = <span class="num">300</span>;               <span class="cm">// 300 callbacks ÷ 35/sec ≈ 8.5 seconds</span>
+}</pre>
+
+<p><code>api.c</code> even promotes this into a helper function:</p>
+<pre><span class="kw">static int</span> <span class="fn">antiSpam</span>(<span class="ty">int64_t</span> *nextPrint, <span class="ty">int64_t</span> interval) {
+    <span class="ty">int64_t</span> now = mstime();
+    <span class="kw">if</span> (now &gt; *nextPrint) { *nextPrint = now + interval; <span class="kw">return</span> <span class="num">1</span>; }
+    <span class="kw">return</span> <span class="num">0</span>;
+}</pre>
+
+<div class="callout tip">
+  <strong>Time-based vs count-based:</strong> Time-based (<code>mstime() > antiSpam</code>) gives a predictable wall-clock suppression window and is safe to use across threads (just needs an int64_t per call site). Count-based is simpler for callback-rate code where you know the call frequency. Both are <code>static</code> inside the function — they survive across calls without polluting global state.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="4">
+    <span>4. Levels 4–5 — Opt-in Output</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<h3>Level 4 — Modes.debug_* runtime flags</h3>
+<p>For subsystem-specific verbose output that is too noisy for normal operation but doesn't require a recompile to enable. The pattern is always <code>if (Modes.debug_X)</code> gating a <code>fprintf</code>:</p>
+
+<pre><span class="cm">// net_io.c — only prints when --debug n is active</span>
+<span class="kw">if</span> (Modes.debug_net) {
+    fprintf(stderr, <span class="str">"net_io: connection attempt %s:%s\n"</span>, host, port_s);
+}
+
+<span class="cm">// sdr_rtlsdr.c — debug AND rate-limited (belt-and-suspenders)</span>
+<span class="kw">if</span> (Modes.debug_sampleCounter &amp;&amp; --antiSpam2 &lt;= <span class="num">0</span>) {
+    fprintf(stderr, <span class="str">"sampleTimestamp: %020llu\n"</span>, outbuf-&gt;sampleTimestamp);
+    antiSpam2 = <span class="num">3000</span>;
+}</pre>
+
+<p>Notice: level 4 can be <em>combined</em> with level 3 — even when a debug flag is on, high-frequency code still rate-limits its output.</p>
+
+<p><strong>Why not just always print?</strong> In production, <code>debug_net</code> would flood stderr with every TCP event — potentially thousands of lines per second on a busy aggregator node. The flag lets a developer investigate network issues in production without stopping the process.</p>
+
+<h3>Level 5 — Commented-out fprintf</h3>
+<p>The most intrusive instrumentation short of a debugger. These are prints that are too verbose even for the debug flags, requiring a recompile to enable. They are deliberately left in the codebase as navigation aids — "if you're debugging this function, here's where to look."</p>
+
+<pre><span class="cm">// convert.c:52 — inside the lookup table initialization loop</span>
+<span class="cm">// Every (I,Q) pair → magnitude value: 65,536 lines if uncommented</span>
+<span class="cm">//fprintf(stderr, "%d %d %.2f\n", i, q, magsq);</span>
+
+<span class="cm">// sdr_rtlsdr.c:307 — numgains immediately after driver opens</span>
+<span class="cm">//fprintf(stderr, "numgains: %d\n", RTLSDR.numgains);</span>
+
+<span class="cm">// readsb.c:1679 — at the top of parse_opt(), traces every CLI option</span>
+<span class="cm">//fprintf(stderr, "parse_opt(%d, %s, argp_state*)\n", key, arg);</span>
+
+<span class="cm">// aircraft.c:31 — fires on every aircraft allocation from free list</span>
+<span class="cm">//fprintf(stderr, "alloc from freelist\n");</span></pre>
+
+<div class="callout warn">
+  <strong>Breadcrumb discipline:</strong> A commented-out print should be removed <em>only</em> if you're confident no future developer will need it. In a codebase like readsb, where the original authors aren't always available, these comments say "I was here, I debugged this exact point, here's the print that helped me."
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="5">
+    <span>5. Level 6 — Crash on Demand + Why This Matters</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>The strangest level: intentional process destruction. <code>--devel provokeSegfault</code> in <span class="filepath">readsb.c:3241</span>:</p>
+
+<pre><span class="kw">if</span> (Modes.debug_provoke_segfault) {
+    msleep(<span class="num">666</span>);   <span class="cm">// let the process fully initialize first</span>
+    fprintf(stderr, <span class="str">"devel=provokeSegfault -> provoking SEGFAULT now!\n"</span>);
+    <span class="kw">int</span> *a = NULL;
+    *a = <span class="num">0</span>;         <span class="cm">// guaranteed SIGSEGV</span>
+}</pre>
+
+<p><strong>Why would you deliberately crash the process?</strong> Because <em>the crash infrastructure needs testing too</em>. In production deployments:</p>
+
+<ul style="margin:0 0 1rem 1.5rem; line-height:2;">
+  <li>Does the systemd unit actually restart after a crash?</li>
+  <li>Does the core dump handler write a useful file?</li>
+  <li>Does the monitoring alert fire within the expected SLA?</li>
+  <li>Does the init script suppress the "started" log line if readsb immediately dies?</li>
+</ul>
+
+<p>You cannot answer these questions by just <em>reading</em> the configuration. You have to <em>observe the actual behavior</em>. <code>provokeSegfault</code> lets you fire a real crash on demand, in the real deployment environment, at a moment of your choosing — without waiting for a genuine bug to manifest.</p>
+
+<div class="callout red">
+  <strong>The hierarchy is a cost ladder, not a preference order.</strong> You don't "start at level 1 and work down." You ask: <em>how much does it cost to observe this, and what is the minimum cost that gives me the answer?</em><br><br>
+  — Unknown bug? Start at level 4 (runtime flags, no restart if already running via a signal or --devel).<br>
+  — Tight loop too slow? The print you added is at level 5 — comment it out and move to level 4.<br>
+  — System never sends crashes to monitoring? Use level 6 deliberately once to verify.
+</div>
+
+<h3>Why is the order cost-driven?</h3>
+<table>
+  <thead><tr><th>Level</th><th>Can enable without…</th><th>Performance cost when off</th><th>Risk</th></tr></thead>
+  <tbody>
+    <tr><td>1 — #ifdef</td><td>Requires recompile</td><td>Zero — code doesn't exist</td><td>None; dead code</td></tr>
+    <tr><td>2 — always-on</td><td>Nothing — always active</td><td>One write per program lifetime</td><td>None; rare event</td></tr>
+    <tr><td>3 — antiSpam</td><td>Nothing — always active</td><td>One compare per call</td><td>None if rate-limited correctly</td></tr>
+    <tr><td>4 — debug flags</td><td>Restart required</td><td>One branch per call</td><td>Flooding if flag left on</td></tr>
+    <tr><td>5 — commented</td><td>Requires recompile</td><td>Zero — commented out</td><td>Extreme spam if uncommented in loops</td></tr>
+    <tr><td>6 — crash</td><td>Restart required</td><td>Zero — never reached normally</td><td>Process dies; use deliberately</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="6">
+    <span>6. Often Confused With: External Tools</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<table>
+  <thead><tr><th>Aspect</th><th>Internal instrumentation (this hierarchy)</th><th>External tools (gdb, strace, valgrind)</th></tr></thead>
+  <tbody>
+    <tr><td>Availability</td><td>Works on any deployment — headless Pi, container, remote server</td><td>Requires tool binary + sometimes OS features (ptrace)</td></tr>
+    <tr><td>Timing impact</td><td>Minimal — one branch, one write</td><td>High — strace adds syscall overhead; valgrind slows 10–50×</td></tr>
+    <tr><td>Production use</td><td>Yes — level 3 and 4 are designed for this</td><td>Rarely — timing changes can hide or alter the bug</td></tr>
+    <tr><td>What you observe</td><td>What the developer chose to expose</td><td>Anything — but requires knowing where to look</td></tr>
+    <tr><td>Long-running bugs</td><td>Excellent — output accumulates in logs</td><td>Poor — session-based, not persistent</td></tr>
+    <tr><td>Right when</td><td>Production deployments, Pis, containers, tight timing</td><td>Local development, memory bugs, unknown crash location</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <strong>They complement each other.</strong> Use internal instrumentation (levels 3–4) to narrow the subsystem, then attach gdb or add a commented print (level 5) to get the exact value. The hierarchy is not "instead of gdb" — it's "everything you can do before gdb."
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="7">
+    <span>7. Quiz</span>
+    <span class="section-label">(practice)</span>
+  </label>
+</h2>
+
+<div class="quiz-block">
+
+  <div class="question" data-question="1">
+    <p>Q1. threadpool.c contains <code>#undef DEBUG</code> at the top before the <code>#ifdef DEBUG</code> block. What does this accomplish beyond just "not defining DEBUG"?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="#undef doesn't make a symbol undefined in the linker sense — it only affects preprocessor symbols. The linker doesn't know about DEBUG.">It prevents the linker from finding a DEBUG symbol in other object files</li>
+      <li data-correct="true"  data-why="Correct. If someone compiles with -DDEBUG in CFLAGS (a common practice for debug builds), that would normally enable the DEBUG block in threadpool.c. The #undef cancels it specifically for this file, making the author's intent explicit: this debug output is never wanted in production, regardless of build flags.">It cancels any <code>-DDEBUG</code> compiler flag, making the off-state explicit even in debug builds</li>
+      <li data-correct="false" data-why="#undef has no runtime cost — it's a preprocessor directive that disappears before compilation even begins.">It reduces runtime overhead by clearing the DEBUG variable at startup</li>
+      <li data-correct="false" data-why="All #ifdef guards are removed at compile time. #undef affects only whether the block compiles; it doesn't change link behavior.">It tells the linker to strip all DEBUG-related symbols at link time</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="2">
+    <p>Q2. In the FIFO-drop case in rtlsdrCallback(), the antiSpam counter is decremented (<code>--antiSpam</code>) rather than compared against a timestamp. When would you choose count-based over time-based antiSpam?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="mstime() is already used elsewhere in the same callback. Both forms are available.">When mstime() is not available in that code path</li>
+      <li data-correct="false" data-why="Both forms use a static variable. The storage cost is identical (one int64_t vs one int).">When memory is extremely constrained and you can't store an int64_t</li>
+      <li data-correct="true"  data-why="Correct. Count-based antiSpam ties the print rate to the call rate, which is stable at ~35 callbacks/sec for rtlsdr. '300 callbacks' is directly readable as 'roughly 8 seconds at 35/s.' Time-based requires checking the wall clock (a syscall) on every call. In a tight callback, avoiding even one syscall per callback matters.">When the call rate is stable and known, making N-count directly meaningful — and when avoiding the mstime() call per iteration matters</li>
+      <li data-correct="false" data-why="Both patterns are thread-safe as long as the static variable is only written by one thread. Neither requires a mutex for single-writer use.">When the function is called from multiple threads simultaneously</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="3">
+    <p>Q3. A commented-out fprintf inside a per-sample conversion loop (like convert.c:52) would print 65,536 lines during a single lookup table initialization. Why keep the comment rather than deleting it?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The C compiler sees commented-out code as whitespace — it has zero impact on compilation time or binary size.">It reduces compilation time since the compiler skips commented code</li>
+      <li data-correct="true"  data-why="Correct. The comment serves as a navigation aid for the next developer who needs to understand or debug the lookup table. It says: 'I debugged this exact loop; here's the print that revealed the values.' Without it, the next developer has to rediscover the same instrumentation point from scratch.">It's a breadcrumb: it marks the exact instrumentation point a previous developer needed, saving the next developer from rediscovering it</li>
+      <li data-correct="false" data-why="Commented code is not dead code elimination in the compiler sense — it's simply text. The compiler ignores comments entirely.">It enables dead code elimination, which shrinks the binary</li>
+      <li data-correct="false" data-why="Nothing in C prevents uncommenting code. The comment is a deliberate choice, not a compiler restriction.">It prevents future developers from accidentally enabling it</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="4">
+    <p>Q4. You need to investigate whether a network client is connecting correctly. You don't want to recompile, and the process is already running. Which level do you reach for?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Level 5 (commented-out fprintf) requires a recompile and restart. You said you don't want to recompile.">Level 5 — uncomment the fprintf near the connection code and recompile</li>
+      <li data-correct="false" data-why="Level 1 (#ifdef CRCDEBUG) is a compile-time flag and won't help with network connection investigation.">Level 1 — compile with -DCRCDEBUG and restart</li>
+      <li data-correct="true"  data-why="Correct. Level 4 (--debug n, which sets Modes.debug_net) is enabled at startup with a command-line flag. You restart with --debug n and the networking subsystem becomes verbose with no recompile needed. This is exactly what debug flags are for.">Level 4 — restart with <code>--debug n</code> to enable Modes.debug_net</li>
+      <li data-correct="false" data-why="Level 6 (crash-on-demand) would kill the process. It tests monitoring infrastructure, not networking logic.">Level 6 — use --devel provokeSegfault to reset the connection state</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="5">
+    <p>Q5. Level 4 debug flags can still be combined with antiSpam (level 3), as seen in rtlsdrCallback(). Why is this combination common?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="antiSpam has no effect on whether a flag is enabled — it only controls print frequency when the code is reached.">Because antiSpam acts as an additional flag that must be set alongside the debug flag</li>
+      <li data-correct="true"  data-why="Correct. When you enable --debug K in a hot callback that fires 35x/second, the debug prints themselves would spam at 35 lines/sec. The antiSpam wraps the print so you still get the info (at a readable rate) rather than a wall of identical lines.">A debug flag in a hot callback still fires too fast without rate-limiting; antiSpam makes the output readable</li>
+      <li data-correct="false" data-why="Performance cost of a debug flag check is a single branch — the antiSpam doesn't reduce that cost further.">To reduce the branch prediction penalty of the debug flag check</li>
+      <li data-correct="false" data-why="antiSpam doesn't add any thread safety. Thread-safety for shared state requires a mutex, not rate-limiting.">To make the debug output thread-safe in the multi-threaded reader</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="score-area" id="score-area" hidden>Score: <span id="score-val">0</span> / 5</div>
+</div>
+
+<h2>Check Your Understanding — Scenarios</h2>
+
+<div class="callout">
+<strong>Scenario A:</strong> You want to print the contents of every mag_buf as it passes through the decoder — both samples and metadata. Which level is appropriate and why? What's the risk if you choose the wrong level?
+<br><br>
+<a href="#" id="toggleA" style="color:var(--cyan)">show answer</a>
+<div id="ansA" hidden style="margin-top:0.75rem; color:var(--green)">
+<strong>Level 5 (commented-out fprintf)</strong>, not level 4. A mag_buf has up to 65,000 samples; printing every sample would produce ~2.3 million lines per second (35 buffers/sec × 65,536 samples). Even printing just the metadata (8 fields per buffer) produces 280 lines/sec — manageable but only for a few seconds of investigation, not production.<br><br>
+<strong>Right approach:</strong> Add a commented fprintf that prints only the metadata fields (length, sampleTimestamp, mean_level, dropped) and gate it with antiSpam so it fires at most once per second. Mark it clearly for removal when done.<br><br>
+<strong>Wrong level risk:</strong> A level 4 debug flag that prints per-sample data without antiSpam would make the decoder thread unable to keep up (it's doing 65k fprintf syscalls per callback), causing the very FIFO drops you're trying to investigate.
+</div>
+</div>
+
+<div class="callout" style="margin-top:1rem;">
+<strong>Scenario B:</strong> Your deployment uses a watchdog that should restart readsb if it dies. You want to verify the watchdog works before deploying to 200 sites. What do you use, and what do you verify?
+<br><br>
+<a href="#" id="toggleB" style="color:var(--cyan)">show answer</a>
+<div id="ansB" hidden style="margin-top:0.75rem; color:var(--green)">
+<strong>Level 6: <code>--devel provokeSegfault</code></strong>. Run readsb normally on one test node with this flag — it will initialize fully (666ms sleep), log the intent to stderr, then SIGSEGV. Verify:<br><br>
+1. The watchdog/systemd detects the non-zero exit and restarts within expected time.<br>
+2. A core dump is written (if configured) — check with <code>ls -lh /var/crash/</code> or the configured coredump path.<br>
+3. The monitoring system alerts on the unexpected restart.<br>
+4. The restarted instance initializes correctly without manual intervention.<br><br>
+If any of these fail on the test node, you've found a gap in your infrastructure before deploying to 200 sites. That's exactly what level 6 is for.
+</div>
+</div>
+
+<br><br>
+<p style="color:var(--muted);font-size:0.85rem;text-align:center;">readsb · crc.c, threadpool.c, sdr_rtlsdr.c, net_io.c, readsb.c · lesson 0004</p><br>
+
+</div>
+
+<script>
+const checks = document.querySelectorAll('.section-check');
+function updateProgress() {
+  const done = [...checks].filter(c=>c.checked).length;
+  document.getElementById('progress-fill').style.width=(done/checks.length*100)+'%';
+  document.getElementById('progress-text').textContent=done+' / '+checks.length+' sections complete';
+}
+checks.forEach(c=>c.addEventListener('change',updateProgress));
+updateProgress();
+
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}
+  return arr;
+}
+let correct=0,answered=0;
+const totalQ=5;
+document.querySelectorAll('[data-question]').forEach(block=>{
+  const list=block.querySelector('.options');
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+  const feedback=block.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(block.dataset.done)return;
+      block.dataset.done='true';answered++;
+      const ok=li.dataset.correct==='true';
+      if(ok)correct++;
+      list.querySelectorAll('li').forEach(o=>{
+        o.classList.add('disabled');
+        o.classList.add(o.dataset.correct==='true'?'correct':'wrong');
+      });
+      feedback.hidden=false;
+      feedback.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      feedback.className='feedback '+(ok?'correct-fb':'wrong-fb');
+      if(answered===totalQ){
+        const sa=document.getElementById('score-area');sa.hidden=false;
+        document.getElementById('score-val').textContent=correct;
+        sa.style.color=correct>=4?'var(--green)':correct>=2?'var(--yellow)':'var(--red)';
+      }
+    });
+  });
+});
+document.getElementById('toggleA').addEventListener('click',e=>{e.preventDefault();document.getElementById('ansA').hidden=!document.getElementById('ansA').hidden;});
+document.getElementById('toggleB').addEventListener('click',e=>{e.preventDefault();document.getElementById('ansB').hidden=!document.getElementById('ansB').hidden;});
+</script>
+</body>
+</html>

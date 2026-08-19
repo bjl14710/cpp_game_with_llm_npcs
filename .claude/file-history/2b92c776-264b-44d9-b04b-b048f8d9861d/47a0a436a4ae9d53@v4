@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0010 — Request-Id Routing: One LLM, Many Askers</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; }
+  ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); }
+  .good { border-left-color:var(--green); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0010 · Multiplayer networking · from feat(net): route NPC dialogue through the server</div>
+<h1>Request-Id Routing: One LLM, Many Askers</h1>
+<p>How <code>HostChatRouter</code> gives four players one shared NPC brain without
+crossing anyone's wires.</p>
+
+<h2>The fan-in / fan-out problem</h2>
+<p>All NPC replies stream out of a single <code>LlmClient</code> as anonymous-looking
+<code>ChatDelta{id, text}</code> fragments. In solo play, "who is this for?" had one easy
+answer: the open dialogue. With remote players, one stream now serves:</p>
+<ul>
+<li>the host's own conversation (rendered in the local <code>DialogUI</code>),</li>
+<li>player 2 chatting with the baker (goes over player 2's socket <em>only</em>),</li>
+<li>player 3 chatting with the cop (player 3's socket <em>only</em>).</li>
+</ul>
+<p>The routing key already existed: <code>LlmClient::submit()</code> returns a unique,
+monotonically increasing <strong>request id</strong>, and every delta and reply carries it.
+The router just remembers who each id belongs to:</p>
+<pre><code>std::unordered_map&lt;uint64_t, std::pair&lt;int,int&gt;&gt; inflight_;  // id → {playerId, npcIndex}
+
+uint64_t id = npc.ask(line.text);          // submit through the SHARED path
+inflight_[id] = {line.playerId, npcIndex}; // claim the id for that player</code></pre>
+
+<h2>Consume-or-pass: chaining drains without forking them</h2>
+<p>The host's frame loop drains the LLM queues exactly once, offering each item to
+the router first. <em>Consumed</em> means "that was a remote player's"; <em>declined</em>
+falls through to the existing solo handling, untouched:</p>
+<pre><code>for (auto&amp; d : client.drainDeltas()) {
+    if (chatRouter &amp;&amp; chatRouter-&gt;routeDelta(d)) continue;  // remote → socket
+    if (session.deltaArrived(d.id, d.text))                 // mine → DialogUI
+        dialog.appendStreamingDelta(d.text);
+}</code></pre>
+<div class="callout good">This boolean consume-or-pass shape is how you extend a
+single-consumer queue to two consumers without rewriting either: the new consumer
+gets first refusal, the old code cannot tell anything changed.</div>
+
+<h2>Serializing a shared NPC</h2>
+<p>An <code>Npc</code> tracks exactly one pending request (<code>pendingId_</code>), so two
+simultaneous questions to the same NPC would clobber each other. The router
+enforces one-at-a-time <em>per NPC</em> with a queue:</p>
+<pre><code>queued_[npcIndex].push_back({playerId, text});   // arrival order
+// pumpNpc(): if (!npc.waiting()) submit the front line</code></pre>
+<p><code>npc.waiting()</code> covers <em>anyone's</em> in-flight question — including the host's —
+so host and guests can't interleave a conversation turn. When a reply resolves,
+the router pumps that NPC's queue again: the next asker gets their turn, in
+order. Different NPCs don't queue on each other (the single LlmClient worker
+serializes actual HTTP calls, but that's an implementation detail the router
+doesn't depend on).</p>
+
+<h2>Private stream, public consequences</h2>
+<p>On a successful reply the router does three sends with different audiences:</p>
+<ol>
+<li><code>ChatReply</code> → <strong>the asker only</strong> (their transcript).</li>
+<li><code>NpcSpeechBubble</code> → <strong>everyone</strong> (bystanders see the NPC speak).</li>
+<li><code>NpcMoodUpdate</code> → <strong>everyone</strong> (faces update on all screens).</li>
+</ol>
+<p>Failures are the asymmetric case: an "Ollama unreachable" error goes to the
+requesting player <em>only</em>. Broadcasting errors would tell every player about a
+problem only one of them can act on.</p>
+<div class="callout">Note the shared-memory consequence: <code>npc.onReplyArrived()</code> appends to
+the one true history no matter who asked. Tell the baker your name, and she knows
+it when your friend talks to her — that's the "same NPC for everyone" feature,
+implemented by <em>not</em> duplicating state.</div>
+
+<h2>Disconnects: drop the route, keep the world</h2>
+<p>If a player leaves mid-reply, the reply still resolves against the NPC (history
+stays consistent), but <code>sendToPlayer()</code> returns false and the payload evaporates.
+Nothing else notices. The loopback test proves the next player can immediately use
+the same NPC — the failure of one client is never allowed to wedge shared state.</p>
+</div></body></html>

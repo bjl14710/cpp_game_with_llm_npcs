@@ -1,0 +1,264 @@
+"""Tests for the drawdown circuit breaker: ArenaState primitives, the
+live_tick non-backfill guarantee, and the resume CLI command."""
+import argparse
+import sqlite3
+
+import pandas as pd
+import pytest
+
+import paper_trading_sim
+from analyze_equity import compare_strategies
+from strategies.daily import DailySignal, DailyStrategy
+from strategy_arena import ArenaState, cmd_live, cmd_resume, live_tick
+
+
+class AlwaysLong(DailyStrategy):
+    name = "always-long"
+
+    def generate_signal(self, df):
+        return DailySignal(1, 1.0, "long")
+
+
+@pytest.fixture
+def state(tmp_path):
+    return ArenaState(str(tmp_path / "arena.db"))
+
+
+def _seed_equity(state, name, rows):
+    """Directly insert (date, equity) rows, bypassing live_tick."""
+    state.append_ledger(name, rows, [])
+
+
+# ---------------------------------------------------------------------------
+# running_drawdown
+# ---------------------------------------------------------------------------
+
+def test_running_drawdown_none_with_fewer_than_two_rows(state):
+    assert state.running_drawdown("s") is None
+    _seed_equity(state, "s", [("2026-01-01", 1000.0)])
+    assert state.running_drawdown("s") is None
+
+
+def test_running_drawdown_computes_from_peak(state):
+    _seed_equity(state, "s", [
+        ("2026-01-01", 1000.0), ("2026-01-02", 1100.0),
+        ("2026-01-03", 900.0), ("2026-01-04", 880.0),
+    ])
+    dd, peak, current = state.running_drawdown("s")
+    assert peak == 1100.0
+    assert current == 880.0
+    assert dd == pytest.approx(880.0 / 1100.0 - 1.0)
+
+
+def test_running_drawdown_respects_anchor_scoping(state):
+    """Setting the anchor excludes equity before it from the peak search."""
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+    _seed_equity(state, "s", [
+        ("2026-01-01", 1000.0), ("2026-01-02", 2000.0),  # old high peak, before anchor
+        ("2026-01-03", 1200.0), ("2026-01-04", 1250.0),
+    ])
+    state.set_anchor("s", "2026-01-03")
+    dd, peak, current = state.running_drawdown("s")
+    assert peak == 1250.0  # the 2000 peak from before the anchor is excluded
+    assert current == 1250.0
+    assert dd == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# live_tick: since_date non-backfill guarantee
+# ---------------------------------------------------------------------------
+
+def test_live_tick_since_date_skips_the_paused_gap(state, make_ohlcv):
+    """The core acceptance guarantee: resuming does not retroactively
+    'trade' through the days the strategy was paused for."""
+    closes = [100, 102, 104, 106, 108, 110, 112, 114]
+    data = {"AAA": make_ohlcv(closes)}
+
+    # First tick: seeds the ledger normally (no since_date).
+    live_tick(state, "s", AlwaysLong(), data, top_n=1, capital=1000.0, trade_cost_bps=0.0)
+    last_date_before, equity_before = state.last_equity("s")
+
+    # Simulate a resume: today's date is set as the anchor/since_date, well
+    # after last_date_before — i.e. there was a paused gap in between.
+    resume_date = "2024-06-01"  # far in the future relative to synthetic dates
+    added = live_tick(state, "s", AlwaysLong(), data, top_n=1, capital=1000.0,
+                      trade_cost_bps=0.0, since_date=resume_date)
+    # Nothing in the fetched window falls after resume_date -> no backfill.
+    assert added == 0
+    last_date_after, equity_after = state.last_equity("s")
+    assert last_date_after == last_date_before
+    assert equity_after == equity_before
+
+
+def test_live_tick_since_date_only_affects_days_before_it(state, make_ohlcv):
+    """Once since_date is in the past relative to fetched data, new bars
+    after it still append normally (the floor only matters right after resume)."""
+    closes = list(range(100, 130))
+    data = {"AAA": make_ohlcv(closes)}
+    live_tick(state, "s", AlwaysLong(), data, top_n=1, capital=1000.0, trade_cost_bps=0.0)
+    last_date, _ = state.last_equity("s")
+
+    # since_date far in the past (before all recorded data) changes nothing.
+    added = live_tick(state, "s", AlwaysLong(), data, top_n=1, capital=1000.0,
+                      trade_cost_bps=0.0, since_date="2000-01-01")
+    assert added == 0  # same data, nothing new regardless
+    assert state.last_equity("s")[0] == last_date
+
+
+# ---------------------------------------------------------------------------
+# Breaker event logging
+# ---------------------------------------------------------------------------
+
+def test_log_breaker_event_is_idempotent_per_strategy_date_event(state):
+    state.log_breaker_event("s", "2026-01-05", "TRIP", -0.25, 1000.0, 750.0, -0.20)
+    state.log_breaker_event("s", "2026-01-05", "TRIP", -0.25, 1000.0, 750.0, -0.20)
+    n = state.conn.execute("SELECT COUNT(*) FROM breaker_events").fetchone()[0]
+    assert n == 1
+
+
+def test_set_status_and_anchor_round_trip(state):
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+    state.set_status("s", "PAUSED")
+    assert state.statuses()["s"] == "PAUSED"
+    assert state.anchor("s") is None
+    state.set_anchor("s", "2026-02-01")
+    assert state.anchor("s") == "2026-02-01"
+
+
+# ---------------------------------------------------------------------------
+# cmd_resume
+# ---------------------------------------------------------------------------
+
+def _ns(db, strategy):
+    return argparse.Namespace(db=db, strategy=strategy)
+
+
+def test_resume_requires_paused_status(tmp_path):
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+    with pytest.raises(SystemExit, match="not PAUSED"):
+        cmd_resume(_ns(db, "s"))
+
+
+def test_resume_requires_existing_equity(tmp_path):
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+    state.set_status("s", "PAUSED")
+    with pytest.raises(SystemExit, match="no live equity history"):
+        cmd_resume(_ns(db, "s"))
+
+
+def test_resume_resets_status_and_anchor(tmp_path, make_ohlcv, capsys):
+    """cmd_resume anchors to the REAL current date (dt.date.today()), so the
+    seeded 'last' row must also be dated today for the post-resume window to
+    see it — mirrors the real invariant that resume always follows a live
+    tick recorded today."""
+    import datetime as dt
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+    today = dt.date.today().isoformat()
+    _seed_equity(state, "s", [("2026-01-01", 1000.0), (today, 750.0)])
+    state.set_status("s", "PAUSED")
+
+    cmd_resume(_ns(db, "s"))
+
+    assert state.statuses()["s"] == "PASS"
+    assert state.anchor("s") == today
+    events = state.conn.execute(
+        "SELECT event FROM breaker_events WHERE strategy='s'"
+    ).fetchall()
+    assert ("RESUME",) in events
+    # Post-resume, drawdown is measured from the resumed equity (750), not
+    # the earlier peak (1000) — a fresh baseline with zero drawdown. With
+    # only one row in the anchored window, running_drawdown is None
+    # (needs >=2 points); that's correct — it just hasn't accumulated any
+    # post-resume history yet, and the earlier 1000 peak is excluded.
+    assert state.running_drawdown("s") is None
+
+
+def test_resume_on_unknown_strategy_errors_without_side_effects(tmp_path):
+    db = str(tmp_path / "arena.db")
+    ArenaState(db)  # create the DB, no strategies
+    with pytest.raises(SystemExit, match="not PAUSED"):
+        cmd_resume(_ns(db, "ghost"))
+
+
+# ---------------------------------------------------------------------------
+# Migration: old arena.db predates breaker_events/hwm_anchor
+# ---------------------------------------------------------------------------
+
+def _live_args(**overrides):
+    """argparse.Namespace matching arena-run live's flags, sensible defaults."""
+    base = dict(
+        db=None, strategies="always-long", tickers="AAA", tickers_file=None,
+        top_n=1, capital=1000.0, trade_cost_bps=0.0, gbm_bundle=None,
+        max_pos=0.30, vol_window=20, cost_model="none", commission_bps=0.0,
+        half_spread_bps=0.0, impact_coeff_bps=0.0, fallback_adv=1_000_000.0,
+        lookback_days=200, breaker_dd=0.20, no_breaker=False,
+        divergence_z=2.0, min_live_days=20, no_regime_gate=True,
+    )
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+def test_cmd_live_trips_breaker_on_real_drawdown_then_skips_and_reports(
+    tmp_path, make_ohlcv, monkeypatch
+):
+    """End-to-end acceptance check: a >20% drawdown through the real
+    cmd_live path pauses the strategy, logs a TRIP, a subsequent live run
+    skips it, and the report surfaces paused_since."""
+    from strategies.registry import STRATEGY_REGISTRY
+
+    monkeypatch.setitem(STRATEGY_REGISTRY, "always-long", AlwaysLong)
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("always-long", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+
+    # Rises then craters >21% from its peak — should trip the -20% breaker.
+    closes = [100, 110, 120, 130, 100.0]  # peak 130 -> 100 is a -23.1% drawdown
+    monkeypatch.setattr(paper_trading_sim, "fetch_history",
+                        lambda tickers, start, end: {"AAA": make_ohlcv(closes)})
+
+    cmd_live(_live_args(db=db))
+
+    assert state.statuses()["always-long"] == "PAUSED"
+    trips = state.conn.execute(
+        "SELECT event FROM breaker_events WHERE strategy='always-long'"
+    ).fetchall()
+    assert ("TRIP",) in trips
+
+    table = compare_strategies(state.conn).set_index("strategy")
+    assert table.loc["always-long", "status"] == "PAUSED"
+    assert table.loc["always-long", "paused_since"] is not None
+
+    # A subsequent live run must skip it — no new rows, no re-evaluation.
+    equity_count_before = state.conn.execute(
+        "SELECT COUNT(*) FROM equity WHERE strategy='always-long'"
+    ).fetchone()[0]
+    cmd_live(_live_args(db=db))
+    equity_count_after = state.conn.execute(
+        "SELECT COUNT(*) FROM equity WHERE strategy='always-long'"
+    ).fetchone()[0]
+    assert equity_count_after == equity_count_before
+    assert state.statuses()["always-long"] == "PAUSED"  # still paused, untouched
+
+
+def test_legacy_db_upgrades_in_place_for_breaker_columns(tmp_path):
+    db_path = str(tmp_path / "legacy_arena.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE strategies (name TEXT PRIMARY KEY, status TEXT NOT NULL, "
+        "backtest_sharpe REAL, backtest_cagr REAL, backtest_maxdd REAL, updated TEXT)"
+    )
+    conn.execute("INSERT INTO strategies VALUES ('old', 'PASS', 0.5, 0.1, -0.1, '2026-01-01')")
+    conn.commit()
+    conn.close()
+
+    upgraded = ArenaState(db_path)
+    assert upgraded.anchor("old") is None  # column exists, defaults NULL, no crash
+    assert upgraded.running_drawdown("old") is None  # no equity rows either, fine

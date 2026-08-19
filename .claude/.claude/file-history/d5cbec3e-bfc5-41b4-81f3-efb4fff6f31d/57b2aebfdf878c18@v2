@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0011 — Mutexes and semaphores</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .sync-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .prim-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0 18px;
+  }
+  .prim-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px; font-size: 13.5px;
+  }
+  .prim-card h4 { margin: 0 0 6px; font-size: 14px; color: var(--accent-2); }
+  .prim-card.mut { border-top: 3px solid #a0d8ff; }
+  .prim-card.cnt { border-top: 3px solid #c4e08a; }
+  .prim-card.bin { border-top: 3px solid #ffb780; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .prim-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0011 &middot; cpp_games / docs / learning</div>
+  <h1>Mutexes and semaphores</h1>
+  <p class="why">Why this matters: lesson 0005 covered <code class="inline">std::mutex</code> deeply. C++20 added <code class="inline">std::counting_semaphore</code> and <code class="inline">std::binary_semaphore</code> &mdash; a different family of synchronisation primitive entirely. Most C++ devs confuse them because they sometimes look interchangeable. They aren't. This lesson is the rule for picking right.</p>
+</header>
+
+<h2>1. The concept &mdash; the ownership question</h2>
+
+<p>The single most important difference between a mutex and a semaphore is one word: <b>ownership</b>.</p>
+
+<ul>
+  <li><b>A mutex has ownership.</b> Only the thread that locked it can unlock it. The mutex "belongs" to that thread for the duration of the lock. If anyone else tries to unlock it, you have a bug.</li>
+  <li><b>A semaphore has no ownership.</b> It's just a counter. <em>Any</em> thread can acquire (decrement) and <em>any</em> thread can release (increment). The thread that calls <code class="inline">release</code> needn't be the one that called <code class="inline">acquire</code>.</li>
+</ul>
+
+<p>That single distinction is enough to explain why they're used so differently. A mutex models "I'm using this thing; everyone else wait." A semaphore models "there are <em>N</em> permits available; take one when you need it, return one when you're done &mdash; or hand it to someone else." Different shapes of problem, different tools.</p>
+
+<div class="prim-row">
+  <div class="prim-card mut">
+    <h4><code>std::mutex</code></h4>
+    <p><b>Mutual exclusion of one resource.</b> Lock/unlock by the same thread. RAII-wrapped via <code class="inline">lock_guard</code> / <code class="inline">unique_lock</code>. Use to protect shared data.</p>
+  </div>
+  <div class="prim-card cnt">
+    <h4><code>std::counting_semaphore&lt;N&gt;</code></h4>
+    <p><b>"At most <em>K</em> things may be in flight at once."</b> Initial count <em>K</em>; <code class="inline">acquire</code> decrements, <code class="inline">release</code> increments. Any thread can do either. Use for resource pools, rate limits, admission control.</p>
+  </div>
+  <div class="prim-card bin">
+    <h4><code>std::binary_semaphore</code></h4>
+    <p><b>One-shot signal between threads.</b> Special case of counting semaphore with max=1. Often used as a "wait for done" primitive. Looks like a mutex; semantically different.</p>
+  </div>
+</div>
+
+<h3>The visual model</h3>
+
+<div class="sync-diagram">  MUTEX                          SEMAPHORE (count = 3)
+  ──────────────                 ──────────────────────
+                                 +---+---+---+
+   "the lock"                    | • | • | • |   ← 3 permits available
+                                 +---+---+---+
+   Thread A: lock()                   |
+       ▼                              | acquire → count = 2
+   ┌─────────┐                        |
+   │ holding │  Thread B and          | acquire → count = 1
+   │ the     │  C wait at the         |
+   │ mutex   │  door                  | acquire → count = 0
+   └─────────┘                        |
+   Thread A: unlock()                 | acquire → BLOCKS
+                                      |   (no permits available)
+   Anyone else trying                 |
+   to unlock = bug                    | release (any thread) → count = 1
+                                      |   (the blocked thread wakes)</div>
+
+<div class="callout">
+  <h3>The mental model in one line each</h3>
+  <p><b>Mutex</b>: "I claim this; nobody else touch it until I'm done."<br>
+  <b>Counting semaphore</b>: "There are N seats; take one and give it back."<br>
+  <b>Binary semaphore</b>: "Tap me on the shoulder when X is done."</p>
+</div>
+
+<h2>2. Minimal example &mdash; three primitives, three problem shapes</h2>
+
+<p>The clearest way to feel the difference is to see each tool solve the problem <em>it</em> is for. Same idea every time: multiple threads, one piece of shared infrastructure.</p>
+
+<pre class="code"><span class="com">// PROBLEM 1: One database connection, many threads want to use it.</span>
+<span class="com">// Use a MUTEX — exclusion of one resource.</span>
+<span class="kw">class</span> DbWriter {
+    std::mutex m_;
+    Connection conn_;
+ <span class="kw">public</span>:
+    <span class="kw">void</span> write(<span class="kw">const</span> std::string&amp; row) {
+        std::lock_guard&lt;std::mutex&gt; lock(m_);  <span class="com">// one writer at a time</span>
+        conn_.send(row);
+    }
+};
+
+<span class="com">// PROBLEM 2: A "GPU capacity" of 3 concurrent LLM calls. More requesting threads</span>
+<span class="com">// must wait their turn. Use a COUNTING SEMAPHORE — admission control.</span>
+std::counting_semaphore&lt;<span class="num">3</span>&gt; gpuSlots{<span class="num">3</span>};  <span class="com">// 3 permits initially available</span>
+
+<span class="kw">void</span> handleRequest(<span class="kw">const</span> Request&amp; r) {
+    gpuSlots.acquire();                  <span class="com">// blocks if all 3 in use</span>
+    <span class="kw">auto</span> reply = runOnGpu(r);
+    gpuSlots.release();                  <span class="com">// any thread releases; not "the owner"</span>
+}
+
+<span class="com">// PROBLEM 3: A worker thread does setup, then signals the main thread it's done.</span>
+<span class="com">// Use a BINARY SEMAPHORE — one-shot cross-thread signal.</span>
+std::binary_semaphore done{<span class="num">0</span>};         <span class="com">// initially: no signal</span>
+
+std::thread t([&amp;] {
+    setUpEverything();
+    done.release();                      <span class="com">// signal: ready</span>
+});
+
+done.acquire();                          <span class="com">// main thread blocks until signal</span>
+useTheThing();</pre>
+
+<p>Notice the asymmetry of acquire/release in problems 2 and 3 &mdash; that's the no-ownership property in action. In problem 2, three different threads might be the ones to release a permit; in problem 3, the worker thread releases and the main thread acquires. <em>That</em> is the case where a mutex couldn't do the job: a mutex's unlock must come from the locker.</p>
+
+<h2>3. In your project &mdash; mutexes you have, semaphores you might add</h2>
+
+<h3>Today: two mutexes in <code class="inline">LlmClient</code> (recap)</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.hpp:78-82</small>
+<pre class="code">std::mutex requestMutex_;
+std::condition_variable requestCv_;
+std::queue&lt;ChatRequest&gt; requests_;
+
+std::mutex replyMutex_;
+std::vector&lt;ChatReply&gt; replies_;</pre>
+
+<p>Each mutex protects exactly the data structure it guards. Same thread that locks unlocks (lesson 0005). This is exclusion of a shared resource &mdash; the textbook mutex case. No semaphore would fit; the queue isn't a count, it's a structure.</p>
+
+<h3>Hypothetical: a counting semaphore for "max N requests in flight"</h3>
+
+<p>Today <code class="inline">LlmClient</code> has one worker. Suppose you scale up: 5 worker threads, all popping from <code class="inline">requests_</code>. But your GPU can only realistically handle 3 LLM calls in flight before VRAM and compute saturate. You want the workers to pop as many requests as they like, but only 3 of them can call <code class="inline">processOne</code> at a time.</p>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp (hypothetical)</small>
+<pre class="code"><span class="kw">private</span>:
+    std::counting_semaphore&lt;<span class="num">8</span>&gt; gpuSlots_{<span class="num">3</span>};   <span class="com">// max=8, start with 3 permits</span>
+
+<span class="kw">void</span> LlmClient::workerLoop() {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        ChatRequest req = dequeueOne();         <span class="com">// existing mutex-protected pop</span>
+
+        gpuSlots_.acquire();                    <span class="com">// block until a GPU slot opens</span>
+        ChatReply reply = backend_-&gt;request(req);
+        gpuSlots_.release();                    <span class="com">// hand the slot to whoever's next</span>
+
+        pushReply(std::move(reply));            <span class="com">// existing mutex-protected push</span>
+    }
+}</pre>
+
+<p>Why a semaphore and not a fourth mutex? Because you're not protecting <em>one</em> resource &mdash; you're admitting threads to a <em>pool</em> of three identical resources. A mutex models "one." A semaphore models "K." The mutex you'd need to express this with would be an awkward "lock + counter + CV" combo, which is exactly what <code class="inline">std::counting_semaphore</code> already is, packaged.</p>
+
+<p>Notice also that with the semaphore <code class="inline">release</code>, <em>any</em> thread can be the one to call it. If you added a feature where the main thread cancels a request mid-flight and needs to release the GPU slot, it can &mdash; even though the worker acquired it. A mutex would forbid that ("only the locker may unlock").</p>
+
+<h3>Hypothetical: a binary semaphore as a simpler shutdown handshake</h3>
+
+<p>Today <code class="inline">LlmClient</code>'s destructor sets <code class="inline">stop_</code> and calls <code class="inline">notify_all</code> on the CV (lesson 0005). The worker checks the predicate, sees <code class="inline">stop_</code>, returns. That's fine, but it uses three primitives: atomic, mutex, CV.</p>
+
+<p>An alternative for the simpler "just wait for the worker to finish one specific thing" case is a binary semaphore:</p>
+
+<pre class="code">std::binary_semaphore startupReady_{<span class="num">0</span>};   <span class="com">// not yet signalled</span>
+
+LlmClient::LlmClient(...) {
+    worker_ = std::thread([<span class="kw">this</span>] {
+        connectToOllama();
+        startupReady_.release();              <span class="com">// signal: I'm ready for traffic</span>
+        workerLoop();
+    });
+    startupReady_.acquire();                  <span class="com">// main thread waits</span>
+}</pre>
+
+<p>For shutdown, a binary semaphore alone isn't enough &mdash; the worker is in a long-running loop checking a flag, not waiting on a single signal &mdash; so the existing atomic+CV pattern is the right one. But for one-shot handshakes ("setup is done", "first frame rendered", "the file is loaded"), the binary semaphore is a tighter expression than three primitives.</p>
+
+<div class="callout warn">
+  <h3>You don't actually need this in your code today</h3>
+  <p>Just like lesson 0010's note about <code class="inline">shared_ptr</code>: semaphores don't currently fit your code. They're taught so you recognise the problem when it appears &mdash; "I want N things in flight at once" or "I just want a one-shot wait" &mdash; and don't reach for a mutex out of habit.</p>
+</div>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Mutex vs. binary semaphore (THE classic confusion)</h3>
+<p>Both look like "lock the door, unlock the door." Semantically they're not interchangeable.</p>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th><code class="inline">std::mutex</code></th><th><code class="inline">std::binary_semaphore</code></th></tr></thead>
+  <tbody>
+    <tr><td>Who can unlock?</td><td>Only the locker</td><td>Anyone</td></tr>
+    <tr><td>Used for</td><td>Protecting shared data</td><td>Cross-thread one-shot signal</td></tr>
+    <tr><td>RAII helper</td><td><code class="inline">std::lock_guard</code> / <code class="inline">unique_lock</code></td><td>None standard; you call <code class="inline">acquire</code>/<code class="inline">release</code> by hand</td></tr>
+    <tr><td>Recursive same-thread relock</td><td>Deadlocks (unless <code class="inline">recursive_mutex</code>)</td><td>Decrements to 0, next acquire blocks</td></tr>
+    <tr><td>Best when</td><td>You're protecting <em>state</em></td><td>You're handing <em>control</em> from one thread to another</td></tr>
+  </tbody>
+</table>
+
+<h3>Mutex vs. condition variable</h3>
+<p>You already know this one (lesson 0005), but it's worth restating: a mutex enforces exclusion ("nobody else may touch this"), a CV enables waiting ("sleep until something changes"). They pair: every CV is associated with a mutex. A semaphore folds both ideas (counted admission + waiting) into one primitive.</p>
+
+<h3>Counting semaphore vs. mutex pool</h3>
+<p>You <em>could</em> simulate a counting semaphore with an array of <em>K</em> mutexes and a "find the next free one" routine. People sometimes do this in pre-C++20 code. The result is more complex, slower (you scan), and exposes the ownership constraint you don't want (only-locker-can-unlock). A counting semaphore is the right answer for "K equivalent permits."</p>
+
+<h3>Spinlock vs. mutex</h3>
+<p>A <b>spinlock</b> is a mutex-like primitive that busy-loops on an atomic instead of sleeping. Useful when critical sections are extremely short (a few instructions) and the cost of putting the thread to sleep would exceed the lock wait. Not in the C++ standard library &mdash; you'd either roll your own with <code class="inline">std::atomic_flag</code> or use a vendor library. For your game's locks (which protect non-trivial data structures), <code class="inline">std::mutex</code> is the right tool; the sleep is fine.</p>
+
+<h3>Reader-writer lock (<code class="inline">std::shared_mutex</code>)</h3>
+<p>The same idea as a mutex, but with two modes: many readers OR one writer. Lets concurrent readers all proceed when nobody's writing. Pays off for read-heavy workloads on big data structures. Not used in your code; mentioned here because it's the third major lock variety after mutex and semaphore.</p>
+
+<h3>Semaphores in IPC vs. semaphores in-process</h3>
+<p>The word "semaphore" is also used for POSIX named semaphores (<code class="inline">sem_open</code>) and SysV semaphores &mdash; cross-<em>process</em> primitives the OS provides. Same concept, different scope: those synchronise processes (lesson 0009 IPC), while <code class="inline">std::counting_semaphore</code> synchronises threads within one process. If you ever wanted your game and Ollama to coordinate via a counter (you don't), the POSIX version would be the right tool. The C++ one is in-process only.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">You add a feature: a <em>main thread</em> can cancel an in-flight LLM request. When it does, it should release the GPU slot that the worker was holding. Which primitive supports this, and why does the other one not?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backwards. The mutex's whole invariant is 'only the locker unlocks.' If you let the main thread release the worker's mutex, you've broken the contract — most implementations will either fail to wake waiters or land in undefined behaviour.">
+      <code class="inline">std::mutex</code> &mdash; you just unlock it from whichever thread holds the cancellation handle.
+    </li>
+    <li data-correct="true" data-why="Right. A counting semaphore is pure permit-counting with no ownership constraint. Any thread can call release; it just bumps the counter and unblocks a waiter. That's exactly the asymmetric handoff cancellation needs.">
+      <code class="inline">std::counting_semaphore</code> &mdash; any thread can release a permit; ownership semantics don't apply.
+    </li>
+    <li data-correct="false" data-why="Atomic operations on a counter alone can decrement past zero and forget how to wake blocked threads. You can simulate a semaphore with atomic + futex, but std::atomic by itself doesn't give you the 'block until count > 0' behaviour.">
+      <code class="inline">std::atomic&lt;int&gt;</code> &mdash; decrement and increment as needed.
+    </li>
+    <li data-correct="false" data-why="Spinlocks have the same ownership constraint as mutexes (the same thread must release them). They're an optimisation of mutex for very short critical sections, not a different primitive.">
+      A spinlock &mdash; it's faster and any thread can release it.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A junior dev replaces all uses of <code class="inline">std::mutex</code> in <code class="inline">LlmClient</code> with <code class="inline">std::binary_semaphore</code>, reasoning "they both look like locks." The code compiles and passes their tests. What's the most likely real-world bug they've introduced?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Binary semaphores are not slower; if anything they can be cheaper (no ownership tracking). Performance isn't the issue.">
+      Performance is dramatically worse because semaphores use a syscall for every acquire.
+    </li>
+    <li data-correct="true" data-why="Right. A mutex enforces 'lock then unlock by same thread.' A binary semaphore doesn't. The producer might acquire-release in a pattern that, semantically, looks like the worker is the one supposed to release — and any code path that 'over-releases' (release without a matching acquire) silently breaks the count. The compiler accepts it because the API allows it. The bug is invisible until two threads collide.">
+      The protection of shared data is now allowed to be 'unlocked' by the wrong thread, breaking the invariant the mutex was enforcing — silently.
+    </li>
+    <li data-correct="false" data-why="binary_semaphore is in C++20 — well within the codebase's C++17/20 baseline. The compile-and-test passed; the issue is semantic.">
+      <code class="inline">std::binary_semaphore</code> requires C++23 and the build is now using a degraded fallback.
+    </li>
+    <li data-correct="false" data-why="The worker thread doesn't crash for that reason. The bug is data integrity, not a runtime exception.">
+      The worker thread crashes with a 'use after release' fault.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You have 5 worker threads and a counting semaphore with max=3 limiting concurrent GPU calls. Thread A and Thread B both <code class="inline">acquire()</code> permits and run. Thread C is the third to <code class="inline">acquire()</code>. Threads D and E call <code class="inline">acquire()</code> and block. Now Thread B finishes and calls <code class="inline">release()</code>. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Both D and E being woken would mean the count went up by more than one — the semantics are 'release one permit, wake one waiter,' not all of them. (And waking all would be a thundering herd anti-pattern, see lesson 0005.)">
+      Both D and E wake up and both proceed.
+    </li>
+    <li data-correct="true" data-why="Right. release() bumps the counter; the implementation picks one waiter to wake (D or E, scheduler-dependent), it acquires the permit, the counter goes back to zero. The other thread keeps waiting until A or C releases. This is exactly the 'thread pool of 3' admission control we want.">
+      One of D or E (implementation-dependent which) wakes up and acquires the permit; the other stays blocked.
+    </li>
+    <li data-correct="false" data-why="A counting semaphore's release() is non-blocking. It doesn't matter that the count is currently 'maxed' relative to a waiter — release() just bumps the counter (capped at the template parameter max).">
+      The release() blocks until a fourth thread tries to acquire, then hands off the permit.
+    </li>
+    <li data-correct="false" data-why="The starvation question is real for some schedulers but not as you've described it. The semaphore wakes one waiter on each release; nothing about that prevents long-term progress for D and E.">
+      D and E both starve; the OS prefers waking newly-arrived threads over already-blocked ones.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">For the existing <code class="inline">LlmClient</code> shutdown sequence (destructor sets <code class="inline">stop_</code>, calls <code class="inline">notify_all</code>, joins the worker), why is a binary semaphore a <em>worse</em> fit than the current atomic+CV approach?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Binary semaphores work cross-thread by design. Atomic visibility is fine — you'd use std::atomic_thread_fence or just the semaphore's own happens-before relationship.">
+      Binary semaphores don't propagate writes between threads on some platforms.
+    </li>
+    <li data-correct="true" data-why="Right. The CV with predicate handles two concerns at once: 'wake when there's work' OR 'wake to shut down.' A binary semaphore is one-shot — it signals 'go,' not 'go OR stop.' You'd have to either add a second semaphore for the stop case, or layer the stop flag back on top — at which point you've reinvented the existing atomic+CV pattern. The CV is genuinely the right tool for 'wait for one of N kinds of event.'">
+      The worker waits for two different events (new work OR shutdown). A binary semaphore is a one-shot signal — it can't cleanly multiplex 'work arrived' and 'shutdown requested' on the same wait.
+    </li>
+    <li data-correct="false" data-why="binary_semaphore is in C++20. Both forms are available in modern C++. The reason isn't 'one doesn't exist.'">
+      <code class="inline">std::binary_semaphore</code> isn't available in the C++ standard the project uses.
+    </li>
+    <li data-correct="false" data-why="Both wake the same way underneath — they use the OS scheduler. There's no inherent 'lower priority' wakeup for semaphores.">
+      Binary semaphore wakeups have lower priority than CV notifications, so the worker exits later.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You want a "rate limit Wren's replies to one every 2 seconds" feature. Which primitive cleanly expresses this, and what specifically would <em>release</em> do?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A mutex would force only-one-at-a-time but doesn't model 'wait between replies.' You'd still be deadlocked-style — the second reply waits for the first to unlock — which isn't rate-limiting, it's serialisation. And the unlock has to come from the same thread, which is awkward for time-based gating.">
+      A <code class="inline">std::mutex</code> &mdash; lock during the reply, unlock when done.
+    </li>
+    <li data-correct="true" data-why="Right. A binary semaphore models 'permit available?' A timer thread periodically (every 2s) calls release(); the worker calls acquire() before sending. If the worker tries to send twice in a row, the second acquire blocks until the timer's next release. The fact that the release can come from a totally different thread is exactly why a semaphore works here and a mutex doesn't.">
+      A <code class="inline">std::binary_semaphore</code> &mdash; a timer thread releases one permit every 2 seconds; the worker acquires before each reply.
+    </li>
+    <li data-correct="false" data-why="sleep_for would force you to actually pause for 2s after every reply, even if the next request didn't arrive for 10s. It's a worse user experience than gating on demand.">
+      A <code class="inline">std::this_thread::sleep_for(2s)</code> at the end of every reply.
+    </li>
+    <li data-correct="false" data-why="A condition variable doesn't have built-in 'one every 2 seconds' semantics — you'd be reinventing the semaphore with extra steps. The semaphore is the cleaner expression of admission-controlled gating.">
+      A <code class="inline">std::condition_variable</code> with a 2-second timeout on wait_for.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> Your game adds a feature: the dialog UI plays a short audio "thinking" cue while Wren is generating, and a different audio cue when the reply arrives. Only one audio channel exists. Should the audio channel be protected by a mutex or by a binary semaphore? Defend your answer; the right one is not the one that sounds like "exclusion."</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> Suppose <code class="inline">LlmClient</code> grows a worker pool of 8 threads and a <code class="inline">counting_semaphore&lt;8&gt; gpuSlots_{3}</code>. Now you decide that on a player's beefier GPU the slot count should be 5 instead of 3. What changes in your code, and what doesn't? (Hint: <code class="inline">3</code> is the runtime starting value; <code class="inline">8</code> is something else.)</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> A teammate proposes "let's replace the two mutexes in <code class="inline">LlmClient</code> with two <code class="inline">binary_semaphore</code>s &mdash; binary semaphores are 'the new way to do locking.'" Argue against it in one paragraph, using the words <em>ownership</em>, <em>RAII</em>, and <em>invariant</em>. Reference lesson 0005's reason for picking mutexes if you want.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can state the ownership difference in one sentence</label></li>
+  <li><label><input type="checkbox"> Walked through the three-problem example &mdash; I see what each primitive is shaped for</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I can name where a counting semaphore would fit in my code, and why it's not there today</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I can distinguish mutex/binary_semaphore semantically, not just syntactically</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/cpp/thread/counting_semaphore">cppreference: <code>std::counting_semaphore</code></a> &middot;
+    <a href="https://en.cppreference.com/cpp/thread/binary_semaphore">cppreference: <code>std::binary_semaphore</code></a> &middot;
+    <a href="http://maye.ski/index.php/2022/10/03/mutexes-vs-semaphores-in-c20/">Vincent Mayeski &mdash; Mutexes vs Semaphores in C++20</a> &middot;
+    <a href="https://en.cppreference.com/cpp/thread/shared_mutex">cppreference: <code>std::shared_mutex</code> (reader-writer lock)</a>
+  </p>
+  <p>Lesson 0011 &middot; <code class="inline">docs/learning/lessons/0011-mutexes-and-semaphores.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

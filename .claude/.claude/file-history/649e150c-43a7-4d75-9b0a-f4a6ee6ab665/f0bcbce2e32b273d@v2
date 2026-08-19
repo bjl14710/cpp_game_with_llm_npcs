@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0006 — Statistics Math in Trading</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+  .formula {
+    display: block; background: var(--code-bg); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 14px 18px; margin: 12px 0; font-family: "JetBrains Mono", monospace;
+    font-size: 15px; color: var(--accent-2); text-align: center;
+  }
+  .formula .small-note { display: block; color: var(--ink-dim); font-size: 12px; margin-top: 6px; font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0006</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Returns</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Vol &amp; Sharpe</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Drawdown &amp; CAGR</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Covariance &amp; CUSUM</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 In this project</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Statistics Math in Trading</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: <code>analyze_equity.py</code>
+    is 40 lines that compute every headline number you'll ever quote for a strategy —
+    CAGR, Sharpe, max drawdown, annualized vol. Each line encodes a statistical idea
+    you need to defend. This lesson walks the math behind those lines so you can
+    interpret the numbers honestly and write the next ones yourself.
+  </p>
+
+  <!-- ===================== §1 RETURNS ===================== -->
+  <h2>1. Returns: simple vs log, and why both exist</h2>
+
+  <p>
+    Every metric in this lesson starts with <strong>returns</strong>, not prices.
+    (Recall Lesson 0005: returns are roughly stationary; prices aren't.) Two
+    standard definitions:
+  </p>
+
+  <div class="formula">
+    r<sub>t</sub><sup>simple</sup> = (P<sub>t</sub> − P<sub>t−1</sub>) / P<sub>t−1</sub>  =  P<sub>t</sub>/P<sub>t−1</sub> − 1
+    <span class="small-note">Simple return — what <code>pct_change()</code> computes</span>
+  </div>
+
+  <div class="formula">
+    r<sub>t</sub><sup>log</sup> = ln(P<sub>t</sub> / P<sub>t−1</sub>)
+    <span class="small-note">Log return — additive across time, used in academic papers and risk math</span>
+  </div>
+
+  <p>The two properties that make each useful:</p>
+
+  <table>
+    <tr><th></th><th>Simple return</th><th>Log return</th></tr>
+    <tr><td>Compounds via</td><td><code>∏(1 + r)</code> &nbsp; (product)</td><td><code>∑ r</code> &nbsp; (sum)</td></tr>
+    <tr><td>Aggregates across <em>assets</em> linearly?</td><td><strong>Yes</strong> (portfolio return = Σ wᵢ rᵢ)</td><td>No</td></tr>
+    <tr><td>Aggregates across <em>time</em> linearly?</td><td>No</td><td><strong>Yes</strong> (multi-day log return = sum of daily log returns)</td></tr>
+    <tr><td>Symmetric around 0?</td><td>No (−50% / +100% ≠ same magnitude)</td><td>Yes</td></tr>
+  </table>
+
+  <p>
+    Both columns are right, in different contexts. This repo uses <strong>simple
+    returns</strong> throughout (<code>pct_change()</code> everywhere) because the
+    main operation is portfolio aggregation: <em>"how did my equally-weighted top-N
+    do today?"</em> Portfolio math is cleaner with simple returns.
+  </p>
+
+  <div class="callout">
+    <strong>The one identity that ties them together:</strong>
+    <code>(1 + r<sup>simple</sup>) = exp(r<sup>log</sup>)</code>. For small returns
+    (|r| &lt; 5%) they are numerically nearly identical. They diverge fast for
+    crypto-sized moves; equities are usually fine.
+  </div>
+
+  <!-- ===================== §2 VOL & SHARPE ===================== -->
+  <h2>2. Volatility, the Sharpe ratio, and the annualization factor</h2>
+
+  <p>
+    <strong>Volatility</strong> in finance just means "standard deviation of returns."
+    By itself, that number is daily — small and unhelpful for comparison across
+    horizons. So we always annualize:
+  </p>
+
+  <div class="formula">
+    σ<sub>ann</sub> = σ<sub>daily</sub> × √252
+    <span class="small-note">252 ≈ number of US trading days per year</span>
+  </div>
+
+  <h3>Why √252 and not 252?</h3>
+  <p>
+    If daily returns are independent with mean μ and variance σ², then over N days
+    the sum has mean Nμ and variance Nσ². <strong>Means add; variances add.</strong>
+    Annualized volatility is the standard deviation of the <em>annual</em> return,
+    so you take the square root of the summed variance: √(252·σ²) = σ·√252. This
+    is the central limit theorem doing its job.
+  </p>
+  <p class="small">
+    The assumption of independence is wrong in detail (returns have autocorrelation,
+    volatility clusters), but √T scaling is the universal first-pass convention and
+    every reported "annualized vol" uses it.
+  </p>
+
+  <h3>The Sharpe ratio</h3>
+  <p>
+    A unit-free measure of return per unit of risk. The textbook version uses
+    excess return over a risk-free rate; this repo uses the simpler "raw"
+    version (assumes risk-free = 0):
+  </p>
+
+  <div class="formula">
+    Sharpe = (mean daily return × 252) / σ<sub>ann</sub>
+    <span class="small-note">Equivalent to: mean daily / σ<sub>daily</sub> × √252</span>
+  </div>
+
+  <p>
+    A Sharpe of 1.0 means "per unit of annual standard deviation, you earn one unit
+    of annual mean." Industry rough guide: &lt;0.5 mediocre, 1.0 solid, 2.0
+    excellent, 3.0+ raise eyebrows (or fees). HFT strategies routinely exceed
+    Sharpe 5 because their bets are many and small.
+  </p>
+
+  <h3>Tiny worked example</h3>
+<pre><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> math
+
+<span class="com"># 252 daily returns, mean 0.05% per day, std 1% per day</span>
+ret = np.random.<span class="fn">normal</span>(<span class="num">0.0005</span>, <span class="num">0.01</span>, <span class="num">252</span>)
+
+mean_daily  = ret.<span class="fn">mean</span>()
+std_daily   = ret.<span class="fn">std</span>()
+mean_ann    = mean_daily * <span class="num">252</span>            <span class="com"># ~12.6%   — means scale linearly</span>
+vol_ann     = std_daily  * math.<span class="fn">sqrt</span>(<span class="num">252</span>)  <span class="com"># ~15.9%   — std scales by sqrt(T)</span>
+sharpe      = mean_ann / vol_ann               <span class="com"># ~0.79</span>
+</pre>
+
+  <!-- ===================== §3 DRAWDOWN & CAGR ===================== -->
+  <h2>3. Drawdown and CAGR</h2>
+
+  <h3>Maximum drawdown — the worst the curve ever felt</h3>
+  <p>
+    <strong>Drawdown</strong> at time t is the percentage drop from the running
+    peak so far:
+  </p>
+
+  <div class="formula">
+    DD<sub>t</sub> = equity<sub>t</sub> / max<sub>s≤t</sub>(equity<sub>s</sub>) − 1
+    <span class="small-note">Always ≤ 0. The minimum over the whole period is the "max drawdown."</span>
+  </div>
+
+  <p>
+    In code this is two lines: a running cumulative max, then a ratio:
+  </p>
+
+<pre>cum      = (<span class="num">1</span> + ret).<span class="fn">cumprod</span>()       <span class="com"># 1 + cumulative growth path</span>
+roll_max = cum.<span class="fn">cummax</span>()                <span class="com"># running peak so far</span>
+maxdd    = (cum / roll_max - <span class="num">1</span>).<span class="fn">min</span>()   <span class="com"># worst drop from peak</span>
+</pre>
+
+  <p>
+    Why care: Sharpe says nothing about <em>shape</em>. Two strategies can have
+    identical Sharpe and very different max drawdowns. Drawdown is the number
+    investors actually pull capital over.
+  </p>
+
+  <h3>CAGR — geometric annual growth, the honest version of "average return"</h3>
+  <p>
+    Two ways to summarize "what return did I earn per year on average":
+  </p>
+
+  <div class="formula">
+    APR<sub>simple</sub> = mean(daily return) × 252
+    <span class="small-note">Arithmetic — ignores compounding</span>
+  </div>
+
+  <div class="formula">
+    CAGR = (final / initial)<sup>252/N</sup> − 1
+    <span class="small-note">Geometric — what actually compounded to that final value</span>
+  </div>
+
+  <p>
+    They are <strong>not</strong> the same number. CAGR &lt; APR<sub>simple</sub>
+    by an amount that grows with volatility (this is the
+    <em>volatility drag</em>: <code>CAGR ≈ μ − σ²/2</code> in log terms). A
+    strategy with daily returns alternating +10% / −10% has APR ≈ 0 but
+    CAGR ≈ −1.005% per period — because two such days compound to
+    1.10 × 0.90 = 0.99, not 1.00. Real money cares about CAGR.
+  </p>
+
+  <!-- ===================== §4 COV & CUSUM ===================== -->
+  <h2>4. Covariance matrix and the CUSUM statistic</h2>
+
+  <h3>Covariance — when assets move together</h3>
+  <p>
+    Variance generalizes to <strong>covariance</strong> when you have multiple
+    assets:
+  </p>
+
+  <div class="formula">
+    Σ<sub>ij</sub> = E[(r<sub>i</sub> − μ<sub>i</sub>)(r<sub>j</sub> − μ<sub>j</sub>)]
+    <span class="small-note">Σ<sub>ii</sub> = variance of asset i. Σ<sub>ij</sub> = how i and j co-move.</span>
+  </div>
+
+  <p>
+    For a portfolio with weight vector <code>w</code>:
+  </p>
+
+  <div class="formula">
+    portfolio variance = w<sup>T</sup> Σ w
+  </div>
+
+  <p>
+    That single equation is why correlations matter: two highly-correlated
+    assets in a portfolio don't diversify you, no matter how good each one is
+    individually. The mean-variance optimizer (Lesson 0007's target) lives or
+    dies on a stable estimate of Σ. The repo estimates it as the sample covariance
+    of recent daily returns over a <code>--cov_lookback</code> window (default 90 days).
+  </p>
+
+  <h3>CUSUM — detecting a regime break</h3>
+  <p>
+    The <strong>cumulative sum (CUSUM)</strong> test detects when a time series
+    has drifted away from its mean — i.e. when something structurally changed.
+    Two running sums track upward and downward drift:
+  </p>
+
+  <div class="formula">
+    S<sup>+</sup><sub>t</sub> = max(0, S<sup>+</sup><sub>t−1</sub> + (r<sub>t</sub> − μ) − k)
+    <br>
+    S<sup>−</sup><sub>t</sub> = min(0, S<sup>−</sup><sub>t−1</sub> + (r<sub>t</sub> − μ) + k)
+    <span class="small-note">k is a "slack" parameter, typically a multiple of σ. Trigger when |S| crosses a threshold.</span>
+  </div>
+
+  <p>
+    The repo uses CUSUM as one of four stress detectors in
+    <code>walkforward_sim.py</code>, with <code>k = cusum_threshold × σ</code> where
+    <code>cusum_threshold</code> defaults to 3. The intuition: small noise should
+    leave both running sums near zero; a sustained drift in either direction
+    pushes one of them past the threshold and signals a regime change.
+  </p>
+
+  <!-- ===================== §5 IN THIS PROJECT ===================== -->
+  <h2>5. In this project</h2>
+
+  <p>
+    Time to read the actual code. Every formula above lives in roughly 20 lines of
+    <code>analyze_equity.py</code>.
+  </p>
+
+  <span class="filepath">analyze_equity.py:compute_metrics (lines 7–40)</span>
+<pre><span class="kw">def</span> <span class="fn">compute_metrics</span>(eq: pd.Series) -> dict:
+    eq = eq.<span class="fn">dropna</span>()
+    initial, final = <span class="fn">float</span>(eq.iloc[<span class="num">0</span>]), <span class="fn">float</span>(eq.iloc[-<span class="num">1</span>])
+    total_return = final / initial - <span class="num">1.0</span>          <span class="com"># cumulative return over the period</span>
+
+    ret = eq.<span class="fn">pct_change</span>().<span class="fn">dropna</span>()                <span class="com"># §1 — simple daily returns</span>
+    n   = <span class="fn">len</span>(ret)
+    ann = <span class="num">252.0</span>                                  <span class="com"># §2 — trading days per year</span>
+
+    cagr       = (final / initial) ** (ann / <span class="fn">max</span>(<span class="num">1.0</span>, n)) - <span class="num">1.0</span>   <span class="com"># §3 — geometric</span>
+    vol        = <span class="fn">float</span>(ret.<span class="fn">std</span>()) * math.<span class="fn">sqrt</span>(ann) <span class="kw">if</span> n <span class="kw">else</span> <span class="num">0.0</span>  <span class="com"># §2 — sigma × sqrt(252)</span>
+    apr_simple = <span class="fn">float</span>(ret.<span class="fn">mean</span>()) * ann <span class="kw">if</span> n <span class="kw">else</span> <span class="num">0.0</span>           <span class="com"># §3 — arithmetic</span>
+    sharpe     = (<span class="fn">float</span>(ret.<span class="fn">mean</span>()) * ann) / vol <span class="kw">if</span> vol > <span class="num">0</span> <span class="kw">else</span> <span class="num">0.0</span> <span class="com"># §2</span>
+
+    cum      = (<span class="num">1.0</span> + ret).<span class="fn">cumprod</span>()                <span class="com"># §3 — growth curve</span>
+    roll_max = cum.<span class="fn">cummax</span>()                          <span class="com"># §3 — running peak</span>
+    maxdd    = <span class="fn">float</span>((cum / roll_max - <span class="num">1.0</span>).<span class="fn">min</span>())  <span class="com"># §3 — worst peak-to-trough</span>
+
+    years = n / ann                                  <span class="com"># useful for sanity checks</span>
+    <span class="kw">return</span> {
+        <span class="str">"Initial"</span>: initial, <span class="str">"Final"</span>: final,
+        <span class="str">"TotalReturn"</span>: total_return, <span class="str">"Years(approx)"</span>: years,
+        <span class="str">"CAGR"</span>: cagr, <span class="str">"APR_simple"</span>: apr_simple,
+        <span class="str">"Vol"</span>: vol, <span class="str">"Sharpe"</span>: sharpe, <span class="str">"MaxDD"</span>: maxdd,
+    }
+</pre>
+
+  <p>
+    Things to notice from reading the real code:
+  </p>
+  <ul>
+    <li>
+      <strong>Both</strong> <code>CAGR</code> and <code>APR_simple</code> are returned.
+      The CLI in <code>main()</code> prints both. Good practice — comparing them
+      tells you how much volatility drag the strategy carries.
+    </li>
+    <li>
+      <code>Sharpe</code> is built without a risk-free rate. That's the convention
+      this repo follows but in formal reporting you should subtract a benchmark
+      (e.g. T-bill yield) from <code>ret.mean()</code> first.
+    </li>
+    <li>
+      <code>roll_max = cum.cummax()</code> uses pandas' running maximum — efficient
+      and idiomatic. Don't roll your own; it's a one-line pattern worth remembering.
+    </li>
+  </ul>
+
+  <span class="filepath">paper_trading_sim.py:metrics (almost identical)</span>
+<pre>cagr = (equity.iloc[-<span class="num">1</span>] / equity.iloc[<span class="num">0</span>]) ** (ann / <span class="fn">max</span>(<span class="num">1</span>, <span class="fn">len</span>(ret))) - <span class="num">1</span>
+vol  = ret.<span class="fn">std</span>() * math.<span class="fn">sqrt</span>(ann) <span class="kw">if</span> <span class="fn">len</span>(ret) <span class="kw">else</span> <span class="num">0.0</span>
+sharpe = (ret.<span class="fn">mean</span>() * ann) / vol <span class="kw">if</span> vol > <span class="num">0</span> <span class="kw">else</span> <span class="num">0.0</span>
+</pre>
+
+  <p>
+    Same formulas, separate file. A small consolidation opportunity (DRY) — but
+    nothing is mathematically inconsistent between the two. If you change the
+    annualization convention you have to remember to change both places.
+  </p>
+
+  <h3>And the covariance / CUSUM math</h3>
+  <span class="filepath">predict_next.py (covariance for mean-variance)</span>
+<pre>Sigma_emp = ret_panel.<span class="fn">cov</span>().to_numpy()       <span class="com"># sample covariance matrix</span>
+Sigma     = (<span class="num">1</span> - shrink) * Sigma_emp + shrink * np.<span class="fn">diag</span>(np.<span class="fn">diag</span>(Sigma_emp))
+                                              <span class="com"># shrinkage toward the diagonal</span>
+w = <span class="fn">meanvar_long_only</span>(mu, Sigma, max_w=max_w)
+</pre>
+
+  <span class="filepath">walkforward_sim.py (CUSUM, condensed)</span>
+<pre>sigma = market_ret.<span class="fn">std</span>()
+k     = cusum_threshold * sigma                <span class="com"># slack = 3σ by default</span>
+<span class="com"># pos/neg running sums updated on each new return; cusum_hit when either crosses k</span>
+cusum_hit = (pos > <span class="num">0</span>) <span class="kw">or</span> (neg < <span class="num">0</span>)
+</pre>
+
+  <div class="callout warn">
+    <strong>Repo-specific gotcha:</strong> <code>analyze_equity.py</code> uses
+    <code>pandas.Series.std()</code> which defaults to <code>ddof=1</code> (sample
+    std with Bessel's correction, divides by n−1). NumPy's <code>np.std()</code>
+    defaults to <code>ddof=0</code>. Different libraries, different defaults, same
+    name — a classic 1% bug when porting code between pandas and NumPy.
+  </div>
+
+  <!-- ===================== §6 OFTEN CONFUSED WITH ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>CAGR vs APR (arithmetic mean × 252)</h4>
+      <p>
+        <strong>CAGR</strong> = geometric — what actually compounded.
+        <strong>APR<sub>simple</sub></strong> = mean × 252 — what arithmetic says.
+        APR is always ≥ CAGR. The gap is <em>volatility drag</em> ≈ σ²/2.
+        Quote CAGR to investors; quote both internally.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Volatility vs Variance</h4>
+      <p>
+        <strong>Variance</strong> = E[(r − μ)²]. Units: returns².
+        <strong>Volatility</strong> = √variance. Units: returns. People say "vol"
+        when they want a number they can compare to mean return (same units).
+        Variance is what mathematically adds across time; vol is what gets quoted.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Sharpe vs Sortino</h4>
+      <p>
+        <strong>Sharpe</strong> divides excess return by total standard deviation.
+        <strong>Sortino</strong> divides by <em>downside</em> deviation only
+        (treats upside vol as good). Sortino is kinder to strategies with
+        positively skewed returns; this repo computes only Sharpe.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Drawdown vs Loss</h4>
+      <p>
+        A <strong>loss</strong> is realized P&L below your starting capital.
+        A <strong>drawdown</strong> is below your running <em>peak</em> — you can
+        have a 30% drawdown while still up 50% from your start. Investors
+        emotionally treat both as failures; drawdown is the harsher measure.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Sample std (<code>ddof=1</code>) vs Population std (<code>ddof=0</code>)</h4>
+      <p>
+        Sample uses (n−1) in the denominator (unbiased estimator from a sample).
+        Population uses n (when you have the whole population). For finite return
+        samples we want ddof=1. pandas defaults to 1; numpy defaults to 0.
+        Same word, different number.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Correlation vs Covariance</h4>
+      <p>
+        <strong>Covariance</strong> has the units of the underlying variables
+        (returns²) and depends on their scale.
+        <strong>Correlation</strong> = covariance / (σᵢ σⱼ) is unit-free and
+        bounded in [−1, +1]. Use correlation to compare assets; use covariance
+        in the portfolio variance formula.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. Why does <code>analyze_equity.py</code> multiply daily volatility by <code>math.sqrt(252)</code> instead of by <code>252</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Calendar days are ~365, but trading days are ~252 — and the question is about sqrt vs linear, not about which number to use.">Because there are √252 ≈ 16 calendar days per trading day on average.</li>
+      <li data-correct="true"  data-why="Right. Means add linearly across independent periods, but variances add — so standard deviation (the square root of variance) scales by sqrt(T). Annual variance = 252 × daily variance, so annual std = sqrt(252) × daily std.">Because variances add across independent periods, so standard deviation scales by √T. Annual variance = 252 × daily variance ⇒ annual std = √252 × daily std.</li>
+      <li data-correct="false" data-why="It's not a magic constant — it comes from the assumption that daily returns are independent with the same variance, so they sum and the std scales by sqrt of the number of periods.">Because √252 is a financial-industry convention with no real statistical justification.</li>
+      <li data-correct="false" data-why="The mean uses *252 in this same file (apr_simple = ret.mean() * ann). So we *do* scale linearly when it's the right thing to scale linearly — namely, the mean.">Because all annualizations use √T regardless of which moment you're scaling.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. A strategy reports <code>APR_simple = 12%</code> and <code>CAGR = 9%</code>. What does the gap most likely mean?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The two numbers compute different things; they shouldn't be equal. The fact that they differ is expected, and the gap is the *information*.">There's a bug — these numbers should always match.</li>
+      <li data-correct="true"  data-why="Right. Arithmetic mean × 252 ignores compounding; CAGR captures what actually compounded. The gap of ~3% per year is volatility drag (≈ σ²/2 in log terms). Higher vol → larger gap. Useful diagnostic.">There's meaningful volatility drag — the strategy has enough variance that arithmetic and geometric annual returns diverge by ~σ²/2.</li>
+      <li data-correct="false" data-why="The Sharpe ratio is computed using mean and vol; it doesn't directly produce the APR/CAGR gap. The gap is purely a function of the variance of the returns.">The strategy has a Sharpe ratio above 2.</li>
+      <li data-correct="false" data-why="Trading costs would show up identically in both APR and CAGR computed from the same equity curve. The gap between them is volatility drag, not cost drag.">Trading costs are eating about 3% per year of returns.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Inside <code>compute_metrics</code>, what exactly does <code>(cum / roll_max - 1.0).min()</code> measure?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That would be just `cum.min()` — but the comparison to the running peak matters: drawdown asks 'how far below the running peak did we get', not 'what was the lowest equity'.">The lowest equity value the strategy ever reached.</li>
+      <li data-correct="true"  data-why="Correct. roll_max is the running peak so far; cum/roll_max - 1 is the fractional distance below that peak at each time. Taking the minimum gives the worst peak-to-trough drop — the maximum drawdown.">The worst peak-to-trough percentage drop the equity curve ever experienced — the maximum drawdown.</li>
+      <li data-correct="false" data-why="That's the total return over the period (final/initial - 1), not the drawdown. They are often confused but are different — you can have a positive total return and a deep drawdown.">The total return of the strategy over the full period.</li>
+      <li data-correct="false" data-why="No — daily mean is ret.mean(). The drawdown computation involves the running peak, not the per-period mean.">The mean daily loss across all losing days.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. A strategy has daily returns of +10%, −10%, +10%, −10%, … for many days. What does <code>analyze_equity.py</code> report for <code>APR_simple</code> and <code>CAGR</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="APR_simple would be 0 (mean of +0.1 and -0.1), but CAGR isn't. The +10%/-10% pair compounds to 1.10 × 0.90 = 0.99, not 1.00.">Both ≈ 0%, because the daily returns average to zero.</li>
+      <li data-correct="true"  data-why="Right. The mean daily return is exactly 0, so APR_simple = 0. But each (+10%, -10%) pair compounds to 1.10 × 0.90 = 0.99, so the equity curve geometrically decays at ~0.5% per pair, and CAGR is negative. This is volatility drag in its purest form.">APR_simple ≈ 0%, but CAGR is negative — each (+10%, −10%) pair compounds to 0.99, so equity geometrically decays.</li>
+      <li data-correct="false" data-why="Both are positive only if there's a net upward drift, but the arithmetic mean of these returns is exactly zero.">Both positive, because the average is taken across the whole period.</li>
+      <li data-correct="false" data-why="Vol would be ~10% per day, but that doesn't directly give Sharpe = infinity. With APR_simple = 0, Sharpe is also 0 (not infinity).">Sharpe approaches infinity because the mean is small but vol is huge.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. <code>walkforward_sim.py</code> sets <code>k = cusum_threshold * sigma</code> with <code>cusum_threshold = 3.0</code> by default. What's the rough effect of raising <code>cusum_threshold</code> to 5.0?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Threshold tuning affects sensitivity, not the underlying mean estimation. It does not redefine which 'mean' the test compares against.">It changes which mean the CUSUM is comparing returns to.</li>
+      <li data-correct="true"  data-why="Correct. k is the per-step slack the running sums tolerate before counting. Bigger k means each daily return has to be a bigger surprise to register; the cumulative sums grow more slowly; the regime-break alarm fires less often. You lose sensitivity but reduce false alarms.">The detector becomes less sensitive — each running sum needs more sustained drift to fire, so regime-break alarms become rarer and more conservative.</li>
+      <li data-correct="false" data-why="Backwards — a higher threshold k means MORE drift is required before triggering, so the detector fires LESS often, not more.">The detector becomes more sensitive — alarms fire more frequently.</li>
+      <li data-correct="false" data-why="No, increasing the slack increases the per-step margin the running sums must exceed. It's not a no-op — it directly controls the false-alarm vs detection-latency tradeoff.">It has no effect because the running sum is reset on every clock cycle.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A teammate ports <code>compute_metrics</code> to NumPy and now Vol comes back ~0.5% lower than the original. What's the most likely cause?</summary>
+    <p>
+      The <code>std()</code> default. pandas uses <code>ddof=1</code> (sample std,
+      divides by n−1); NumPy uses <code>ddof=0</code> (population std, divides
+      by n). For ~252 returns, n vs n−1 is a ~0.2% difference in the variance,
+      ~0.1% in the std, which scales to ~0.1 × √252 ≈ 1.5% in annualized vol —
+      easily explains the gap. Fix: pass <code>ddof=1</code> explicitly when
+      calling NumPy. Don't trust same-named functions across libraries.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You add the constraint that risk-free rate is 4% annual (T-bill yield). How does the Sharpe formula in <code>analyze_equity.py</code> change?</summary>
+    <p>
+      The textbook Sharpe is <em>excess</em> return over the risk-free rate divided
+      by the std of <em>excess</em> returns. The cleanest patch:
+      <code>excess = ret - rf_daily</code> where <code>rf_daily = 0.04 / 252</code>,
+      then <code>sharpe = (excess.mean() * 252) / (excess.std() * sqrt(252))</code>.
+      In practice the denominator barely changes because rf is nearly constant, so
+      most quick implementations subtract rf only in the numerator. Either is
+      defensible; just be consistent and disclose which one you used.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. Two strategies both report Sharpe = 1.5 over the same period. One has MaxDD = 12%, the other MaxDD = 45%. Which would you allocate to, and why doesn't Sharpe alone tell you?</summary>
+    <p>
+      The one with MaxDD = 12% — and Sharpe can't see the difference because it
+      measures the average tradeoff between mean and std, not the shape of the
+      worst stretch. Two return series can have identical mean and std (hence
+      identical Sharpe) and very different drawdown profiles, especially if one
+      has fat negative tails or path-dependent losses. This is exactly why this
+      repo computes drawdown alongside Sharpe — and why investors actually live
+      with the drawdown number, not the Sharpe number.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidate: <strong>Mean-variance portfolio optimization</strong> —
+    everything in this lesson set up the covariance matrix Σ; the next lesson
+    walks <code>predict_next.py:meanvar_long_only</code> to show why
+    <code>w ∝ Σ⁻¹μ</code> falls out, why shrinkage matters, and what
+    <code>max_w</code> protects you from.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

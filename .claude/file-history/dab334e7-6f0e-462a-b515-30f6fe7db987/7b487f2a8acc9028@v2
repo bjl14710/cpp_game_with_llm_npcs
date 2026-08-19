@@ -1,0 +1,67 @@
+"""Console tests via streamlit.testing.v1.AppTest.
+
+These run ONLY when the dashboard extra is installed
+(`uv sync --extra dashboard`) — importorskip keeps the core suite green
+without streamlit, which is itself part of the design contract.
+"""
+import pytest
+
+st = pytest.importorskip("streamlit", reason="dashboard extra not installed")
+
+from pathlib import Path
+
+from streamlit.testing.v1 import AppTest
+
+# Absolute: the tests chdir into tmp dirs to simulate fresh checkouts.
+APP = str(Path(__file__).resolve().parent.parent / "streamlit_app" / "dashboard.py")
+
+
+def _run(**session):
+    at = AppTest.from_file(APP, default_timeout=30)
+    for key, value in session.items():
+        at.session_state[key] = value
+    return at.run()
+
+
+def test_console_renders_without_artifacts(tmp_path, monkeypatch):
+    """Fresh checkout: no arena DB, no CSV — three tabs, empty states, no
+    exceptions (the never-a-traceback acceptance criterion)."""
+    monkeypatch.chdir(tmp_path)  # nothing exists here
+    at = _run()
+    assert not at.exception
+    assert len(at.tabs) == 3
+    infos = " ".join(block.value for block in at.info)
+    assert "No arena data yet" in infos
+    assert "equity CSV not found" in infos or "run a backtest" in infos
+
+
+def test_console_renders_seeded_arena_and_equity(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from strategy_arena import ArenaState
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "arena_state").mkdir()
+    state = ArenaState(str(tmp_path / "arena_state" / "arena.db"))
+    state.record_backtest("tsmom", "PASS", {"Sharpe": 1.1, "CAGR": 0.2, "MaxDD": -0.1})
+    idx = pd.bdate_range("2026-01-02", periods=40)
+    pd.DataFrame({"equity": 100000 * (1.002 ** pd.RangeIndex(40))},
+                 index=idx).to_csv(tmp_path / "walkforward_equity.csv")
+
+    at = _run()
+    assert not at.exception
+    labels = [m.label for m in at.metric]
+    assert "Strategies tracked" in labels
+    assert "Sharpe" in labels  # equity tab cards rendered too
+    assert any("tsmom" in str(df.value) for df in at.dataframe)
+
+
+def test_plain_import_never_launches_the_app():
+    """Importing the module outside a streamlit run context must not execute
+    main() (which would sys.exit or build widgets)."""
+    import importlib
+
+    import streamlit_app.dashboard as dashboard
+
+    importlib.reload(dashboard)  # would raise/exit if main() ran on import
+    assert callable(dashboard.main)

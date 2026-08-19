@@ -1,0 +1,162 @@
+#pragma once
+/**
+ * @file order_book.hpp  (solutions/06_cpp_order_book)
+ * @brief C++ price-time-priority limit order book — Exercise 06 reference solution.
+ *
+ * Port of the Python LOB from exercise 01 with performance-focused data
+ * structures.
+ *
+ *   Data structure          BBO         Insert      Cancel
+ *   std::map (here)         O(log P)    O(log P)    O(log P + L)
+ *   Flat tick array (L4+)   O(1) amort  O(1)        O(L)
+ *
+ * Price is stored as integer TICKS (×10000 of dollars) to avoid float
+ * equality bugs.  Example: $100.25 → price_ticks = 1,002,500.
+ *
+ * Side convention: 'B' = bid/buy, 'A' = ask/sell.
+ *
+ * @see exercises/06_cpp_order_book/order_book.hpp  — the practice stub
+ * @see tests/exercises/cpp/test_06_order_book.cpp  — grading tests
+ * @see solutions/01_order_book/order_book.py        — Python reference
+ */
+#include <algorithm>
+#include <climits>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+struct Order { int64_t order_id; int64_t price_ticks; int32_t qty; };
+struct Fill  { int64_t order_id; int64_t price_ticks; int32_t qty; };
+
+class OrderBook {
+public:
+    /**
+     * Add a resting limit order.
+     * @throws std::invalid_argument on bad side/price/qty or duplicate order_id.
+     */
+    void add_limit(int64_t order_id, char side, int64_t price_ticks, int32_t qty) {
+        if (side != 'B' && side != 'A')
+            throw std::invalid_argument("side must be 'B' or 'A'");
+        if (price_ticks <= 0 || qty <= 0)
+            throw std::invalid_argument("price_ticks and qty must be positive");
+        if (order_index_.count(order_id))
+            throw std::invalid_argument("duplicate order_id: " + std::to_string(order_id));
+        Order o{order_id, price_ticks, qty};
+        (side == 'B' ? bids_[price_ticks] : asks_[price_ticks]).push_back(o);
+        order_index_[order_id] = {side, price_ticks};
+    }
+
+    /**
+     * Cancel a resting order.
+     * @throws std::out_of_range if order_id not found.
+     */
+    void cancel(int64_t order_id) {
+        auto it = order_index_.find(order_id);
+        if (it == order_index_.end())
+            throw std::out_of_range("order_id not found: " + std::to_string(order_id));
+        char side = it->second.first;
+        int64_t price = it->second.second;
+        order_index_.erase(it);
+        _remove_from_level(side, price, order_id);
+    }
+
+    /**
+     * Execute a market order; returns fills in price-time order (FIFO within level).
+     * Partial fills are returned for insufficient liquidity.
+     * @param side  'B' (buy, lifts asks) or 'A' (sell, hits bids).
+     */
+    std::vector<Fill> execute_market(char side, int32_t qty) {
+        std::vector<Fill> fills;
+        auto do_fill = [&](auto& book) {
+            for (auto it = book.begin(); it != book.end() && qty > 0;) {
+                auto& lvl = it->second;
+                while (!lvl.empty() && qty > 0) {
+                    Order& front = lvl.front();
+                    int32_t taken = std::min(qty, front.qty);
+                    fills.push_back({front.order_id, it->first, taken});
+                    qty -= taken;
+                    front.qty -= taken;
+                    if (front.qty == 0) {
+                        order_index_.erase(front.order_id);
+                        lvl.pop_front();
+                    }
+                }
+                if (lvl.empty()) it = book.erase(it);
+                else ++it;
+            }
+        };
+        if (side == 'B') do_fill(asks_);
+        else             do_fill(bids_);
+        return fills;
+    }
+
+    /** Highest resting bid price in ticks; INT64_MIN if no bids. */
+    int64_t best_bid() const noexcept {
+        return bids_.empty() ? INT64_MIN : bids_.begin()->first;
+    }
+
+    /** Lowest resting ask price in ticks; INT64_MAX if no asks. */
+    int64_t best_ask() const noexcept {
+        return asks_.empty() ? INT64_MAX : asks_.begin()->first;
+    }
+
+    /** Total resting quantity at a price level; 0 if absent. */
+    int32_t level_qty(char side, int64_t price_ticks) const noexcept {
+        auto get = [](const auto& book, int64_t p) -> int32_t {
+            auto it = book.find(p);
+            if (it == book.end()) return 0;
+            int32_t total = 0;
+            for (const auto& o : it->second) total += o.qty;
+            return total;
+        };
+        return (side == 'B') ? get(bids_, price_ticks) : get(asks_, price_ticks);
+    }
+
+    /**
+     * Signed imbalance in [-1, 1]: (bid_qty − ask_qty) / (bid_qty + ask_qty).
+     * Considers top `levels` price levels on each side.  Returns 0.0 if both empty.
+     */
+    double imbalance(int levels = 1) const noexcept {
+        auto sum_top = [&](const auto& book) {
+            int64_t total = 0;
+            int n = 0;
+            for (const auto& [price, lvl] : book) {
+                if (n++ >= levels) break;
+                for (const auto& o : lvl) total += o.qty;
+            }
+            return total;
+        };
+        int64_t bq = sum_top(bids_), aq = sum_top(asks_), tot = bq + aq;
+        return tot == 0 ? 0.0 : static_cast<double>(bq - aq) / tot;
+    }
+
+private:
+    // Largest-price first: begin() gives the best (highest) bid.
+    // std::greater<int64_t> is the key: without it bids_ would be sorted ascending
+    // and begin() would give the WORST bid — a subtle bug that only shows under load.
+    std::map<int64_t, std::deque<Order>, std::greater<int64_t>> bids_;
+    // Smallest-price first: begin() gives the best (lowest) ask.
+    std::map<int64_t, std::deque<Order>>                        asks_;
+    // O(1) cancel lookup: order_id → {side, price_ticks}
+    std::unordered_map<int64_t, std::pair<char, int64_t>>       order_index_;
+
+    void _remove_from_level(char side, int64_t price, int64_t order_id) {
+        auto erase_from = [&](auto& book) {
+            auto lit = book.find(price);
+            if (lit == book.end()) return;
+            auto& dq = lit->second;
+            for (auto it = dq.begin(); it != dq.end(); ++it) {
+                if (it->order_id == order_id) { dq.erase(it); break; }
+            }
+            if (dq.empty()) book.erase(lit);
+        };
+        if (side == 'B') erase_from(bids_);
+        else             erase_from(asks_);
+    }
+};

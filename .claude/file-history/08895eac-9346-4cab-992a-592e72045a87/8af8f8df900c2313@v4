@@ -1,0 +1,110 @@
+"""Backtest-vs-live divergence: walk-forward CCF vs full-sample CCF (scaffold).
+
+Plan: ``.claude/plans/backtest-vs-live-divergence.md``. Runs the flagship
+CCF lead-lag signal two ways — the current backtest path (full dataset
+visible) and an "as-if-live" walk-forward path (each estimate sees only data
+before its as-of date) — and quantifies the gap.
+
+"Live" here means information-set restriction only: yfinance history is
+retroactively adjusted, so vendor point-in-time data is out of reach on the
+free tier. The docs/perf writeup must restate this.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import pandas as pd
+
+from oil_alpha.analysis.leadlag import LeadLagResult, ccf_leadlag
+
+#: Trailing estimation window / re-estimation step, in trading days.
+DEFAULT_WINDOW = 252
+DEFAULT_STEP = 21
+
+
+@dataclass(frozen=True)
+class WalkForwardStep:
+    """One as-of-date estimate plus its out-of-sample score.
+
+    ``oos_corr_at_pit_lag`` scores the point-in-time estimate on the NEXT
+    ``step`` days; ``oos_corr_at_full_lag`` scores the full-sample peak lag
+    on the same days — the difference is the look-ahead advantage.
+    """
+
+    as_of: pd.Timestamp
+    window_start: pd.Timestamp
+    leader: str
+    peak_lag: int
+    peak_corr: float
+    oos_corr_at_pit_lag: float
+    oos_corr_at_full_lag: float
+
+
+@dataclass(frozen=True)
+class DivergenceReport:
+    """Aggregate backtest-vs-live gap over all walk-forward steps."""
+
+    steps: list[WalkForwardStep]
+    full_sample: LeadLagResult
+    leader_agreement_rate: float   # fraction of steps agreeing with full-sample leader
+    mean_abs_lag_drift: float      # mean |pit peak_lag - full-sample peak_lag|
+    mean_oos_gap: float            # mean (full-lag OOS corr - pit-lag OOS corr)
+    n_steps: int
+    n_skipped: int = field(default=0)
+
+
+def walkforward_ccf(
+    x: pd.Series,
+    y: pd.Series,
+    window: int = DEFAULT_WINDOW,
+    step: int = DEFAULT_STEP,
+    max_lag: int = 10,
+) -> list[WalkForwardStep]:
+    """Strict point-in-time CCF estimates over a rolling schedule.
+
+    TODO(divergence-1): implement per the plan —
+      for each as-of index t in range(window, len-step, step):
+        estimate ccf_leadlag on x[t-window:t], y[t-window:t]  (STRICT: no
+        row at index >= t may enter — guard with an assertion);
+        score on [t, t+step): corr of x/y aligned at the PIT peak lag and
+        at the full-sample peak lag (computed once by the caller).
+      Steps whose windows lose too much to NaN alignment are skipped and
+      counted (plan edge case). Raise ValueError if the series is shorter
+      than window + step, naming the minimum length.
+    """
+    raise NotImplementedError(
+        "TODO(divergence-1): strict-slicing walk-forward CCF "
+        "(plan: .claude/plans/backtest-vs-live-divergence.md)"
+    )
+
+
+def divergence_report(
+    x: pd.Series,
+    y: pd.Series,
+    window: int = DEFAULT_WINDOW,
+    step: int = DEFAULT_STEP,
+    max_lag: int = 10,
+) -> DivergenceReport:
+    """Run both paths and aggregate the gap into a DivergenceReport.
+
+    TODO(divergence-1): full-sample ccf_leadlag once, walkforward_ccf for
+    the PIT path, then the three metrics (agreement rate, lag drift,
+    OOS gap). Contemporaneous PIT verdicts (peak_lag == 0) agree only with
+    a contemporaneous full-sample verdict.
+    """
+    raise NotImplementedError("TODO(divergence-1): see walkforward_ccf")
+
+
+def _main() -> None:
+    """CLI: run on real CL/XLE via the cached pipeline data path.
+
+    TODO(divergence-2): fetch via sources.fetch_prices + build_returns_frame
+    (cache on), print the step table and the three headline metrics; these
+    numbers feed docs/perf/<next-free>-backtest-vs-live.md.
+    """
+    raise NotImplementedError("TODO(divergence-2)")
+
+
+if __name__ == "__main__":
+    _main()

@@ -1,0 +1,100 @@
+#pragma once
+
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+namespace llm_npc {
+
+// Where every agent has been, as an interval record (plan: clue-like-zones).
+//
+// This is the alibi substrate. No position history of any kind exists today —
+// Journal and FactStore are fact-keyed, not positional — so this is genuinely
+// new state.
+//
+// TRANSITIONS, NOT SAMPLES. Twenty-one NPCs sampled at 1 Hz over a
+// 24-real-minute day is ~30,000 rows a day and grows without bound. Recording
+// only a CHANGE of zone is perhaps 50 rows per agent per day, makes the query
+// a scan over stays rather than a histogram, and stores exactly the sentence
+// an alibi is made of: "entered the bakery at 14:03, left at 14:21".
+//
+// Ground truth only. This records what actually happened; turning it into
+// per-NPC partial testimony (who SAW whom) is a separate concern, and
+// co-presence is trivially derivable from these intervals.
+
+// One agent's stay in one zone. Closed when they leave; `ongoing` while they
+// are still there.
+struct ZoneVisit {
+    std::string agent;   // persona name, or "player"
+    std::string zoneId;
+    double startHour = 0.0;
+    // Only meaningful when `ongoing` is false. An ongoing visit has no end
+    // yet, and a query that overlaps it should treat it as running to the
+    // window's end rather than to endHour.
+    double endHour = 0.0;
+    bool ongoing = false;
+};
+
+class LocationLog {
+   public:
+    // Records where one agent is at this instant. Only a change of zone writes
+    // anything, so calling this every frame for every agent is the intended
+    // usage and costs a zone lookup plus a comparison.
+    //
+    // `worldHour` is passed in rather than read from a clock, for the same
+    // reason DayNight.hpp is a pure function of hours: it keeps this testable
+    // with no WorldState and no MatchClock. It must be the match's MONOTONIC
+    // hour, not the wrapped 0-24 clock hour, or a stay across midnight becomes
+    // two out-of-order intervals.
+    //
+    void observe(const std::string& agent, float x, float z, double worldHour);
+
+    // Everyone whose stay in `zoneId` OVERLAPS [fromHour, toHour]. Overlap, not
+    // containment: someone who arrived at 13:50 and left at 14:10 was in the
+    // bakery during 14:00-15:00 and must be returned.
+    //
+    std::vector<ZoneVisit> whoWasIn(const std::string& zoneId,
+                                    double fromHour, double toHour) const;
+
+    // Where `agent` was across the window, in chronological order — their
+    // alibi, in the order they would tell it.
+    //
+    std::vector<ZoneVisit> trailOf(const std::string& agent,
+                                   double fromHour, double toHour) const;
+
+    // Closes any ongoing visit for one agent and stops logging them entirely —
+    // call when they die, so a corpse neither accumulates an eternal stay nor
+    // starts new ones as the body sits there being observed each frame.
+    //
+    // Permanent for the life of the log. The dead do not move, and a caller
+    // that wants an agent back should clear() and start a new match.
+    void closeAgent(const std::string& agent, double worldHour);
+
+    // Has `agent` been retired by closeAgent? O(1).
+    //
+    // Exists so a caller can skip re-closing a corpse every frame: closeAgent
+    // scans back through visits_ to find the agent's newest entry, and that
+    // walk gets longer as other agents keep appending, so calling it 60 times
+    // a second per dead NPC is quietly quadratic over a match.
+    bool retired(const std::string& agent) const {
+        return closed_.count(agent) != 0;
+    }
+
+    // Drops everything. New match.
+    void clear();
+
+    // All recorded visits, for tests and tooling.
+    const std::vector<ZoneVisit>& visits() const { return visits_; }
+
+   private:
+    // Append-only, in arrival order. Ordering is by construction rather than
+    // by sorting, because observe() only ever appends or closes the last visit
+    // for an agent.
+    std::vector<ZoneVisit> visits_;
+
+    // Agents closeAgent() has retired. observe() ignores them, so a dead NPC
+    // still being ticked every frame cannot open a new stay.
+    std::unordered_set<std::string> closed_;
+};
+
+}  // namespace llm_npc

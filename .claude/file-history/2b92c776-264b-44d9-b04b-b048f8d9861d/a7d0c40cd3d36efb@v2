@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0021 — The World Bus and Injected Time</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .good { border-left-color:var(--green); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0021 · Architecture · from PR #82 (world time)</div>
+<h1>The World Bus and Injected Time</h1>
+<p>Three systems needed the time of day at once: NPC schedules, the sky,
+and the fog. The trap is letting each keep its own timer — three clocks
+that drift, pause differently in menus, and disagree at dusk. The fix has
+two halves.</p>
+
+<h2>1. One authoritative value on a shared bus</h2>
+<p><code>WorldState</code> is a string-keyed fact store owned by World.
+The clock is just its first fact (<code>world_time_seconds</code>);
+gossip facts moved in next with zero changes to the store's shape. The
+convenience accessors (<code>timeOfDayHours()</code>) are sugar over the
+same fact any system could read raw — no side channels.</p>
+
+<h2>2. Consumers take time as a parameter</h2>
+<pre><code>void Npc::update(float dt, const Vec3&amp; playerPos,
+                 const City&amp; city, float timeOfDayHours = -1.f);</code></pre>
+<p>The NPC has no clock member. The test that proves the design: call the
+SAME NPC with hour 7 and it heads to the bakery; call it with hour 12.5
+and it heads to the plaza. Injected time also makes "no clock" explicit
+(negative = schedules dormant) instead of accidental.</p>
+
+<h2>Why the renderer follows the same rule</h2>
+<p><code>setTimeOfDay(hours)</code> derives the sky clear color, the fog
+color, and a light-level uniform from one hour via pure curves in core
+(<code>DayNight.hpp</code> — testable, including continuity at the dawn/
+dusk band edges). Because fog color and sky always come from the same
+value, distant geometry melts into the horizon at midnight exactly as it
+does at noon — lesson 0019's rule, now time-varying.</p>
+
+<div class="callout good"><strong>The pattern.</strong> When a value has
+multiple consumers, promote it to a shared store and INJECT it — don't
+let consumers cache or re-derive it. The bus earns its name when the
+second tenant (gossip) moves in without renovation.</div>
+</div></body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0023 — One Shared Asset Pool</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0023 · pairs with lesson 0024</div>
+<h1>Vocab: One Shared Asset Pool</h1>
+<dl>
+<dt>pool separation</dt>
+<dd>Two consumers drawing "the same kind" of content from unrelated sources
+(rigged models vs composite parts). The root cause behind both "they don't
+match" and "additions don't propagate".</dd>
+
+<dt>dispatch hook</dt>
+<dd>An existing per-entity branch between implementations
+(<code>customLooks.find(i) ? composite : rigged</code>). Unification widens
+the hook until one branch is unreachable — no new machinery.</dd>
+
+<dt>authored-or-derived resolver</dt>
+<dd>The one rule mapping an entity to pool content: hand-authored value when
+valid, else a value derived deterministically from identity
+(<code>randomizeLook(hash(name))</code>). Serves an art-directed cast and
+procedural spawns with the same function.</dd>
+
+<dt>deterministic fallback</dt>
+<dd>A derived default computed from stable identity rather than fresh
+randomness — the same input yields the same result every run, so no state
+needs persisting and nothing reshuffles on launch.</dd>
+
+<dt>demote, don't kill</dt>
+<dd>Stale references degrade to the fallback with a logged reason instead of
+failing the whole record — an NPC with a removed hair part still spawns,
+loudly.</dd>
+
+<dt>structural vs catalog validation</dt>
+<dd>The parser enforces shape (five items); existence against the live
+catalog is checked where the catalog lives, at spawn. Keeps the file format
+decoupled from the pool's contents.</dd>
+
+<dt>priced trade-off</dt>
+<dd>A loss taken knowingly: fidelity (rigged animation) exchanged for
+cohesion, with the decision, its reason, and the off-ramp written down —
+distinguishable from an accidental regression.</dd>
+
+<dt>data-level acceptance test</dt>
+<dd>Asserting the product promise on the data (authored, valid,
+pairwise-distinct looks) instead of its rendered consequence — cheap,
+exhaustive, and survives art changes.</dd>
+</dl>
+</div></body>
+</html>

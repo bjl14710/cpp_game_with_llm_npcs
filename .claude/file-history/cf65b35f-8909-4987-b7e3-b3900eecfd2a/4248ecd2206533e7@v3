@@ -1,0 +1,131 @@
+#pragma once
+#include "itch_parser.hpp"
+#include "order_book_flat.hpp"
+#include <cstdint>
+#include <vector>
+
+// Per-book-update microstructure signals: Order Flow Imbalance (OFI) and
+// microprice (plan: .claude/plans/microstructure-signals.md, steps 2-3).
+//
+// Design note: this wraps OrderBookFlat rather than adding fields to it, so
+// the book keeps a single responsibility and its latency benchmarks stay
+// comparable with docs/perf/01-flat-book.md. The engine applies each parsed
+// message to the book, snapshots top-of-book, and emits one MicroEvent per
+// update.
+//
+// OFI follows the best-level definition of Cont, Kukanov & Stoikov (2014),
+// "The Price Impact of Order Book Events": with best bid (P_b, q_b) and best
+// ask (P_a, q_a), the event-n contribution is
+//
+//   e_n =  1{P_b_n >= P_b_{n-1}} * q_b_n  -  1{P_b_n <= P_b_{n-1}} * q_b_{n-1}
+//        - 1{P_a_n <= P_a_{n-1}} * q_a_n  +  1{P_a_n >= P_a_{n-1}} * q_a_{n-1}
+//
+// Positive e_n = net buying pressure (bid depth added, ask depth consumed).
+//
+// Microprice is the depth-weighted mid: with imbalance I = q_b / (q_b + q_a),
+//   microprice = I * P_a + (1 - I) * P_b
+// It leans toward the side with LESS depth's price being hit next — a better
+// short-horizon fair-value estimate than the plain mid.
+
+namespace itch {
+
+struct MicroEvent {
+    uint64_t timestamp_ns;   // ITCH ns-since-midnight of the triggering message
+    double   ofi;            // per-event OFI increment e_n, in shares (signed)
+    double   microprice;     // depth-weighted mid, in dollars
+    double   best_bid;       // dollars
+    double   best_ask;       // dollars
+    uint32_t bid_size;       // shares at best bid
+    uint32_t ask_size;       // shares at best ask
+};
+
+class MicrostructureEngine {
+public:
+    // Same construction contract as OrderBookFlat: the instrument's expected
+    // fixed-point tick range must be declared up front.
+    MicrostructureEngine(uint32_t min_price_raw, uint32_t max_price_raw,
+                         uint32_t tick_size = 1)
+        : book_(min_price_raw, max_price_raw, tick_size) {}
+
+    void on_add(const AddOrder& m) {
+        book_.add(m.order_ref, m.side, m.price, m.shares);
+        emit(m.timestamp_ns);
+    }
+    void on_execute(const ExecuteOrder& m) {
+        book_.execute(m.order_ref, m.executed_shares);
+        emit(m.timestamp_ns);
+    }
+    void on_delete(const DeleteOrder& m) {
+        book_.del(m.order_ref);
+        emit(m.timestamp_ns);
+    }
+    void on_replace(const ReplaceOrder& m) {
+        book_.replace(m.old_order_ref, m.new_order_ref, m.shares, m.price);
+        emit(m.timestamp_ns);
+    }
+
+    // Ready-made visitor for parse_buffer(); the engine must outlive it.
+    MessageVisitor visitor() {
+        MessageVisitor v;
+        v.on_add     = [this](const AddOrder& m)     { on_add(m); };
+        v.on_execute = [this](const ExecuteOrder& m) { on_execute(m); };
+        v.on_delete  = [this](const DeleteOrder& m)  { on_delete(m); };
+        v.on_replace = [this](const ReplaceOrder& m) { on_replace(m); };
+        return v;
+    }
+
+    const std::vector<MicroEvent>& events() const { return events_; }
+    // Updates while one book side was empty: no event can be computed there.
+    uint64_t skipped_one_sided() const { return skipped_one_sided_; }
+    const OrderBookFlat& book() const { return book_; }
+
+private:
+    void emit(uint64_t timestamp_ns) {
+        const TopOfBook tob = book_.top_of_book();
+        if (!tob.best_bid || !tob.best_ask) {
+            // A one-sided book has no spread: neither OFI's best-level deltas
+            // nor microprice are defined. Count and move on; prev_* keeps the
+            // last two-sided state so OFI resumes coherently.
+            ++skipped_one_sided_;
+            return;
+        }
+        const uint32_t bid_raw = tob.best_bid->price_raw;
+        const uint32_t ask_raw = tob.best_ask->price_raw;
+        const uint32_t q_b     = tob.best_bid->shares;
+        const uint32_t q_a     = tob.best_ask->shares;
+
+        double e = 0.0;
+        if (have_prev_) {
+            if (bid_raw >= prev_bid_raw_) e += static_cast<double>(q_b);
+            if (bid_raw <= prev_bid_raw_) e -= static_cast<double>(prev_q_b_);
+            if (ask_raw <= prev_ask_raw_) e -= static_cast<double>(q_a);
+            if (ask_raw >= prev_ask_raw_) e += static_cast<double>(prev_q_a_);
+        }
+
+        const double p_b = bid_raw / 10000.0;
+        const double p_a = ask_raw / 10000.0;
+        const double micro =
+            (static_cast<double>(q_b) * p_a + static_cast<double>(q_a) * p_b) /
+            (static_cast<double>(q_b) + static_cast<double>(q_a));
+
+        events_.push_back(MicroEvent{timestamp_ns, e, micro, p_b, p_a, q_b, q_a});
+
+        prev_bid_raw_ = bid_raw;
+        prev_ask_raw_ = ask_raw;
+        prev_q_b_     = q_b;
+        prev_q_a_     = q_a;
+        have_prev_    = true;
+    }
+
+    OrderBookFlat book_;
+    std::vector<MicroEvent> events_;
+    uint64_t skipped_one_sided_ = 0;
+
+    bool     have_prev_    = false;
+    uint32_t prev_bid_raw_ = 0;
+    uint32_t prev_ask_raw_ = 0;
+    uint32_t prev_q_b_     = 0;
+    uint32_t prev_q_a_     = 0;
+};
+
+}  // namespace itch

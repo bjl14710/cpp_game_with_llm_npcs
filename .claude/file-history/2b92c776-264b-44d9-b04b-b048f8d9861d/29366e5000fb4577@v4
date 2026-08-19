@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0011 — Condition Variables and the Lost Wakeup</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; }
+  ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); }
+  .good { border-left-color:var(--green); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0011 · Concurrency · from fix(llm): take the queue mutex before signalling worker shutdown</div>
+<h1>Condition Variables and the Lost Wakeup</h1>
+<p>A real bug from this codebase: the game's test suite hung roughly one run in
+five, and the fix was two lines of lock scope.</p>
+
+<h2>The crime scene</h2>
+<p><code>LlmClient</code> runs one worker thread that sleeps on a condition variable until
+there's a request (or shutdown). The destructor looked reasonable:</p>
+<pre><code>// BUGGY — as it was before the fix
+LlmClient::~LlmClient() {
+    stop_.store(true);          // stop_ is a std::atomic&lt;bool&gt;
+    requestCv_.notify_all();
+    if (worker_.joinable()) worker_.join();   // hung here, forever
+}
+
+// worker side
+std::unique_lock&lt;std::mutex&gt; lock(requestMutex_);
+requestCv_.wait(lock, [this] { return stop_.load() || !requests_.empty(); });</code></pre>
+<p><code>stop_</code> is atomic, so no data race. <code>notify_all()</code> is called after the store.
+What could possibly go wrong?</p>
+
+<h2>The interleaving that kills it</h2>
+<pre><code>worker thread                          destructor thread
+─────────────────────────────          ─────────────────────────────
+locks requestMutex_
+evaluates predicate → false
+                                       stop_.store(true)
+                                       requestCv_.notify_all()   ← nobody is waiting yet!
+blocks on the CV (releasing mutex)
+...sleeps forever — the notify already happened</code></pre>
+<p><code>wait(lock, pred)</code> is a loop: check predicate → if false, atomically
+release-and-block. The atomicity protects against wakeups <em>while blocking</em> —
+but there is a gap between <em>evaluating the predicate</em> and <em>starting to block</em>.
+A notification delivered in that gap hits no waiter and vanishes. That is the
+<strong>lost wakeup</strong>. The worker then sleeps waiting for a notify that will never
+come again, and <code>join()</code> waits for the worker: deadlock.</p>
+<div class="callout warn">Atomics are the trap here. Because <code>stop_</code> is atomic, the code
+compiles cleanly, passes TSan's data-race checks, and works 99% of the time.
+Atomicity of the flag does <em>nothing</em> to order the flag-write against the
+waiter's evaluate-then-block sequence.</div>
+
+<h2>The fix: write the predicate state under the mutex</h2>
+<pre><code>LlmClient::~LlmClient() {
+    {
+        std::lock_guard&lt;std::mutex&gt; lock(requestMutex_);
+        stop_.store(true);              // now serialized with the wait
+    }
+    requestCv_.notify_all();
+    if (worker_.joinable()) worker_.join();
+}</code></pre>
+<p>Why does holding the mutex close the gap? The worker evaluates its predicate
+<em>while holding <code>requestMutex_</code></em>. If the destructor must also hold that mutex to
+flip <code>stop_</code>, only two orderings exist:</p>
+<ol>
+<li>Destructor gets the mutex <em>first</em> → worker's predicate check happens after,
+sees <code>stop_ == true</code>, never blocks.</li>
+<li>Worker gets the mutex first → it is <em>fully blocked</em> on the CV (the
+release-and-block is atomic) before the destructor can take the mutex —
+so the notify finds a waiter.</li>
+</ol>
+<p>The gap is gone by construction. Note that <code>notify_all()</code> itself may stay
+outside the lock — it's the <em>predicate state change</em> that must be inside.</p>
+
+<h2>The rule to remember</h2>
+<div class="callout good"><strong>Any write that makes a condition-variable predicate become true
+must happen while holding the same mutex the waiter uses</strong> — even if the write is
+atomic. (Corollary: <code>enqueue()</code> in this same file was already correct: it pushes
+to the queue under the mutex, then notifies.)</div>
+
+<h2>How it was caught, and how it's kept dead</h2>
+<p>Multiplayer's loopback tests run the whole suite more often and construct more
+threaded objects; a routine 5×-run flake check hung on run 3. <code>sample &lt;pid&gt;</code>
+on the stuck process showed one thread in <code>~LlmClient → join()</code> and the worker in
+<code>condition_variable::wait</code> — the two-line stack trace <em>is</em> the diagnosis.</p>
+<p>The regression test exploits the race window directly: constructing and
+immediately destroying <code>LlmClient</code> 200 times hits the
+destructor-vs-wait-entry timing over and over. Pre-fix it hangs the suite within
+a few runs; post-fix it's deterministic. You can't unit-test a race into
+impossibility, but you can make the odds of missing it astronomically small.</p>
+</div></body></html>

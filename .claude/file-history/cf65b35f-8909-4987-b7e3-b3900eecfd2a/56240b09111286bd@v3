@@ -1,0 +1,69 @@
+"""Tests for the signals_cpp bridge + committed ITCH fixture.
+
+Acceptance criterion covered (plan: .claude/plans/microstructure-signals.md):
+given the filtered real ITCH fixture, the C++ layer emits OFI and microprice
+per book update. Uses the committed golden fixture
+``tests/fixtures/aapl-12302019-first8mb.itch`` (AAPL, 2019-12-30, 269,742
+messages spanning 04:00-09:58 ET) so CI never needs the multi-GB sample.
+
+Skips (rather than fails) when the signals_cpp extension isn't built, the
+same convention as tests/test_cpp_bridge.py.
+"""
+
+from __future__ import annotations
+
+import struct
+from pathlib import Path
+
+import pytest
+
+from oil_alpha.microstructure.events import (
+    AAPL_GOLDEN_MAX_RAW,
+    AAPL_GOLDEN_MIN_RAW,
+    EVENT_COLUMNS,
+    USING_CPP,
+    load_micro_events,
+)
+
+pytestmark = pytest.mark.skipif(
+    not USING_CPP,
+    reason="signals_cpp extension not built — run `pip install -e .` first",
+)
+
+FIXTURE = Path(__file__).parent / "fixtures" / "aapl-12302019-first8mb.itch"
+
+
+def test_fixture_produces_event_stream() -> None:
+    """The golden fixture yields a non-empty frame with the documented columns."""
+    df = load_micro_events(str(FIXTURE), AAPL_GOLDEN_MIN_RAW, AAPL_GOLDEN_MAX_RAW)
+    assert tuple(df.columns) == EVENT_COLUMNS
+    assert len(df) > 0
+    # AAPL traded ~$289-293 on 2019-12-30: microprice must sit in the bounds.
+    assert df["microprice"].between(280.0, 300.0).all()
+    # Timestamps are ns-since-midnight and non-decreasing.
+    assert (df["timestamp_ns"].diff().dropna() >= 0).all()
+    # Diagnostics ride along on attrs; pre-market one-sided books are normal.
+    assert df.attrs["skipped_one_sided"] >= 0
+    assert df.attrs["book_error_count"] >= 0
+    # The spread is positive whenever the book is two-sided (crossed books
+    # would mean the engine emitted from a corrupt state).
+    assert (df["best_ask"] >= df["best_bid"]).all()
+
+
+def test_empty_stream_warns_not_crashes(tmp_path: Path) -> None:
+    """A file with no book activity returns an empty frame + warning (plan edge case)."""
+    # A single framed 'S' (System Event) message: no orders, no book, no events.
+    sys_msg = b"S" + struct.pack(">HH", 0, 0) + (500).to_bytes(6, "big") + b"O"
+    quiet = tmp_path / "halted.itch"
+    quiet.write_bytes(struct.pack(">H", len(sys_msg)) + sys_msg)
+
+    with pytest.warns(UserWarning, match="no microstructure events"):
+        df = load_micro_events(str(quiet), AAPL_GOLDEN_MIN_RAW, AAPL_GOLDEN_MAX_RAW)
+    assert df.empty
+    assert tuple(df.columns) == EVENT_COLUMNS
+
+
+def test_missing_file_raises_runtime_error() -> None:
+    """IO failures surface as RuntimeError, never a silent empty frame."""
+    with pytest.raises(RuntimeError, match="cannot open"):
+        load_micro_events("/nonexistent/nope.itch", 1, 100)

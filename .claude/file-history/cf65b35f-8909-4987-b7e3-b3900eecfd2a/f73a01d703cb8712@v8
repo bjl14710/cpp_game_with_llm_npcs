@@ -1,0 +1,30 @@
+"""Intraday microstructure signals from real ITCH data (scaffold).
+
+Plan: ``.claude/plans/microstructure-signals.md``. The C++ layer
+(``cpp/itch/microstructure_signals.hpp`` via the ``signals_cpp`` pybind11
+module) computes per-book-update OFI and microprice; this package holds the
+Python research side:
+
+- :mod:`oil_alpha.microstructure.events` — load the event stream as a DataFrame
+- :mod:`oil_alpha.microstructure.kyles_lambda` — rolling-window price-impact
+  (Kyle's lambda) estimation
+- :mod:`oil_alpha.microstructure.plots` — diagnostic figures for the dashboard
+
+Golden dataset: AAPL, 2019-12-30 (see ``scripts/fetch_itch_sample.sh``);
+committed test fixture: ``tests/fixtures/aapl-12302019-first8mb.itch``.
+"""
+
+from oil_alpha.microstructure.events import USING_CPP, load_micro_events
+from oil_alpha.microstructure.kyles_lambda import (
+    KylesLambdaResult,
+    LambdaWindow,
+    estimate_kyles_lambda,
+)
+
+__all__ = [
+    "USING_CPP",
+    "load_micro_events",
+    "LambdaWindow",
+    "KylesLambdaResult",
+    "estimate_kyles_lambda",
+]

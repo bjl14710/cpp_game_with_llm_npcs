@@ -1,0 +1,160 @@
+"""Kyle's lambda: rolling-window price-impact estimation (scaffold).
+
+Kyle's lambda measures price impact per unit of signed order flow: in the
+regression ``delta_price = intercept + lambda * signed_flow + noise``, lambda is the
+slope. Here signed flow is the per-window sum of OFI increments and the
+price change is the microprice delta over the same window — both from the
+C++ event stream (:mod:`oil_alpha.microstructure.events`).
+
+Resolved decision (plan): ROLLING intraday windows (default 5 minutes) with
+a whole-session estimate as the aggregate; low-observation windows are
+flagged rather than silently fitted — mirrors how ``analysis/leadlag.py``
+pins its sign convention with a synthetic known-answer test.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+#: Default rolling window: 5 minutes, in ITCH nanoseconds-since-midnight.
+DEFAULT_WINDOW_NS: int = 5 * 60 * 1_000_000_000
+
+#: Windows with fewer regression observations than this are flagged not-ok.
+MIN_OBS_PER_WINDOW: int = 30
+
+
+@dataclass(frozen=True)
+class LambdaWindow:
+    """One rolling-window regression result.
+
+    ``ok`` is False when the window had fewer than ``min_obs`` observations —
+    the fitted values are then reported for transparency but must not be
+    trusted (plan edge case: low-liquidity window).
+    """
+
+    start_ns: int          # window start, ns since midnight
+    end_ns: int            # window end (exclusive)
+    lam: float             # fitted lambda (price impact per share of OFI)
+    intercept: float
+    r_squared: float
+    n_obs: int
+    ok: bool
+
+
+@dataclass(frozen=True)
+class KylesLambdaResult:
+    """Session-level result: per-window estimates plus the aggregate fit."""
+
+    windows: list[LambdaWindow]
+    session_lambda: float      # single regression over the whole session
+    session_r_squared: float
+    session_n_obs: int
+    n_windows_ok: int
+
+
+#: Sub-bar width for the regression observations: 1 second.
+_BAR_NS: int = 1_000_000_000
+
+
+def _ols(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
+    """Plain OLS of ``y = intercept + slope*x``. Returns (slope, intercept, r2).
+
+    Returns NaNs (r2=0) when a line cannot be fit: fewer than two points or
+    a degenerate (constant) regressor.
+    """
+    if len(x) < 2 or float(np.ptp(x)) == 0.0:
+        return math.nan, math.nan, 0.0
+    slope, intercept = np.polyfit(x, y, 1)
+    resid = y - (intercept + slope * x)
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    r2 = 1.0 - float(np.sum(resid**2)) / ss_tot if ss_tot > 0 else 0.0
+    return float(slope), float(intercept), r2
+
+
+def estimate_kyles_lambda(
+    events: pd.DataFrame,
+    window_ns: int = DEFAULT_WINDOW_NS,
+    min_obs: int = MIN_OBS_PER_WINDOW,
+) -> KylesLambdaResult:
+    """Estimate Kyle's lambda from a microstructure event stream.
+
+    ``events`` must have the columns of
+    :data:`oil_alpha.microstructure.events.EVENT_COLUMNS`.
+
+    Method: events are bucketed into 1-second sub-bars; each bar contributes
+    one regression observation ``(x, y)`` where ``x`` is the bar's summed OFI
+    and ``y`` is the microprice change from the previous bar's close to this
+    bar's close (bar-close-to-bar-close, so consecutive observations
+    telescope the cumulative price path without double counting). Bars are
+    then grouped into contiguous ``window_ns`` windows anchored at the first
+    event's second, one OLS per window, plus one OLS over the whole session.
+
+    Windows with fewer than ``min_obs`` observations are reported with
+    ``ok=False`` — fitted values (possibly NaN) are shown for transparency
+    but must not be trusted (plan edge case: low-liquidity window).
+
+    Raises ValueError for an empty frame or when the whole session yields
+    fewer than two regression observations.
+    """
+    if events.empty:
+        raise ValueError("events frame is empty — nothing to estimate")
+    missing = {"timestamp_ns", "ofi", "microprice"} - set(events.columns)
+    if missing:
+        raise ValueError(f"events frame missing columns: {sorted(missing)}")
+
+    # 1-second bars: summed OFI and closing microprice per bar.
+    bar_id = events["timestamp_ns"] // _BAR_NS
+    bars = (
+        events.groupby(bar_id)
+        .agg(x=("ofi", "sum"), close=("microprice", "last"))
+        .sort_index()
+    )
+    # y_k = close_k - close_{k-1}; the first bar has no prior close.
+    bars["y"] = bars["close"].diff()
+    bars = bars.dropna(subset=["y"])
+    if len(bars) < 2:
+        raise ValueError(
+            f"only {len(bars)} regression observation(s) in the session — "
+            "need at least 2 (more events or a longer file)"
+        )
+
+    x_all = bars["x"].to_numpy(dtype=float)
+    y_all = bars["y"].to_numpy(dtype=float)
+    session_lambda, _, session_r2 = _ols(x_all, y_all)
+
+    # Contiguous windows anchored at the first event's whole second.
+    t0 = int(events["timestamp_ns"].iloc[0] // _BAR_NS) * _BAR_NS
+    bar_start_ns = bars.index.to_numpy(dtype="int64") * _BAR_NS
+    win_idx = (bar_start_ns - t0) // window_ns
+
+    windows: list[LambdaWindow] = []
+    n_ok = 0
+    for k in range(int(win_idx.max()) + 1):
+        mask = win_idx == k
+        n = int(mask.sum())
+        lam, intercept, r2 = _ols(x_all[mask], y_all[mask])
+        ok = n >= min_obs and math.isfinite(lam)
+        n_ok += ok
+        windows.append(
+            LambdaWindow(
+                start_ns=t0 + k * window_ns,
+                end_ns=t0 + (k + 1) * window_ns,
+                lam=lam,
+                intercept=intercept,
+                r_squared=r2,
+                n_obs=n,
+                ok=ok,
+            )
+        )
+
+    return KylesLambdaResult(
+        windows=windows,
+        session_lambda=session_lambda,
+        session_r_squared=session_r2,
+        session_n_obs=len(bars),
+        n_windows_ok=n_ok,
+    )

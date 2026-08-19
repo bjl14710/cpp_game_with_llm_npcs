@@ -1,0 +1,362 @@
+"""Create the 9 'July 6th 2026 ideas' issues on bjl14710/algo_trading_practice.
+
+Run with: uv run python create_july6_issues.py
+Requires GH_TOKEN sourced from ~/.gitlab-api.key. Idempotent on title.
+"""
+import os
+import sys
+
+import requests
+
+REPO = "bjl14710/algo_trading_practice"
+USERNAME = "bjl14710"
+API = f"https://api.github.com/repos/{REPO}"
+
+MILESTONE_TITLE = "July 6 2026 Ideas — Arena Enhancements"
+MILESTONE_DESC = (
+    "9 plans ideated 2026-07-06/07 extending the Strategy Arena "
+    "(.claude/plans/strategy-arena.md and its follow-ons): realistic costs, "
+    "conviction-weighted sizing, a drawdown circuit breaker, live-vs-backtest "
+    "divergence alerts, regime-aware gating, historical stress testing, "
+    "SHAP explainability, feature drift monitoring, and a track-record-"
+    "weighted ensemble. Each issue's spec is its .claude/plans/*.md doc."
+)
+
+ISSUE_TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Spec
+Full plan: `.claude/plans/{plan_file}` — read it before implementing;
+it documents the design decisions already made so there is nothing to
+re-litigate.
+
+## Branch name
+`feature/issue-{number}-{slug}`
+"""
+
+SPECS = [
+    {
+        "title": "feat(sizing): confidence/volatility-weighted position sizing for the arena",
+        "slug": "confidence-vol-sizing",
+        "plan_file": "confidence-position-sizing.md",
+        "what": (
+            "Implement the plan in `.claude/plans/confidence-position-sizing.md`: "
+            "`_capped_normalized` weight helper, a `sizing='conf_vol'` mode in "
+            "`run_strategy_walkforward` (weight ∝ confidence / 20-day volatility, "
+            "normalized, capped at `max_pos` default 0.30, remainder in cash), and "
+            "persisting the sizing mode per screened strategy in the arena DB so "
+            "live reuses whatever mode backtest selected."
+        ),
+        "where": "`walkforward_sim.py` (`run_strategy_walkforward`), `strategy_arena.py` (schema + CLI)",
+        "verify": (
+            "`sizing='equal'` reproduces current equity/blotter output byte-for-byte "
+            "(regression test). A lone signal under `conf_vol` sizes at exactly "
+            "`max_pos` with the remainder in cash. Weights never exceed `max_pos` or "
+            "sum above 1. `uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Do not touch `simulate_walkforward` (the GBM meanvar path) or "
+            "`paper_trading_sim.py` — sizing is scoped to the generic arena loop only. "
+            "No new dependencies."
+        ),
+    },
+    {
+        "title": "feat(costs): transaction cost & slippage model (commission + spread + sqrt impact)",
+        "slug": "transaction-cost-model",
+        "plan_file": "transaction-costs.md",
+        "what": (
+            "Implement `.claude/plans/transaction-costs.md`: new `costs.py` with a "
+            "`CostModel` dataclass and square-root market-impact formula, wired into "
+            "all three backtest loops (`run_strategy_walkforward`, "
+            "`simulate_walkforward`, `paper_trading_sim.simulate`) charging on "
+            "turnover (|Δweight| × notional), not a flat per-day haircut. Every "
+            "equity output gains `equity_gross` and `cost` columns alongside net "
+            "`equity`."
+        ),
+        "where": "New `costs.py`; `walkforward_sim.py`, `paper_trading_sim.py`, `strategy_arena.py` (CLI passthrough)",
+        "verify": (
+            "`--cost_model flat` reproduces today's equity exactly (regression-pinned). "
+            "`--cost_model none` ⇒ equity == equity_gross. A churning strategy shows "
+            "strictly lower net equity than a buy-and-hold strategy with identical "
+            "gross returns. Lower-ADV ticker costs more for the same trade size. "
+            "`uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Default mode stays `flat` (existing behavior) — `realistic` is opt-in, "
+            "never silently changes historical results. No new dependencies "
+            "(pure pandas/numpy math)."
+        ),
+    },
+    {
+        "title": "feat(arena): drawdown circuit breaker with manual-only resume",
+        "slug": "drawdown-circuit-breaker",
+        "plan_file": "drawdown-circuit-breaker.md",
+        "what": (
+            "Implement `.claude/plans/drawdown-circuit-breaker.md`: a "
+            "`breaker_events` table + `hwm_anchor` column in the arena DB, "
+            "auto-pause (status=PAUSED) when a live strategy's drawdown from its "
+            "running peak crosses `--breaker_dd` (default -20%), and a new "
+            "`arena-run resume <strategy>` subcommand that is the ONLY way back to "
+            "PASS — it resets the high-water-mark anchor to the resume point."
+        ),
+        "where": "`strategy_arena.py` (schema migration, `cmd_live`, new `resume` subcommand)",
+        "verify": (
+            "A live series dropping >20% from peak flips status to PAUSED and logs "
+            "one TRIP event with peak/trough/threshold. Subsequent `arena-run live` "
+            "runs skip PAUSED strategies (no new rows). `arena-run resume` sets PASS, "
+            "logs RESUME, and the paused window is NOT backfilled. Post-resume "
+            "drawdown is measured from the resume point, not the original peak. "
+            "A pre-existing arena DB upgrades in place with no data loss. "
+            "`uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Backtests and `rh-exec` real-money execution are untouched — paper "
+            "live only. `--no_breaker` must disable evaluation entirely with zero "
+            "behavior change. If the confidence/vol sizing or divergence issues "
+            "land first, rebase this migration on their schema changes rather than "
+            "conflicting with them."
+        ),
+    },
+    {
+        "title": "feat(arena): live-vs-backtest divergence alert (overfitting signal)",
+        "slug": "live-backtest-divergence",
+        "plan_file": "live-backtest-divergence.md",
+        "what": (
+            "Implement `.claude/plans/live-backtest-divergence.md`: persist each "
+            "screened strategy's backtest daily-return fingerprint (mean, std, n) "
+            "at `arena-run backtest` time, then test live daily returns against it "
+            "with a one-sided z-test (`z = (live_mean - bt_mean) / (bt_std / sqrt(n_live))`, "
+            "flag when z < -2.0 after at least 20 live days). This is NOT a same-"
+            "period shadow backtest — that would equal the live ledger by "
+            "construction since both share one deterministic code path."
+        ),
+        "where": "`strategy_arena.py` (schema, `record_backtest`, `cmd_live`), `analyze_equity.py` (report columns)",
+        "verify": (
+            "Hand-computed z on a synthetic case matches `divergence_z` to 1e-9. A "
+            "live series engineered below the backtest mean by >2 SEs flips the "
+            "`diverged` flag and logs exactly one DIVERGED event; crossing back logs "
+            "one RECOVERED event. No evaluation before `min_live_days`. Report shows "
+            "`divergence_z`, `vol_ratio`, `diverged`, `diverged_since`. "
+            "`uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "This flags only — it never pauses a strategy (that's the circuit "
+            "breaker's job; the two signals are independent and can both be true). "
+            "If the circuit-breaker issue lands first, rebase this migration on its "
+            "schema changes."
+        ),
+    },
+    {
+        "title": "feat(regime): market regime classifier gating which strategies may trade",
+        "slug": "regime-gating",
+        "plan_file": "regime-gating.md",
+        "what": (
+            "Implement `.claude/plans/regime-gating.md`: a deterministic "
+            "`regime.py` classifying each day as `trending` / `mean_reverting` / "
+            "`high_vol` / `neutral` from a benchmark proxy (SPY, falling back to "
+            "cross-sectional mean, reusing `walkforward_sim`'s existing risk-"
+            "overlay proxy pattern). Each `DailyStrategy` gets a "
+            "`compatible_regimes` class attribute (default: all four); gated days "
+            "produce a hold, never a trade."
+        ),
+        "where": (
+            "New `regime.py`; `strategies/daily.py` + `candlestick_daily.py` + "
+            "`technical.py` + `mean_reversion.py` (regime assignments); "
+            "`walkforward_sim.py` (`run_strategy_walkforward` gating); "
+            "`strategy_arena.py` (`regime_log` table)"
+        ),
+        "verify": (
+            "Synthetic high-vol series classifies `high_vol` regardless of "
+            "autocorrelation; positive/negative lag-1 autocorrelation series "
+            "classify `trending`/`mean_reverting`. `DailyEngulfingStrategy` "
+            "produces no trades on a `trending` day even when its pattern would "
+            "otherwise fire; `TechnicalStrategy` is gated on `mean_reverting` days. "
+            "Omitting `regime_series` reproduces current output exactly (regression-"
+            "pinned). `uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Rule-based classifier only — no ML/HMM training (that's the existing, "
+            "separate `risk_overlay` GaussianMixture machinery). One regime per day, "
+            "market-wide, not per-ticker. `GBMStrategy` keeps the all-regimes "
+            "default (it's not scoped to this plan to restrict)."
+        ),
+    },
+    {
+        "title": "feat(stress): historical shock-period replay mode for walkforward_sim.py",
+        "slug": "stress-test-mode",
+        "plan_file": "stress-test-mode.md",
+        "what": (
+            "Implement `.claude/plans/stress-test-mode.md`: a `shocks.py` registry "
+            "of known historical shock windows (COVID Feb-Apr 2020, the 2022 "
+            "selloff, the Q4 2018 selloff) plus a `--shocks_json` override hook, and "
+            "a `run_shock_tests` helper in `walkforward_sim.py` that replays either "
+            "the GBM bundle path or a `DailyStrategy` independently over each "
+            "window, reporting Sharpe/CAGR/MaxDD/worst-day per period."
+        ),
+        "where": "New `shocks.py`; `walkforward_sim.py` (`run_shock_tests`, `--stress` CLI flag)",
+        "verify": (
+            "`load_shocks(None)` returns the built-in 3-window registry; a JSON "
+            "override merges/replaces by name. `run_shock_tests` against synthetic "
+            "multi-year mocked data produces one metrics row per window and isolates "
+            "a missing-data window as a failure row rather than crashing the whole "
+            "run. No live API calls in tests. `uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Scope is `walkforward_sim.py` only this round — do not wire into "
+            "`arena-run backtest` (that's a listed fast-follow issue). Shock date "
+            "ranges are historical facts, not tunables, in this version."
+        ),
+    },
+    {
+        "title": "feat(predict-next): SHAP-based per-prediction explainability",
+        "slug": "shap-explainability",
+        "plan_file": "shap-explainability.md",
+        "what": (
+            "Implement `.claude/plans/shap-explainability.md`: add the `shap` "
+            "dependency (approved — no sklearn-native alternative gives exact "
+            "per-prediction tree attribution), a new `--explain` flag on "
+            "`predict_next.py` using `shap.TreeExplainer` built once per model, "
+            "adding a `shap_top` column (top-k signed feature contributions) to the "
+            "predictions output, plus an optional `--explain_csv` long-format dump."
+        ),
+        "where": "`predict_next.py`, `pyproject.toml` (new dependency)",
+        "verify": (
+            "`predict-next` without `--explain` is byte-identical to current output "
+            "(shap never imported). With `--explain`, `shap_top`'s top feature "
+            "matches the largest `|shap_value|` computed independently in a test, "
+            "and per-row SHAP values sum (plus base value) to the model's own "
+            "prediction within tolerance — the standard SHAP consistency check. "
+            "`uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Lazy-import `shap` inside the `--explain` branch only — the default "
+            "path must never require it installed. Do not fix the pre-existing "
+            "one-day inference lag in `predict_next.py` (tracked separately) — "
+            "SHAP explains whatever row the model already scores."
+        ),
+    },
+    {
+        "title": "feat(drift): PSI-based concept drift monitoring for GBM feature inputs",
+        "slug": "concept-drift-monitoring",
+        "plan_file": "concept-drift-monitoring.md",
+        "what": (
+            "Implement `.claude/plans/concept-drift-monitoring.md`: new `drift.py` "
+            "computing Population Stability Index per feature; "
+            "`paper_trading_sim.py` additively stores a `feature_reference` (decile "
+            "edges per feature) in the saved bundle at `--save_model` time; "
+            "`predict_next.py` gains `--check_drift` comparing the day's pooled live "
+            "feature values against that reference, flagging features with PSI > 0.25."
+        ),
+        "where": "New `drift.py`; `paper_trading_sim.py` (bundle save); `predict_next.py` (`--check_drift`)",
+        "verify": (
+            "`psi()` on identical distributions ≈0; on a distribution shifted "
+            "several std devs, exceeds 0.25. A freshly saved bundle contains "
+            "`feature_reference` with one 10-edge list per feature. `--check_drift` "
+            "against a bundle missing that key prints a clear skip notice, never a "
+            "crash. `uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "Bundle format change is additive only — every existing bundle in "
+            "`models/` must keep loading exactly as before. Do not wire into "
+            "`GBMStrategy`/`arena-run live` this round (listed fast-follow issue). "
+            "Inputs only, not the prediction target."
+        ),
+    },
+    {
+        "title": "feat(arena): track-record-weighted ensemble meta-strategy",
+        "slug": "ensemble-strategy",
+        "plan_file": "ensemble-strategy.md",
+        "what": (
+            "Implement `.claude/plans/ensemble-strategy.md`: a new "
+            "`strategies/ensemble.py` `EnsembleStrategy` combining constituents via "
+            "weighted vote (no DB access — pure function of constituents+weights), "
+            "an `ensemble_weights` function in `strategy_arena.py` deriving weights "
+            "from each constituent's live Sharpe (floor 0.05, all-or-nothing "
+            "bootstrap fallback to equal weights if any constituent lacks 20 live "
+            "days), and a new `arena-run ensemble` subcommand reusing the existing "
+            "backtest/live/report machinery."
+        ),
+        "where": "New `strategies/ensemble.py`; `strategy_arena.py` (`ensemble_weights`, `ensemble` subcommand)",
+        "verify": (
+            "Two agreeing constituents combine to that direction; two equally-"
+            "weighted disagreeing constituents produce HOLD. `ensemble_weights` "
+            "sums to 1 with negative-Sharpe constituents clipped to the floor, not "
+            "excluded. Any constituent below `min_live_days` forces equal weights "
+            "for that computation. `arena-run ensemble --members a,b,missing` fails "
+            "fast naming `missing`, creating nothing. `uv run pytest tests/ -m \"not exercise\"` green."
+        ),
+        "constraints": (
+            "`EnsembleStrategy` must not import `strategy_arena` (avoid circular "
+            "import; keeps the `DailyStrategy` contract DB-free). Not added to the "
+            "static `strategies/registry.py` map — constructed dynamically only. "
+            "No nested ensembles this version."
+        ),
+    },
+]
+
+
+def main() -> None:
+    tok = os.environ.get("GH_TOKEN", "")
+    H = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
+    who = requests.get("https://api.github.com/user", headers=H)
+    if who.status_code != 200:
+        sys.exit("GH_TOKEN invalid.")
+    print(f"Authenticated as {who.json()['login']}")
+
+    issues = requests.get(f"{API}/issues?state=open&per_page=100", headers=H).json()
+    existing_titles = {i["title"].lower() for i in issues if "pull_request" not in i}
+
+    if requests.get(f"{API}/labels/ready-for-ai", headers=H).status_code == 404:
+        requests.post(f"{API}/labels", headers=H,
+                      json={"name": "ready-for-ai", "color": "0e8a16"}).raise_for_status()
+
+    ms = requests.get(f"{API}/milestones?state=open&per_page=100", headers=H).json()
+    ms_num = next((m["number"] for m in ms if m["title"] == MILESTONE_TITLE), None)
+    if ms_num is None:
+        r = requests.post(f"{API}/milestones", headers=H,
+                          json={"title": MILESTONE_TITLE, "description": MILESTONE_DESC})
+        r.raise_for_status()
+        ms_num = r.json()["number"]
+        print(f"Created milestone #{ms_num}: {MILESTONE_TITLE}")
+    else:
+        print(f"Reusing milestone #{ms_num}: {MILESTONE_TITLE}")
+
+    created = []
+    for spec in SPECS:
+        if spec["title"].lower() in existing_titles:
+            print(f"Skipping (exists): {spec['title']}")
+            continue
+        body = ISSUE_TEMPLATE.format(number="N", **{
+            k: spec[k] for k in ("what", "where", "verify", "constraints", "slug", "plan_file")
+        })
+        r = requests.post(f"{API}/issues", headers=H, json={
+            "title": spec["title"], "body": body, "labels": ["ready-for-ai"],
+            "assignees": [USERNAME], "milestone": ms_num,
+        })
+        r.raise_for_status()
+        issue = r.json()
+        fixed = body.replace("issue-N-", f"issue-{issue['number']}-")
+        requests.patch(f"{API}/issues/{issue['number']}", headers=H, json={"body": fixed}).raise_for_status()
+        print(f"  Created #{issue['number']}: {spec['title']}")
+        created.append({"number": issue["number"], "title": spec["title"], "url": issue["html_url"]})
+
+    print("\n=== July 6 2026 Ideas queue ===")
+    q = requests.get(f"{API}/issues?state=open&labels=ready-for-ai&per_page=100", headers=H).json()
+    for i in q:
+        if "pull_request" not in i:
+            print(f"  #{i['number']:3} {i['title']}")
+    print(f"\nTotal in ready-for-ai: {sum(1 for i in q if 'pull_request' not in i)}")
+    print(f"Created this run: {len(created)}")
+
+
+if __name__ == "__main__":
+    main()

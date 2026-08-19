@@ -1,0 +1,35 @@
+/idea
+
+Goal: Give NPCs saved, ongoing conversations using a local model better suited
+for it than the current setup, fully local via Ollama.
+
+Context: NPCs currently use Gemma via Ollama with `format: json` emitting
+{dialogue, mood, gesture}. Dialogue quality is fine but there's no persistence —
+conversation state dies when the process restarts. There's also no side-by-side
+data on how Gemma compares to Qwen3 on this exact schema.
+
+Scope:
+1. Model evaluation — benchmark Qwen3 8B vs. current Gemma vs. Mistral Small
+   against the existing JSON schema: (a) valid-JSON rate over N generations,
+   (b) persona consistency over 20+ turn conversations, (c) latency on target
+   hardware (M1 Pro). Recommend one, with numbers, not vibes.
+2. Conversation persistence — design + implement per-NPC save/load: a running
+   summary that gets injected back into the persona prompt, plus the full
+   transcript for debugging. Must survive process restart.
+3. Integration — swap in the recommended model behind the existing JSON
+   interface. No changes to the C++/render-side contract.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Where a decision would normally prompt me, pick the
+  most defensible option yourself, log the decision and reasoning in
+  OVERNIGHT_REPORT.md, and keep going.
+- Default to SQLite for persistence if there's any doubt — it matches the
+  single-table + payload JSON pattern already used elsewhere.
+- Default to Qwen3 8B as the swap target if the benchmark numbers are close;
+  only pick something else if it's clearly and measurably better on JSON
+  validity or persona consistency.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

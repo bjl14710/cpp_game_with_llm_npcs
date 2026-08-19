@@ -113,14 +113,14 @@ void World::tickNpcAi(float dt, CombatFrameResult& out) {
         Npc& npc = npcs_[i];
         switch (npc.combatState()) {
             case NpcState::Fleeing: {
-                const Vec3 away = normalize(npc.position() - player_.position);
+                const Vec3 away = steerXZ(player_.position, npc.position());
                 const Vec3 target = npc.position() + away * (kFleeSpeed * dt);
                 npc.position() = city_.resolveMovement(npc.position(), target, 0.4f);
                 break;
             }
             case NpcState::Hostile: {
                 const float dist = distanceXZ(npc.position(), player_.position);
-                const Vec3 dir   = normalize(player_.position - npc.position());
+                const Vec3 dir   = steerXZ(npc.position(), player_.position);
                 if (dist > kHostilePreferRange + 1.f) {
                     const Vec3 target = npc.position() + dir * (kFleeSpeed * dt);
                     npc.position() = city_.resolveMovement(npc.position(), target, 0.4f);

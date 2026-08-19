@@ -1,0 +1,79 @@
+"""Track API requests against free-tier caps (paper Part 1 / Caveats).
+
+The dashboard renders ``used / remaining`` per source so you can see how close a
+run gets to e.g. Alpha Vantage's 25/day cap before you hit it. Sources with no
+hard cap (yfinance/FRED/Stooq) are still tallied so the compute panel can show
+total request volume.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from oil_alpha.config import FREE_TIER_CAPS
+
+
+class BudgetExceeded(RuntimeError):
+    """Raised when a request would exceed a source's known free-tier cap."""
+
+
+@dataclass
+class SourceUsage:
+    name: str
+    used: int = 0
+    cap: int | None = None
+
+    @property
+    def remaining(self) -> int | None:
+        if self.cap is None:
+            return None
+        return max(0, self.cap - self.used)
+
+    @property
+    def fraction(self) -> float | None:
+        if self.cap is None or self.cap == 0:
+            return None
+        return min(1.0, self.used / self.cap)
+
+
+@dataclass
+class APIBudget:
+    """Accumulates per-source request counts for a single pipeline run."""
+
+    caps: dict[str, int | None] = field(default_factory=lambda: dict(FREE_TIER_CAPS))
+    usage: dict[str, SourceUsage] = field(default_factory=dict)
+
+    def _slot(self, source: str) -> SourceUsage:
+        if source not in self.usage:
+            self.usage[source] = SourceUsage(name=source, cap=self.caps.get(source))
+        return self.usage[source]
+
+    def charge(self, source: str, n: int = 1, *, enforce: bool = True) -> SourceUsage:
+        """Record ``n`` requests against ``source``.
+
+        Raises :class:`BudgetExceeded` when a capped source would go over and
+        ``enforce`` is True; uncapped sources are always allowed.
+        """
+        slot = self._slot(source)
+        if enforce and slot.cap is not None and slot.used + n > slot.cap:
+            raise BudgetExceeded(
+                f"{source}: {slot.used}+{n} would exceed free-tier cap of {slot.cap}/day"
+            )
+        slot.used += n
+        return slot
+
+    def total_requests(self) -> int:
+        return sum(s.used for s in self.usage.values())
+
+    def as_rows(self) -> list[dict]:
+        """Display-friendly rows for the dashboard's API-budget panel."""
+        return [
+            {
+                "source": s.name,
+                "used": s.used,
+                "cap": s.cap,
+                "remaining": s.remaining,
+                "fraction": s.fraction,
+            }
+            for s in sorted(self.usage.values(), key=lambda x: x.name)
+        ]

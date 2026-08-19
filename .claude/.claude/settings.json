@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Write(src/**)",
+      "Write(tests/**)",
+      "Write(docs/**)",
+      "Write(.claude/memory/**)",
+      "Write(.claude/plans/**)",
+      "Write(.claude/skills/**)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(npm test*)",
+      "Bash(pytest*)",
+      "Bash(cargo test*)",
+      "Bash(go test*)",
+      "Bash(gh issue list*)",
+      "Bash(gh issue view*)",
+      "Bash(gh issue edit*)",
+      "Bash(gh issue comment*)",
+      "Bash(gh issue close*)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr list*)",
+      "Bash(gh auth status)"
+    ],
+    "deny": [
+      "Write(.env*)",
+      "Write(secrets/**)",
+      "Write(credentials/**)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)"
+    ]
+  },
+  "model": "claude-fable-5[1m]",
+  "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": true
+}

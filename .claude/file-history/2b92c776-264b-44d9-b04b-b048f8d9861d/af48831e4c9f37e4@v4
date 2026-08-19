@@ -1,0 +1,38 @@
+---
+# Teaching Progress — LLM NPC City Game
+
+## Student profile
+Building a C++ game with LLM-driven NPCs. Has shipped the codebase.
+Background unclear on depth — treat as intermediate C++ learner, new to game architecture patterns.
+
+## Sessions
+
+### Session 1 (2026-06-12)
+- **Topic:** How to run and develop the game — lesson `0001-how-to-run-and-develop.html`
+- **Covers:** dual-environment model (Windows = game, Linux/container = tests), CMake + MSYS2 + run.bat Windows flow, make-based test workflow, core/app split rationale, development loop, adding an NPC.
+- **Mastery:** TBD (just delivered — no quiz results yet)
+- **Suggested next:** `0002-async-llm-client.html` — how LlmClient's worker thread and drain pattern keep the game loop at 60 fps while waiting on a 1–3 second HTTP call. This is a direct code concept in src/core/LlmClient.cpp and the most non-obvious part of the architecture.
+
+### Session 2 (2026-06-14)
+- **Type:** DRILL — `drills/0001-llm-integration.html`
+- **Target:** LLM integration end-to-end (the whole pipeline, not just one file).
+- **Channels drilled (5):** Sidecar architecture · Async & threading · Streaming protocol · Persona & prompting · Directive protocol. 21 questions (14 written recall, 7 MC), all grounded in real src/core code with file:line citations.
+- **Note for next /teach:** the existing teach doc `docs/learning/llm.md` is now STALE on one point — it documents `stream:false` / a blocking `processOne`, but the code has since moved to streaming NDJSON (`stream:true`) with `StreamAssembler`, `drainDeltas`, `keep_alive`, and `warmUp()`. Refresh that doc (or supersede it) before re-teaching streaming. Verified current Ollama behavior against the official API docs on 2026-06-14.
+- **Mastery:** TBD — awaiting the user's self-rated results from this drill. Promote concepts to GLOSSARY only after they hold up across this drill + one more.
+- **Shaky areas to watch (predicted, confirm against results):** the two-mutex rationale, the `inFlight_` ordering race, why tags are stripped before history (model echo), and the late-`deltaArrived` id check — these are the most subtle and the likeliest misses.
+
+### Session 3 (2026-06-19)
+- **Topic:** Game engines & the game loop — lesson `lessons/0002-game-engines-and-the-game-loop.html`
+- **Context:** Taught right after the user implemented a big batch of engine systems by hand (articulated character renderer, graduated-punishment law system, 5x5 map, wandering crowd via PersonaFactory, and a Traffic system) on branch `6-bigger-livelier-city`. The lesson consolidates all of that into the "this project IS a hand-rolled engine" mental model.
+- **Covers:** what a game engine is (loop/renderer/world/collision/input/time subsystems, hand-rolled vs commercial); the universal loop (input→update(dt)→render→present); their real `main.cpp:327-617` loop walked through; the `std::min(0.03f, dt)` max-step clamp (spiral-of-death/tunneling guard); update-vs-render and variable-vs-fixed-timestep contrasts; the engine/platform boundary = SFML-free `core/` vs `app/`. Grounded in current code; timestep facts checked against Gaffer/Game-Programming-Patterns sources.
+- **Mastery:** TBD — just delivered; awaiting quiz results + the in-chat knowledge check.
+- **Glossary:** hold until grasp confirmed — candidates: *game loop, delta time (dt), fixed vs variable timestep, update/render split, game engine, spiral of death*.
+- **Suggested next:** either (a) `0003` on the **entity/update model** (how World owns a `vector<Npc>` + Traffic, why fixed indices matter for `pendingRoutes`/`wasCaught`, and the cost of despawning) — a natural follow-on they just lived through; or (b) refresh the stale `llm.md` and re-teach **streaming** (still outstanding from Session 2).
+
+### Session 4 (2026-06-19)
+- **Type:** DRILL — `drills/0002-game-engines.html` (tests lesson `0002`)
+- **Target:** Game engines & the game loop, end-to-end.
+- **Channels drilled (5):** The game loop · Delta time & timestep · Update vs render · Engine architecture · Engine/platform boundary. 17 questions (11 written recall, 6 MC), grounded in real `main.cpp`/`core` code with file:line citations; timestep facts consistent with the Gaffer / André Leite sources used in lesson 0002.
+- **Mastery:** TBD — awaiting the user's self-rated results + the in-chat knowledge check.
+- **Likely-shaky (confirm against results):** the precise `frameClock.restart()` semantics (returns elapsed AND resets), articulating the spiral-of-death + why this loop is immune, and naming the core/app boundary as the reason tests run headless. The "which call is render vs update" MC should be easy if update/render landed.
+- **Glossary:** still holding the engine terms (game loop, delta time, fixed/variable timestep, update/render split, game engine, spiral of death) until they hold up across this drill + the in-chat check; promote the solid ones afterward.

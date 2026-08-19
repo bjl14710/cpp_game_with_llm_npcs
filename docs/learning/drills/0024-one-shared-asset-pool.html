@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0024 — One Shared Asset Pool</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0024 · pairs with lesson 0024</div>
+<h1>Drill: One Shared Asset Pool</h1>
+
+<div class="q"><h3>1. Why wasn't "just add more hairstyles" enough?</h3>
+<p>The user asked for more hair AND for created characters to match NPCs.
+Why did adding hair to the creator's catalog alone fail the brief?</p>
+<details><summary>Answer</summary><div class="a">
+<p>NPCs were rigged glTF models that physically can't wear composite parts —
+hair added to the creator's pool could never appear on a townsperson. The two
+requests shared a root cause (two unrelated pipelines); only unifying the
+pool fixes both, after which hair expansion is six data rows both consumers
+inherit.</p>
+</div></details></div>
+
+<div class="q"><h3>2. What was the unification seam?</h3>
+<p>How much new render machinery did routing all NPCs onto composites
+require, and why?</p>
+<details><summary>Answer</summary><div class="a">
+<p>None. The dispatch hook already existed: the loop drew a composite for any
+NPC with a <code>customLooks</code> entry, else the rigged model. Giving
+EVERY NPC a look (<code>npcLooks[i]</code>) made the else-branch unreachable
+for NPCs — the previous feature's hook became this feature's seam.</p>
+</div></details></div>
+
+<div class="q"><h3>3. Authored-or-derived</h3>
+<p>State <code>lookForPersona</code>'s decision rule and what each branch
+buys.</p>
+<details><summary>Answer</summary><div class="a">
+<p>Valid authored look → use it (art direction: the cop reads uniformed).
+Otherwise → <code>randomizeLook(FNV-1a(name))</code>: deterministic, so an
+unauthored NPC keeps the same face every run with no save data, and a stale
+authored look demotes (with a logged reason) instead of blocking the spawn.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Where does look validation happen — and why NOT in the parser?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>PersonaLoader checks structure only (exactly five items — a typo fails
+loudly like a bad position). Catalog validation lives in
+<code>lookForPersona</code> at the spawn site, so the persona format has no
+dependency on the parts catalog and catalog edits can't retroactively break
+persona files — a removed part just falls back at runtime.</p>
+</div></details></div>
+
+<div class="q"><h3>5. The retired models</h3>
+<p>Unification deleted the rigged NPC look. What was done so this reads as a
+decision rather than a regression?</p>
+<details><summary>Answer</summary><div class="a">
+<p>The trade-off was priced and logged: fidelity (skeletal animation,
+textures) exchanged for one-pool cohesion per the brief's stated priority;
+loading stays dormant (remote players, revival); and the off-ramp — rebuild
+both systems on a modular CC0 pack (XL) — is documented in the plan for the
+day fidelity wins.</p>
+</div></details></div>
+
+<div class="q"><h3>6. What does the roster test assert about looks, and why those three properties?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>Every shipped persona has an AUTHORED look (never the hash — keeps the
+cast art-directed), each validates against the live catalog (no silent
+fallback drift when parts change), and no two are identical (variety ≥ the
+old five-model baseline). The interesting promise is checked at the data
+level, not by eyeballing screenshots.</p>
+</div></details></div>
+
+<div class="q"><h3>7. Transfer it</h3>
+<p>Your app renders emails with template engine A and in-app messages with
+engine B; product asks for "consistent branding" and "more templates". Map
+the lesson.</p>
+<details><summary>Answer</summary><div class="a">
+<p>Same shape: two consumers, two pools. Don't tune B to resemble A — pick
+one template pool, give both consumers a resolver into it (specific template
+if authored, derived default otherwise), then "more templates" is data both
+channels inherit. Assert the brand properties over the shared pool in tests.</p>
+</div></details></div>
+</div></body>
+</html>

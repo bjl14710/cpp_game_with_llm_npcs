@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0012 — RF Engineering in HFT</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .illus { color: var(--accent-2); font-size: 12px; font-style: italic; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Path diagram */
+  .path {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px; margin: 16px 0; font-family: "JetBrains Mono", monospace; font-size: 13px;
+  }
+  .path-row {
+    display: grid; grid-template-columns: 90px 1fr 130px 110px; gap: 12px;
+    padding: 8px 12px; border-radius: 6px; margin: 4px 0;
+    align-items: center;
+  }
+  .path-row .src { color: var(--accent); }
+  .path-row .desc { color: var(--ink); font-family: inherit; }
+  .path-row .num { text-align: right; color: var(--accent-2); }
+  .path-row.fiber  { background: rgba(248, 113, 113, .07); }
+  .path-row.hollow { background: rgba(255, 212, 121, .07); }
+  .path-row.micro  { background: rgba(74, 222, 128, .08); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0012</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 The physics</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 The famous routes</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 RF engineering</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Bandwidth tradeoff</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 Economics</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>RF Engineering in HFT</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: Lesson 0011's latency ladder
+    placed cross-market microwave/RF links on Tier 5–6. This lesson opens the box.
+    The physics is simple — light travels faster through air than glass — but the
+    engineering is full of constraints (line-of-sight, weather, FCC licensing,
+    bandwidth) that decide what kinds of strategies can use it and which cannot.
+  </p>
+
+  <p class="illus">
+    Note: per the new repo guidance, code blocks here are <em>illustrative</em> only —
+    the repo doesn't yet have cross-venue RF infrastructure. They can be retrofitted
+    once we wire one up.
+  </p>
+
+  <!-- ===================== §1 PHYSICS ===================== -->
+  <h2>1. The physics — why RF beats fiber over distance</h2>
+
+  <p>
+    All electromagnetic signals travel at the speed of light <code>c</code> ≈
+    299,792,458 m/s in vacuum. The catch is what happens when they enter a
+    medium: glass slows them down dramatically, air barely at all.
+  </p>
+
+  <table>
+    <tr><th>Medium</th><th>Refractive index <code>n</code></th><th>Effective speed</th><th>% of <code>c</code></th></tr>
+    <tr><td>Vacuum</td><td>1.0000</td><td>299,792 km/s</td><td>100%</td></tr>
+    <tr><td>Air (dry, sea level)</td><td>1.0003</td><td>~299,700 km/s</td><td>~99.97%</td></tr>
+    <tr><td>Hollow-core fiber</td><td>~1.005</td><td>~298,300 km/s</td><td>~99.5%</td></tr>
+    <tr><td>Conventional silica fiber</td><td>~1.467</td><td>~204,400 km/s</td><td>~68%</td></tr>
+  </table>
+
+  <p>
+    That's the entire story. <strong>Light through glass moves at about two-thirds
+    the speed of light through air.</strong> Over a thousand kilometers between
+    exchanges, those few percent compound into several milliseconds — and several
+    milliseconds is the entire game in cross-market arbitrage.
+  </p>
+
+<pre><span class="com"># Illustrative: minimum one-way latency for a 1180 km link</span>
+<span class="kw">def</span> <span class="fn">latency_ms</span>(distance_km: <span class="ty">float</span>, fraction_of_c: <span class="ty">float</span>) -> <span class="ty">float</span>:
+    c_kms = <span class="num">299_792.458</span>
+    <span class="kw">return</span> distance_km / (c_kms * fraction_of_c) * <span class="num">1000.0</span>
+
+<span class="fn">latency_ms</span>(<span class="num">1180</span>, <span class="num">1.000</span>)   <span class="com"># = 3.94 ms  (vacuum / great-circle floor)</span>
+<span class="fn">latency_ms</span>(<span class="num">1180</span>, <span class="num">0.997</span>)   <span class="com"># = 3.95 ms  (microwave through air, line-of-sight)</span>
+<span class="fn">latency_ms</span>(<span class="num">1180</span>, <span class="num">0.995</span>)   <span class="com"># = 3.96 ms  (hollow-core fiber, also air-filled)</span>
+<span class="fn">latency_ms</span>(<span class="num">1180</span>, <span class="num">0.680</span>)   <span class="com"># = 5.81 ms  (conventional fiber)</span>
+</pre>
+
+  <div class="callout">
+    <strong>Real-world overhead</strong> — those are physics minimums. Real fiber
+    routes aren't straight (they follow railroads, highways); real microwave routes
+    aren't straight either but they're close. Real numbers for Chicago↔Carteret
+    one-way: fiber ~6.5–7 ms, microwave ~4.0–4.5 ms. The ~2.5 ms one-way edge is
+    what funded an entire industry of tower-builders.
+  </div>
+
+  <!-- ===================== §2 ROUTES ===================== -->
+  <h2>2. The famous routes, with real numbers</h2>
+
+  <p>
+    Three corridors dominate the global cross-market HFT business. Each connects
+    venues whose products trade against each other.
+  </p>
+
+  <div class="path">
+    <div class="path-row fiber" style="background: var(--panel-2)">
+      <span class="src">ROUTE</span>
+      <span class="desc">Endpoints (typical data-center pair)</span>
+      <span class="num">Distance</span>
+      <span class="num">~MW one-way</span>
+    </div>
+    <div class="path-row micro">
+      <span class="src">CME↔NJ</span>
+      <span class="desc">Aurora, IL (CME) ↔ Carteret/Secaucus, NJ (NYSE/NASDAQ)</span>
+      <span class="num">~1180 km</span>
+      <span class="num">~4.0 ms</span>
+    </div>
+    <div class="path-row micro">
+      <span class="src">LD4↔FR2</span>
+      <span class="desc">Slough, UK (LSE colo) ↔ Frankfurt (Deutsche Börse)</span>
+      <span class="num">~660 km</span>
+      <span class="num">~2.4 ms</span>
+    </div>
+    <div class="path-row micro">
+      <span class="src">TYO↔SGX</span>
+      <span class="desc">Tokyo ↔ Singapore (over partial water → mixed RF + fiber)</span>
+      <span class="num">~5300 km</span>
+      <span class="num">~25 ms</span>
+    </div>
+  </div>
+
+  <p>
+    The CME↔NJ corridor is the most famous because it carries the relationship
+    between <em>futures</em> (e.g. ES, NQ traded in Aurora) and the <em>cash
+    equities</em> they implicitly track (S&amp;P 500, Nasdaq 100 traded in Carteret).
+    A move in the futures contract gives an informational edge on the cash basket
+    — but only to whoever sees it first.
+  </p>
+
+  <div class="callout warn">
+    <strong>Industry operators (2024–2025):</strong> McKay Brothers and Anova
+    Financial Networks are the dominant common-carrier microwave operators on
+    the major US/EU corridors. BSO, Quincy Data, and Jump Trading (in-house)
+    also operate routes. McKay's published target for Aurora↔Carteret is
+    <strong>&lt;8.00 ms round-trip</strong> end-to-end.
+  </div>
+
+  <!-- ===================== §3 ENGINEERING ===================== -->
+  <h2>3. The engineering — what actually has to be built</h2>
+
+  <h3>Tower spacing and hops</h3>
+  <p>
+    Microwave links are <strong>line-of-sight</strong> — the curvature of the Earth
+    eventually puts the receiver behind the horizon. Practical hop length is
+    40–70 km depending on tower height and terrain. So Chicago↔NJ at 1180 km
+    needs roughly <strong>20–30 hops</strong> in series, each adding tower-side
+    repeater latency (~10s of ns per hop).
+  </p>
+
+  <h3>Frequency bands</h3>
+  <table>
+    <tr><th>Band</th><th>Frequency</th><th>Typical hop</th><th>Bandwidth</th><th>Weather sensitivity</th></tr>
+    <tr><td>6 GHz</td><td>5.9–7.1 GHz</td><td>60–80 km</td><td>~30 Mbps</td><td>Very low (rain fade negligible)</td></tr>
+    <tr><td>11 GHz</td><td>10.7–11.7 GHz</td><td>40–60 km</td><td>~100 Mbps</td><td>Low</td></tr>
+    <tr><td>18 GHz</td><td>17.7–19.7 GHz</td><td>20–40 km</td><td>~300 Mbps</td><td>Moderate (rain fade)</td></tr>
+    <tr><td>80 GHz (E-band)</td><td>71–86 GHz</td><td>5–10 km</td><td>1–10 Gbps</td><td>Severe (atmospheric absorption)</td></tr>
+  </table>
+
+  <p>
+    For HFT, the lower bands (6, 11 GHz) dominate the long-haul backbone because
+    they survive rain. The higher bands (E-band) are used for last-mile in/out of
+    data centers where higher bandwidth is needed and hops are short. The receiver
+    is typically <em>on the roof of the exchange data center</em>, or on a pole
+    next to it — extra meters of fiber inside the building waste nanoseconds.
+  </p>
+
+  <h3>Fresnel zone</h3>
+  <p>
+    Between two microwave antennas there's an ellipsoidal volume — the
+    <strong>Fresnel zone</strong> — that must be roughly 60% clear of obstructions
+    for the link to work. The Fresnel zone is fattest at mid-span. Buildings,
+    trees, and even crops growing in summer can intrude. Tower heights and route
+    planning are designed around this constraint, and an ice storm bending a
+    tower can take a link down for hours.
+  </p>
+
+  <h3>Modulation and the latency↔bandwidth tradeoff</h3>
+  <p>
+    Higher-order modulations (256-QAM, 1024-QAM) carry more bits per symbol but
+    need higher signal-to-noise ratio and add encoding/decoding latency. HFT
+    operators use lower-order modulations (QPSK, 16-QAM) to minimize latency at
+    each hop, at the cost of usable bandwidth.
+  </p>
+
+  <!-- ===================== §4 BANDWIDTH TRADEOFF ===================== -->
+  <h2>4. The fundamental bandwidth tradeoff — and what actually gets sent</h2>
+
+  <p>
+    A full futures-market data feed is <strong>gigabits per second</strong>. A
+    long-haul microwave channel delivers <strong>~100 Mbps</strong>. The math
+    doesn't work — you cannot ship full market data over microwave.
+  </p>
+
+  <p>
+    What HFT firms actually send: <strong>highly compressed signals</strong>
+    — sometimes just a few critical price ticks, sometimes a single bit
+    ("ES went up or down by more than threshold X"). The remote venue's
+    strategy is pre-loaded with everything else and waits for that one bit.
+  </p>
+
+  <p>Illustrative wire-format for a microwave-carried signal:</p>
+
+<pre><span class="com">// 8 bytes total: a tick worth racing across the country</span>
+<span class="kw">struct</span> <span class="ty">__attribute__</span>((packed)) RfSignal {
+    <span class="ty">uint16_t</span> instrument_id;   <span class="com">// 2 bytes — e.g. ES, NQ, CL</span>
+    <span class="ty">int16_t</span>  delta_ticks;     <span class="com">// 2 bytes — price change since last frame</span>
+    <span class="ty">uint32_t</span> ts_remote_ns;    <span class="com">// 4 bytes — sender's hardware timestamp</span>
+};
+</pre>
+
+  <p>
+    Eight bytes. At 100 Mbps that's a transmission time of ~0.6 microseconds for
+    one message, leaving headroom for ~12 million messages per second on the
+    channel — but in practice you send a few thousand per second because the
+    receiver's strategy only needs the headline moves.
+  </p>
+
+  <div class="callout">
+    <strong>Mental model:</strong> microwave isn't a data pipe; it's a
+    <em>messaging channel for compressed alpha</em>. Send the one bit of
+    information that wouldn't fit in your already-known model of the world,
+    and let the receiving end fill in the rest.
+  </div>
+
+  <!-- ===================== §5 ECONOMICS ===================== -->
+  <h2>5. Economics — the common-carrier model and the tier system</h2>
+
+  <p>
+    HFT firms rarely build their own networks. The capex (~$10M+ per route),
+    multi-year tower lease negotiations, and FCC/Ofcom licensing make it a
+    specialty business. Instead, <strong>common-carrier operators</strong> like
+    McKay Brothers and Anova run shared infrastructure and sell access in tiers:
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Premium tier</h4>
+      <p>Lowest latency, guaranteed slot, redundant paths. Used by the largest HFT desks for their primary strategies. Annual cost: undisclosed, but in the seven figures per route.</p>
+    </div>
+    <div class="card">
+      <h4>Standard tier</h4>
+      <p>Same wire, but pays slightly higher serialization delay (microseconds, not nanoseconds — but enough to matter). Smaller desks; secondary strategies.</p>
+    </div>
+    <div class="card">
+      <h4>Backup / fiber blend</h4>
+      <p>Hybrid path that falls back to hollow-core or conventional fiber when the microwave link is degraded (storm, alignment loss). Bandwidth is higher; latency reverts to fiber tier.</p>
+    </div>
+    <div class="card">
+      <h4>Why common-carrier works</h4>
+      <p>The towers, licenses, and amplifiers cost the same whether one firm uses them or twenty do. Charging twenty firms tiered access turns a fixed-cost network into a high-margin business.</p>
+    </div>
+  </div>
+
+  <h3>The hollow-core fiber competitor</h3>
+  <p>
+    Conventional silica fiber slows light to ~0.68c. <strong>Hollow-core fiber</strong>
+    runs light through an air-filled channel surrounded by photonic-crystal walls
+    — speed is ~99% c. Bandwidth is the same as conventional fiber (~hundreds of
+    Gbps), latency is only slightly worse than microwave, and it doesn't care
+    about rain or line-of-sight.
+  </p>
+
+  <p>
+    The current state: hollow-core has been deployed by McKay, DRW, Jump and
+    others for CME↔NJ — about 1 ms slower than microwave one-way but with
+    1000× more bandwidth. Many HFT firms now run <strong>both</strong>: microwave
+    for the bit-of-alpha signal, hollow-core for the bulk market data and the
+    rest of the strategy state.
+  </p>
+
+  <!-- ===================== §6 IN THIS PROJECT ===================== -->
+  <h2>6. In this project</h2>
+
+  <p>
+    This repo has no cross-venue strategy today — the GBM trades a daily-rebalance
+    long-only equity portfolio from a single market-data source (yfinance), so
+    physics of inter-venue latency is irrelevant. But the natural extension is
+    worth flagging.
+  </p>
+
+  <p>
+    A <em>cross-market</em> arbitrage strategy — say, trading the basis between
+    E-mini S&amp;P futures (CME, in Aurora) and the SPY ETF (in Carteret) — would
+    necessarily inhabit Tier 5/6 of the latency ladder. The strategy would need:
+  </p>
+  <ol>
+    <li>Colocation in <em>both</em> Aurora and Carteret.</li>
+    <li>A microwave or hollow-core path between them (lease, not build).</li>
+    <li>An FPGA endpoint on each side speaking a compact signal protocol like the 8-byte struct above.</li>
+    <li>A pre-loaded model on the receiving side that knows what to do when "ES moved by X ticks" arrives.</li>
+  </ol>
+
+  <p>
+    The decision to take that step is <strong>economic before it is technical</strong>.
+    A few million dollars per year of operating cost has to be paid back by the
+    spread captured on the arb. That's a question for the strategy team, not the
+    engineering team.
+  </p>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> none of this is in the code today, nor should
+    it be soon. The point of this lesson is to give you the right mental model
+    for when you read about "microwave HFT" — and for the day this repo eventually
+    sprouts a cross-venue branch.
+  </div>
+
+  <!-- ===================== §7 CONTRASTS ===================== -->
+  <h2>7. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Microwave vs Hollow-core fiber</h4>
+      <p>
+        <strong>Microwave</strong>: ~99.97% c through air, narrow bandwidth
+        (~100 Mbps), weather-sensitive, line-of-sight, cheap per Mbps.
+        <strong>Hollow-core</strong>: ~99% c through air-filled fiber, wide
+        bandwidth (~Gbps), weather-immune, follows fiber routes (not necessarily
+        straight). Most firms now use both.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Microwave vs Millimeter-wave (E-band)</h4>
+      <p>
+        <strong>Microwave</strong> (3–30 GHz): long hops, narrow bandwidth, weather-tolerant.
+        <strong>Millimeter-wave / E-band</strong> (60–80+ GHz): short hops (5–10 km),
+        wide bandwidth (gigabits), severe rain fade. HFT uses E-band for last-mile,
+        microwave for long-haul.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Latency vs Bandwidth (RF specifically)</h4>
+      <p>
+        Microwave gives you the lowest latency available <em>but</em> the smallest
+        usable bandwidth. Fiber gives you the highest bandwidth <em>but</em>
+        slower light. The HFT solution: send tiny signals over microwave, send
+        bulk data over hollow-core fiber, run both in parallel.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Common-carrier vs Private link</h4>
+      <p>
+        <strong>Common-carrier</strong> (McKay, Anova): shared towers, sold in
+        tiers, multiple HFT firms on the same wire. <strong>Private link</strong>:
+        a single firm owns the towers and the licenses. The largest desks
+        (Jump, Citadel) sometimes own private routes; most rent from a carrier.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Line-of-sight vs Tropospheric scatter</h4>
+      <p>
+        <strong>Line-of-sight</strong>: receiver must see the transmitter
+        directly; Earth's curvature limits hops. HFT exclusively uses this.
+        <strong>Tropo scatter</strong>: bounce signal off the upper atmosphere
+        for longer hops; much higher latency, never used in HFT.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Refractive index vs Group velocity</h4>
+      <p>
+        <strong>Refractive index</strong> tells you the <em>phase</em> velocity
+        of light in a medium. <strong>Group velocity</strong> is what carries
+        information and is what matters for latency. In standard fiber they
+        track closely; in exotic media (hollow-core, slow-light fibers) they
+        can diverge.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §8 QUIZ ===================== -->
+  <h2>8. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. The microwave Chicago↔NJ link beats conventional fiber by ~2.5 ms one-way for a single reason at the physics level. What is it?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Bandwidth is actually LOWER on microwave — typically ~100 Mbps vs ~hundreds of Gbps on fiber. The advantage is latency, not bandwidth.">Microwave links carry more bandwidth than fiber, so packets transmit faster.</li>
+      <li data-correct="true"  data-why="Right. Conventional silica fiber has refractive index ~1.47, so light travels at ~0.68c — about 204,400 km/s. Air has index ~1.0003, so microwaves travel at ~99.97% c. Over 1180 km, that's roughly 2 ms saved by the medium alone, plus another ~0.5 ms because line-of-sight routes are straighter than fiber routes.">Conventional fiber has refractive index ~1.47 (~0.68c), while microwave travels through air at ~0.9997c — the medium itself is the bottleneck.</li>
+      <li data-correct="false" data-why="There's no Earth-curvature shortcut at this scale. The microwave route is line-of-sight which is straighter than fiber but not curvature-corrected.">Microwave signals follow the curvature of the Earth shorter than fiber.</li>
+      <li data-correct="false" data-why="Exchanges process orders the same way regardless of how they arrived. The latency advantage is in transit between Chicago and New Jersey, not at either endpoint.">Exchanges in Carteret prioritize processing for microwave-delivered packets.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. Why is the data sent over a long-haul microwave link typically a few bytes per message rather than full market data?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="It's not an FCC rule. The constraint is throughput vs latency in radio engineering — higher modulation rates trade more bits per symbol for slower decode and worse SNR margins.">Because the FCC regulates payload sizes on commercial microwave links.</li>
+      <li data-correct="true"  data-why="Right. A long-haul HFT microwave channel delivers around 100 Mbps usable. Full futures market data is gigabits per second. You can't fit it. The solution is to send a compressed signal (sometimes a single bit: 'ES moved by X') and pre-load the receiving strategy with everything else it needs.">Long-haul microwave delivers ~100 Mbps; full market data is gigabits. You can only ship signals, not full feeds.</li>
+      <li data-correct="false" data-why="Receiver-side decoding adds nanoseconds at most. The dominant constraint is link bandwidth, not decoder speed.">Because the receiver's decoder can't process more than 8 bytes per message in real time.</li>
+      <li data-correct="false" data-why="Encryption isn't the binding constraint; the bandwidth physics of the channel is. Some HFT links don't even encrypt because the message contents are public reference prices.">Because the encryption overhead per message limits the payload size.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Hollow-core fiber is ~99% c — only slightly slower than microwave (99.97% c). Why do HFT firms still pay for microwave at all?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Hollow-core fiber is widely deployed by McKay, DRW, Jump, and others on CME↔NJ specifically. Availability is not the issue.">Hollow-core fiber hasn't actually been deployed yet on the major HFT corridors.</li>
+      <li data-correct="true"  data-why="Right. The Chicago↔NJ one-way difference between microwave (~4.0 ms) and hollow-core (~5.0 ms) is roughly 1 ms — a small fraction of fiber's 6.5 ms but a huge edge at HFT scales. At market-data rates of 100k+ messages/sec, 1 ms is thousands of ticks. Firms run BOTH paths: microwave for the alpha signal, hollow-core for the wider bandwidth.">Even ~1 ms one-way difference between microwave and hollow-core matters at HFT scales; firms typically run both paths in parallel.</li>
+      <li data-correct="false" data-why="Both technologies are sold in tiered pricing models. Cost isn't structurally simpler for microwave; if anything microwave has higher operating cost per Mbps.">Microwave is structurally cheaper per route than hollow-core fiber.</li>
+      <li data-correct="false" data-why="Hollow-core fiber is widely used for trading data; bulk market data over hollow-core is now standard practice on CME↔NJ.">Hollow-core fiber is reserved for non-trading data only.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. Why are long-haul HFT microwave links built in the 6 and 11 GHz bands rather than 80 GHz, even though 80 GHz carries more bandwidth?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="80 GHz E-band IS commercially licensed and widely available for data-center interconnect. The constraint is range and weather, not licensing.">Because 80 GHz isn't commercially licensed in the US.</li>
+      <li data-correct="true"  data-why="Right. At 80 GHz, atmospheric absorption (especially the oxygen-absorption band near 60 GHz, but real attenuation at 80 GHz too) and rain fade limit practical hops to 5–10 km. For a 1180 km route that would need ~200 hops vs ~25 hops at 11 GHz. Each hop adds latency and a failure point. Lower bands give you longer reliable hops; 80 GHz is reserved for last-mile in/out of the colo.">At 80 GHz, atmospheric absorption and rain fade limit practical hops to 5–10 km, requiring hundreds of hops on a long route. Lower-frequency bands allow 40–70 km hops and survive weather.</li>
+      <li data-correct="false" data-why="Antenna size and gain are concerns at higher frequencies but the binding constraint for long-haul is atmospheric absorption and weather, not antenna engineering.">Because 80 GHz requires antennas larger than can be mounted on towers.</li>
+      <li data-correct="false" data-why="Radar interference is a non-issue at 80 GHz versus 6 GHz; if anything the lower bands are more crowded by radar and incumbents.">Because 6 GHz signals can't be jammed by weather radar.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. You want to extend this repo from a single-venue daily GBM into a cross-venue (CME futures ↔ NYSE equities) arbitrage strategy. Which infrastructure decision dominates?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="A faster GBM model wouldn't matter; the strategy lives or dies on the cross-venue latency edge. The model is the secondary concern.">Train a much faster gradient-boosting model for next-tick prediction.</li>
+      <li data-correct="true"  data-why="Right. Cross-market arbitrage is a Tier 5/6 latency strategy by definition. You must colocate at BOTH venues, lease a low-latency path between them (microwave for the signal, hollow-core for bulk data), and have an FPGA at each endpoint that can react in nanoseconds. Skip any of these and you're systematically slower than the desks that have them, which means you'll only get adverse fills.">Colocate at both venues, lease a microwave + hollow-core path between them, and put an FPGA endpoint on each side that speaks a compact signal protocol.</li>
+      <li data-correct="false" data-why="A cloud region in Chicago might shave a few µs off your existing system but doesn't help with the Aurora↔Carteret leg, which is the binding constraint.">Move the Python backtests to a cloud region in Chicago for proximity.</li>
+      <li data-correct="false" data-why="Public exchange APIs can't deliver the latency required; you'd be at multi-ms behind firms that have the dedicated infrastructure. The arb would not be viable on public APIs.">Subscribe to both venues' public REST APIs over HTTPS.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §9 SCENARIOS ===================== -->
+  <h2>9. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A summer ice storm in Pennsylvania bends a microwave tower 2 degrees out of alignment. The link still passes signal but with high error rate. What happens to dependent strategies?</summary>
+    <p>
+      The link's forward error correction will compensate up to a point — but
+      retransmits and dropped messages add latency, and the receiver-side
+      strategy will see inconsistent state ("I got the alpha bit for some
+      seconds, missed it for others"). Most HFT desks running on a primary
+      microwave link have an automatic failover: if error rate or latency
+      crosses a threshold, traffic re-routes to a secondary microwave path or
+      to hollow-core fiber, accepting the ~1 ms penalty. The strategy
+      meanwhile scales itself down or pauses while the failover stabilizes.
+      Tower-alignment alerts are a real operational discipline; carriers like
+      McKay treat them as priority pages.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. A teammate proposes "let's bypass McKay and build our own microwave route from Aurora to Carteret." Walk through the major obstacles before they spend any money.</summary>
+    <p>
+      Five hard problems, roughly in cost order. (1) <strong>Tower siting</strong>:
+      25+ tower sites must be leased or built across multiple states with
+      land-use approvals — years of permitting per site. (2) <strong>FCC
+      licensing</strong>: each microwave hop requires individual FCC frequency
+      authorization; the band is already heavily licensed and incumbents have
+      priority. (3) <strong>Capex</strong>: ~$5–10M for the towers and amplifiers
+      alone, before integration. (4) <strong>Operations</strong>: 24/7 alignment
+      monitoring, weather response, repair crews; carrier-grade ops is a
+      headcount problem. (5) <strong>Time-to-market</strong>: 18–36 months
+      assuming no FCC delays. Conclusion: unless you're at the very largest
+      desk (Jump scale) and have a multi-year horizon, renting from McKay or
+      Anova is structurally cheaper, faster, and operationally simpler.
+      The build-it-yourself math almost never works.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. You sit at a desk with a Premium-tier McKay subscription on CME↔Carteret. A new firm shows up paying for the same Premium tier. What does that mean for your alpha?</summary>
+    <p>
+      You now share the link's queue with another fast participant who sees
+      the same signal at the same time. The microwave link itself isn't
+      slower, but the <em>population of equally-fast competitors</em> just
+      grew by one. Pre-trade signal value erodes accordingly — what used to
+      be your alpha is now a tied race with the new entrant, with the venue's
+      matching engine being the tiebreaker. Mitigation paths: (a) move
+      faster <em>at the endpoints</em> via FPGA tick-to-trade and queue-priority
+      strategies, (b) move to a more exclusive private microwave route if you
+      can justify the capex, or (c) shift to strategies whose alpha doesn't
+      live on first-fill. The common-carrier model is great for getting onto
+      the link cheaply; the downside is that everyone else on it is just as
+      well-positioned as you are.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next in your queue: <strong>DMA (Direct Market Access)</strong> — both the
+    trading sense (sponsored access to exchanges, regulatory implications) and
+    the PCIe sense (how FPGAs and CPUs share data), since the same acronym
+    refers to two very different concepts in HFT engineering.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

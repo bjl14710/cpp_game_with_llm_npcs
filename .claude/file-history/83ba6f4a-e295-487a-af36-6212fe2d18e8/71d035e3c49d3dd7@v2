@@ -1,0 +1,19 @@
+"""Extract bookmarks (chapter/section outline) from the TI PDFs."""
+import sys
+from pypdf import PdfReader
+
+def walk(reader, outline, depth=0, max_depth=2):
+    for item in outline:
+        if isinstance(item, list):
+            walk(reader, item, depth + 1, max_depth)
+        elif depth <= max_depth:
+            try:
+                page = reader.get_destination_page_number(item) + 1
+            except Exception:
+                page = "?"
+            print(f"{'  ' * depth}{item.title}  [p{page}]")
+
+path = sys.argv[1]
+reader = PdfReader(path)
+print(f"pages: {len(reader.pages)}")
+walk(reader, reader.outline)

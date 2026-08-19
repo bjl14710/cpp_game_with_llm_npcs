@@ -1,0 +1,105 @@
+# Instrumentation #2: What OFI + Microprice Actually Cost on the Flat Book
+
+## Summary
+
+Wiring per-update OFI/microprice signals (`MicrostructureEngine`) onto the
+flat-array book and running the **real AAPL golden day** (2019-12-30,
+1,519,871 filtered ITCH messages) showed that the signal layer — not the
+book — dominates the per-event cost, and that essentially all of it is the
+`top_of_book()` linear scan, whose cost is proportional to the book's
+declared price range. The book update itself remains ~31 ns; the signal
+emit is ~70,000 ns. The fix (incremental best-price tracking) is documented
+below as the next optimization, with the measurement that justifies it.
+
+## Numbers
+
+Platform: Apple Silicon macOS (Darwin 23.6), Apple clang 16.0.0, Release
+build. Full-day timings measured through `signals_cpp.events_from_file`
+(single pass over the 45 MB filtered day, C++ parse + engine + columnar
+conversion; wall clock).
+
+| Measurement | Result |
+|---|---|
+| Bare flat book, synthetic 100k adds (`bench_main_flat`) | **30.9 ns/message** mean |
+| Book + engine, real day, bounds $280–$300 (200,000 ticks) | 109.7 s → **72,568 ns/event** |
+| Book + engine, real day, bounds $285–$298.50 (135,000 ticks) | 74.4 s → **49,212 ns/event** |
+
+The two engine runs differ **only** in the declared price range. Cost ratio
+72,568 / 49,212 = **1.47**; tick-range ratio 200,000 / 135,000 = **1.48**.
+Per-event cost is linear in the tick range — the O(range) scan is
+effectively 100% of the cost, dwarfing parsing, book maintenance, OFI/
+microprice arithmetic, and the Python columnar conversion combined.
+
+## Why: `emit()` runs two linear scans per update
+
+`MicrostructureEngine::emit()` calls `OrderBookFlat::top_of_book()` after
+every book-affecting message. That method scans the bid array downward from
+the top of the range and the ask array upward from the bottom
+(`cpp/itch/order_book_flat.hpp:86-105`). With bounds $280–$300 and best bid
+near $289.75, the bid scan alone walks ~100,000 slots per event. The scan
+was designed for the *benchmark* access pattern (top-of-book queried
+rarely); the signal engine queries it on **every update**, turning an
+acceptable O(range) into the hot path.
+
+`docs/perf/01-flat-book.md` promised "best-bid scan is a cache-friendly
+linear sweep over a small array" — true at 30,001 ticks for a $3 range, no
+longer true at 200,000 ticks when the sweep runs 1.5M times.
+
+## The follow-up optimization (measured justification, not yet built)
+
+Track `best_bid_idx_` / `best_ask_idx_` incrementally: an add at a better
+price moves the cached index directly (O(1)); a removal at the best level
+repairs by scanning only from the previous best inward — short in practice
+because the next live level is nearby. Expected effect: per-event cost
+drops from ~70 µs toward the sub-µs regime (parse + book + arithmetic),
+i.e. a ~100× wall-clock improvement for full-day research loads.
+Deliberately deferred: it changes book internals shared with the latency
+benchmarks, so it should land as its own before/after write-up (03).
+
+## Real-Data Sanity Checks (bounds $280–$300)
+
+- 1,512,175 events from 1,519,871 messages — ~1 event per book-affecting
+  message, as designed; **1** update skipped for a one-sided book.
+- `book_error_count` = 119,567 (~8% of messages): resting orders priced
+  outside the declared bounds (pre/post-market extremes) are rejected at
+  add, and their later cancels/deletes then miss too. Safe for top-of-book
+  signals — a $250 bid can never be the touch when the book trades $286–298
+  — but it is why bounds must generously cover the *traded* range.
+- Microprice stayed within 285.66–297.94, inside the day's traded range.
+- Faithful book reconstruction required handling ITCH `'X'` partial
+  cancels; skipping them left phantom depth that permanently crossed the
+  book (fixed in `feature/micro-3-signals-bridge`, see the two
+  `MicroEngine` cancel tests).
+- Kyle's λ on regular hours: **1.48×10⁻⁵ $/share of OFI**, r² = 0.61 over
+  23,347 one-second bars; **78/78** five-minute windows fit with adequate
+  observations, per-window λ between 4.8×10⁻⁶ and 2.6×10⁻⁵ — magnitudes and
+  explanatory power consistent with Cont–Kukanov–Stoikov (2014).
+
+## What This Teaches About HFT Systems
+
+1. **Instrumentation has a cost, and it concentrates.** Adding "one cheap
+   read" per event turned a 31 ns update path into a 72 µs one. Measure the
+   observer, not just the observed.
+2. **Complexity constants hide in domain parameters.** O(range) was fine at
+   30k ticks and is 6.7× worse at 200k — the data structure didn't change,
+   the instrument's declared range did.
+3. **Vary the parameter, confirm the model.** One extra run with tighter
+   bounds turned "we suspect the scan" into "the scan is 100% of the cost,
+   cost ∝ ticks, r ≈ 1.0."
+
+## Commands to Reproduce
+
+```bash
+./scripts/fetch_itch_sample.sh AAPL        # golden day + fixture
+./_build/cpp/itch/bench_main_flat          # bare-book baseline
+python - <<'PY'
+import sys, time; sys.path.insert(0, "src")
+import signals_cpp
+for lo, hi in [(2_800_000, 3_000_000), (2_850_000, 2_985_000)]:
+    t0 = time.perf_counter()
+    raw = signals_cpp.events_from_file("data_cache/itch/AAPL-12302019.itch", lo, hi)
+    dt = time.perf_counter() - t0
+    print(f"{hi-lo:,} ticks: {dt:.1f}s, {dt/len(raw['timestamp_ns'])*1e9:.0f} ns/event")
+PY
+pytest tests/test_micro_events.py tests/test_kyles_lambda.py
+```

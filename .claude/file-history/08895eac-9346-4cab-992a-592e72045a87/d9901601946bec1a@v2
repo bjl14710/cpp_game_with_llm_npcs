@@ -1,0 +1,62 @@
+// Market-making sim tests (SCAFFOLD — every case GTEST_SKIPs until built).
+// One stub per acceptance criterion in
+// .claude/plans/avellaneda-stoikov-mm-sim.md (steps 1-4).
+// TODO(mm-1..4): replace the skips with real assertions.
+
+#include <gtest/gtest.h>
+#include "../itch/mm_simulator.hpp"
+#include "../itch/order_book_queue.hpp"
+#include "../itch/shadow_order.hpp"
+
+// ── OrderBookQueue (mm-1) ────────────────────────────────────────────────────
+
+TEST(OrderBookQueue, TopOfBookParityWithFlatBook) {
+    // Same message sequence into OrderBookQueue and OrderBookFlat ->
+    // identical top_of_book (mirrors OrderBookFlat's parity test vs the
+    // std::map book).
+    GTEST_SKIP() << "TODO(mm-1)";
+}
+
+TEST(OrderBookQueue, LevelQueueIsFIFOByArrival) {
+    // Three adds at one price -> level_queue order matches arrival order;
+    // executions consume from the front, partial front fill decrements
+    // in place.
+    GTEST_SKIP() << "TODO(mm-1)";
+}
+
+// ── ShadowOrder (mm-2) ───────────────────────────────────────────────────────
+
+TEST(ShadowOrder, FillsOnlyAfterAheadQueueEmpties) {
+    // Plan's hand-computed case: our 100-sh bid behind 300 sh; executions
+    // of 250 then 100 -> we fill exactly 50.
+    GTEST_SKIP() << "TODO(mm-2)";
+}
+
+TEST(ShadowOrder, CancelAheadPromotesQueuePosition) {
+    // Same setup, but 100 ahead-shares cancel before the trades -> we
+    // fill 100 instead of 50.
+    GTEST_SKIP() << "TODO(mm-2)";
+}
+
+// ── A-S quoter + latency queue (mm-3) ───────────────────────────────────────
+
+TEST(ASQuoter, PositiveInventorySkewsReservationBelowMid) {
+    // Sign convention pin: q > 0 -> r < mid (and symmetric) — the
+    // inventory-aversion direction can't silently flip.
+    GTEST_SKIP() << "TODO(mm-3)";
+}
+
+TEST(LatencyQueue, NoActionAppliesBeforeTriggerTimePlusDelay) {
+    // Actions triggered at tape time t take effect at the first event with
+    // timestamp >= t + latency_ns; actions past session end are dropped
+    // and counted.
+    GTEST_SKIP() << "TODO(mm-3)";
+}
+
+// ── Simulator (mm-4) ─────────────────────────────────────────────────────────
+
+TEST(MMSimulator, DeterministicPnLOnIdenticalParams) {
+    // Two runs over the same buffer with identical MMParams produce
+    // bit-identical sample series.
+    GTEST_SKIP() << "TODO(mm-4)";
+}

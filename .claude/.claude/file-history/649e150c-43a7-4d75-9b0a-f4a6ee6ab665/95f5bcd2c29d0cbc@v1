@@ -1,0 +1,151 @@
+# CLAUDE.md — HFT Practice
+
+Algorithmic trading research platform: ML-powered next-day return predictions, walk-forward backtesting, risk-aware portfolio allocation, and multi-platform delivery (desktop GUI, FastAPI web app, iOS app, Docker, FPGA).
+
+---
+
+## Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Language | Python 3.12+, C++17 |
+| Package manager | `uv` (not pip directly — always use `uv sync` / `uv run`) |
+| ML | scikit-learn `GradientBoostingRegressor`, ONNX Runtime (C++) |
+| Data | yfinance (OHLCV), Alpha Vantage (news sentiment) |
+| Web | FastAPI + Jinja2 (`webapp/`), static SaaS site (`web/`) |
+| Desktop GUI | Tkinter (`gui_app.py`) |
+| Mobile | React Native / Expo (`ios_app/`) |
+| Execution | robin-stocks → Robinhood (default dry-run) |
+| Hardware | VHDL / Vivado (`fpga/`) |
+| Containerization | Docker + docker-compose |
+
+---
+
+## Entry Points
+
+All commands are available after `uv sync`:
+
+```bash
+paper-backtest      # paper_trading_sim:main   — train GBM + backtest
+walkforward-sim     # walkforward_sim:main     — walk-forward simulation
+predict-next        # predict_next:main        — next-day prediction + allocation
+analyze-equity      # analyze_equity:main      — Sharpe, CAGR, drawdown metrics
+news-fetch          # news_fetch:main          — pull Alpha Vantage news
+news-features       # news_features:main       — engineer sentiment features
+gui-hft             # gui_app:main             — Tkinter desktop GUI
+web-hft             # webapp.main:run          — FastAPI web server (port 8000)
+universe-builder    # scripts.universe_builder — scrape S&P 500 / NASDAQ tickers
+rh-exec             # scripts.robinhood_executor — submit orders (dry-run default)
+refresh-tickers     # refresh_tickers:main     — refresh ticker universe files
+```
+
+---
+
+## Development Setup
+
+```bash
+git clone https://github.com/bjl14710/HFT_practice.git
+cd HFT_practice
+uv sync                        # installs all deps into .venv
+uv sync --extra dev            # also installs pytest, pytest-cov, python-docx
+source .venv/bin/activate      # optional — uv run <cmd> also works
+```
+
+Copy and populate the Docker env file before running containers:
+
+```bash
+cp .env.docker.example .env.docker
+# edit .env.docker — add ALPHAVANTAGE_API_KEY, WEB_AUTH_USER, WEB_AUTH_PASS
+docker compose up -d
+```
+
+---
+
+## Testing
+
+```bash
+uv run pytest tests/ -v              # full suite
+uv run pytest tests/test_news_features.py -v   # single file
+```
+
+- All new Python functions need at least one test in `tests/`.
+- Do not hit live APIs in tests — mock `requests.get` and `yfinance.download`.
+- C++ tests live in `tests/cpp/`.
+
+---
+
+## Project Layout (key directories)
+
+```
+paper_trading_sim.py      # GBM training + backtest engine
+walkforward_sim.py        # rolling walk-forward, risk overlay, portfolio optimization
+predict_next.py           # inference + mean-variance allocation output
+news_fetch.py             # Alpha Vantage ingestion
+news_features.py          # sentiment feature engineering
+analyze_equity.py         # performance metrics
+gui_app.py                # Tkinter GUI
+
+scripts/                  # universe_builder, robinhood_executor, clean_tickers_file
+webapp/                   # FastAPI app (main.py + Jinja2 templates)
+web/                      # SaaS static site (landing, login, signup, pricing, dashboard)
+gradient_boosting/        # C++ ONNX inference + model_to_onnx.py
+fpga/                     # VHDL synthesis pipeline
+ios_app/                  # React Native / Expo mobile app
+investor_app/             # Investor-facing frontend
+
+models/                   # saved .joblib model bundles
+data/                     # OHLCV CSVs cached per-ticker
+tickers/                  # universe text files (one ticker per line)
+results/                  # backtest output CSVs
+docs/                     # DEVELOPER_GUIDE.md, README_NEWS.md
+tests/                    # pytest suite + cpp/ tests
+```
+
+---
+
+## Model Bundles
+
+Saved with `joblib` as a dict:
+
+```python
+{ "model": GradientBoostingRegressor, "features": ["close", "ret_1d", ...] }
+```
+
+The `features` list defines exact column order at inference. Always retrain after changing `build_features`. Best model to date: `model_bundle_11_14_2025_sap_500_2016_to_2020.joblib` (~27.19% annualized return, tested 2020–2025 out-of-sample).
+
+---
+
+## SaaS Website (`web/`)
+
+Static HTML/CSS/JS — no build step. Run locally with:
+
+```bash
+cd web && python3 -m http.server 8787
+```
+
+Auth is localStorage-only (demo). Download links in `dashboard.html` are placeholders — search with:
+
+```bash
+grep -n 'href="#"\|PLACEHOLDER' web/dashboard.html
+```
+
+See `web/README.md` for the full reference.
+
+---
+
+## Important Conventions
+
+- **Package management:** always `uv`, never bare `pip install`.
+- **Robinhood execution:** `rh-exec` is dry-run by default. Pass `--no_dry_run` explicitly to place real orders.
+- **Environment variables:** `ALPHAVANTAGE_API_KEY`, `WEB_AUTH_USER`, `WEB_AUTH_PASS`, `RH_USERNAME`, `RH_PASSWORD`, `RH_MFA`. Never commit `.env.docker`.
+- **ONNX re-export:** after changing `build_features`, re-export the model with `python gradient_boosting/model_to_onnx.py` and rebuild the C++ binary.
+- **Ticker files:** one symbol per line, no header. Universe files live in `tickers/`.
+- **GUI:** `MPLBACKEND=Agg` must be set in Docker (already in `docker-compose.yml`) to prevent Tkinter/matplotlib conflicts.
+
+---
+
+## Docs
+
+- `docs/DEVELOPER_GUIDE.md` — architecture, all modules, C++, FPGA, Docker, iOS, SaaS site
+- `docs/README_NEWS.md` — news pipeline deep-dive
+- `web/README.md` — SaaS site file-by-file reference

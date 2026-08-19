@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Fetch the pinned "golden" Nasdaq TotalView-ITCH 5.0 sample day and filter it
+# to a single symbol (default AAPL) for the microstructure-signals milestone.
+#
+# Golden dataset (see .claude/plans/microstructure-signals.md):
+#   https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/12302019.NASDAQ_ITCH50.gz
+#   3,524,013,057 bytes compressed (~9 GB decompressed, full exchange day).
+#
+# This script NEVER processes the unfiltered file: decompression is always
+# piped straight into itch_filter so the multi-GB day never lands on disk
+# uncompressed. Outputs:
+#   data_cache/itch/<SYMBOL>-12302019.itch          filtered day (local only)
+#   tests/fixtures/<symbol>-12302019-first8mb.itch  committed test fixture
+#
+# Usage: ./scripts/fetch_itch_sample.sh [SYMBOL]     (default AAPL)
+set -euo pipefail
+
+ITCH_DATE="12302019"
+URL="https://emi.nasdaq.com/ITCH/Nasdaq%20ITCH/${ITCH_DATE}.NASDAQ_ITCH50.gz"
+EXPECTED_BYTES=3524013057
+FIXTURE_BYTES=8388608   # 8 MiB — big enough to exercise the parser, small enough to commit
+
+SYMBOL="${1:-AAPL}"
+SYMBOL_LC=$(printf '%s' "$SYMBOL" | tr '[:upper:]' '[:lower:]')
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CACHE_DIR="$REPO_ROOT/data_cache/itch"
+GZ="$CACHE_DIR/${ITCH_DATE}.NASDAQ_ITCH50.gz"
+OUT="$CACHE_DIR/${SYMBOL}-${ITCH_DATE}.itch"
+FIXTURE="$REPO_ROOT/tests/fixtures/${SYMBOL_LC}-${ITCH_DATE}-first8mb.itch"
+FILTER="$REPO_ROOT/_build/cpp/itch/itch_filter"
+
+mkdir -p "$CACHE_DIR" "$REPO_ROOT/tests/fixtures"
+
+# --- 1. Download (resumable) -------------------------------------------------
+echo "==> Downloading $URL"
+echo "    (${EXPECTED_BYTES} bytes; curl resumes if partially present)"
+curl -sS -L -C - -o "$GZ" "$URL" || {
+    # curl exits 22/33 variants when the file is already complete and the
+    # server rejects the out-of-range resume; verify by size below.
+    true
+}
+
+ACTUAL=$(stat -f%z "$GZ" 2>/dev/null || stat -c%s "$GZ")
+if [ "$ACTUAL" -ne "$EXPECTED_BYTES" ]; then
+    echo "ERROR: size mismatch: got $ACTUAL, expected $EXPECTED_BYTES bytes." >&2
+    echo "       Re-run to resume the download." >&2
+    exit 1
+fi
+echo "==> Download complete and size-verified."
+
+# Record the checksum on first success; verify on later runs.
+SHA_FILE="$GZ.sha256"
+if [ -f "$SHA_FILE" ]; then
+    echo "==> Verifying SHA-256 against $(basename "$SHA_FILE")"
+    (cd "$CACHE_DIR" && shasum -a 256 -c "$(basename "$SHA_FILE")")
+else
+    echo "==> Recording SHA-256 (first run)"
+    (cd "$CACHE_DIR" && shasum -a 256 "$(basename "$GZ")" > "$(basename "$SHA_FILE")")
+    cat "$SHA_FILE"
+fi
+
+# --- 2. Build the filter if needed -------------------------------------------
+if [ ! -x "$FILTER" ]; then
+    echo "==> Building itch_filter"
+    cmake -S "$REPO_ROOT" -B "$REPO_ROOT/_build" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$REPO_ROOT/_build" --target itch_filter
+fi
+
+# --- 3. Decompress-and-filter in one pass ------------------------------------
+echo "==> Filtering to ${SYMBOL} (streaming; the full day never hits disk uncompressed)"
+gunzip -c "$GZ" | "$FILTER" "$SYMBOL" \
+    --fixture "$FIXTURE" --fixture-bytes "$FIXTURE_BYTES" > "$OUT"
+
+echo "==> Done."
+echo "    filtered day : $OUT ($(du -h "$OUT" | cut -f1))"
+echo "    test fixture : $FIXTURE ($(du -h "$FIXTURE" | cut -f1))"

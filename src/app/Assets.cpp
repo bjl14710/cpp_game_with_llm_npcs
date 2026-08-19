@@ -1,9 +1,14 @@
 #include "Assets.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
+#include "raymath.h"
+
+#include "CharacterParts.hpp"
 #include "FaceTexture.hpp"
+#include "json.hpp"
 
 namespace llm_npc {
 
@@ -65,12 +70,104 @@ void main() {
 }
 )";
 
+// Character cel shader (issue #138): 3-band toon diffuse composed with the
+// SAME warm-tint + distance-fog stage as kFogFragmentShader, in one program.
+// The face normal comes from screen-space derivatives of the world position
+// (flat-faceted banding) rather than vertex normals, because the rlgl batch
+// only fills normals for cubes — spheres/cylinders (most composite parts)
+// push none. Derivative normals band EVERY character surface identically:
+// batch primitives, skinned meshes, and the #139 part meshes. Same vertex
+// stage as fog; only the fragment differs.
+constexpr const char* kCelFragmentShader = R"(
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragPosition;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+uniform vec3 cameraPos;
+uniform vec4 fogColor;
+uniform float fogDensity;
+uniform float lightLevel;
+out vec4 finalColor;
+void main() {
+    vec4 texel = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
+    // Flat face normal; fixed sun direction. No normalize(cross) on
+    // degenerate fragments: guard keeps billboards/decals fully lit.
+    vec3 dx = dFdx(fragPosition);
+    vec3 dy = dFdy(fragPosition);
+    vec3 n = cross(dx, dy);
+    float ndl = 1.0;
+    if (dot(n, n) > 1e-12) {
+        ndl = max(dot(normalize(n), normalize(vec3(0.4, 0.8, 0.45))), 0.0);
+    }
+    // Quantize into 3 bands: shadow floor, mid tone, full light. The floor
+    // stays readable (0.70) — the pack's baked outfit colors are already
+    // dark, and a character facing away from the sun must not go murky.
+    float band = ndl < 0.25 ? 0.70 : (ndl < 0.65 ? 0.87 : 1.0);
+    vec3 warm = texel.rgb * band * vec3(1.06, 1.0, 0.92) * lightLevel;
+    float d = length(cameraPos - fragPosition) * fogDensity;
+    float fog = 1.0 - exp(-d * d);
+    finalColor = vec4(mix(warm, fogColor.rgb, fog), texel.a);
+}
+)";
+
+// Inverted-hull outline for MESH characters (the model counterpart of the
+// #103 primitive hull): the vertex stage pushes each vertex out along its
+// world-space normal by a fixed world width; drawn with front faces culled
+// so only the rim survives. Meshes have real normals (unlike the batch),
+// which is exactly why this pass is mesh-only.
+constexpr const char* kOutlineVertexShader = R"(
+#version 330
+in vec3 vertexPosition;
+in vec3 vertexNormal;
+uniform mat4 matModel;
+uniform mat4 matNormal;
+uniform mat4 matView;
+uniform mat4 matProjection;
+uniform float outlineWidth;
+out vec3 fragPosition;
+void main() {
+    vec3 wp = vec3(matModel * vec4(vertexPosition, 1.0));
+    vec3 wn = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));
+    fragPosition = wp + wn * outlineWidth;
+    gl_Position = matProjection * matView * vec4(fragPosition, 1.0);
+}
+)";
+
+// Solid rim color, fading into fog with distance so far-off outlines melt
+// into the horizon along with the geometry they wrap.
+constexpr const char* kOutlineFragmentShader = R"(
+#version 330
+in vec3 fragPosition;
+uniform vec3 cameraPos;
+uniform vec4 fogColor;
+uniform float fogDensity;
+uniform vec4 outlineColor;
+out vec4 finalColor;
+void main() {
+    float d = length(cameraPos - fragPosition) * fogDensity;
+    float fog = 1.0 - exp(-d * d);
+    finalColor = vec4(mix(outlineColor.rgb, fogColor.rgb, fog), 1.0);
+}
+)";
+
 }  // namespace
 
 Assets::Assets(const std::string& assetsDir) {
     // Mood emotes are procedural — baked here regardless of downloads.
     for (int i = 0; i < 6; ++i) {
         faces_[i] = FaceTexture::bake(static_cast<NpcFace>(i));
+    }
+    // The stylized decal set too (issue #140): every creator face pick x
+    // every mood, a few rect draws each — negligible at boot.
+    for (int e = 0; e < FaceTexture::kEyeStyleCount; ++e) {
+        for (int m = 0; m < FaceTexture::kMouthStyleCount; ++m) {
+            for (int f = 0; f < 6; ++f) {
+                stylizedFaces_[e][m][f] =
+                    FaceTexture::bakeStylized(e, m, static_cast<NpcFace>(f));
+            }
+        }
     }
 
     // Atmosphere shader first, so every model loaded below can adopt it.
@@ -86,7 +183,7 @@ Assets::Assets(const std::string& assetsDir) {
         // density is tuned so the plaza (~40 units) stays crisp and the far
         // city edge (~150+) visibly hazes.
         const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
-        const float density = 0.006f;
+        const float density = kFogDensity;  // single source: Assets.hpp (issue #170)
         const float light = 1.f;
         SetShaderValue(fogShader_, fogColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogDensity"),
@@ -94,6 +191,54 @@ Assets::Assets(const std::string& assetsDir) {
         SetShaderValue(fogShader_, fogLightLoc_, &light, SHADER_UNIFORM_FLOAT);
     } else {
         std::cerr << "[llm_npc] fog shader failed to compile — plain look\n";
+    }
+
+    // Character cel shader (issue #138): shares the fog vertex stage and
+    // uniform names, so the renderer drives fog + cel identically. Failure
+    // degrades characters to the fog shader — never the default material.
+    celShader_ = LoadShaderFromMemory(kFogVertexShader, kCelFragmentShader);
+    celLoaded_ = IsShaderValid(celShader_);
+    if (celLoaded_) {
+        celCameraLoc_ = GetShaderLocation(celShader_, "cameraPos");
+        celColorLoc_ = GetShaderLocation(celShader_, "fogColor");
+        celLightLoc_ = GetShaderLocation(celShader_, "lightLevel");
+        const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
+        const float density = kFogDensity;  // single source: Assets.hpp (issue #170)
+        const float light = 1.f;
+        SetShaderValue(celShader_, celColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(celShader_, GetShaderLocation(celShader_, "fogDensity"),
+                       &density, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(celShader_, celLightLoc_, &light, SHADER_UNIFORM_FLOAT);
+    } else {
+        std::cerr << "[llm_npc] cel shader failed to compile — characters keep "
+                     "the fog look\n";
+    }
+
+    // Mesh outline shader: fixed world-space rim width (relative to the
+    // 1.8u character contract) and the #103 rim color, set once — only
+    // cameraPos and fogColor change per frame.
+    outlineShader_ =
+        LoadShaderFromMemory(kOutlineVertexShader, kOutlineFragmentShader);
+    outlineLoaded_ = IsShaderValid(outlineShader_);
+    if (outlineLoaded_) {
+        outlineCameraLoc_ = GetShaderLocation(outlineShader_, "cameraPos");
+        outlineColorLoc_ = GetShaderLocation(outlineShader_, "fogColor");
+        const float width = 0.022f;
+        const float rim[4] = {32.f / 255.f, 30.f / 255.f, 38.f / 255.f, 1.f};
+        const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
+        const float density = kFogDensity;  // single source: Assets.hpp (issue #170)
+        SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "outlineWidth"),
+                       &width, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "outlineColor"),
+                       rim, SHADER_UNIFORM_VEC4);
+        SetShaderValue(outlineShader_, outlineColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
+        SetShaderValue(outlineShader_, GetShaderLocation(outlineShader_, "fogDensity"),
+                       &density, SHADER_UNIFORM_FLOAT);
+        outlineMaterial_ = LoadMaterialDefault();
+        outlineMaterial_.shader = outlineShader_;
+    } else {
+        std::cerr << "[llm_npc] outline shader failed to compile — mesh "
+                     "characters render rimless\n";
     }
 
     cityDir_ = assetsDir + "/models/city";
@@ -173,13 +318,34 @@ Assets::Assets(const std::string& assetsDir) {
         loadCharacter(stem);
     }
 
+    // Quaternius modular part meshes (issue #139), resolved from whatever
+    // the part catalog references.
+    modularDir_ = assetsDir + "/models/characters_modular";
+    loadModularParts();
+
     loaded_ = any;
 }
 
 Assets::~Assets() {
     if (fogLoaded_) UnloadShader(fogShader_);
+    if (celLoaded_) UnloadShader(celShader_);
+    if (outlineLoaded_) {
+        // Not UnloadMaterial: that would also unload outlineShader_ (freed
+        // on the next line) — only the default maps array is ours to free.
+        MemFree(outlineMaterial_.maps);
+        UnloadShader(outlineShader_);
+    }
     for (Texture2D& face : faces_) UnloadTexture(face);
+    for (auto& perEye : stylizedFaces_) {
+        for (auto& perMouth : perEye) {
+            for (Texture2D& face : perMouth) UnloadTexture(face);
+        }
+    }
     for (auto& [stem, model] : models_) UnloadModel(model);
+    for (auto& [stem, model] : modularModels_) UnloadModel(model);
+    for (auto& [stem, entry] : modularClips_) {
+        if (entry.clips) UnloadModelAnimations(entry.clips, entry.count);
+    }
     for (auto& character : characters_) {
         if (character.clips) UnloadModelAnimations(character.clips, character.clipCount);
         UnloadModel(character.model);
@@ -220,12 +386,15 @@ void Assets::loadCharacter(const std::string& stem) {
         return;
     }
 
-    // Characters fog too. CPU skinning is unaffected: it writes animated
-    // vertices into the mesh before drawing, and the fog shader consumes
-    // only the standard position/texcoord/color attributes.
-    if (fogLoaded_) {
+    // Characters render through the cel shader (#138) — banded toon light
+    // composed with the same fog stage. CPU skinning is unaffected: it
+    // writes animated vertices into the mesh before drawing, and the shader
+    // consumes only the standard position/texcoord/color attributes. Cel
+    // compile failure falls back to fog; a character NEVER keeps the
+    // default lit material (the routing rule this block enforces).
+    if (celLoaded_ || fogLoaded_) {
         for (int i = 0; i < character.model.materialCount; ++i) {
-            character.model.materials[i].shader = fogShader_;
+            character.model.materials[i].shader = celLoaded_ ? celShader_ : fogShader_;
         }
     }
 
@@ -239,6 +408,281 @@ void Assets::loadCharacter(const std::string& stem) {
     }
     if (stem == "Knight") knightIndex_ = static_cast<int>(characters_.size());
     characters_.push_back(character);
+}
+
+namespace {
+
+// raylib's glTF path assumes skinned vertices are stored in the NODE-REST
+// pose (that is what it puts in model.bindPose) and never reads the skin's
+// inverse_bind_matrices — but the Quaternius pack stores vertices in the
+// TRUE bind pose (T-pose arms) with an arms-down rest skeleton. The result
+// is the #139-noted "shoulders never move" freeze: rest-relative deltas
+// are computed against the wrong base. Re-baking every skinned vertex and
+// normal into rest space once at load (v' = sum of w * restGlobal *
+// inverseBind * v) fixes both tiers at the root: the static Tier-A stance
+// becomes the natural arms-down rest, and UpdateModelAnimation's deltas
+// become correct so clips play as authored (issue #142).
+void rebakeVerticesToRestPose(Model& model, const nlohmann::json& gltf) {
+    if (model.boneCount <= 0 || model.bindPose == nullptr) return;
+    if (!gltf.contains("skins") || gltf["skins"].empty() ||
+        !gltf["skins"][0].contains("inverseBindMatrices") ||
+        !gltf.contains("buffers") || gltf["buffers"].empty()) {
+        return;
+    }
+    const std::string uri = gltf["buffers"][0].value("uri", "");
+    const auto comma = uri.find(',');
+    if (uri.rfind("data:", 0) != 0 || comma == std::string::npos) return;
+    int rawSize = 0;
+    unsigned char* raw = DecodeDataBase64(
+        reinterpret_cast<const unsigned char*>(uri.c_str() + comma + 1), &rawSize);
+    if (raw == nullptr) return;
+
+    const auto& accessor =
+        gltf["accessors"][gltf["skins"][0]["inverseBindMatrices"].get<int>()];
+    const auto& view = gltf["bufferViews"][accessor["bufferView"].get<int>()];
+    const std::size_t offset = static_cast<std::size_t>(
+        view.value("byteOffset", 0) + accessor.value("byteOffset", 0));
+    const int count = accessor.value("count", 0);
+    if (count < model.boneCount ||
+        offset + static_cast<std::size_t>(count) * 16 * sizeof(float) >
+            static_cast<std::size_t>(rawSize)) {
+        MemFree(raw);
+        return;
+    }
+
+    // skinMat = restGlobal * inverseBind, per joint. glTF matrices are
+    // column-major; the element shuffle below is the same one raylib's own
+    // loader applies.
+    std::vector<Matrix> skin(static_cast<std::size_t>(model.boneCount));
+    for (int i = 0; i < model.boneCount; ++i) {
+        float m[16];
+        std::memcpy(m, raw + offset + static_cast<std::size_t>(i) * 16 * sizeof(float),
+                    sizeof(m));
+        const Matrix ibm = {m[0], m[4], m[8],  m[12], m[1], m[5], m[9],  m[13],
+                            m[2], m[6], m[10], m[14], m[3], m[7], m[11], m[15]};
+        const Transform& rest = model.bindPose[i];
+        const Matrix restGlobal = MatrixMultiply(
+            MatrixMultiply(MatrixScale(rest.scale.x, rest.scale.y, rest.scale.z),
+                           QuaternionToMatrix(rest.rotation)),
+            MatrixTranslate(rest.translation.x, rest.translation.y,
+                            rest.translation.z));
+        skin[static_cast<std::size_t>(i)] = MatrixMultiply(ibm, restGlobal);
+    }
+    MemFree(raw);
+
+    for (int m = 0; m < model.meshCount; ++m) {
+        Mesh& mesh = model.meshes[m];
+        if (mesh.boneWeights == nullptr || mesh.boneIds == nullptr) continue;
+        for (int v = 0; v < mesh.vertexCount; ++v) {
+            const Vector3 p = {mesh.vertices[v * 3], mesh.vertices[v * 3 + 1],
+                               mesh.vertices[v * 3 + 2]};
+            Vector3 outP{};
+            Vector3 outN{};
+            float total = 0.f;
+            for (int j = 0; j < 4; ++j) {
+                const float w = mesh.boneWeights[v * 4 + j];
+                if (w == 0.f) continue;
+                const Matrix& sm = skin[mesh.boneIds[v * 4 + j]];
+                outP = Vector3Add(outP, Vector3Scale(Vector3Transform(p, sm), w));
+                if (mesh.normals != nullptr) {
+                    Matrix rot = sm;  // rotation-only for normals
+                    rot.m12 = rot.m13 = rot.m14 = 0.f;
+                    const Vector3 n = {mesh.normals[v * 3], mesh.normals[v * 3 + 1],
+                                       mesh.normals[v * 3 + 2]};
+                    outN = Vector3Add(outN, Vector3Scale(Vector3Transform(n, rot), w));
+                }
+                total += w;
+            }
+            if (total <= 0.f) continue;
+            mesh.vertices[v * 3] = outP.x / total;
+            mesh.vertices[v * 3 + 1] = outP.y / total;
+            mesh.vertices[v * 3 + 2] = outP.z / total;
+            if (mesh.normals != nullptr) {
+                const Vector3 n = Vector3Normalize(outN);
+                mesh.normals[v * 3] = n.x;
+                mesh.normals[v * 3 + 1] = n.y;
+                mesh.normals[v * 3 + 2] = n.z;
+            }
+        }
+        // Push the re-baked data to the GPU buffers LoadModel uploaded.
+        UpdateMeshBuffer(mesh, 0, mesh.vertices,
+                         mesh.vertexCount * 3 * static_cast<int>(sizeof(float)), 0);
+        if (mesh.normals != nullptr) {
+            UpdateMeshBuffer(mesh, 2, mesh.normals,
+                             mesh.vertexCount * 3 * static_cast<int>(sizeof(float)),
+                             0);
+        }
+    }
+}
+
+}  // namespace
+
+void Assets::loadModularParts() {
+    // glTF node names -> raylib mesh index ranges, per file stem. raylib
+    // flattens glTF meshes PER PRIMITIVE in file order, so glTF mesh i's
+    // primitives occupy a contiguous raylib range starting at the sum of
+    // the primitive counts before it — read straight from the glTF JSON
+    // (it's the same file LoadModel parses).
+    struct NodeRange {
+        int first = 0;
+        int count = 0;
+    };
+    std::unordered_map<std::string, std::unordered_map<std::string, NodeRange>>
+        nodeRanges;
+
+    for (const PartDef& part : partCatalog()) {
+        if (part.meshName.empty()) continue;
+        const auto colon = part.meshName.find(':');
+        if (colon == std::string::npos) {
+            std::cerr << "[llm_npc] bad meshName (no ':'): " << part.meshName << "\n";
+            continue;
+        }
+        const std::string stem = part.meshName.substr(0, colon);
+        const std::string path = modularDir_ + "/" + stem + ".gltf";
+
+        // Load the model + its node map once per file.
+        auto modelIt = modularModels_.find(stem);
+        if (modelIt == modularModels_.end()) {
+            if (!std::filesystem::exists(path)) {
+                std::cerr << "[llm_npc] missing modular pack file: " << path
+                          << " (run tools/fetch_assets.sh; mesh parts draw "
+                             "fallback boxes)\n";
+                continue;
+            }
+            Model model = LoadModel(path.c_str());
+            if (model.meshCount == 0) {
+                std::cerr << "[llm_npc] failed to load modular file: " << path << "\n";
+                continue;
+            }
+            // Compact out unskinned prop meshes (the SciFi pistol) exactly
+            // like loadCharacter does — raylib's CPU skinning dereferences
+            // boneWeights unconditionally — but KEEP the old->new index
+            // remap: node resolution below still speaks pre-compaction
+            // (glTF file order) indices.
+            std::vector<int> remap(static_cast<std::size_t>(model.meshCount), -1);
+            int kept = 0;
+            for (int i = 0; i < model.meshCount; ++i) {
+                if (model.meshes[i].boneWeights != nullptr) {
+                    remap[static_cast<std::size_t>(i)] = kept;
+                    model.meshes[kept] = model.meshes[i];
+                    model.meshMaterial[kept] = model.meshMaterial[i];
+                    ++kept;
+                } else {
+                    UnloadMesh(model.meshes[i]);
+                }
+            }
+            model.meshCount = kept;
+            // Same routing rule as every character surface (issue #138).
+            if (celLoaded_ || fogLoaded_) {
+                for (int i = 0; i < model.materialCount; ++i) {
+                    model.materials[i].shader = celLoaded_ ? celShader_ : fogShader_;
+                }
+            }
+            // Animation library for Tier-B locomotion (issue #142), kept
+            // for the life of the Assets; playback happens per figure via
+            // poseModular. All four files share one library, so mixed
+            // heads/bodies pose in agreement.
+            int clipCount = 0;
+            ModelAnimation* clips = LoadModelAnimations(path.c_str(), &clipCount);
+            ModularClips entry;
+            entry.clips = clips;
+            entry.count = clipCount;
+            for (int i = 0; i < clipCount; ++i) {
+                const std::string clipName = clips[i].name;
+                if (clipName == "Idle") entry.idle = i;
+                else if (clipName == "Walk") entry.walk = i;
+            }
+            modularClips_.emplace(stem, entry);
+            modelIt = modularModels_.emplace(stem, model).first;
+            meshRemaps_.emplace(stem, std::move(remap));
+
+            std::ifstream in(path);
+            const nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+            auto& ranges = nodeRanges[stem];
+            if (j.is_object() && j.contains("meshes") && j.contains("nodes")) {
+                std::vector<int> base;
+                int running = 0;
+                for (const auto& mesh : j["meshes"]) {
+                    base.push_back(running);
+                    running += static_cast<int>(mesh.value("primitives",
+                                                           nlohmann::json::array())
+                                                    .size());
+                }
+                for (const auto& node : j["nodes"]) {
+                    if (!node.contains("mesh") || !node.contains("name")) continue;
+                    const int mi = node["mesh"].get<int>();
+                    if (mi < 0 || mi >= static_cast<int>(base.size())) continue;
+                    ranges[node["name"].get<std::string>()] = {
+                        base[static_cast<std::size_t>(mi)],
+                        static_cast<int>(j["meshes"][static_cast<std::size_t>(mi)]
+                                             .value("primitives",
+                                                    nlohmann::json::array())
+                                             .size())};
+                }
+                rebakeVerticesToRestPose(modelIt->second, j);
+            }
+        }
+
+        // Resolve this part's '+'-separated node list against the map.
+        PartMeshes resolved;
+        resolved.model = &modelIt->second;
+        const auto& ranges = nodeRanges[stem];
+        bool ok = true;
+        std::string nodeList = part.meshName.substr(colon + 1);
+        while (ok && !nodeList.empty()) {
+            const auto plus = nodeList.find('+');
+            const std::string token = nodeList.substr(0, plus);
+            nodeList = plus == std::string::npos ? "" : nodeList.substr(plus + 1);
+            const auto range = ranges.find(stem + "_" + token);
+            if (range == ranges.end()) {
+                std::cerr << "[llm_npc] modular node not found: " << stem << "_"
+                          << token << " (part " << part.id << ")\n";
+                ok = false;
+                break;
+            }
+            const std::vector<int>& remap = meshRemaps_[stem];
+            for (int i = 0; i < range->second.count; ++i) {
+                const int original = range->second.first + i;
+                if (original >= static_cast<int>(remap.size())) continue;
+                const int mapped = remap[static_cast<std::size_t>(original)];
+                if (mapped >= 0) resolved.meshes.push_back(mapped);
+            }
+        }
+        if (!ok || resolved.meshes.empty()) continue;
+
+        // Measured union bounds (bind pose) — what the renderer anchors by.
+        BoundingBox box =
+            GetMeshBoundingBox(modelIt->second.meshes[resolved.meshes.front()]);
+        for (const int idx : resolved.meshes) {
+            const BoundingBox b = GetMeshBoundingBox(modelIt->second.meshes[idx]);
+            box.min = Vector3{std::min(box.min.x, b.min.x), std::min(box.min.y, b.min.y),
+                              std::min(box.min.z, b.min.z)};
+            box.max = Vector3{std::max(box.max.x, b.max.x), std::max(box.max.y, b.max.y),
+                              std::max(box.max.z, b.max.z)};
+        }
+        resolved.boundsMin = box.min;
+        resolved.boundsMax = box.max;
+        partMeshes_.emplace(part.meshName, std::move(resolved));
+    }
+}
+
+const Assets::PartMeshes* Assets::partMeshes(const std::string& meshName) const {
+    const auto it = partMeshes_.find(meshName);
+    return it != partMeshes_.end() ? &it->second : nullptr;
+}
+
+void Assets::poseModular(const std::string& stem, bool walking, float timeSec) {
+    const auto modelIt = modularModels_.find(stem);
+    const auto clipIt = modularClips_.find(stem);
+    if (modelIt == modularModels_.end() || clipIt == modularClips_.end()) return;
+    const int clip = walking ? clipIt->second.walk : clipIt->second.idle;
+    if (clip < 0 || clip >= clipIt->second.count) return;
+    const ModelAnimation& animation = clipIt->second.clips[clip];
+    // Same ~60 samples/second convention the rigged path uses.
+    const int frame = animation.frameCount > 0
+                          ? static_cast<int>(timeSec * 60.f) % animation.frameCount
+                          : 0;
+    UpdateModelAnimation(modelIt->second, animation, frame);
 }
 
 const Assets::CharacterAsset* Assets::characterFor(int variantSeed, bool police) const {

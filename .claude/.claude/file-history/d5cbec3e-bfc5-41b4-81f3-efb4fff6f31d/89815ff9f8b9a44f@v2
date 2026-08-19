@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0013 — A tour of C++11/14/17/20/23</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .std-row {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 14px 0 18px;
+  }
+  .std-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 12.5px;
+  }
+  .std-card h4 { margin: 0 0 4px; font-size: 13px; }
+  .std-card.s11 { border-top: 3px solid #a0d8ff; }
+  .std-card.s14 { border-top: 3px solid #b9ccea; }
+  .std-card.s17 { border-top: 3px solid #c4e08a; }
+  .std-card.s20 { border-top: 3px solid #ffd58a; }
+  .std-card.s23 { border-top: 3px solid #ffb780; }
+  .std-card ul { margin: 0; padding-left: 16px; }
+
+  .audit-table th, .audit-table td { font-size: 13px; }
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+  }
+  .b11 { background: rgba(160, 216, 255, 0.18); color: #a0d8ff; }
+  .b14 { background: rgba(185, 204, 234, 0.18); color: #b9ccea; }
+  .b17 { background: rgba(196, 224, 138, 0.18); color: #c4e08a; }
+  .b20 { background: rgba(255, 213, 138, 0.18); color: #ffd58a; }
+  .b23 { background: rgba(255, 183, 128, 0.18); color: #ffb780; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 760px) {
+    .std-row { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0013 &middot; cpp_games / docs / learning</div>
+  <h1>A tour of C++11 / 14 / 17 / 20 / 23</h1>
+  <p class="why">Why this matters: your CMakeLists pin <code class="inline">CMAKE_CXX_STANDARD 17</code>. That number is doing real work &mdash; it decides which features you can use. Across the twelve lessons so far you've touched features from every standard from C++11 to C++20. This is the map that tells you which version gave you what, and what bumping the number would unlock.</p>
+</header>
+
+<h2>1. The concept &mdash; C++ has a release train</h2>
+
+<p>Since 2011, ISO C++ releases on a three-year cadence: <b>C++11, C++14, C++17, C++20, C++23</b>, with C++26 in progress. Each release adds language features and library functions; older code keeps working. The number you set in your build system (<code class="inline">CMAKE_CXX_STANDARD</code>, <code class="inline">-std=c++17</code>) controls which features the compiler will accept.</p>
+
+<div class="std-row">
+  <div class="std-card s11">
+    <h4>C++11 (2011)</h4>
+    <p><b>Theme:</b> "modern C++" begins.</p>
+    <ul><li>auto, lambdas</li><li>range-for</li><li>nullptr</li><li>move semantics</li><li>smart pointers</li><li>&lt;thread&gt;, &lt;atomic&gt;</li><li>enum class</li></ul>
+  </div>
+  <div class="std-card s14">
+    <h4>C++14 (2014)</h4>
+    <p><b>Theme:</b> polishing C++11.</p>
+    <ul><li>std::make_unique</li><li>generic lambdas (auto params)</li><li>variable templates</li><li>binary/digit literals</li></ul>
+  </div>
+  <div class="std-card s17">
+    <h4>C++17 (2017)</h4>
+    <p><b>Theme:</b> "comfortable" modern C++.</p>
+    <ul><li>structured bindings</li><li>if constexpr</li><li>std::optional/variant</li><li>std::string_view</li><li>std::filesystem</li><li>[[nodiscard]]</li><li>CTAD</li></ul>
+  </div>
+  <div class="std-card s20">
+    <h4>C++20 (2020)</h4>
+    <p><b>Theme:</b> language overhaul.</p>
+    <ul><li>concepts</li><li>ranges</li><li>modules</li><li>coroutines</li><li>std::span</li><li>std::jthread</li><li>semaphores</li><li>&lt;=&gt; spaceship</li><li>designated initializers</li></ul>
+  </div>
+  <div class="std-card s23">
+    <h4>C++23 (2024)</h4>
+    <p><b>Theme:</b> the long tail.</p>
+    <ul><li>std::expected</li><li>std::print/println</li><li>std::flat_map/set</li><li>std::mdspan</li><li>&lt;stacktrace&gt;</li><li>if consteval</li></ul>
+  </div>
+</div>
+
+<div class="callout">
+  <h3>The mental model</h3>
+  <p>C++11 is where "modern C++" begins; if you have that, you have 80% of what you write day-to-day. C++17 fills in usability gaps. C++20 is the next big language overhaul. C++23 is incremental but useful (especially <code class="inline">std::expected</code> and <code class="inline">std::print</code>).</p>
+</div>
+
+<h2>2. A minimal example &mdash; the same loop, four ways</h2>
+
+<p>Read the same idea evolving across versions to feel how each one cleans the language up.</p>
+
+<pre class="code"><span class="com">// C++03 (pre-modern): verbose, manual iterator types.</span>
+<span class="kw">std</span>::vector&lt;<span class="kw">std</span>::string&gt; names;
+names.push_back(<span class="str">"alice"</span>);
+<span class="kw">for</span> (<span class="kw">std</span>::vector&lt;<span class="kw">std</span>::string&gt;::iterator it = names.begin();
+     it != names.end(); ++it) {
+    <span class="kw">std</span>::cout &lt;&lt; *it &lt;&lt; <span class="str">"\n"</span>;
+}
+
+<span class="com">// C++11: auto + range-for + initializer list = legible.</span>
+std::vector&lt;std::string&gt; names = {<span class="str">"alice"</span>, <span class="str">"bob"</span>};
+<span class="kw">for</span> (<span class="kw">const auto</span>&amp; n : names) std::cout &lt;&lt; n &lt;&lt; <span class="str">"\n"</span>;
+
+<span class="com">// C++17: structured bindings make iterating maps clean.</span>
+std::unordered_map&lt;std::string, <span class="typ">int</span>&gt; counts = {{<span class="str">"alice"</span>, <span class="num">1</span>}};
+<span class="kw">for</span> (<span class="kw">const auto</span>&amp; [name, count] : counts) {
+    std::cout &lt;&lt; name &lt;&lt; <span class="str">": "</span> &lt;&lt; count &lt;&lt; <span class="str">"\n"</span>;
+}
+
+<span class="com">// C++23: std::print replaces &lt;iostream&gt; for many cases.</span>
+std::print(<span class="str">"{}: {}\n"</span>, name, count);  <span class="com">// type-safe, no &lt;&lt;, no manual newlines</span></pre>
+
+<p>Every C++03 line still compiles in C++23. The new versions don't remove anything (mostly); they give you cleaner ways to express the same intent.</p>
+
+<h2>3. In your project &mdash; every feature you use, audited by standard</h2>
+
+<p>Your codebase is on <code class="inline">CMAKE_CXX_STANDARD 17</code>. Here's what each standard gave you of what's actually in your source.</p>
+
+<table class="compare audit-table">
+  <thead><tr><th style="width:13%">Standard</th><th>Feature you use</th><th>Where in your code</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td><code class="inline">auto</code>, range-for</td>
+      <td>Everywhere &mdash; e.g. <code class="inline">for (auto&amp; projectile : game.projectiles)</code> in the shooter</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td>Lambdas</td>
+      <td><code class="inline">LlmClient::workerLoop</code> &mdash; <code class="inline">requestCv_.wait(lock, [this] { return ... })</code></td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td>Brace initialization</td>
+      <td><code class="inline">Vec3{0.0f, 2.5f, 0.0f}</code> in shooter, <code class="inline">{"user", std::move(line)}</code> in Npc.cpp</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td>Move semantics + <code class="inline">std::move</code></td>
+      <td><code class="inline">LlmClient::submit</code>, <code class="inline">drainReplies</code>, your whole "by-value+std::move" pattern (lesson 0003)</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td><code class="inline">std::unique_ptr</code> / <code class="inline">std::shared_ptr</code></td>
+      <td>Lesson-0007 refactor's <code class="inline">unique_ptr&lt;LlmBackend&gt;</code> (lesson 0010)</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td><code class="inline">std::thread</code>, <code class="inline">std::mutex</code>, <code class="inline">std::condition_variable</code>, <code class="inline">std::atomic</code></td>
+      <td><code class="inline">LlmClient</code> &mdash; the whole concurrency layer from lesson 0005</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td><code class="inline">std::array</code>, <code class="inline">std::unordered_map</code></td>
+      <td>Racing's quad corners + matrix, both games' config readers (lessons 0002, 0008)</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td><code class="inline">override</code>, <code class="inline">final</code></td>
+      <td>In the proposed HAL refactor (lesson 0007)</td>
+    </tr>
+    <tr>
+      <td><span class="badge b11">C++11</span></td>
+      <td><code class="inline">enum class</code></td>
+      <td><code class="inline">TranscriptLine::Kind</code> in <code class="inline">DialogUI.hpp</code></td>
+    </tr>
+    <tr>
+      <td><span class="badge b14">C++14</span></td>
+      <td><code class="inline">std::make_unique</code></td>
+      <td>Lesson-0007 refactor: <code class="inline">std::make_unique&lt;OllamaBackend&gt;(...)</code></td>
+    </tr>
+    <tr>
+      <td><span class="badge b14">C++14</span></td>
+      <td>Generic lambdas (<code class="inline">[](auto&amp; x)</code>)</td>
+      <td>Used implicitly in the shooter's erase-remove lambdas</td>
+    </tr>
+    <tr>
+      <td><span class="badge b17">C++17</span></td>
+      <td><code class="inline">std::filesystem</code></td>
+      <td><code class="inline">cpp_game_with_llm_npcs/src/main.cpp</code> &mdash; <code class="inline">fs::path</code>, <code class="inline">fs::exists</code>, <code class="inline">fs::current_path</code></td>
+    </tr>
+    <tr>
+      <td><span class="badge b17">C++17</span></td>
+      <td><code class="inline">std::optional</code></td>
+      <td><code class="inline">Npc::onReplyArrived</code> returns <code class="inline">std::optional&lt;std::string&gt;</code></td>
+    </tr>
+    <tr>
+      <td><span class="badge b17">C++17</span></td>
+      <td>Nested namespace syntax</td>
+      <td>You could write <code class="inline">namespace llm_npc</code> nested if needed (you currently don't)</td>
+    </tr>
+    <tr>
+      <td><span class="badge b17">C++17</span></td>
+      <td>Structured bindings (potential)</td>
+      <td>You could iterate <code class="inline">kv</code> map with <code class="inline">for (auto&amp; [key, value] : kv)</code> &mdash; currently using <code class="inline">.first</code>/<code class="inline">.second</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>What bumping to C++20 would give you</h3>
+
+<p>If you change <code class="inline">CMAKE_CXX_STANDARD 17</code> to <code class="inline">20</code>, these become available:</p>
+
+<table class="compare">
+  <thead><tr><th>Feature</th><th>What it'd buy you</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">std::jthread</code></td><td>Auto-joining thread. Your <code class="inline">LlmClient</code> destructor wouldn't need the explicit <code class="inline">join()</code> &mdash; <code class="inline">jthread</code>'s destructor does it.</td></tr>
+    <tr><td><code class="inline">std::counting_semaphore</code> / <code class="inline">std::binary_semaphore</code></td><td>Lesson 0011's hypothetical GPU rate-limiter would actually be writable in standard C++.</td></tr>
+    <tr><td><code class="inline">std::span&lt;T&gt;</code></td><td>Non-owning view over a contiguous range. Cleaner function signatures than <code class="inline">const std::vector&lt;T&gt;&amp;</code> when you don't care if the source is a vector or array.</td></tr>
+    <tr><td>Designated initializers</td><td><code class="inline">Persona{.name = "Wren", .role = "..."}</code> &mdash; brace-init that names the fields. Catches misordered arguments at compile time.</td></tr>
+    <tr><td>Three-way <code class="inline">operator&lt;=&gt;</code></td><td>Define one comparison operator and get all six. Useful when you add ordered NPC types.</td></tr>
+    <tr><td>Concepts</td><td>Constrain template parameters (<code class="inline">template &lt;Integer T&gt;</code>). Better error messages, expresses intent.</td></tr>
+  </tbody>
+</table>
+
+<h3>What bumping to C++23 would give you</h3>
+
+<table class="compare">
+  <thead><tr><th>Feature</th><th>What it'd buy you</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">std::print</code> / <code class="inline">std::println</code></td><td>Type-safe formatted output without <code class="inline">&lt;iostream&gt;</code>. Cleaner than streams, faster than <code class="inline">printf</code>, and you don't have to repeatedly type <code class="inline">std::cout &lt;&lt; ... &lt;&lt; "\n"</code>.</td></tr>
+    <tr><td><code class="inline">std::expected&lt;T, E&gt;</code></td><td><code class="inline">ChatReply</code> could be <code class="inline">std::expected&lt;std::string, std::string&gt;</code> &mdash; "either a reply or an error" in one type instead of the <code class="inline">ok</code>/<code class="inline">content</code>/<code class="inline">errorMessage</code> trio.</td></tr>
+    <tr><td><code class="inline">std::flat_map</code></td><td>Map with vector-of-pairs storage &mdash; cache-friendly for small maps. Faster than <code class="inline">unordered_map</code> for &lt;100 entries.</td></tr>
+    <tr><td><code class="inline">&lt;stacktrace&gt;</code></td><td>Get the call stack from inside the program. Useful for error messages and crash diagnostics.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <h3>Compiler support reality check (mid-2026)</h3>
+  <p>You can bump CMake to 20 today on any reasonably current compiler (GCC 11+, Clang 14+, MSVC 19.30+). C++23 also works on GCC 14+, Clang 17+, and MSVC 2026 Build Tools 18.0+. Your MSYS2 UCRT64 toolchain almost certainly supports both. The headline features (jthread, semaphores, span, expected, print) are all there.</p>
+</div>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Language standard vs library version</h3>
+<p>"C++17" refers to <em>both</em> the language (new syntax: structured bindings, <code class="inline">if constexpr</code>) and the library (<code class="inline">std::optional</code>, <code class="inline">std::filesystem</code>). They were standardised together but they're implemented separately: the compiler does the language parts; the standard library implementation (<code class="inline">libstdc++</code>, <code class="inline">libc++</code>, MSVC STL) does the library parts. Some compiler versions support the language but not the full library yet, or vice versa.</p>
+
+<h3><code class="inline">-std=c++17</code> vs compiler version</h3>
+<p><code class="inline">-std=c++17</code> sets the dialect &mdash; what the compiler accepts. The compiler version sets <em>how completely</em> that dialect is implemented. GCC 6 will accept <code class="inline">-std=c++17</code> but doesn't fully implement it; GCC 11 does. When something "doesn't compile", the question is which: dialect not enabled, or version too old to have the feature.</p>
+
+<h3>"Modern C++"</h3>
+<p>The phrase is fuzzy. The Bjarne-coined meaning is "C++ written in the C++11 idiom or later": auto, smart pointers, range-for, no manual <code class="inline">new</code>/<code class="inline">delete</code>. Doesn't necessarily mean C++23. Your code is modern C++ in the original sense even though it's pinned to C++17.</p>
+
+<h3>Forward and backward compatibility</h3>
+<p><b>Backward compatibility</b>: C++17 code compiles in C++20 mode (almost always). <b>Forward compatibility</b>: C++17 code does <em>not</em> use C++20 features. The standards committee tries hard not to break old code; the corollary is that "old features that aged poorly" stay in the language (e.g. <code class="inline">printf</code>, raw <code class="inline">new</code>).</p>
+
+<h3>Compiler-specific extensions vs standard features</h3>
+<p>GCC and Clang offer extensions that aren't standard C++ &mdash; nested functions, variable-length arrays, designated initializers (which became standard in C++20). If you write code that uses an extension without realising, you may be locked to that compiler. The <code class="inline">-pedantic</code> flag tells GCC/Clang to warn about extensions; <code class="inline">CMAKE_CXX_EXTENSIONS OFF</code> in your CMakeLists.txt does the equivalent &mdash; you have this set, which is why your code is portable.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">Your CMakeLists.txt has <code class="inline">set(CMAKE_CXX_STANDARD 17)</code>. You write <code class="inline">std::span&lt;int&gt; v</code> in a new file. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="span isn't in C++17 — it was added in C++20. The compiler will refuse it under -std=c++17 (or whatever your CMake sets).">
+      Compiles fine &mdash; <code class="inline">std::span</code> is a C++17 feature.
+    </li>
+    <li data-correct="true" data-why="Right. std::span is C++20. Under CMAKE_CXX_STANDARD 17, the compiler doesn't expose it, and the include of <span> will fail (or std::span will be undeclared). Bumping to CMAKE_CXX_STANDARD 20 enables it.">
+      Compile error &mdash; <code class="inline">std::span</code> is C++20; you need to bump <code class="inline">CMAKE_CXX_STANDARD</code> to 20.
+    </li>
+    <li data-correct="false" data-why="Compilers don't 'auto-detect' that you want a newer standard. The setting in CMakeLists is what controls the dialect; you'd have to change it.">
+      Compiles and works &mdash; the compiler automatically detects you need C++20.
+    </li>
+    <li data-correct="false" data-why="Even old GCC versions don't 'crash on undeclared identifier' — they error at compile time with a message. The behaviour at runtime is moot because there's no executable.">
+      Compiles, but crashes at runtime on the first access.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Which of these is the <em>oldest</em> standard that gave you the syntax <code class="inline">for (const auto&amp; x : container)</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="C++03 had no range-for. Iterating took explicit iterators or indices. Range-for arrived with the C++11 'modern C++' wave.">
+      C++03 &mdash; range-for has been there since the beginning.
+    </li>
+    <li data-correct="true" data-why="Right. Range-for is one of the headline C++11 quality-of-life features, alongside auto, lambdas, and move semantics. It works on anything with begin()/end() — vectors, arrays, deques, maps.">
+      C++11 &mdash; range-for was a headline 'modern C++' feature.
+    </li>
+    <li data-correct="false" data-why="Range-for predates C++14; it's in C++11. C++14 added small refinements but range-for was already there.">
+      C++14 &mdash; introduced as part of C++14's quality-of-life pass.
+    </li>
+    <li data-correct="false" data-why="Way too late. Range-for has been ubiquitous since 2011.">
+      C++17 &mdash; came with structured bindings.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">The lesson 0007 refactor uses <code class="inline">std::make_unique&lt;OllamaBackend&gt;(host, port, model)</code>. The user's CMake is on C++17. Which earlier standard introduced this function (and when would you not be able to use it)?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="make_unique is famously a C++14 addition — it was the oversight that C++11 'forgot' to ship with make_shared. C++11 has make_shared but not make_unique.">
+      C++11 &mdash; alongside <code class="inline">std::unique_ptr</code> itself.
+    </li>
+    <li data-correct="true" data-why="Right. unique_ptr was C++11 but make_unique didn't ship until C++14 — a famous oversight. If a codebase is pinned to C++11, you have to write std::unique_ptr<T>(new T(args)) by hand. CMAKE_CXX_STANDARD 11 is the one place this lesson's feature wouldn't compile.">
+      C++14 &mdash; <code class="inline">make_unique</code> was famously omitted from C++11 and added later.
+    </li>
+    <li data-correct="false" data-why="It predates C++17 by a release. C++17 is when std::optional and std::filesystem shipped; make_unique has been around for 11 years.">
+      C++17 &mdash; came with the smart-pointer overhaul.
+    </li>
+    <li data-correct="false" data-why="Adding it in C++20 would have been very late given how widely used unique_ptr was. It's C++14.">
+      C++20 &mdash; alongside <code class="inline">std::span</code>.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Your <code class="inline">cpp_game_with_llm_npcs/src/main.cpp</code> uses <code class="inline">fs::path</code>, <code class="inline">fs::exists</code>, <code class="inline">fs::current_path</code>. Which standard first made these portable across compilers?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="C++03 had nothing like std::filesystem. Boost.Filesystem was the de-facto choice for years before standardisation.">
+      C++03 &mdash; the standard library has always shipped a filesystem API.
+    </li>
+    <li data-correct="false" data-why="C++11 added threads and atomics but not filesystem. The TS for filesystem came later.">
+      C++11 &mdash; alongside <code class="inline">std::thread</code>.
+    </li>
+    <li data-correct="true" data-why="Right. std::filesystem was a Technical Specification that merged into the C++17 standard library. It's a canonical reason most codebases jumped from C++14 to C++17 — finally, portable file paths in the standard library. Your CMake target is on 17, which is why fs::path works without extra dependencies.">
+      C++17 &mdash; <code class="inline">std::filesystem</code> finalised the long-running TS.
+    </li>
+    <li data-correct="false" data-why="C++20 added concepts and ranges; filesystem predates it by a release.">
+      C++20 &mdash; along with <code class="inline">std::span</code> and concepts.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A teammate says "let's add <code class="inline">std::expected</code> to <code class="inline">ChatReply</code>; it'd clean up the <code class="inline">ok</code>/<code class="inline">errorMessage</code> pair." You agree the design is nicer. What's the <em>one</em> change to make this concretely possible in your code?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A header-only library can add an analog (tl::expected), but the standard one specifically requires C++23. The 'one change' the question asks about, sticking to the standard library, is the CMake bump.">
+      Vendor a header-only <code class="inline">tl::expected</code> &mdash; no compiler change needed.
+    </li>
+    <li data-correct="true" data-why="Right. std::expected is C++23. Your CMake is pinned to 17. Bumping CMAKE_CXX_STANDARD to 23 (and confirming your toolchain supports it — GCC 14+, Clang 17+, MSVC 2026+) unlocks it. The rest of your code keeps working.">
+      Bump <code class="inline">CMAKE_CXX_STANDARD</code> from 17 to 23 (and check the toolchain supports it).
+    </li>
+    <li data-correct="false" data-why="std::expected has been in the standard since C++23 (Oct 2024). No 'experimental' header needed in modern compilers.">
+      Switch the include to <code class="inline">&lt;experimental/expected&gt;</code>, since the type isn't yet standardised.
+    </li>
+    <li data-correct="false" data-why="There's no global compiler flag that enables 'all standard library extensions.' The dialect (-std=) is the mechanism; bumping it is the change.">
+      Pass <code class="inline">-fstdlib-extensions</code> to the compiler to opt in.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> You bump <code class="inline">CMAKE_CXX_STANDARD</code> from 17 to 20 in <code class="inline">cpp_game_with_llm_npcs/CMakeLists.txt</code>. Name two concrete features in lesson 0011 (the semaphores lesson) that go from "hypothetical, can't write in real code" to "now writable as a one-line change." Then name one change in lesson 0005's code that <code class="inline">std::jthread</code> would simplify.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> A teammate writes <code class="inline">auto [key, value] : kv</code> in the racing game's config reader. The CMake says <code class="inline">CMAKE_CXX_STANDARD 17</code>. The PR compiles for them on Windows but fails for you on Linux. Two distinct possible causes that have nothing to do with the language standard &mdash; both have to do with the distinction in §4.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> You're considering bumping to C++23 to use <code class="inline">std::print</code> across your three games. What's the <em>case against</em>? Think about contributors, CI machines, and the C++17-era libraries you depend on (SFML, cpp-httplib, nlohmann/json). One paragraph.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can name the theme of each standard from C++11 to C++23</label></li>
+  <li><label><input type="checkbox"> Walked the audit table &mdash; I can identify which standard introduced features I've already written</label></li>
+  <li><label><input type="checkbox"> Read the C++20/C++23 "what bumping would buy you" tables</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I distinguish language standard from library, and dialect from compiler version</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/w/cpp/compiler_support.html">cppreference: compiler support tables</a> &middot;
+    <a href="https://gcc.gnu.org/projects/cxx-status.html">GCC C++ standards status</a> &middot;
+    <a href="https://github.com/AnthonyCalandra/modern-cpp-features">Calandra: modern C++ features cheatsheet</a> &middot;
+    <a href="https://en.wikipedia.org/wiki/C%2B%2B20">Wikipedia: C++20</a>
+  </p>
+  <p>Lesson 0013 &middot; <code class="inline">docs/learning/lessons/0013-cpp-standards-tour.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

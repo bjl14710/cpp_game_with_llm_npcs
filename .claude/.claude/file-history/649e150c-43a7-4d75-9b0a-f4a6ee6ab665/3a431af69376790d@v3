@@ -1,0 +1,174 @@
+# Algo-Trading Learning Roadmap — from daily rebalancing to nanosecond HFT
+
+A leveled curriculum built on THIS repo. Every level has three kinds of files:
+
+1. **Working files** — real, runnable code already in the repo (the reference
+   you read and run).
+2. **Practice files** — the same components with bodies removed
+   (`exercises/…` — you implement, an automated suite grades you).
+3. **Tested references** — complete solutions (`solutions/…`) verified by the
+   same suite, for after you've attempted the practice.
+
+The grading machinery already exists: `exercises/` + `solutions/` +
+`tests/exercises/` (see `exercises/README.md`). Unimplemented stubs show as
+**skipped**, wrong answers **fail**, done means **green** — the pytest skip
+count is your progress bar. C++ exercises compile and run via
+`tests/exercises/cpp/run_cpp.sh`; VHDL via `scripts/run_vhdl_tests.sh` (ghdl).
+
+```bash
+uv run pytest tests/exercises/ -v                         # grade everything
+HFT_EXERCISE_TARGET=solutions uv run pytest tests/exercises/ -v   # prove suites solvable
+```
+
+---
+
+## The ladder at a glance
+
+Latency classes follow Lesson 0011's tier ladder. "Theoretical speed" is the
+per-decision software latency the level's techniques can reach.
+
+| Level | Domain | Decision cadence | Theoretical speed | Repo assets | Status |
+|---|---|---|---|---|---|
+| **L0** | Daily-frequency ML trading (what you have) | 1/day | seconds per run (offline) | `paper_trading_sim.py`, `walkforward_sim.py`, `predict_next.py`, `analyze_equity.py`, `tests/` | ✅ working + tested |
+| **L1** | Quant math: regression, stat-arb, risk | 1/day–1/min | ms (numpy) | exercise **03** (pairs/CUSUM/OTR/walk-forward splits); lessons 0006, 0018, 0019, 0026, 0028 | ✅ practice ready |
+| **L2** | Market microstructure in Python | per-tick (simulated) | µs–ms (Python) | exercise **01** (order book), **02** (inventory-aware market maker); lessons 0016, 0017 | ✅ practice ready |
+| **L3** | Low-latency C++ building blocks | per-tick | ~10–100 **ns** per op | exercise **04** (O(1) MA + lock-free SPSC ring), `gradient_boosting/` ONNX C++, `tests/cpp/`; lessons 0009, 0010 | ✅ practice ready |
+| **L4** | Ultra-low-latency C++ systems | millions of msgs/sec | ~100 ns–1 µs tick-to-trade (CPU) | exercise **06** (C++ order book), **07** (binary feed handler), **08** (latency benchmark harness); lessons 0011, 0013 | ✅ practice ready |
+| **L5** | Hardware (FPGA/VHDL) | per-tick, wire-rate | ~4–50 ns (cycles, deterministic) | exercise **05** (GHDL testbenches), `fpga/*.vhd`; **proposed batch 09** (inventory-aware MM in VHDL); lessons 0002, 0014 | ✅ practice ready / 🔜 extension |
+| **L6** | Capstone: tick-to-trade integration | end-to-end | measured p50/p99/p99.99 | **proposed batch 10** (replay → book → strategy → order, with hardware-style latency report) | 🔜 to build |
+
+Career mapping (roughly): L0–L1 → quant research / data roles; L2 →
+trading-systems & quant dev; L3–L4 → low-latency C++ developer (the classic
+high-comp HFT software role); L5 → FPGA engineer; L6 is the portfolio piece
+that ties the interview story together.
+
+---
+
+## Level 0 — Daily-frequency ML trading (your existing system)
+
+**Working files:** `paper_trading_sim.py` (GBM training + backtest),
+`walkforward_sim.py` (rolling retrain + risk overlay), `predict_next.py`
+(inference + mean-variance allocation), `analyze_equity.py` (metrics).
+**Tests:** `tests/` (run `uv run pytest tests/ -m "not exercise"`).
+
+**Goal:** read every one of these end-to-end and be able to answer: where
+could look-ahead bias enter? why regression instead of classification? what
+does the risk overlay gate on?
+
+**Complexity/speed profile:** pandas + sklearn, seconds-to-minutes per run.
+Speed is irrelevant here — correctness of the *time discipline* (no future
+leakage) is everything. This is also where the money-math lives that every
+interview at every level asks about (Sharpe, drawdown, alpha/beta — lessons
+0006 and 0028).
+
+**Suggested self-assignments (no scaffolding needed):**
+- Add `alpha_beta()` to `analyze_equity.py` (spec in lesson 0028 §2) and
+  report the flagship bundle's β to SPY.
+- Re-tune the GBM (lesson 0025 §3) scoring on walk-forward Sharpe, not R².
+
+## Level 1 — Quant math (exercise 03)
+
+**Practice:** `exercises/03_stat_arb_risk/{pairs.py, risk.py}` —
+OLS hedge ratio, spread z-score, Dickey-Fuller, AR(1) half-life, CUSUM
+detector, OTR tracker, walk-forward splits with embargo.
+**Grade:** `uv run pytest tests/exercises/ -k 03 -v`
+
+**Complexity ranking:** all O(n) or O(n·p²) numpy — the intellectual
+difficulty is statistical (why a t-stat needs a different critical value
+under a unit-root null), not computational.
+
+## Level 2 — Microstructure in Python (exercises 01–02)
+
+**Practice:** `exercises/01_order_book/` (price-time-priority LOB: add,
+cancel, market execution with FIFO fills, imbalance) and
+`exercises/02_market_maker/` (Avellaneda-Stoikov-lite inventory-aware
+quoting — deliberately fixing the inventory-blindness of
+`fpga/market_maker.vhd`).
+**Grade:** `uv run pytest tests/exercises/ -k "01 or 02" -v`
+
+**Complexity ranking:** the order book is the first place data-structure
+choice = P&L: best-bid lookup O(P) with a dict-of-levels (acceptable here),
+O(log P) with a heap/tree, O(1) amortized with the array-of-price-levels
+trick real engines use. Internalize the operations now in Python; L4 makes
+them fast.
+
+## Level 3 — Low-latency C++ (exercise 04)
+
+**Practice:** `exercises/04_spsc_ring/ring_ma.hpp` (O(1) running-sum moving
+average — fixes the O(window) flaw in
+`gradient_boosting/sample_with_gradient_boosting.cpp`) and `spsc_ring.hpp`
+(lock-free single-producer/single-consumer queue: release/acquire ordering,
+power-of-two indexing, `alignas(64)` anti-false-sharing — the tests include a
+2-thread, 1M-message sequenced transfer and a `sizeof` check that catches a
+forgotten `alignas`).
+**Grade:** `uv run pytest tests/exercises/ -k 04 -v` or
+`bash tests/exercises/cpp/run_cpp.sh` (compiles with g++ -std=c++20 -O2).
+
+**Theoretical speed ranking (the numbers interviewers expect):**
+ring-MA push ≈ a handful of ns (two adds, an index mask, all L1-resident);
+SPSC push/pop ≈ 10–20 ns uncontended (one relaxed load, one acquire load, one
+release store); a mutex-based queue ≈ 50–200+ ns and unbounded tail under
+contention. Being able to *explain why* (cache lines, memory ordering, false
+sharing — lessons 0009/0010) is the L3→L4 interview gate.
+
+## Level 4 — ULL C++ systems (proposed exercise batches 06–08)
+
+The "millions of messages per second" tier. Not yet scaffolded — say the word
+and these get built in the same exercises/solutions/tests pattern:
+
+| # | Exercise | What you build | Speed target / ranking |
+|---|---|---|---|
+| 06 | **C++ order book** | The L2 book re-done for speed: flat arrays indexed by price tick, intrusive FIFO queues, O(1) best-bid maintenance | ~50–200 ns per event; handles 10⁶–10⁷ events/sec single-threaded |
+| 07 | **Binary feed handler** | Parse an ITCH-flavored binary message stream (fixed-width structs, no allocation, no branching on the hot path) into book events | wire-rate parsing, ~10–30 ns/msg; teaches the L13 DMA/zero-copy ideas in software |
+| 08 | **Latency benchmark harness** | rdtsc-based timing of 06+07, histogram, p50/p99/p99.99 + jitter report; experiments: enable/disable `alignas`, `[[likely]]`, -O0 vs -O2 vs PGO | the *measuring* skill from lesson 0011 — honest percentiles, not averages |
+
+Each ships with a working solution, a hollowed stub, and a test binary that
+checks both correctness *and* (loosely) performance ceilings.
+
+## Level 5 — FPGA (exercise 05 + proposed batch 09)
+
+**Practice now:** `exercises/05_vhdl_testbench/` — write GHDL testbenches for
+all three `fpga/*.vhd` modules (clocking idiom, fixed-point encodings,
+pipeline-latency assertions). `bash scripts/run_vhdl_tests.sh` (needs
+`apt-get install ghdl`; auto-skipped otherwise).
+
+**Proposed batch 09:** port your L2 Python market maker into VHDL — an
+inventory-aware quoting module (the reservation-price skew in Q16.16
+fixed-point) replacing the inventory-blind `market_maker.vhd`, verified by
+the same testbench machinery.
+
+**Speed ranking:** 1–2 pipeline stages at a 250 MHz clock = 4–8 ns,
+*deterministically* — the jitter-free property no CPU can offer (lesson
+0002). This is the floor of the software→hardware ladder.
+
+## Level 6 — Capstone (proposed batch 10)
+
+One binary: replay a recorded message stream → feed handler (07) → order
+book (06) → strategy (your MM from 02, in C++) → order events out, with the
+benchmark harness (08) reporting tick-to-trade percentiles. The deliverable
+is a README table of p50/p99/p99.99 before/after each optimization — exactly
+the artifact to talk through in a low-latency interview.
+
+---
+
+## Working order
+
+1. **L0 reading + the two self-assignments** (you have lessons 0001–0028 as
+   the theory track).
+2. **Exercises 01 → 02 → 03** (Python; recommended order in
+   `exercises/README.md`).
+3. **Exercise 04** (C++), then re-read lessons 0009/0010 against your own
+   code.
+4. **Exercise 05** (VHDL testbenches; install ghdl).
+5. Ask for **batches 06–08** when 04 is green — they assume your SPSC ring
+   and MA exist.
+6. **Batch 09–10** last.
+
+## Rules of the road
+
+- Attempt before peeking: `solutions/` is for *after* the suite has judged
+  your attempt (wrong-answer failures are the most instructive moment).
+- Keep the default repo suite green: stubs skip, they never fail. If
+  `uv run pytest tests/` shows failures, you broke something real.
+- Update `docs/learning/PROGRESS.md`'s exercises table as levels go green —
+  it's the shared map between sessions.

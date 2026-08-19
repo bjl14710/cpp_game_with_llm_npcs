@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0002 — Connections &amp; Documentation</title>
+<style>
+  :root {
+    --bg:       #111827;
+    --surface:  #1f2937;
+    --surface2: #283548;
+    --surface3: #314060;
+    --accent:   #60a5fa;
+    --gold:     #fbbf24;
+    --green:    #34d399;
+    --red:      #f87171;
+    --port-blue:#93c5fd;
+    --wire-gold:#fcd34d;
+    --text:     #e2e8f0;
+    --dim:      #6b7280;
+    --border:   #2d3d5a;
+    --code-bg:  #0d1117;
+    --mono:     'Cascadia Code','Fira Mono','Consolas',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);
+       line-height:1.75;font-size:15.5px}
+  .page{max-width:880px;margin:0 auto;padding:2.5rem 1.5rem 5rem}
+
+  header{border-bottom:2px solid var(--border);padding-bottom:1.4rem;margin-bottom:2.5rem}
+  .lesson-label{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.14em;
+                text-transform:uppercase;margin-bottom:.4rem}
+  h1{font-size:2rem;color:#fff;margin-bottom:.5rem}
+  .tagline{color:var(--accent);font-size:1rem}
+
+  /* progress chips */
+  .progress-bar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
+                background:var(--surface);border:1px solid var(--border);
+                border-radius:8px;padding:.8rem 1.1rem;margin-bottom:2.5rem}
+  .progress-bar span{font-size:.82rem;color:var(--dim)}
+  .chk{display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;
+       font-size:.82rem;color:var(--dim);user-select:none;
+       border:1px solid var(--border);border-radius:4px;padding:.18rem .55rem;
+       transition:all .2s}
+  .chk.done{color:var(--green);border-color:var(--green)}
+  .chk .box{font-size:.95rem}
+
+  section{margin-bottom:3.2rem}
+  h2{font-size:1.3rem;color:var(--gold);margin-bottom:1rem;
+     padding-bottom:.4rem;border-bottom:1px solid var(--border)}
+  h3{font-size:1.05rem;color:#c0d0ff;margin:1.6rem 0 .6rem}
+  p{margin-bottom:.9rem}
+  ul,ol{margin:.4rem 0 1rem 1.4rem}
+  li{margin-bottom:.35rem}
+  strong{color:#fff}
+  code{font-family:var(--mono)}
+  p code,li code{background:var(--surface2);border:1px solid var(--border);
+                 border-radius:3px;padding:.12em .38em;font-size:.88em}
+
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:7px;
+      padding:1rem 1.2rem;overflow-x:auto;font-family:var(--mono);font-size:.85rem;
+      line-height:1.65;margin:1rem 0 1.3rem}
+  .kw{color:#c792ea}.str{color:#c3e88d}.cm{color:#4a6070;font-style:italic}
+  .fn{color:#82aaff}.num{color:#f78c6c}.cls{color:#ffcb6b}.attr{color:#a5d6ff}
+
+  .callout{border-left:4px solid var(--accent);background:var(--surface);
+            border-radius:0 6px 6px 0;padding:.8rem 1.1rem;margin:1rem 0}
+  .callout.tip{border-color:var(--green)}
+  .callout.warn{border-color:var(--gold)}
+  .callout-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;
+                 margin-bottom:.25rem;font-family:var(--mono)}
+  .callout.tip .callout-label{color:var(--green)}
+  .callout.warn .callout-label{color:var(--gold)}
+
+  table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.9rem}
+  th{background:var(--surface2);padding:.55rem .9rem;text-align:left;
+     color:#fff;border:1px solid var(--border)}
+  td{padding:.5rem .9rem;border:1px solid var(--border)}
+  tr:nth-child(even) td{background:var(--surface)}
+
+  /* interactive diagram */
+  .diagram{background:#0d111f;border:1px solid var(--border);border-radius:8px;
+            padding:1.5rem;margin:1.2rem 0;position:relative}
+  .d-block{display:inline-block;background:var(--surface2);
+           border:2px solid #3a5080;border-radius:6px;min-width:130px;
+           vertical-align:middle}
+  .d-title{background:#1e3a70;border-radius:4px 4px 0 0;
+           padding:.3rem .7rem;font-family:var(--mono);font-size:.75rem;
+           color:#fff;font-weight:bold}
+  .d-body{padding:.5rem .7rem;font-family:var(--mono);font-size:.75rem}
+  .d-port{color:var(--port-blue);margin:.1rem 0;cursor:pointer;
+          transition:color .2s}
+  .d-port:hover{color:var(--wire-gold)}
+  .d-wire{display:inline-block;vertical-align:middle;color:var(--wire-gold);
+          font-size:1.3rem;margin:0 .6rem}
+  .d-label{font-family:var(--mono);font-size:.72rem;color:var(--dim);
+           display:block;text-align:center;margin-top:.2rem}
+  .port-tag{display:inline-block;background:rgba(147,197,253,.12);
+            border:1px solid rgba(147,197,253,.4);border-radius:4px;
+            padding:.1rem .5rem;font-family:var(--mono);font-size:.78rem;
+            color:var(--port-blue);margin:.15rem .1rem}
+  .port-tag.connected{background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.4);
+                      color:var(--green)}
+
+  /* quiz */
+  .quiz-wrap{background:var(--surface);border:1px solid var(--border);
+             border-radius:8px;padding:1.5rem;margin:1rem 0}
+  .question{margin-bottom:2rem}
+  .q-text{font-weight:600;color:#fff;margin-bottom:.7rem;font-size:1rem}
+  .q-num{color:var(--accent);margin-right:.4rem}
+  .options{list-style:none;margin:0;padding:0}
+  .options li{background:var(--surface2);border:1px solid var(--border);
+              border-radius:5px;padding:.55rem 1rem;margin-bottom:.45rem;
+              cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
+  .options li:hover{border-color:var(--accent);background:rgba(96,165,250,.08)}
+  .options li.correct{border-color:var(--green);background:rgba(52,211,153,.1);color:var(--green)}
+  .options li.wrong{border-color:var(--red);background:rgba(248,113,113,.1);color:var(--red)}
+  .options li.locked{cursor:default}
+  .feedback{margin-top:.6rem;font-size:.88rem;padding:.45rem .8rem;
+            border-radius:4px;display:none}
+  .feedback.ok{background:rgba(52,211,153,.12);color:var(--green);
+               border:1px solid rgba(52,211,153,.3)}
+  .feedback.bad{background:rgba(248,113,113,.1);color:var(--red);
+                border:1px solid rgba(248,113,113,.3)}
+  .score-box{text-align:center;padding:1rem;border-radius:6px;margin-top:1rem;
+             display:none;border:1px solid var(--border)}
+  .btn{display:inline-block;padding:.5rem 1.1rem;border-radius:5px;cursor:pointer;
+       font-size:.9rem;border:1px solid transparent;margin-top:.7rem;
+       font-family:var(--mono);transition:opacity .2s}
+  .btn-primary{background:var(--accent);color:#000}
+  .btn-primary:hover{opacity:.85}
+
+  /* scenario */
+  .scenario{background:var(--surface);border:1px solid var(--border);
+            border-radius:8px;padding:1.1rem 1.3rem;margin:.8rem 0}
+  .scenario-q{font-weight:600;color:#fff;margin-bottom:.6rem}
+  .scenario details summary{cursor:pointer;color:var(--accent);font-size:.88rem}
+  .scenario .ans{margin-top:.5rem;font-size:.9rem;color:var(--dim);line-height:1.6}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="lesson-label">Lesson 0002 · Silmulator</div>
+  <h1>Connections &amp; Documentation</h1>
+  <p class="tagline">Why this matters: understanding the port/wire system lets you build any simulation; understanding hardware_docs lets you add new instruments without writing Python.</p>
+</header>
+
+<!-- progress tracker -->
+<div class="progress-bar">
+  <span>Sections:</span>
+  <div class="chk" id="c1" onclick="tick('c1')"><span class="box">☐</span> 1. Ports deep-dive</div>
+  <div class="chk" id="c2" onclick="tick('c2')"><span class="box">☐</span> 2. Wires deep-dive</div>
+  <div class="chk" id="c3" onclick="tick('c3')"><span class="box">☐</span> 3. In the project</div>
+  <div class="chk" id="c4" onclick="tick('c4')"><span class="box">☐</span> 4. hardware_docs</div>
+  <div class="chk" id="c5" onclick="tick('c5')"><span class="box">☐</span> 5. Custom blocks</div>
+  <div class="chk" id="c6" onclick="tick('c6')"><span class="box">☐</span> 6. Confused with</div>
+  <div class="chk" id="c7" onclick="tick('c7')"><span class="box">☐</span> 7. Quiz</div>
+  <div class="chk" id="c8" onclick="tick('c8')"><span class="box">☐</span> 8. Scenarios</div>
+</div>
+
+<!-- ============================================================ -->
+<section>
+<h2>1. Connection Ports — What They Really Are</h2>
+
+<p>Every hardware block on the canvas has <strong>connection ports</strong> — the small blue circles on its edges. In Python they are instances of <code>ConnectionPort</code>, which is a <strong>child <code>QGraphicsItem</code></strong> embedded inside the block.</p>
+
+<h3>What each port holds</h3>
+<table>
+  <tr><th>Attribute</th><th>Type</th><th>What it means</th></tr>
+  <tr><td><code>port_id</code></td><td><code>str</code></td><td>Unique name within the block (e.g. <code>"CH1_IN"</code>)</td></tr>
+  <tr><td><code>label</code></td><td><code>str</code></td><td>Short display label painted near the circle</td></tr>
+  <tr><td><code>parent_block</code></td><td><code>BaseBlock</code></td><td>The block this port belongs to</td></tr>
+  <tr><td><code>connected_to</code></td><td><code>Optional[ConnectionPort]</code></td><td><code>None</code> when free; points to the peer port when wired</td></tr>
+</table>
+
+<h3>Position is fractional — not pixels</h3>
+<p>When a subclass calls <code>add_port("CH1_IN", "CH1", 0.0, 0.15)</code>, the numbers <code>0.0</code> and <code>0.15</code> are <em>fractions</em> of the block's width and height:</p>
+
+<pre><code><span class="cm"># silmulator/gui/blocks/base_block.py:189</span>
+<span class="kw">def</span> <span class="fn">add_port</span>(self, port_id: str, label: str,
+             x_frac: float, y_frac: float) -> <span class="cls">ConnectionPort</span>:
+    port = <span class="cls">ConnectionPort</span>(self, port_id, label)
+    <span class="cm"># setPos is RELATIVE to the parent block's (0,0) corner</span>
+    port.<span class="fn">setPos</span>(self.BLOCK_WIDTH * x_frac,
+                self.BLOCK_HEIGHT * y_frac)
+    self._ports.<span class="fn">append</span>(port)
+    <span class="kw">return</span> port</code></pre>
+
+<p>So <code>x_frac=0.0</code> → left edge, <code>x_frac=1.0</code> → right edge, <code>y_frac=0.0</code> → top, <code>y_frac=1.0</code> → bottom. This makes port placement resize-friendly — if you change <code>BLOCK_WIDTH</code> the ports move with it.</p>
+
+<h3>Colour signals connection state</h3>
+<div class="diagram">
+  <span class="port-tag">● Blue = idle (free)</span>&nbsp;&nbsp;
+  <span class="port-tag connected">● Green = connected</span>&nbsp;&nbsp;
+  <span class="port-tag" style="background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.4);color:var(--gold)">● Gold = hover target</span>
+</div>
+
+<pre><code><span class="cm"># ConnectionPort._update_color()  — base_block.py:41</span>
+<span class="kw">def</span> <span class="fn">_update_color</span>(self) -> None:
+    color = self.COLOR_CONNECTED <span class="kw">if</span> self.connected_to <span class="kw">else</span> self.COLOR_IDLE
+    self.<span class="fn">setBrush</span>(<span class="cls">QBrush</span>(color))   <span class="cm"># fills the circle</span>
+    self.<span class="fn">setPen</span>(<span class="cls">QPen</span>(<span class="cls">QColor</span>(<span class="num">30</span>,<span class="num">30</span>,<span class="num">30</span>), <span class="num">1.5</span>))  <span class="cm"># dark outline</span></code></pre>
+
+<div class="callout tip">
+  <div class="callout-label">💡 Key invariant</div>
+  If <code>portA.connected_to is portB</code>, then <code>portB.connected_to is portA</code>. The link is always symmetric — <code>connect_to()</code> sets both sides at once.
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>2. Wires — How the Connection Is Stored and Drawn</h2>
+
+<p>A wire is a <code>WireItem</code> — a <code>QGraphicsLineItem</code> that lives in the scene, separate from both blocks. It holds references to its two endpoint ports and redraws itself on every mouse move.</p>
+
+<pre><code><span class="cm"># silmulator/gui/canvas.py:46</span>
+<span class="kw">class</span> <span class="cls">WireItem</span>(<span class="cls">QGraphicsLineItem</span>):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, src: <span class="cls">ConnectionPort</span>, dst: <span class="cls">ConnectionPort</span>) -> None:
+        <span class="fn">super</span>().__init__()
+        self.src_port = src      <span class="cm"># reference to source port</span>
+        self.dst_port = dst      <span class="cm"># reference to destination port</span>
+        self.wire_id  = str(<span class="fn">uuid.uuid4</span>())[:<span class="num">8</span>]
+        pen = <span class="cls">QPen</span>(<span class="cls">QColor</span>(<span class="num">255</span>,<span class="num">200</span>,<span class="num">50</span>), <span class="num">2</span>, ...)  <span class="cm"># gold, 2 px wide</span>
+        self.<span class="fn">setZValue</span>(-<span class="num">1</span>)       <span class="cm"># render BELOW blocks so ports stay visible</span>
+        self.<span class="fn">update_position</span>()   <span class="cm"># draw the initial line</span>
+
+    <span class="kw">def</span> <span class="fn">update_position</span>(self) -> None:
+        src_pos = self.src_port.<span class="fn">scenePos</span>()   <span class="cm"># world-space coords</span>
+        dst_pos = self.dst_port.<span class="fn">scenePos</span>()
+        self.<span class="fn">setLine</span>(<span class="cls">QLineF</span>(src_pos, dst_pos))</code></pre>
+
+<p><strong>The wire's ZValue is <code>-1</code></strong> — it renders below all blocks. That's intentional: you should always be able to see and click the port dots even when two blocks are close together.</p>
+
+<h3>What happens when you connect two ports</h3>
+
+<pre><code><span class="cm"># CanvasScene.connect_ports()  — canvas.py:185</span>
+<span class="kw">def</span> <span class="fn">connect_ports</span>(self, src: <span class="cls">ConnectionPort</span>,
+                   dst: <span class="cls">ConnectionPort</span>) -> <span class="cls">Optional</span>[<span class="cls">WireItem</span>]:
+    <span class="cm"># Guard 1: no self-loops</span>
+    <span class="kw">if</span> src.parent_block <span class="kw">is</span> dst.parent_block:
+        <span class="kw">return None</span>
+    <span class="cm"># Guard 2: no overwriting existing connections</span>
+    <span class="kw">if</span> src.connected_to <span class="kw">or</span> dst.connected_to:
+        <span class="kw">return None</span>
+
+    wire = <span class="cls">WireItem</span>(src, dst)
+    self.<span class="fn">addItem</span>(wire)                          <span class="cm"># add to scene</span>
+    self._wires[wire.wire_id] = wire            <span class="cm"># register in bookkeeping dict</span>
+    src.<span class="fn">connect_to</span>(dst)                         <span class="cm"># sets both port.connected_to</span>
+    self.wire_added.<span class="fn">emit</span>(...)</code></pre>
+
+<h3>What happens when you delete a block</h3>
+<p>The scene must remove all wires attached to that block first, then unregister the block:</p>
+
+<pre><code><span class="cm"># CanvasScene.remove_block()  — canvas.py:143</span>
+wires_to_remove = [
+    w <span class="kw">for</span> w <span class="kw">in</span> self._wires.<span class="fn">values</span>()
+    <span class="kw">if</span> (w.src_port.parent_block <span class="kw">is</span> block <span class="kw">or</span>
+        w.dst_port.parent_block <span class="kw">is</span> block)
+]
+<span class="kw">for</span> wire <span class="kw">in</span> wires_to_remove:
+    self.<span class="fn">_remove_wire</span>(wire)    <span class="cm"># calls port.disconnect() on both ends</span></code></pre>
+
+<div class="callout warn">
+  <div class="callout-label">⚠ The disconnect contract</div>
+  <code>port.disconnect()</code> sets <code>self.connected_to = None</code> <em>and</em> sets the peer's <code>connected_to = None</code>. If you delete the WireItem from the scene without calling <code>disconnect()</code>, the two ports still think they're connected — a ghost state that breaks future connection attempts.
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>3. In This Project — Reading Real Port Definitions</h2>
+
+<p>Every block subclass overrides <code>_setup_ports()</code> to declare its port layout. Here are two contrasting examples:</p>
+
+<h3>Oscilloscope — input ports on the left, trigger on the right</h3>
+<pre><code><span class="cm"># silmulator/gui/blocks/oscilloscope_block.py:41</span>
+<span class="kw">def</span> <span class="fn">_setup_ports</span>(self) -> None:
+    <span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">1</span>, <span class="num">5</span>):
+        <span class="cm"># x=0.0 → left edge; y stacks down: 0.15, 0.35, 0.55, 0.75</span>
+        self.<span class="fn">add_port</span>(f<span class="str">"CH{i}_IN"</span>, f<span class="str">"CH{i}"</span>, <span class="num">0.0</span>, <span class="num">0.15</span> + <span class="num">0.2</span> * (i - <span class="num">1</span>))
+    <span class="cm"># x=1.0 → right edge; y=0.5 → vertical middle</span>
+    self.<span class="fn">add_port</span>(<span class="str">"TRIG_IN"</span>, <span class="str">"TRIG"</span>, <span class="num">1.0</span>, <span class="num">0.5</span>)</code></pre>
+
+<h3>MSP430 — GPIO on both sides, specials at top and bottom</h3>
+<pre><code><span class="cm"># silmulator/gui/blocks/msp430_block.py:29</span>
+<span class="kw">def</span> <span class="fn">_setup_ports</span>(self) -> None:
+    <span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">8</span>):
+        self.<span class="fn">add_port</span>(f<span class="str">"P1.{i}"</span>, f<span class="str">"P1.{i}"</span>, <span class="num">0.0</span>, <span class="num">0.2</span> + <span class="num">0.08</span> * i) <span class="cm"># left</span>
+        self.<span class="fn">add_port</span>(f<span class="str">"P2.{i}"</span>, f<span class="str">"P2.{i}"</span>, <span class="num">1.0</span>, <span class="num">0.2</span> + <span class="num">0.08</span> * i) <span class="cm"># right</span>
+    <span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">4</span>):
+        self.<span class="fn">add_port</span>(f<span class="str">"ADC{i}"</span>, f<span class="str">"A{i}"</span>, <span class="num">0.15</span>+<span class="num">0.2</span>*i, <span class="num">1.0</span>) <span class="cm"># bottom</span>
+    self.<span class="fn">add_port</span>(<span class="str">"VCC"</span>,  <span class="str">"VCC"</span>,  <span class="num">0.5</span>, <span class="num">0.0</span>) <span class="cm"># top</span>
+    self.<span class="fn">add_port</span>(<span class="str">"GND"</span>,  <span class="str">"GND"</span>,  <span class="num">0.7</span>, <span class="num">0.0</span>) <span class="cm"># top</span>
+    self.<span class="fn">add_port</span>(<span class="str">"UART_TX"</span>, <span class="str">"TX"</span>, <span class="num">0.0</span>, <span class="num">0.95</span>) <span class="cm"># near bottom-left</span></code></pre>
+
+<p>The pattern: <strong>inputs left</strong> (<code>x=0.0</code>), <strong>outputs right</strong> (<code>x=1.0</code>), <strong>power top</strong> (<code>y=0.0</code>), <strong>comms bottom</strong> (<code>y=1.0</code>). This is a convention, not enforced — the system accepts any (x, y) fraction.</p>
+
+<h3>How save/load captures connections</h3>
+<pre><code><span class="cm"># canvas.py:to_dict() — what gets serialised</span>
+<span class="str">"wires"</span>: [
+    {
+        <span class="str">"id"</span>:        wire.wire_id,
+        <span class="str">"src_block"</span>: wire.src_port.parent_block.block_id,
+        <span class="str">"src_port"</span>:  wire.src_port.port_id,     <span class="cm"># e.g. "CH1_OUT"</span>
+        <span class="str">"dst_block"</span>: wire.dst_port.parent_block.block_id,
+        <span class="str">"dst_port"</span>:  wire.dst_port.port_id,     <span class="cm"># e.g. "CH1_IN"</span>
+    }
+]</code></pre>
+
+<p>On load, <code>from_dict()</code> rebuilds a <code>port_map</code> keyed by <code>(block_id, port_id)</code>, then calls <code>connect_ports()</code> for each wire entry. If a block was silently skipped (e.g. the old "Function Gen" name mismatch) its port_id entries are missing from the map — that wire is simply dropped.</p>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>4. hardware_docs/ — The Reference Layer</h2>
+
+<p>The <code>hardware_docs/</code> folder is where you put vendor documentation so it ships alongside the simulator. It has nothing to do with code generation automatically — it is a <strong>human-readable reference store</strong> that a future "New custom block from docs…" wizard will read.</p>
+
+<pre><code>hardware_docs/
+├── keysight/     ← E36312A, 33522B, 34401A programmer's references
+├── tektronix/    ← MSO54, TBS series
+├── ti/           ← MSP430FR5994, C2000 series
+├── nasa/         ← cFE, cFS, F′ Prime flight OS docs
+├── rtos/         ← FreeRTOS, Zephyr, NuttX programmer's guides
+└── custom/       ← in-house ASICs, development boards, anything else</code></pre>
+
+<h3>The suggested per-device layout</h3>
+<pre><code>hardware_docs/keysight/E36312A/
+├── programmer_reference.pdf   ← the full vendor PDF
+├── scpi_commands.md           ← cleaned-up command table you'll test against
+└── notes.md                   ← team-specific notes (quirks, tested versions)</code></pre>
+
+<h3>What Silmulator currently does with these files</h3>
+<table>
+  <tr><th>File type</th><th>What happens</th></tr>
+  <tr><td>PDFs</td><td>Stored for human reference; not auto-parsed at runtime</td></tr>
+  <tr><td><code>scpi_commands.md</code></td><td>The future custom-block wizard will read this to pre-fill command maps</td></tr>
+  <tr><td><code>notes.md</code></td><td>Human reference only</td></tr>
+</table>
+
+<div class="callout tip">
+  <div class="callout-label">💡 The workflow loop</div>
+  <ol style="margin-left:1.2rem;margin-top:.4rem">
+    <li>Drop a vendor PDF in <code>hardware_docs/&lt;vendor&gt;/&lt;model&gt;/</code></li>
+    <li>Write a <code>scpi_commands.md</code> summarising the commands you'll test</li>
+    <li>Create a matching JSON spec in <code>silmulator/custom_blocks/</code></li>
+    <li>Restart Silmulator — the block appears in the library automatically</li>
+  </ol>
+</div>
+
+<h3>Why a folder, not a wiki</h3>
+<p>Lab benches, secure test ranges, and flight-test environments often have no internet. Keeping docs in the git repo means the Docker image and <code>.app</code> bundle always ship with the references your test code was written against — no "where's that PDF" hunt during a test campaign.</p>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>5. Custom Blocks — Creating Instruments Without Writing Python</h2>
+
+<p>The custom-block system lets you define a new instrument entirely in a JSON file. Drop it in <code>silmulator/custom_blocks/</code> (or <code>~/.silmulator/custom_blocks/</code> for personal blocks) and it appears in the library on next launch.</p>
+
+<h3>The minimal spec — Hello World example (shipped with Silmulator)</h3>
+<pre><code><span class="cm">// silmulator/custom_blocks/hello_world.json</span>
+{
+    <span class="attr">"name"</span>:         <span class="str">"Hello World"</span>,
+    <span class="attr">"manufacturer"</span>: <span class="str">"Silmulator"</span>,
+    <span class="attr">"model"</span>:        <span class="str">"HELLO-1"</span>,
+    <span class="attr">"color"</span>:        <span class="str">"#3a6f3a"</span>,    <span class="cm">// CSS hex — the block header tint</span>
+    <span class="attr">"ports"</span>: [
+        {<span class="attr">"id"</span>:<span class="str">"IN"</span>,  <span class="attr">"label"</span>:<span class="str">"IN"</span>,  <span class="attr">"x"</span>:<span class="num">0.0</span>, <span class="attr">"y"</span>:<span class="num">0.5</span>},  <span class="cm">// left-middle</span>
+        {<span class="attr">"id"</span>:<span class="str">"OUT"</span>, <span class="attr">"label"</span>:<span class="str">"OUT"</span>, <span class="attr">"x"</span>:<span class="num">1.0</span>, <span class="attr">"y"</span>:<span class="num">0.5</span>}   <span class="cm">// right-middle</span>
+    ],
+    <span class="attr">"commands"</span>: {
+        <span class="attr">"HELLO"</span>:  <span class="str">"world"</span>,        <span class="cm">// any matching command → always returns "world"</span>
+        <span class="attr">"*IDN?"</span>:  <span class="str">"Silmulator,HELLO-1,SIM000001,1.0.0"</span>,
+        <span class="attr">"ECHO"</span>:   <span class="str">"echo:{0}"</span>     <span class="cm">// {0} substitutes the first SCPI parameter</span>
+    }
+}</code></pre>
+
+<h3>Three command value types</h3>
+<table>
+  <tr><th>Value format</th><th>Meaning</th><th>Example</th></tr>
+  <tr><td><code>"some string"</code></td><td>Always returned verbatim</td><td><code>"HELLO": "world"</code></td></tr>
+  <tr><td><code>""</code> (empty)</td><td>Write-only — accepted, no response</td><td><code>"OUTP": ""</code></td></tr>
+  <tr><td><code>"echo:{0}"</code></td><td>Substitutes SCPI positional params</td><td><code>ECHO 42</code> → <code>"echo:42"</code></td></tr>
+</table>
+
+<h3>How discovery works at startup</h3>
+<pre><code><span class="cm"># canvas.py:40 — runs at import time</span>
+<span class="kw">try</span>:
+    <span class="fn">register_custom_blocks</span>(BLOCK_REGISTRY)
+<span class="kw">except</span> Exception:
+    <span class="kw">pass</span>   <span class="cm"># one bad JSON file cannot block app startup</span></code></pre>
+
+<p><code>register_custom_blocks()</code> calls <code>discover_specs()</code> which <code>glob("*.json")</code>s both <code>silmulator/custom_blocks/</code> and <code>~/.silmulator/custom_blocks/</code>. Each valid spec is turned into a live Python class by <code>make_custom_block_class(spec)</code> and added to <code>BLOCK_REGISTRY</code> — the same dictionary the built-in blocks live in.</p>
+
+<div class="callout">
+  <div class="callout-label">📌 The full pipeline</div>
+  <code>hardware_docs/keysight/E36312A/scpi_commands.md</code>
+  → <em>(you author a spec)</em>
+  → <code>silmulator/custom_blocks/keysight_e36312a_custom.json</code>
+  → <em>(app starts)</em>
+  → <code>discover_specs()</code> → <code>make_custom_block_class()</code>
+  → appears in Library panel as <strong>"Keysight E36312A Custom"</strong>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>6. Often Confused: Ports vs. Wires vs. Signals</h2>
+
+<p>Three things in this project carry the word "connection" — they are completely different layers:</p>
+
+<table>
+  <tr><th>Concept</th><th>Python class</th><th>Where</th><th>What it does</th></tr>
+  <tr>
+    <td><strong>Port</strong></td>
+    <td><code>ConnectionPort</code></td>
+    <td><code>base_block.py</code></td>
+    <td>A clickable endpoint on a block. Holds <code>connected_to</code> reference. Visual + structural.</td>
+  </tr>
+  <tr>
+    <td><strong>Wire</strong></td>
+    <td><code>WireItem</code></td>
+    <td><code>canvas.py</code></td>
+    <td>A drawn line between two ports. Lives in the scene. Routes Code Input commands when <code>_get_connected_blocks()</code> is called.</td>
+  </tr>
+  <tr>
+    <td><strong>Qt Signal</strong></td>
+    <td><code>pyqtSignal</code></td>
+    <td><code>canvas.py</code></td>
+    <td>A Python-level event notification (e.g. <code>wire_added</code>). Carries metadata to listeners like the status bar. Not visible on canvas.</td>
+  </tr>
+</table>
+
+<p><strong>Common confusion:</strong> people think wires route SCPI commands in real-time, like a bus. They don't — a wire's only runtime effect is to be traversed by <code>_get_connected_blocks()</code> when the Code Input block runs its parsed commands. For direct console commands the wire is purely visual.</p>
+
+<table>
+  <tr><th></th><th>Port</th><th>Wire</th><th>Qt Signal</th></tr>
+  <tr><td>Visible on canvas?</td><td>✓ blue/green circle</td><td>✓ gold line</td><td>✗ invisible</td></tr>
+  <tr><td>Persisted in layout file?</td><td>✓ (via block)</td><td>✓ src_block/port + dst_block/port</td><td>✗ ephemeral</td></tr>
+  <tr><td>Routes SCPI commands?</td><td>✗</td><td>Only for Code Input → connected blocks</td><td>✗</td></tr>
+  <tr><td>One per block?</td><td>✗ (many)</td><td>✗ (many)</td><td>✗ (several types)</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>7. Quiz</h2>
+
+<div class="quiz-wrap">
+
+  <!-- Q1 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q1.</span> You call <code>add_port("TRIG_IN", "TRIG", 1.0, 0.5)</code> on a block with <code>BLOCK_WIDTH=300</code> and <code>BLOCK_HEIGHT=220</code>. Where does the port appear, in pixels relative to the block's top-left corner?</p>
+    <ul class="options">
+      <li data-correct="true"  data-why="x = 300 × 1.0 = 300 (right edge), y = 220 × 0.5 = 110 (vertical midpoint). Correct.">x=300, y=110 — right edge, vertical midpoint</li>
+      <li data-correct="false" data-why="x=0.0 would be the left edge. x_frac=1.0 maps to the right edge (300 px).">x=0, y=110 — left edge, vertical midpoint</li>
+      <li data-correct="false" data-why="x_frac=1.0 → 300, not 150. 150 would be x_frac=0.5 (the horizontal midpoint).">x=150, y=110 — horizontal midpoint, vertical midpoint</li>
+      <li data-correct="false" data-why="y_frac=0.5 → 110, not 220. 220 would be y_frac=1.0 (the bottom edge).">x=300, y=220 — right edge, bottom edge</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q2 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q2.</span> After <code>connect_ports(portA, portB)</code> succeeds, what is the value of <code>portA.connected_to</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="True is not a valid value for connected_to. The attribute holds a port reference or None.">True</li>
+      <li data-correct="true"  data-why="connect_to() sets self.connected_to = other, and other.connected_to = self. portA.connected_to is portB.">portB — the peer ConnectionPort object</li>
+      <li data-correct="false" data-why="The WireItem is stored in CanvasScene._wires, not in the port. The port holds the peer port, not the wire.">The WireItem that connects them</li>
+      <li data-correct="false" data-why="None means free/unconnected. After a successful connection it holds the peer port reference.">None</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q3.</span> You drop a JSON file at <code>~/.silmulator/custom_blocks/my_device.json</code>. When does the block appear in the Library panel?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The discovery runs at import time, not on file-system events. There's no hot-reload in the current codebase.">Immediately — the app watches the folder and hot-reloads</li>
+      <li data-correct="true"  data-why="register_custom_blocks() is called at canvas.py import time (app startup). The next launch discovers the new file.">On the next application restart — discovery runs at import time</li>
+      <li data-correct="false" data-why="Right-click 'Refresh' doesn't exist in the current UI. The only trigger is startup.">After right-clicking the canvas and choosing 'Refresh block library'</li>
+      <li data-correct="false" data-why="Only JSON files in the two scanned directories are loaded. Canvas.py import runs discover_specs() unconditionally.">Only if you also add it to BLOCK_REGISTRY manually in canvas.py</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q4 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q4.</span> What does a <code>WireItem</code>'s <code>setZValue(-1)</code> accomplish?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="ZValue controls render order, not which items receive mouse events. Ports have their own hit-testing via ItemIsSelectable=False.">It makes the wire non-interactive so port clicks aren't intercepted</li>
+      <li data-correct="false" data-why="ZValue=-1 does not affect the wire's colour. Colour is set by the QPen in __init__.">It makes the wire draw in red to indicate low priority</li>
+      <li data-correct="true"  data-why="Lower ZValue → rendered first (behind). At -1, blocks (default ZValue=0) and ports render on top, keeping them visible and clickable even when a wire passes under them.">It renders the wire behind all blocks so port dots remain visible on top</li>
+      <li data-correct="false" data-why="ZValue is a rendering-order property, not an opacity or visibility toggle. The wire is fully visible.">It hides the wire until a block is selected</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q5 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q5.</span> In a custom block JSON, the command <code>"ECHO": "echo:{0}"</code> is defined. A user sends the SCPI command <code>ECHO hello</code>. What does the block respond?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The template replaces {0} with the first parameter. The literal string 'echo:{0}' is the template, not the response.">echo:{0}</li>
+      <li data-correct="true"  data-why="_make_handler returns a function that calls template.format(*cmd.params). cmd.params[0] is 'hello', so the response is 'echo:hello'.">echo:hello</li>
+      <li data-correct="false" data-why="ECHO is a registered command — it doesn't return an empty string unless the template is ''. The template here is 'echo:{0}'.">'' (empty string — write-only)</li>
+      <li data-correct="false" data-why="The handler substitutes {0}=hello into the template. It doesn't echo back the raw command string.">ECHO hello</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <div id="quiz-score" class="score-box"></div>
+  <button class="btn btn-primary" onclick="scoreQuiz()">See my score</button>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section>
+<h2>8. Scenarios — Check Your Understanding</h2>
+
+<div class="scenario">
+  <div class="scenario-q">Scenario A: You want to simulate a custom relay board that has 4 output channels and responds to the commands <code>RELAY:CH1 ON</code>, <code>RELAY:CH1 OFF</code>, and <code>RELAY:CH1?</code> (returns "ON" or "OFF"). Describe the JSON spec you'd write — name the required fields and what you'd put in each.</div>
+  <details>
+    <summary>Show answer</summary>
+    <div class="ans">
+      <pre style="background:var(--code-bg);padding:.8rem;border-radius:5px;font-size:.82rem">{
+  "name": "Relay Board",
+  "manufacturer": "MyLab",
+  "model": "RB-4CH",
+  "color": "#5a3a1a",
+  "ports": [
+    {"id":"CH1","label":"CH1","x":1.0,"y":0.2},
+    {"id":"CH2","label":"CH2","x":1.0,"y":0.4},
+    {"id":"CH3","label":"CH3","x":1.0,"y":0.6},
+    {"id":"CH4","label":"CH4","x":1.0,"y":0.8}
+  ],
+  "commands": {
+    "RELAY:CH1":  "",       // write ON/OFF — write-only, no response
+    "RELAY:CH1?": "ON",     // simplest stub: always returns "ON"
+    "RELAY:CH2":  "",
+    "RELAY:CH2?": "OFF",    // etc.
+    ...
+  }
+}</pre>
+      <p style="margin-top:.5rem">Note: the current custom-block system can't store state between commands (a real ON/OFF toggle), so <code>RELAY:CH1?</code> always returns the same literal. State-tracking requires a Python device class. The JSON spec is ideal for stateless instrument stubs.</p>
+    </div>
+  </details>
+</div>
+
+<div class="scenario">
+  <div class="scenario-q">Scenario B: You load a saved layout and notice that one block's wires are missing — they were there when you saved. Name two bugs that could cause this, and how each manifests in the code.</div>
+  <details>
+    <summary>Show answer</summary>
+    <div class="ans">
+      <p><strong>Bug 1 — device_type mismatch:</strong> The block's <code>device_type</code> string (set in <code>__init__</code>) doesn't match its key in <code>BLOCK_REGISTRY</code>. <code>to_dict()</code> stores the wrong string; <code>from_dict()</code> calls <code>add_block(wrong_name)</code> which returns <code>None</code>; the block is silently skipped; its ports never enter <code>port_map</code>; all wires referencing its ports are also skipped. (This was the Function Generator bug.)</p>
+      <p><strong>Bug 2 — clear() not resetting registries:</strong> After <code>File → New</code> the old block/wire registries aren't cleared. On the next <code>from_dict()</code>, stale entries from the previous layout could interfere with the <code>port_map</code> build — older block_ids might shadow new ones with the same UUID prefix. (Fixed by the <code>CanvasScene.clear()</code> override.)</p>
+    </div>
+  </details>
+</div>
+
+<div class="scenario">
+  <div class="scenario-q">Scenario C: A colleague asks "Why do wires have ZValue=-1? Couldn't we just put them at ZValue=0 like everything else?" Give the technical reason.</div>
+  <details>
+    <summary>Show answer</summary>
+    <div class="ans">
+      Qt renders higher ZValue items on top. Blocks have ZValue=0 (the default). If wires were also at 0, the render order between a wire and a block would be undefined — Qt renders same-ZValue items in scene-item order (last added on top). A wire added after a block would render <em>above</em> it, potentially covering the port circles. Setting ZValue=-1 guarantees wires are always below all blocks so ports stay visible and clickable regardless of how many wires cross through a block's bounding rect.
+    </div>
+  </details>
+</div>
+</section>
+
+<hr style="border:none;border-top:1px solid var(--border);margin:2.5rem 0">
+<p style="color:var(--dim);font-size:.83rem">
+  Lesson 0002 · Silmulator · 2026-06-20<br>
+  Next suggested: <em>SCPI command structure</em> — the IEEE 488.2 tree syntax grounded in <code>silmulator/scpi/parser.py</code>
+</p>
+
+</div>
+
+<script>
+function tick(id){
+  const el=document.getElementById(id);
+  el.classList.toggle('done');
+  el.querySelector('.box').textContent=el.classList.contains('done')?'✓':'☐';
+}
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+let answers={};
+document.querySelectorAll('[data-question]').forEach((q,qi)=>{
+  const list=q.querySelector('.options');
+  const fb=q.querySelector('.feedback');
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('locked'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('locked'));
+      const correct=li.dataset.correct==='true';
+      li.classList.add(correct?'correct':'wrong');
+      if(!correct)list.querySelectorAll('[data-correct="true"]').forEach(x=>x.classList.add('correct'));
+      answers[qi]=correct;
+      fb.style.display='block';
+      fb.className='feedback '+(correct?'ok':'bad');
+      fb.textContent=(correct?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+    });
+  });
+});
+
+function scoreQuiz(){
+  const total=document.querySelectorAll('[data-question]').length;
+  const got=Object.values(answers).filter(Boolean).length;
+  const answered=Object.keys(answers).length;
+  const sb=document.getElementById('quiz-score');
+  sb.style.display='block';
+  const pct=answered?Math.round(got/total*100):0;
+  if(answered<total){sb.style.background='#1e2a4a';sb.style.borderColor=var('--accent');
+    sb.innerHTML=`<strong>${got}/${answered}</strong> answered (${total-answered} skipped)`;}
+  else if(pct===100){sb.style.background='#1a3a2a';sb.style.borderColor='#34d399';
+    sb.innerHTML='🎉 <strong>5/5</strong> — Perfect! Mark section 7 complete.';}
+  else if(pct>=60){sb.style.background='#2a2a1a';sb.style.borderColor='#fbbf24';
+    sb.innerHTML=`<strong>${got}/5</strong> (${pct}%) — Good. Review the missed ones.`;}
+  else{sb.style.background='#3a1a1a';sb.style.borderColor='#f87171';
+    sb.innerHTML=`<strong>${got}/5</strong> (${pct}%) — Re-read sections 1–3, then retry.`;}
+}
+function vr(k){return `var(${k})`}
+</script>
+</body>
+</html>

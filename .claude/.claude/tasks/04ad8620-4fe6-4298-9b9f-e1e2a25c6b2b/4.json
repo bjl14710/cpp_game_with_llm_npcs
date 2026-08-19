@@ -1,0 +1,9 @@
+{
+  "id": "4",
+  "subject": "Issue #5: Canvas interaction visual test",
+  "description": "test_gui_canvas.py: empty canvas + drag PSU block onto canvas",
+  "activeForm": "Building canvas interaction test (#5)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

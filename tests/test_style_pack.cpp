@@ -13,11 +13,12 @@
 using namespace llm_npc;
 
 TEST_CASE("every part and palette carries a pack tag (default core)") {
-    // Step 1 (pack seam). Live already — the defaulted field ships with
-    // the scaffold, so this one is NOT skipped: it pins the seam down.
+    // Step 1 (pack seam). The seam now carries two packs: the built-in
+    // "core" primitives and the "quaternius" mesh family (issue #139) —
+    // anything else is a typo'd row.
     for (const PartDef& part : partCatalog()) {
         CHECK_MESSAGE(!part.pack.empty(), part.id);
-        CHECK(part.pack == "core");  // only the built-in pack exists tonight
+        CHECK((part.pack == "core" || part.pack == "quaternius"));
     }
     for (const PartPalette& palette : paletteCatalog()) {
         CHECK_MESSAGE(!palette.pack.empty(), palette.id);
@@ -25,13 +26,19 @@ TEST_CASE("every part and palette carries a pack tag (default core)") {
     }
 }
 
-TEST_CASE("Mii proportions: heads read as ~half the body+head silhouette") {
+TEST_CASE("cartoon proportions: heads read as ~a third of the body+head silhouette") {
     // Step 2. Metric refined from the scaffold stub (logged in
     // OVERNIGHT_REPORT.md): hair height varies per look, so the STABLE
     // measure is head.y / (headSocket.y + head.y) — the body+head
-    // silhouette. 0.48-0.60 lands the plan's "head reads ~40-45% of
-    // standing height" once a typical hair crown joins the assembly.
+    // silhouette. The window was 0.48-0.60 while a body was one legless
+    // cone; the appealing-character pass gave bodies legs, so the same
+    // cartoon-large head now measures 0.32-0.39 against a full figure.
+    // Retuned deliberately — the head did NOT shrink to satisfy a number.
+    // Scoped to CORE parts: the quaternius mesh family (issue #139) is
+    // realistically proportioned by design and pins its own window in
+    // test_stylized_parts.cpp.
     for (const PartDef* body : partsForCategory(PartCategory::Body, "any")) {
+        if (body->pack != "core") continue;
         const auto socket = body->sockets.find("head");
         REQUIRE_MESSAGE(socket != body->sockets.end(), body->id);
         for (const PartDef* head :
@@ -40,8 +47,8 @@ TEST_CASE("Mii proportions: heads read as ~half the body+head silhouette") {
                 head->localSize.y / (socket->second.y + head->localSize.y);
             CAPTURE(body->id);
             CAPTURE(head->id);
-            CHECK(fraction >= 0.48f);
-            CHECK(fraction <= 0.60f);
+            CHECK(fraction >= 0.30f);
+            CHECK(fraction <= 0.40f);
         }
     }
 }
@@ -83,6 +90,42 @@ TEST_CASE("a five-item look line still parses, mouth defaults to the smile") {
     // Written back, the line is always the six-item current format.
     const std::string rendered = llm_npc::renderPersonaText(parsed.value);
     CHECK(rendered.find("hair_tuft, mouth_smile, warm") != std::string::npos);
+}
+
+TEST_CASE("round skulls wear the mouth ON the face, not out in front of it") {
+    // Regression for the muzzle. A mouth socket's z is only correct for the
+    // mouth LINE it was authored against: #104 placed these against a line of
+    // 0.30 (round) / 0.34 (oval), the appealing-character pass lowered the
+    // line to 0.27 / 0.31, and z stayed put — so the mark kept the depth of a
+    // point higher up a skull that is narrower down there, and stood 0.07
+    // proud of a head only 0.49 deep, hiding the nose bead behind it.
+    //
+    // The invariant that catches it: the front face of the drawn mark sits
+    // level with the skull surface at the mouth's own height. Only the boxy
+    // heads may float a mark off a flat wall and still read as painted on;
+    // on a sphere that is a snout, so this is scoped to the round family.
+    for (const PartDef* head : partsForCategory(PartCategory::Head, "round")) {
+        if (head->pack != "core") continue;
+        const auto mouth = head->sockets.find("mouth");
+        REQUIRE_MESSAGE(mouth != head->sockets.end(), head->id);
+        const float surface = skullSurfaceZ(*head, mouth->second.y);
+        for (const PartDef* part : partsForCategory(PartCategory::Mouth, "round")) {
+            // Every mouth recipe lands its front at dim.z*0.5 past the
+            // socket — the cubes by filling their box, the flattened spheres
+            // by being nudged forward to match. That shared reach is what
+            // lets one authored z serve every mouth style on a skull; when
+            // mouth_open and mouth_o reached only 0.033 and 0.020 of their
+            // own accord, this same z left the small "o" inside the head.
+            const float front =
+                mouth->second.z + part->localSize.z * (kFeatureZPush + 0.5f);
+            CAPTURE(head->id);
+            CAPTURE(part->id);
+            // Bounded by the standoff the derivation authors in, with one
+            // standoff of slack: anything further out is the muzzle again.
+            CHECK(front > surface);
+            CHECK(front < surface + kMarkStandoff * 2.f);
+        }
+    }
 }
 
 TEST_CASE("catalog growth floors: hair>=18 eyes>=10 bodies>=6 mouths>=4 palettes>=12") {

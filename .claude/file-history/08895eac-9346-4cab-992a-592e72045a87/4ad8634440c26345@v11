@@ -1,0 +1,93 @@
+"""Diagnostic plots for microstructure signals.
+
+Consumed by the dashboard's microstructure panel (``app/dashboard.py``).
+Follows the dashboard's existing plotly conventions (see ``_ccf_figure`` /
+``_line`` there): one figure per function, ~300px tall, tight margins.
+
+The full AAPL golden day has ~1.5M events — far beyond what plotly renders
+responsively — so figures decimate to :data:`MAX_PLOT_POINTS` evenly spaced
+rows first. Uniform decimation preserves the session-scale shape (trend,
+regime shifts) that these diagnostics exist to show; it deliberately drops
+single-event spikes, which belong in an event-level view, not here.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pandas as pd
+import plotly.graph_objects as go
+
+from oil_alpha.microstructure.kyles_lambda import KylesLambdaResult
+
+#: Ceiling on rendered points per trace; ~5k keeps plotly interactive.
+MAX_PLOT_POINTS: int = 5_000
+
+
+def _decimate(df: pd.DataFrame, max_points: int = MAX_PLOT_POINTS) -> pd.DataFrame:
+    """Every k-th row so at most ``max_points`` rows survive (order kept)."""
+    if len(df) <= max_points:
+        return df
+    step = math.ceil(len(df) / max_points)
+    return df.iloc[::step]
+
+
+def _clock(ns: pd.Series | pd.Index) -> pd.Series:
+    """ITCH ns-since-midnight -> wall-clock timestamps (ET) for plot axes."""
+    return pd.to_datetime(pd.Series(ns, dtype="int64"), unit="ns")
+
+
+def ofi_vs_price_figure(events: pd.DataFrame) -> go.Figure:
+    """Cumulative OFI vs microprice over the session, twin y-axes.
+
+    Cumulative OFI (net signed order flow, shares) on the left axis and the
+    microprice (dollars) on the right — visually co-moving lines are the
+    qualitative signature of price impact that Kyle's lambda quantifies.
+    """
+    df = events[["timestamp_ns", "ofi", "microprice"]].copy()
+    df["cum_ofi"] = df["ofi"].cumsum()
+    df = _decimate(df)
+    t = _clock(df["timestamp_ns"])
+
+    fig = go.Figure()
+    fig.add_scatter(x=t, y=df["cum_ofi"], mode="lines", name="cumulative OFI (sh)")
+    fig.add_scatter(x=t, y=df["microprice"], mode="lines", name="microprice ($)",
+                    yaxis="y2", line=dict(color="crimson"))
+    fig.update_layout(
+        title="Cumulative order-flow imbalance vs microprice",
+        yaxis=dict(title="cumulative OFI (shares)"),
+        yaxis2=dict(title="microprice ($)", overlaying="y", side="right"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        height=340, margin=dict(l=10, r=10, t=70, b=10),
+    )
+    return fig
+
+
+def lambda_stability_figure(result: KylesLambdaResult) -> go.Figure:
+    """Per-window Kyle's lambda across the session with the session aggregate.
+
+    Trustworthy windows (``ok=True``) are solid bars; low-observation windows
+    are greyed out so an illiquid stretch reads as "no evidence", not "zero
+    impact". The dashed line is the whole-session estimate.
+    """
+    ok = [w for w in result.windows if w.ok]
+    bad = [w for w in result.windows if not w.ok and math.isfinite(w.lam)]
+
+    fig = go.Figure()
+    if ok:
+        fig.add_bar(x=_clock(pd.Index([w.start_ns for w in ok])),
+                    y=[w.lam for w in ok], name="window λ (ok)")
+    if bad:
+        fig.add_bar(x=_clock(pd.Index([w.start_ns for w in bad])),
+                    y=[w.lam for w in bad], name="window λ (low obs)",
+                    marker_color="lightgray")
+    if math.isfinite(result.session_lambda):
+        fig.add_hline(y=result.session_lambda, line_dash="dash", line_color="crimson",
+                      annotation_text=f"session λ = {result.session_lambda:.2e}")
+    fig.update_layout(
+        title=(f"Kyle's λ stability — {result.n_windows_ok}/{len(result.windows)} "
+               f"windows ok, session r²={result.session_r_squared:.2f}"),
+        yaxis_title="λ ($ per share of OFI)",
+        height=340, margin=dict(l=10, r=10, t=50, b=10),
+    )
+    return fig

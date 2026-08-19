@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lesson 0006 — Hardware Docs &amp; Custom Blocks</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#30363d;
+  --green:#34d399;--blue:#60a5fa;--yellow:#fbbf24;--red:#f87171;
+  --orange:#fb923c;--purple:#a78bfa;--teal:#22d3ee;
+  --text:#c9d1d9;--dim:#6e7681;--border:#30363d;--code:#010409;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.72;min-height:100vh}
+
+/* ── nav ── */
+nav{background:var(--surf);border-bottom:1px solid var(--border);padding:.6rem 1.5rem;
+    display:flex;align-items:center;gap:1rem;font-family:var(--mono);font-size:.78rem;
+    position:sticky;top:0;z-index:50;flex-wrap:wrap}
+.nav-title{color:var(--green)}
+.nav-lbl{color:var(--dim)}
+.pdots{display:flex;gap:.35rem;margin-left:auto}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--surf2);border:1px solid var(--border);cursor:pointer;transition:background .2s}
+.dot.done{background:var(--green)}.dot.active{background:var(--yellow);border-color:var(--yellow)}
+
+/* ── layout ── */
+article{max-width:800px;margin:0 auto;padding:2.5rem 1.5rem 6rem}
+h1{font-size:1.9rem;color:#fff;margin-bottom:.3rem;line-height:1.3}
+.why{font-size:.97rem;color:var(--green);margin-bottom:2rem;font-style:italic}
+section{margin-bottom:3.2rem}
+h2{font-size:1.22rem;color:#fff;margin-bottom:1rem;padding-bottom:.4rem;
+   border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.7rem}
+h2 .sn{font-family:var(--mono);font-size:.74rem;color:var(--dim);
+        background:var(--surf2);padding:.1rem .44rem;border-radius:4px}
+.db{font-family:var(--mono);font-size:.72rem;padding:.17rem .54rem;
+    border:1px solid var(--border);border-radius:12px;cursor:pointer;
+    background:transparent;color:var(--dim);transition:all .18s;margin-left:auto}
+.db:hover{border-color:var(--green);color:var(--green)}
+.db.ticked{background:rgba(52,211,153,.11);border-color:var(--green);color:var(--green)}
+
+h3{font-size:1rem;color:#e6edf3;margin:1.5rem 0 .55rem}
+p{margin-bottom:.85rem}
+ul,ol{margin-left:1.5rem;margin-bottom:.85rem}
+li{margin-bottom:.3rem}
+strong{color:#e6edf3}
+em{color:var(--orange);font-style:normal}
+code{font-family:var(--mono);font-size:.85em;background:var(--surf2);
+     padding:.1em .35em;border-radius:3px;color:#a5d6ff}
+
+/* callouts */
+.note,.warn,.key{border-radius:6px;padding:.75rem 1rem;margin-bottom:1rem;
+                 font-size:.9rem;line-height:1.65;border-left:3px solid}
+.note{background:rgba(96,165,250,.07);border-color:var(--blue);color:#b0c8e8}
+.warn{background:rgba(248,113,113,.07);border-color:var(--red);color:#e8b0b0}
+.key{background:rgba(52,211,153,.07);border-color:var(--green);color:#b0e8cc}
+
+/* code blocks */
+pre{background:var(--code);border:1px solid var(--border);border-radius:7px;
+    padding:1rem 1.2rem;overflow-x:auto;font-family:var(--mono);
+    font-size:.83rem;line-height:1.78;margin:1rem 0 1.2rem;position:relative}
+.fl{color:var(--dim);user-select:none;margin-right:.9rem}
+.cm{color:#2d4a5a;font-style:italic}.kw{color:#ff7b72}.fn{color:var(--green)}
+.str{color:#a5d6ff}.cls{color:var(--yellow)}.at{color:var(--blue)}.num{color:var(--orange)}
+.op{color:var(--dim)}.pm{color:#d2a8ff}.key2{color:var(--teal)}
+
+/* file pill */
+.fp{font-family:var(--mono);font-size:.73rem;background:var(--surf2);
+    border:1px solid var(--border);border-radius:4px;padding:.15rem .5rem;
+    color:var(--dim);margin-bottom:.6rem;display:inline-block}
+
+/* folder tree */
+.tree{background:var(--surf);border:1px solid var(--border);border-radius:7px;
+      padding:1rem 1.3rem;font-family:var(--mono);font-size:.83rem;
+      line-height:1.85;margin:1rem 0 1.4rem;color:var(--text)}
+.tree .dir{color:var(--blue)}.tree .file{color:var(--text)}
+.tree .comm{color:var(--dim);margin-left:.6rem;font-style:italic}
+.tree .hi{color:var(--yellow)}
+
+/* pipeline */
+.pipe{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;
+      gap:.5rem;margin:1.1rem 0 1.5rem}
+.ps{font-family:var(--mono);font-size:.76rem;padding:.32rem .75rem;border-radius:4px;
+    border:1px solid var(--border)}
+.ps.a{border-color:var(--blue);color:var(--blue);background:rgba(96,165,250,.08)}
+.ps.b{border-color:var(--green);color:var(--green);background:rgba(52,211,153,.07)}
+.ps.c{border-color:var(--yellow);color:var(--yellow);background:rgba(251,191,36,.07)}
+.ps.d{border-color:var(--orange);color:var(--orange);background:rgba(251,146,60,.07)}
+.arr{color:var(--dim);font-size:1.1rem}
+
+/* comparison table */
+table{width:100%;border-collapse:collapse;margin:1rem 0 1.3rem;font-size:.89rem}
+th{background:var(--surf2);color:#e6edf3;padding:.45rem .75rem;
+   border:1px solid var(--border);text-align:left;font-family:var(--mono);font-size:.8rem}
+td{padding:.42rem .75rem;border:1px solid var(--border);vertical-align:top}
+tr:nth-child(even) td{background:rgba(33,38,45,.5)}
+.yes{color:var(--green)}.no{color:var(--red)}.med{color:var(--yellow)}
+
+/* interactive builder */
+.builder{background:var(--surf);border:1px solid var(--border);border-radius:8px;
+         padding:1.3rem 1.5rem;margin:1rem 0}
+.builder h3{margin-top:0;color:var(--yellow)}
+.frow{display:flex;align-items:center;gap:.7rem;margin-bottom:.6rem;flex-wrap:wrap}
+.frow label{font-family:var(--mono);font-size:.78rem;color:var(--dim);
+            min-width:110px;text-align:right}
+.frow input,.frow select{font-family:var(--mono);font-size:.82rem;
+  background:var(--surf2);border:1px solid var(--border);border-radius:4px;
+  padding:.3rem .6rem;color:var(--text);flex:1;min-width:160px}
+.frow input:focus,.frow select:focus{outline:2px solid var(--green)}
+.cmdrow{display:flex;gap:.5rem;margin-bottom:.4rem;align-items:center}
+.cmdrow input{font-family:var(--mono);font-size:.82rem;background:var(--surf2);
+  border:1px solid var(--border);border-radius:4px;padding:.3rem .55rem;color:var(--text)}
+.cmdrow input:focus{outline:2px solid var(--green)}
+.rmb{background:none;border:none;color:var(--red);cursor:pointer;font-size:1rem;padding:.1rem .3rem}
+.addb{font-family:var(--mono);font-size:.78rem;padding:.28rem .7rem;
+      border:1px dashed var(--border);border-radius:4px;background:none;
+      color:var(--dim);cursor:pointer;transition:all .15s}
+.addb:hover{border-color:var(--green);color:var(--green)}
+.genout{margin-top:1rem}
+.genout pre{margin:0;cursor:pointer;transition:border-color .2s}
+.genout pre:hover{border-color:var(--green)}
+.copylbl{font-family:var(--mono);font-size:.7rem;color:var(--dim);margin-top:.3rem}
+.genbtn{font-family:var(--mono);font-size:.82rem;padding:.38rem .95rem;
+        background:var(--green);color:#000;border:none;border-radius:5px;
+        cursor:pointer;margin-top:.7rem}
+.genbtn:hover{opacity:.84}
+
+/* quiz */
+.quiz{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:1.4rem 1.5rem;margin-top:1.5rem}
+.quiz h3{margin-top:0;color:var(--yellow)}
+.qblock{margin-bottom:1.5rem}
+.qt{font-weight:600;color:#e6edf3;margin-bottom:.65rem;font-size:.94rem}
+pre.qsnip{margin:.35rem 0 .6rem;font-size:.79rem;padding:.7rem 1rem}
+.opts{list-style:none}
+.opts li{background:var(--surf2);border:1px solid var(--border);border-radius:5px;
+         padding:.45rem .88rem;margin-bottom:.38rem;cursor:pointer;font-size:.89rem;
+         transition:border-color .13s,background .13s}
+.opts li:hover:not(.lk){border-color:var(--green);background:rgba(52,211,153,.06)}
+.opts li.ok{border-color:var(--green);background:rgba(52,211,153,.09);color:var(--green)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.07);color:var(--red)}
+.opts li.lk{cursor:default}
+.fb{font-size:.83rem;margin-top:.42rem;padding:.38rem .72rem;border-radius:4px;display:none}
+.fb.ok{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.25)}
+.fb.no{background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.25)}
+.score{font-family:var(--mono);font-size:.82rem;color:var(--dim);margin-top:1rem;
+       padding-top:.8rem;border-top:1px solid var(--border)}
+
+/* scenario */
+.scenario{background:var(--surf2);border:1px solid var(--border);border-radius:7px;
+          padding:1.05rem 1.25rem;margin-bottom:1rem}
+.sc-q{font-weight:600;margin-bottom:.55rem;color:#e6edf3}
+.rev-btn{font-family:var(--mono);font-size:.77rem;padding:.26rem .67rem;
+         border:1px solid var(--border);border-radius:4px;background:none;
+         color:var(--dim);cursor:pointer;transition:all .15s}
+.rev-btn:hover{border-color:var(--green);color:var(--green)}
+.sc-ans{margin-top:.65rem;font-size:.88rem;background:var(--surf);border-radius:4px;
+        padding:.7rem .9rem;display:none;border-left:2px solid var(--green)}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-lbl">Silmulator / Lesson</span>
+  <span class="nav-title">0006 — Hardware Docs &amp; Custom Blocks</span>
+  <div class="pdots" id="pdots">
+    <div class="dot active" title="Overview"></div>
+    <div class="dot" title="hardware_docs/ folder"></div>
+    <div class="dot" title="JSON spec format"></div>
+    <div class="dot" title="Discovery pipeline"></div>
+    <div class="dot" title="Response patterns"></div>
+    <div class="dot" title="Workflow loop"></div>
+    <div class="dot" title="Spec vs Python class"></div>
+    <div class="dot" title="Practice"></div>
+  </div>
+</nav>
+
+<article>
+<h1>Hardware Docs &amp; Custom Blocks</h1>
+<p class="why">Why this matters: Silmulator ships with six built-in blocks. Every real test bench has instruments that aren't in the list — learning this workflow lets you add any device in minutes, not days.</p>
+
+<!-- ══ §0 OVERVIEW ══ -->
+<section id="s0">
+<h2><span class="sn">§0</span> The two-folder system <button class="db" onclick="tick(0,this)">Mark done</button></h2>
+
+<p>Adding a new hardware device to Silmulator is a two-step process. Two folders play different roles:</p>
+
+<div class="tree">
+<span class="dir">hardware_docs/</span>          <span class="comm">← source of truth: vendor PDFs, programmer's refs</span>
+├── <span class="dir">keysight/</span>
+│   └── <span class="dir">E36312A/</span>
+│       ├── <span class="file">programmer_reference.pdf</span>
+│       ├── <span class="hi">scpi_commands.md</span>     <span class="comm">← wizard reads this first</span>
+│       └── <span class="file">notes.md</span>
+├── <span class="dir">tektronix/</span>
+├── <span class="dir">ti/</span>
+├── <span class="dir">nasa/</span>
+├── <span class="dir">rtos/</span>
+└── <span class="dir">custom/</span>
+
+<span class="dir">silmulator/custom_blocks/</span>   <span class="comm">← executable specs auto-loaded at startup</span>
+├── <span class="file">__init__.py</span>
+└── <span class="hi">hello_world.json</span>          <span class="comm">← the one committed example</span>
+</div>
+
+<p><strong><code>hardware_docs/</code></strong> is the <em>reference library</em>. Drop PDFs, programmer's guides, and extracted SCPI tables here. Nothing in this folder runs automatically — it ships alongside the simulator so engineers on a test bench can consult the original docs without leaving the project.</p>
+
+<p><strong><code>silmulator/custom_blocks/</code></strong> is the <em>executable layer</em>. Every <code>.json</code> file here is auto-discovered at startup and appears in the block palette. Think of it as "derived from the docs, ready to simulate."</p>
+
+<div class="pipe">
+  <div class="ps a">vendor PDF / manual</div>
+  <div class="arr">→</div>
+  <div class="ps b">hardware_docs/vendor/model/</div>
+  <div class="arr">→</div>
+  <div class="ps c">custom_blocks/model.json</div>
+  <div class="arr">→</div>
+  <div class="ps d">block in GUI palette</div>
+</div>
+</section>
+
+<!-- ══ §1 hardware_docs ══ -->
+<section id="s1">
+<h2><span class="sn">§1</span> hardware_docs/ — reference library <button class="db" onclick="tick(1,this)">Mark done</button></h2>
+<div class="fp">Silmulator/hardware_docs/README.md</div>
+
+<h3>Layout convention</h3>
+<p>There are no enforced file names, but the established pattern is:</p>
+<div class="tree">
+<span class="dir">hardware_docs/</span>
+└── <span class="dir">&lt;vendor&gt;/</span>               <span class="comm">← lowercase vendor name</span>
+    └── <span class="dir">&lt;model&gt;/</span>             <span class="comm">← model number or family</span>
+        ├── <span class="file">programmer_reference.pdf</span>
+        ├── <span class="hi">scpi_commands.md</span>   <span class="comm">← optional: cleaned-up command table</span>
+        └── <span class="file">notes.md</span>           <span class="comm">← team-specific notes</span>
+</div>
+
+<h3>The scpi_commands.md convention</h3>
+<p>The custom-block wizard (right-click canvas → <strong>New custom block from docs…</strong>) reads <code>scpi_commands.md</code> first when it exists in a model folder. The format is a simple markdown table:</p>
+<pre>
+| Command       | Direction | Response / Notes            |
+|---------------|-----------|-----------------------------|
+| VOLT &lt;n&gt;      | write     | Sets output voltage         |
+| VOLT?         | query     | Returns current voltage     |
+| OUTP ON\|OFF   | write     | Enables/disables output     |
+| *IDN?         | query     | Manufacturer identification |
+| *RST          | write     | Factory reset               |
+</pre>
+<p>This table is human-readable and is what the wizard uses to pre-fill the JSON spec. You don't have to follow this format exactly — any markdown that lists command names and their directions is useful.</p>
+
+<h3>Long-form PDFs</h3>
+<p>PDFs are not parsed automatically. They live here for two reasons:</p>
+<ul>
+  <li><strong>Offline access</strong> — lab benches, secure rooms, and flight-test ranges often have no network. The PDF ships inside the Docker image and installers.</li>
+  <li><strong>Traceability</strong> — when a test fails because a SCPI command behaves unexpectedly, you can pull up the original programmer's reference alongside the running simulation.</li>
+</ul>
+
+<div class="note">Adding a new vendor is four lines in the terminal: <code>mkdir -p hardware_docs/newvendor/ModelXX && cp reference.pdf hardware_docs/newvendor/ModelXX/</code>. No code changes required.</div>
+</section>
+
+<!-- ══ §2 JSON SPEC ══ -->
+<section id="s2">
+<h2><span class="sn">§2</span> The JSON spec format <button class="db" onclick="tick(2,this)">Mark done</button></h2>
+<div class="fp">silmulator/custom_blocks/hello_world.json</div>
+
+<p>Every file in <code>custom_blocks/</code> is a self-describing JSON object. Here is the committed example with every field annotated:</p>
+
+<pre>
+{
+    <span class="key2">"name"</span>: <span class="str">"Hello World"</span>,          <span class="cm">← appears in block palette and BLOCK_REGISTRY</span>
+    <span class="key2">"manufacturer"</span>: <span class="str">"Silmulator"</span>,  <span class="cm">← shown on the block face</span>
+    <span class="key2">"model"</span>: <span class="str">"HELLO-1"</span>,            <span class="cm">← *IDN? manufacturer and model fields</span>
+    <span class="key2">"color"</span>: <span class="str">"#3a6f3a"</span>,          <span class="cm">← any CSS hex color — becomes BODY_COLOR</span>
+
+    <span class="key2">"ports"</span>: [
+        {<span class="key2">"id"</span>: <span class="str">"IN"</span>,  <span class="key2">"label"</span>: <span class="str">"IN"</span>,  <span class="key2">"x"</span>: <span class="num">0.0</span>, <span class="key2">"y"</span>: <span class="num">0.5</span>},  <span class="cm">← left edge, centered</span>
+        {<span class="key2">"id"</span>: <span class="str">"OUT"</span>, <span class="key2">"label"</span>: <span class="str">"OUT"</span>, <span class="key2">"x"</span>: <span class="num">1.0</span>, <span class="key2">"y"</span>: <span class="num">0.5</span>}   <span class="cm">← right edge, centered</span>
+    ],
+
+    <span class="key2">"commands"</span>: {
+        <span class="key2">"HELLO"</span>:   <span class="str">"world"</span>,              <span class="cm">← literal response</span>
+        <span class="key2">"*IDN?"</span>:   <span class="str">"Silmulator,HELLO-1,SIM000001,1.0.0"</span>,
+        <span class="key2">"ECHO"</span>:    <span class="str">"echo:{0}"</span>            <span class="cm">← template: {0} = first parameter</span>
+    }
+}
+</pre>
+
+<h3>Port coordinates — x/y fractions</h3>
+<p><code>x</code> and <code>y</code> are fractions of the block's width (220 px) and height. The block height is <em>computed</em> from the port count: <code>max(120, 40 + 20 × max(1, port_count))</code>.</p>
+<div class="tree" style="font-size:.8rem;line-height:1.65">
+x=0.0, y=0.5  → left edge, vertical center (typical IN port)
+x=1.0, y=0.5  → right edge, vertical center (typical OUT port)
+x=0.0, y=0.25 → left edge, upper quarter
+x=0.5, y=0.0  → top edge, horizontal center
+</div>
+
+<h3>Three command response types</h3>
+<table>
+  <tr><th>Type</th><th>Example value</th><th>What it does</th></tr>
+  <tr><td><strong>Literal</strong></td><td><code>"pong"</code></td><td>Always returns this exact string</td></tr>
+  <tr><td><strong>Empty</strong></td><td><code>""</code></td><td>Write-only — accepted, no response</td></tr>
+  <tr><td><strong>Template</strong></td><td><code>"echo:{0}"</code></td><td>Substitutes SCPI parameters: <code>{0}</code>=first param, <code>{1}</code>=second, etc.</td></tr>
+</table>
+
+<div class="note">Command keys are normalized to UPPERCASE by <code>BlockSpec.from_dict()</code> (line 88 of custom_block.py). You can write <code>"volt"</code> or <code>"VOLT"</code> — both become <code>"VOLT"</code> in the handler table.</div>
+</section>
+
+<!-- ══ §3 DISCOVERY PIPELINE ══ -->
+<section id="s3">
+<h2><span class="sn">§3</span> The discovery pipeline <button class="db" onclick="tick(3,this)">Mark done</button></h2>
+<div class="fp">silmulator/gui/blocks/custom_block.py:166–201</div>
+
+<p>At startup, <code>canvas.py</code> runs this single call:</p>
+<pre>
+<span class="cm"># canvas.py:40–43</span>
+<span class="kw">try</span>:
+    <span class="fn">register_custom_blocks</span>(BLOCK_REGISTRY)
+<span class="kw">except</span> <span class="cls">Exception</span>:
+    <span class="kw">pass</span>   <span class="cm"># failures are non-fatal</span>
+</pre>
+<p>Three functions run in sequence:</p>
+
+<h3>discover_specs()</h3>
+<pre>
+<span class="fl">166</span><span class="kw">def</span> <span class="fn">discover_specs</span>(extra_dirs=<span class="kw">None</span>):
+<span class="fl">175</span>    dirs = []
+<span class="fl">176</span>    <span class="kw">if</span> PACKAGED_DIR.exists(): dirs.append(PACKAGED_DIR)    <span class="cm"># custom_blocks/</span>
+<span class="fl">177</span>    <span class="kw">if</span> USER_DIR.exists():    dirs.append(USER_DIR)         <span class="cm"># ~/.silmulator/custom_blocks/</span>
+<span class="fl">183</span>    <span class="kw">for</span> d <span class="kw">in</span> dirs:
+<span class="fl">184</span>        <span class="kw">for</span> json_path <span class="kw">in</span> sorted(d.glob(<span class="str">"*.json"</span>)):         <span class="cm"># alphabetical</span>
+<span class="fl">185</span>            <span class="kw">try</span>:
+<span class="fl">186</span>                spec = <span class="cls">BlockSpec</span>.<span class="fn">from_file</span>(json_path)
+<span class="fl">187</span>            <span class="kw">except</span> <span class="cls">Exception</span>:
+<span class="fl">188</span>                <span class="kw">continue</span>                                 <span class="cm"># bad file → skip, don't crash</span>
+<span class="fl">189</span>            <span class="kw">if</span> spec.name <span class="kw">in</span> seen_names: <span class="kw">continue</span>       <span class="cm"># first-seen wins</span>
+<span class="fl">190</span>            specs.append(spec)
+</pre>
+
+<h3>make_custom_block_class()</h3>
+<pre>
+<span class="fl">127</span><span class="kw">def</span> <span class="fn">make_custom_block_class</span>(spec: <span class="cls">BlockSpec</span>) -> <span class="cls">type</span>:
+<span class="fl">134</span>    <span class="kw">class</span> <span class="cls">_Block</span>(<span class="cls">BaseBlock</span>):
+<span class="fl">135</span>        BLOCK_WIDTH  = <span class="num">220</span>
+<span class="fl">136</span>        BLOCK_HEIGHT = <span class="fn">max</span>(<span class="num">120</span>, <span class="num">40</span> + <span class="num">20</span> * <span class="fn">max</span>(<span class="num">1</span>, <span class="fn">len</span>(spec.ports)))
+<span class="fl">140</span>        <span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+<span class="fl">141</span>            <span class="kw">super</span>().__init__(<span class="cls">_CustomDevice</span>(spec), spec.name)   <span class="cm"># device + display name</span>
+<span class="fl">144</span>        <span class="kw">def</span> <span class="fn">_setup_ports</span>(self) -> <span class="cls">None</span>:
+<span class="fl">145</span>            <span class="kw">for</span> port <span class="kw">in</span> spec.ports:
+<span class="fl">146</span>                self.<span class="fn">add_port</span>(port.id, port.label, port.x, port.y)
+<span class="fl">148</span>        <span class="kw">def</span> <span class="fn">_paint_content</span>(self, ...):
+<span class="fl">153</span>            <span class="cm"># draws "Manufacturer Model", "N SCPI commands", "N ports"</span>
+<span class="fl">161</span>    _Block.__name__ = <span class="str">f"Custom_{spec.name.replace(' ', '_')}"</span>
+<span class="fl">163</span>    <span class="kw">return</span> _Block
+</pre>
+
+<h3>register_custom_blocks()</h3>
+<pre>
+<span class="fl">195</span><span class="kw">def</span> <span class="fn">register_custom_blocks</span>(registry, extra_dirs=<span class="kw">None</span>):
+<span class="fl">198</span>    specs = <span class="fn">discover_specs</span>(extra_dirs)
+<span class="fl">199</span>    <span class="kw">for</span> spec <span class="kw">in</span> specs:
+<span class="fl">200</span>        registry[spec.name] = <span class="fn">make_custom_block_class</span>(spec)  <span class="cm"># add to BLOCK_REGISTRY</span>
+<span class="fl">201</span>    <span class="kw">return</span> specs
+</pre>
+
+<p>Result: <code>BLOCK_REGISTRY["My Device"] = &lt;class Custom_My_Device&gt;</code>. From this point on, the block appears in the Add menu, can be instantiated, saved, and reloaded exactly like a built-in.</p>
+
+<h3>User directory</h3>
+<p>The second scan path is <code>~/.silmulator/custom_blocks/</code>. Drop a JSON file there for blocks that are personal to you (a test fixture, a prototype, an in-house ASIC) without modifying the shared repo. The packaged blocks are found first — if a user block has the same name as a packaged block, the packaged version wins (first-seen wins on line 189).</p>
+</section>
+
+<!-- ══ §4 RESPONSE PATTERNS ══ -->
+<section id="s4">
+<h2><span class="sn">§4</span> Response patterns in depth <button class="db" onclick="tick(4,this)">Mark done</button></h2>
+<div class="fp">silmulator/gui/blocks/custom_block.py:114–124</div>
+
+<p>Every command value goes through <code>_make_handler(template)</code>, which returns a closure:</p>
+<pre>
+<span class="fl">114</span><span class="kw">def</span> <span class="fn">_make_handler</span>(template: <span class="cls">str</span>) -> <span class="cls">Callable</span>:
+<span class="fl">115</span>    <span class="kw">def</span> <span class="fn">handler</span>(cmd: <span class="cls">ScpiCommand</span>) -> <span class="cls">str</span>:
+<span class="fl">116</span>        <span class="kw">if not</span> template:
+<span class="fl">117</span>            <span class="kw">return</span> <span class="str">""</span>                        <span class="cm">← empty string → write-only</span>
+<span class="fl">118</span>        <span class="kw">if</span> <span class="str">"{"</span> <span class="kw">not in</span> template:
+<span class="fl">119</span>            <span class="kw">return</span> template                   <span class="cm">← no braces → literal</span>
+<span class="fl">120</span>        <span class="kw">try</span>:
+<span class="fl">121</span>            <span class="kw">return</span> template.<span class="fn">format</span>(*cmd.params)  <span class="cm">← braces → template substitution</span>
+<span class="fl">122</span>        <span class="kw">except</span> (<span class="cls">IndexError</span>, <span class="cls">KeyError</span>):
+<span class="fl">123</span>            <span class="kw">return</span> template                   <span class="cm">← wrong param count → return as-is</span>
+<span class="fl">124</span>    <span class="kw">return</span> handler
+</pre>
+
+<p>Concrete examples:</p>
+<table>
+  <tr><th>JSON command</th><th>SCPI sent</th><th>Response</th></tr>
+  <tr><td><code>"PING": "pong"</code></td><td><code>PING</code></td><td><code>pong</code></td></tr>
+  <tr><td><code>"VOLT": ""</code></td><td><code>VOLT 5.0</code></td><td>(no response)</td></tr>
+  <tr><td><code>"ECHO": "echo:{0}"</code></td><td><code>ECHO 42</code></td><td><code>echo:42</code></td></tr>
+  <tr><td><code>"MUL": "{0}×{1}"</code></td><td><code>MUL 3 7</code></td><td><code>3×7</code></td></tr>
+  <tr><td><code>"STATUS?": "OK"</code></td><td><code>STATUS?</code></td><td><code>OK</code></td></tr>
+</table>
+
+<div class="warn">The command key is matched after the <code>?</code> is stripped and everything is uppercased by ScpiParser. A JSON command named <code>"STATUS?"</code> is normalized to key <code>"STATUS"</code> in the handler table (line 110: <code>normalized = cmd_path.rstrip("?")</code>). So <code>"STATUS"</code> and <code>"STATUS?"</code> in the JSON both map to the same handler — they are equivalent.</div>
+</section>
+
+<!-- ══ §5 WORKFLOW LOOP ══ -->
+<section id="s5">
+<h2><span class="sn">§5</span> The authoring workflow, end-to-end <button class="db" onclick="tick(5,this)">Mark done</button></h2>
+
+<ol style="margin-left:1.8rem;margin-bottom:1.2rem;line-height:2.1">
+  <li><strong>Get the manual.</strong> Download the programmer's reference PDF from the vendor site (Keysight, Tektronix, etc.). If it's a proprietary ASIC, export the command register map from your design tool.</li>
+  <li><strong>Drop it in hardware_docs/.</strong> Create <code>hardware_docs/&lt;vendor&gt;/&lt;model&gt;/</code>. Drop the PDF there.</li>
+  <li><strong>Extract the SCPI table.</strong> Open the PDF, find the "SCPI Command Reference" section (usually an appendix). Copy out the commands you plan to test into a <code>scpi_commands.md</code> file in the same folder.</li>
+  <li><strong>Write the JSON spec.</strong> Create <code>silmulator/custom_blocks/&lt;vendor&gt;_&lt;model&gt;.json</code>. Map each command from step 3 to a response pattern (literal / empty / template).</li>
+  <li><strong>Restart Silmulator.</strong> The block appears automatically in the palette. No Python required.</li>
+  <li><strong>Test it.</strong> Add the block, right-click → Send SCPI command. Verify each command returns what you expect.</li>
+  <li><strong>Wire it.</strong> Connect a Code Input block (containing your firmware) to the new block and run parsed commands. Check the command log.</li>
+</ol>
+
+<h3>Live iteration — no restart needed</h3>
+<p>During step 4, you can use <code>discover_specs(extra_dirs=[Path("my_specs/")])</code> from a Python REPL to check your JSON without restarting the GUI. The test suite in <code>tests/test_custom_blocks.py</code> follows this pattern — it writes specs to a <code>tmp_path</code> and calls <code>discover_specs(extra_dirs=[tmp_path])</code>.</p>
+
+<h3>Interactive JSON builder</h3>
+<div class="builder">
+  <h3>⚡ JSON Spec Builder</h3>
+  <div class="frow">
+    <label>name</label>
+    <input id="bname" type="text" value="My Instrument" placeholder="e.g. Keysight E36312A">
+  </div>
+  <div class="frow">
+    <label>manufacturer</label>
+    <input id="bmfr" type="text" value="Acme" placeholder="Vendor name">
+  </div>
+  <div class="frow">
+    <label>model</label>
+    <input id="bmodel" type="text" value="AX-1000" placeholder="Model number">
+  </div>
+  <div class="frow">
+    <label>color</label>
+    <input id="bcolor" type="color" value="#336699">
+  </div>
+  <div style="margin-top:.8rem;margin-bottom:.4rem;font-family:var(--mono);font-size:.78rem;color:var(--dim)">COMMANDS (key → response)</div>
+  <div id="cmdrows">
+    <div class="cmdrow"><input placeholder="VOLT" value="VOLT"><input placeholder="" value=""><button class="rmb" onclick="rmCmd(this)">✕</button></div>
+    <div class="cmdrow"><input placeholder="VOLT?" value="VOLT?"><input placeholder="5.0" value="5.0"><button class="rmb" onclick="rmCmd(this)">✕</button></div>
+    <div class="cmdrow"><input placeholder="*IDN?" value="*IDN?"><input placeholder="Mfr,Model,SN,FW" value="Acme,AX-1000,SIM001,1.0.0"><button class="rmb" onclick="rmCmd(this)">✕</button></div>
+  </div>
+  <button class="addb" onclick="addCmd()">+ Add command</button>
+  <br>
+  <button class="genbtn" onclick="genJson()">Generate JSON →</button>
+  <div class="genout" id="genout" style="display:none">
+    <pre id="jsonout" onclick="copyOut(this)" style="white-space:pre-wrap;word-break:break-all"></pre>
+    <div class="copylbl">Click code block to copy</div>
+  </div>
+</div>
+</section>
+
+<!-- ══ §6 SPEC vs PYTHON ══ -->
+<section id="s6">
+<h2><span class="sn">§6</span> JSON spec vs Python subclass — when to use which <button class="db" onclick="tick(6,this)">Mark done</button></h2>
+
+<table>
+  <tr><th>Capability</th><th>JSON spec</th><th>Python subclass</th></tr>
+  <tr><td>No Python required</td><td class="yes">✓</td><td class="no">✗</td></tr>
+  <tr><td>Appears on restart without code changes</td><td class="yes">✓</td><td class="no">✗ (need to import)</td></tr>
+  <tr><td>Stateful simulation (e.g. track voltage after VOLT N)</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Computed responses (math, noise, waveform data)</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>Custom block face UI (graphs, meters)</td><td class="no">✗</td><td class="yes">✓</td></tr>
+  <tr><td>IEEE 488.2 common commands (*IDN?, *RST, etc.)</td><td class="med">manual in JSON</td><td class="yes">✓ inherited from BaseDevice</td></tr>
+  <tr><td>Per-user without repo changes</td><td class="yes">✓ (~/.silmulator/)</td><td class="no">✗</td></tr>
+</table>
+
+<p><strong>Use a JSON spec when:</strong> you need to test that your firmware sends the right commands to a device and you only care about static/literal responses. Good for protocol-level verification: "does my code send VOLT 5.0 before OUTP ON?"</p>
+<p><strong>Use a Python subclass when:</strong> you need the device to actually track state — e.g. the Power Supply remembers the set voltage and returns it (plus noise) on MEAS:VOLT:DC?. The built-in <code>OscilloscopeBlock</code>, <code>PowerSupplyBlock</code>, etc. are all Python subclasses for exactly this reason.</p>
+<p><strong>The upgrade path:</strong> start with a JSON spec to verify protocol correctness quickly, then promote it to a Python subclass when you need stateful simulation. The JSON spec's command table becomes the skeleton for <code>_setup_handlers()</code>.</p>
+</section>
+
+<!-- ══ §7 PRACTICE ══ -->
+<section id="s7">
+<h2><span class="sn">§7</span> Practice <button class="db" onclick="tick(7,this)">Mark done</button></h2>
+
+<div class="quiz">
+<h3>Quick-fire quiz</h3>
+
+<!-- Q1 -->
+<div class="qblock" data-q="1">
+<div class="qt">Q1. You have a Keysight 33522B programmer's reference PDF. Where do you put it and what optional file speeds up custom-block authoring?</div>
+<ul class="opts">
+  <li data-correct="true" data-why="Correct. hardware_docs/keysight/33522B/ holds the PDF for offline reference. scpi_commands.md is the optional extracted command table that the custom-block wizard reads first to pre-fill the JSON spec.">Put it in <code>hardware_docs/keysight/33522B/</code>. Adding a <code>scpi_commands.md</code> extracted command table speeds up JSON authoring.</li>
+  <li data-correct="false" data-why="silmulator/custom_blocks/ holds executable JSON specs, not reference PDFs. Putting a PDF there would confuse discover_specs() — it only reads .json files, but the folder is for code, not docs.">Put it in <code>silmulator/custom_blocks/keysight/</code> alongside the JSON spec so the wizard can find both files together.</li>
+  <li data-correct="false" data-why="docs/learning/ is the teaching workspace for this lesson system. It has nothing to do with hardware device reference material.">Put it in <code>docs/learning/</code> under a vendor subfolder so Silmulator's doc parser can read it automatically.</li>
+  <li data-correct="false" data-why="There is no root-level hardware/ directory in the project. hardware_docs/ is the correct folder, and it lives inside the Silmulator/ project directory.">Create a new <code>hardware/</code> folder at the project root and put it there. Silmulator scans all top-level folders at startup.</li>
+</ul>
+<div class="fb" id="fb1"></div>
+</div>
+
+<!-- Q2 -->
+<div class="qblock" data-q="2">
+<div class="qt">Q2. Your JSON spec has <code>"volt": "5.0"</code> (lowercase key). A firmware test sends <code>VOLT?</code>. What does the block return?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="ScpiParser strips the trailing '?' before looking up the handler. 'VOLT?' normalizes to path='VOLT'. But the key question is whether lowercase 'volt' in the JSON matches — it does, because BlockSpec.from_dict() uppercases all keys (line 88).">Nothing — the '?' suffix is not stripped so the handler lookup for 'volt' fails against the incoming 'VOLT?' path.</li>
+  <li data-correct="true" data-why="Correct. BlockSpec.from_dict() runs commands={str(k).upper(): str(v) ...} (line 88), so 'volt' becomes 'VOLT' in the handler table. ScpiParser normalizes 'VOLT?' to path='VOLT'. The handler returns the literal '5.0'."><code>5.0</code> — BlockSpec normalizes all keys to uppercase, and ScpiParser strips '?' before dispatch.</li>
+  <li data-correct="false" data-why="Case sensitivity error: 'volt' (lowercase JSON key) would NOT match an uppercase dispatch key if normalization didn't happen. But it does happen — from_dict() calls str(k).upper() on every key.">Nothing — the lowercase JSON key 'volt' doesn't match the uppercase normalized path 'VOLT'.</li>
+  <li data-correct="false" data-why="'5.0' is the literal response value, not interpreted as a measurement. Template substitution only happens when '{' appears in the response string. There is no noise added for custom JSON blocks (that's a Python subclass feature).">A noisy float near 5.0 — custom blocks apply the same measurement simulation as the built-in Power Supply.</li>
+</ul>
+<div class="fb" id="fb2"></div>
+</div>
+
+<!-- Q3 -->
+<div class="qblock" data-q="3">
+<div class="qt">Q3. You drop a broken JSON file (invalid syntax) in <code>silmulator/custom_blocks/</code>. What happens to the other blocks in that folder?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="discover_specs() wraps each file's parse in try/except Exception: continue. A broken file is skipped individually. The remaining files are still processed.">The GUI fails to start because discover_specs() propagates the JSON parse exception up through register_custom_blocks() into canvas.py.</li>
+  <li data-correct="true" data-why="Correct. discover_specs() catches the exception for the broken file (lines 185-188: try/except Exception: continue). It skips that file and continues to the next .json in the directory. All valid specs are registered. The outer try/except in canvas.py (line 40-43) is an additional safety net.">The broken file is skipped silently and all valid JSON specs in the same folder are still registered. Silmulator starts normally.</li>
+  <li data-correct="false" data-why="discover_specs() uses sorted(d.glob('*.json')) — alphabetical order — not creation order. Alphabetically earlier files are processed first regardless of when they were created.">The broken file stops processing of any files created after it (discover_specs reads files in creation order and stops on the first error).</li>
+  <li data-correct="false" data-why="discover_specs() does not write any error file. Failures are silently skipped. The outer try/except in canvas.py (line 40-43) also swallows any exception that does propagate.">discover_specs() writes an error log to <code>silmulator/custom_blocks/errors.log</code> and skips the broken file.</li>
+</ul>
+<div class="fb" id="fb3"></div>
+</div>
+
+<!-- Q4 -->
+<div class="qblock" data-q="4">
+<div class="qt">Q4. You have two JSON specs with <code>"name": "SpectrumAnalyser"</code> — one in <code>silmulator/custom_blocks/</code> and one in <code>~/.silmulator/custom_blocks/</code>. Which one wins?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="The user dir (~/.silmulator/) is scanned SECOND (after the packaged dir). But it's the first-seen name that wins — the packaged block is discovered first and the user block with the same name is skipped on line 189.">The user directory wins — ~/.silmulator/ is always preferred over packaged blocks so users can override defaults.</li>
+  <li data-correct="false" data-why="There is no error or warning for name collisions. The first-seen spec for a given name is kept; subsequent specs with the same name are silently ignored (line 189: if spec.name in seen_names: continue).">An error is raised — duplicate block names are not allowed and the GUI reports the conflict at startup.</li>
+  <li data-correct="true" data-why="Correct. discover_specs() scans packaged dirs first (line 176), then user dirs (line 177). On line 189, if spec.name is already in seen_names, it's skipped. So the packaged block is registered first and the user block with the same name is silently dropped.">The packaged one wins — <code>silmulator/custom_blocks/</code> is scanned first. First-seen wins on duplicate names.</li>
+  <li data-correct="false" data-why="Both are .json files, and discover_specs() makes no distinction between them based on file size, command count, or any other content attribute. Order of discovery (packaged first) is the only tiebreaker.">The one with more commands wins — discover_specs() merges duplicate-named specs, keeping the richer command set.</li>
+</ul>
+<div class="fb" id="fb4"></div>
+</div>
+
+<!-- Q5 -->
+<div class="qblock" data-q="5">
+<div class="qt">Q5. When should you write a Python subclass (like PowerSupplyBlock) instead of a JSON spec?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="Python subclasses are used in all the built-in blocks, but that's because they were written before the JSON spec system existed. New simple devices are better served by JSON specs — faster to author and no Python required.">When you want the block to appear in the block palette (JSON specs don't register with BLOCK_REGISTRY).</li>
+  <li data-correct="false" data-why="Both JSON specs and Python subclasses support IEEE 488.2 common commands. In a JSON spec, add '*IDN?' with the appropriate response string. Python subclasses inherit them automatically from BaseDevice._setup_common_handlers().">When the device needs IEEE 488.2 common commands (*IDN?, *RST) — these require a Python BaseDevice subclass.</li>
+  <li data-correct="true" data-why="Correct. JSON specs return static strings only (literal, empty, or simple parameter substitution). Stateful simulation — where the device remembers a set value and returns it on query, or computes noise, or generates waveform data — requires Python: instance variables, math, conditionals.">When the device needs stateful simulation: it must remember configured values, compute responses from state, or generate waveform data.</li>
+  <li data-correct="false" data-why="User directory (~/.silmulator/custom_blocks/) works for JSON specs too, not just Python subclasses. Both mechanisms support per-user customisation without repo changes.">When you want the block to be available only to you (per-user), not shared in the repository.</li>
+</ul>
+<div class="fb" id="fb5"></div>
+</div>
+
+<div class="score" id="score">0 / 5 answered</div>
+</div>
+
+<h3 style="margin-top:2rem;color:#e6edf3">Scenario questions</h3>
+
+<div class="scenario">
+  <div class="sc-q">You write a JSON spec for a network analyser. It needs to respond to <code>FREQ:START 1E6</code> (set start frequency, no response) and <code>FREQ:START?</code> (query current start frequency, must return whatever was last set). Can you implement this in JSON? What's the limitation?</div>
+  <button class="rev-btn" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">No — not fully. The write command <code>"FREQ:START": ""</code> is easy (empty string = accepted, no response). But the query <code>"FREQ:START?": "1000000.0"</code> can only return a hardcoded literal, not the value that was last set. JSON specs have no state — there's no way to store the value written by the SET command and return it on the query. For this you need a Python subclass with an instance variable that the write handler updates and the query handler reads. The JSON spec can approximate it with a hardcoded default, which is fine for sanity-checking that the firmware sends the right command format.</div>
+</div>
+
+<div class="scenario">
+  <div class="sc-q">You're a new team member. You write <code>silmulator/custom_blocks/my_oscilloscope.json</code> but the block never appears in the palette no matter how many times you restart. What are three things to check?</div>
+  <button class="rev-btn" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">1. JSON syntax error — run <code>python -c "import json; json.load(open('my_oscilloscope.json'))"</code>. A parse error causes discover_specs() to silently skip the file.
+2. Missing "name" field — BlockSpec.from_dict() raises ValueError("custom block spec missing 'name'") which is also caught and skipped.
+3. Name collision — another spec (packaged or user) already claims the same "name" value. The first-seen wins. Check: discover_specs() with debug prints, or temporarily rename the name field to something unique.
+Bonus: confirm the file lives in custom_blocks/ (not hardware_docs/ or some other folder) and ends in .json (not .json.bak or .JSON).</div>
+</div>
+
+<div class="scenario">
+  <div class="sc-q">Your firmware sends <code>ECHO Hello World</code> to a block with <code>"ECHO": "echo:{0}"</code>. ScpiParser splits the command: path="ECHO", params=["Hello", "World"]. What does the block return?</div>
+  <button class="rev-btn" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans"><code>echo:Hello</code>. The template is <code>"echo:{0}"</code>. <code>{0}</code> substitutes the FIRST parameter only — params[0] is "Hello". params[1] ("World") is not referenced and is ignored. The format string is called as <code>"echo:{0}".format("Hello", "World")</code> which returns <code>"echo:Hello"</code>. To include both parameters you'd need <code>"echo:{0} {1}"</code>.</div>
+</div>
+</section>
+
+</article>
+
+<script>
+// section completion
+const N=8;const dots=document.querySelectorAll('.dot');
+function tick(i,btn){btn.classList.toggle('ticked');dots[i].classList.toggle('done');}
+
+// quiz
+let answered=0;const total=5;
+function upScore(){document.getElementById('score').textContent=`${answered} / ${total} answered`;}
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+document.querySelectorAll('.qblock').forEach(qb=>{
+  const list=qb.querySelector('.opts');
+  shuf([...list.children]).forEach(li=>list.appendChild(li));
+  const qn=qb.dataset.q;const fb=document.getElementById('fb'+qn);
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('ok');
+      fb.style.display='block';fb.className='fb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      answered++;upScore();
+    });
+  });
+});
+
+// scenarios
+function rev(btn){
+  const ans=btn.nextElementSibling;
+  ans.style.display=ans.style.display==='block'?'none':'block';
+  btn.textContent=ans.style.display==='block'?'Hide':'Show answer';
+}
+
+// interactive builder
+function addCmd(){
+  const row=document.createElement('div');row.className='cmdrow';
+  row.innerHTML=`<input placeholder="CMD"><input placeholder="response"><button class="rmb" onclick="rmCmd(this)">✕</button>`;
+  document.getElementById('cmdrows').appendChild(row);
+}
+function rmCmd(btn){const row=btn.closest('.cmdrow');if(row)row.remove();}
+function genJson(){
+  const name=document.getElementById('bname').value.trim()||'My Device';
+  const mfr=document.getElementById('bmfr').value.trim()||'Custom';
+  const model=document.getElementById('bmodel').value.trim()||'MODEL-1';
+  const color=document.getElementById('bcolor').value||'#336699';
+  const cmds={};
+  document.querySelectorAll('.cmdrow').forEach(row=>{
+    const [k,v]=row.querySelectorAll('input');
+    const key=(k.value||'').trim();const val=(v.value||'').trim();
+    if(key)cmds[key]=val;
+  });
+  const spec={
+    name,manufacturer:mfr,model,color,
+    ports:[
+      {id:'IN',label:'IN',x:0.0,y:0.5},
+      {id:'OUT',label:'OUT',x:1.0,y:0.5}
+    ],
+    commands:cmds
+  };
+  const out=document.getElementById('jsonout');
+  out.textContent=JSON.stringify(spec,null,4);
+  document.getElementById('genout').style.display='block';
+}
+function copyOut(pre){
+  navigator.clipboard?.writeText(pre.textContent).then(()=>{
+    const orig=pre.style.borderColor;pre.style.borderColor='var(--green)';
+    setTimeout(()=>{pre.style.borderColor=orig;},700);
+  });
+}
+</script>
+</body>
+</html>

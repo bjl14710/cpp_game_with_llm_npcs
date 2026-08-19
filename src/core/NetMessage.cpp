@@ -1,5 +1,7 @@
 #include "NetMessage.hpp"
 
+#include <string>
+
 namespace llm_npc {
 
 namespace {
@@ -10,10 +12,47 @@ constexpr const char* kTypeNames[] = {
     "JoinRequest",   "Welcome",   "PlayerInput",   "WorldSnapshot",
     "ChatOpen",      "ChatLine",  "ChatDelta",     "ChatReply",
     "NpcMoodUpdate", "NpcSpeechBubble", "Disconnect",
+    "VoteOpen",      "VoteNominate", "VoteState",  "VoteConfirm",
+    "VoteResolved",  "MatchOver",
 };
 constexpr int kTypeCount = static_cast<int>(sizeof(kTypeNames) / sizeof(kTypeNames[0]));
 
+// messageTypeToString indexes this array by enum value with no bounds check,
+// so a type added to the enum without a name here reads one past the end and
+// corrupts the protocol quietly. Caught at COMPILE time rather than by a test
+// somebody has to remember to run.
+static_assert(kTypeCount == kMessageTypeCount,
+              "kTypeNames is missing a row for a MessageType — add the name "
+              "next to the enum entry, in the same position");
+
 }  // namespace
+
+bool readBool(const nlohmann::json& j, const char* key, bool fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_boolean()) ? it->get<bool>() : fallback;
+}
+
+int readInt(const nlohmann::json& j, const char* key, int fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_number_integer()) ? it->get<int>() : fallback;
+}
+
+float readFloat(const nlohmann::json& j, const char* key, float fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    // is_number covers int and float: a peer sending 3 where 3.0 was expected
+    // is well-formed, and rejecting it would be pedantry with a crash budget.
+    return (it != j.end() && it->is_number()) ? it->get<float>() : fallback;
+}
+
+std::string readString(const nlohmann::json& j, const char* key,
+                       const std::string& fallback) {
+    if (!j.is_object()) return fallback;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_string()) ? it->get<std::string>() : fallback;
+}
 
 const char* messageTypeToString(MessageType type) {
     return kTypeNames[static_cast<int>(type)];
@@ -49,9 +88,9 @@ nlohmann::json vec3ToJson(const Vec3& v) {
 
 Vec3 vec3FromJson(const nlohmann::json& j) {
     Vec3 v;
-    v.x = j.value("x", 0.f);
-    v.y = j.value("y", 0.f);
-    v.z = j.value("z", 0.f);
+    v.x = readFloat(j, "x", 0.f);
+    v.y = readFloat(j, "y", 0.f);
+    v.z = readFloat(j, "z", 0.f);
     return v;
 }
 
@@ -64,10 +103,10 @@ nlohmann::json playerPoseToJson(const PlayerPose& p) {
 
 PlayerPose playerPoseFromJson(const nlohmann::json& j) {
     PlayerPose p;
-    p.playerId = j.value("id", -1);
-    p.name = j.value("name", std::string{});
-    if (j.contains("pos")) p.position = vec3FromJson(j["pos"]);
-    p.facingDeg = j.value("facing", 0.f);
+    p.playerId = readInt(j, "id", -1);
+    p.name = readString(j, "name");
+    if (j.is_object() && j.contains("pos")) p.position = vec3FromJson(j["pos"]);
+    p.facingDeg = readFloat(j, "facing", 0.f);
     return p;
 }
 
@@ -81,12 +120,77 @@ nlohmann::json netNpcPoseToJson(const NetNpcPose& n) {
 
 NetNpcPose netNpcPoseFromJson(const nlohmann::json& j) {
     NetNpcPose n;
-    n.npcIndex = j.value("i", -1);
-    if (j.contains("pos")) n.position = vec3FromJson(j["pos"]);
-    n.facingDeg = j.value("facing", 0.f);
-    n.mood = j.value("mood", 0);
-    n.behavior = j.value("behavior", 0);
+    n.npcIndex = readInt(j, "i", -1);
+    if (j.is_object() && j.contains("pos")) n.position = vec3FromJson(j["pos"]);
+    n.facingDeg = readFloat(j, "facing", 0.f);
+    n.mood = readInt(j, "mood", 0);
+    n.behavior = readInt(j, "behavior", 0);
     return n;
+}
+
+nlohmann::json voteStateToJson(const VoteStateMsg& v) {
+    nlohmann::json confirmations = nlohmann::json::array();
+    for (const auto& [playerId, agreed] : v.confirmations) {
+        confirmations.push_back({{"id", playerId}, {"ok", agreed}});
+    }
+    return {{"nominee", v.nominee},
+            {"nominator", v.nominator},
+            {"confirmations", std::move(confirmations)}};
+}
+
+VoteStateMsg voteStateFromJson(const nlohmann::json& j) {
+    VoteStateMsg v;
+    v.nominee = readString(j, "nominee");
+    v.nominator = readInt(j, "nominator", -1);
+    // Every field is read totally, with a default — a truncated or hostile
+    // payload must produce an empty ballot, not an exception in the network
+    // thread. `.get<>()` on a missing key throws; `.value()` does not.
+    if (j.contains("confirmations") && j["confirmations"].is_array()) {
+        for (const auto& entry : j["confirmations"]) {
+            if (!entry.is_object()) continue;
+            v.confirmations.emplace_back(readInt(entry, "id", -1),
+                                         readBool(entry, "ok", false));
+        }
+    }
+    return v;
+}
+
+nlohmann::json voteResolvedToJson(const VoteResolvedMsg& v) {
+    // Ints on the wire for the enum, the same convention NetNpcPose uses for
+    // mood and behavior.
+    return {{"outcome", static_cast<int>(v.outcome)},
+            {"accused", v.accused},
+            {"nominator", v.nominator},
+            {"killed", v.playerKilled}};
+}
+
+VoteResolvedMsg voteResolvedFromJson(const nlohmann::json& j) {
+    VoteResolvedMsg v;
+    const int outcome =
+        readInt(j, "outcome", static_cast<int>(VoteOutcome::NoAccusation));
+    // An out-of-range outcome from a newer or hostile peer degrades to
+    // NoAccusation, which is the only value that kills nobody. Casting a
+    // garbage int straight into the enum and switching on it is how a bad
+    // frame gets to execute a player.
+    v.outcome = (outcome >= static_cast<int>(VoteOutcome::NoAccusation) &&
+                 outcome <= static_cast<int>(VoteOutcome::Wrong))
+                    ? static_cast<VoteOutcome>(outcome)
+                    : VoteOutcome::NoAccusation;
+    v.accused = readString(j, "accused");
+    v.nominator = readInt(j, "nominator", -1);
+    v.playerKilled = readInt(j, "killed", -1);
+    return v;
+}
+
+nlohmann::json matchOverToJson(const MatchOverMsg& m) {
+    return {{"killer", m.killer}, {"won", m.playersWon}};
+}
+
+MatchOverMsg matchOverFromJson(const nlohmann::json& j) {
+    MatchOverMsg m;
+    m.killer = readString(j, "killer");
+    m.playersWon = readBool(j, "won", false);
+    return m;
 }
 
 }  // namespace llm_npc

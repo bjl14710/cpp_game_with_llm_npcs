@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0002 — Using the Lab &amp; the HFT Concept Map</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --panel: #ffffff;
+    --ink: #1f2430;
+    --muted: #5c6470;
+    --accent: #0e639c;
+    --accent2: #9c4a0e;
+    --ok: #1a7f37;
+    --bad: #c0392b;
+    --border: #e3ded4;
+    --code-bg: #22262e;
+    --code-ink: #d8dee9;
+    --kw: #7fb4e8;      /* keywords */
+    --str: #a3be8c;     /* strings */
+    --com: #7a828e;     /* comments */
+    --num: #d08770;     /* numbers */
+    --fn: #ebcb8b;      /* function names */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 5rem; }
+  header.lesson {
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: 1rem; margin-bottom: 2rem;
+  }
+  header.lesson .kicker {
+    color: var(--accent); font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; font-size: .8rem;
+  }
+  h1 { font-size: 1.9rem; margin: .2rem 0 .4rem; line-height: 1.25; }
+  .why { color: var(--muted); font-size: 1.05rem; font-style: italic; }
+  h2 {
+    font-size: 1.35rem; margin-top: 2.6rem;
+    padding-top: 1rem; border-top: 1px solid var(--border);
+  }
+  h3 { font-size: 1.05rem; margin-top: 1.6rem; color: var(--accent2); }
+  p, li { font-size: 1rem; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .88em; background: #efece4; padding: .1em .35em; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    padding: 1rem 1.1rem; border-radius: 8px; overflow-x: auto;
+    font-size: .84rem; line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; color: inherit; font-size: 1em; }
+  .kw { color: var(--kw); } .str { color: var(--str); } .com { color: var(--com); }
+  .num { color: var(--num); } .fn { color: var(--fn); }
+  .path {
+    display: inline-block; font-family: ui-monospace, Menlo, monospace;
+    font-size: .82rem; background: #eef4f9; color: var(--accent);
+    border: 1px solid #cfe0ec; border-radius: 5px; padding: .1em .5em; margin: .2em 0;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid var(--border); padding: .5rem .65rem; text-align: left; vertical-align: top; }
+  th { background: #f2efe8; }
+  .scrollbox { overflow-x: auto; }
+  .arch {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.2rem 0;
+  }
+  @media (max-width: 640px) { .arch { grid-template-columns: 1fr; } }
+  .archbox {
+    background: var(--panel); border: 1.5px solid var(--border);
+    border-radius: 10px; padding: 1rem 1.1rem;
+  }
+  .archbox h4 { margin: 0 0 .4rem; font-size: 1rem; }
+  .archbox.py  { border-top: 5px solid #3572A5; }
+  .archbox.cpp { border-top: 5px solid #f34b7d; }
+  .archbox ul { margin: .4rem 0 0; padding-left: 1.1rem; }
+  .archbox li { font-size: .9rem; margin: .15rem 0; }
+  .bridge {
+    grid-column: 1 / -1; text-align: center; background: #f6f2e9;
+    border: 1.5px dashed var(--accent2); border-radius: 10px; padding: .6rem;
+    font-size: .9rem;
+  }
+  .callout {
+    background: #eef6ee; border-left: 4px solid var(--ok);
+    padding: .7rem 1rem; border-radius: 0 8px 8px 0; margin: 1.2rem 0;
+  }
+  .callout.warn { background: #fdf3e7; border-left-color: var(--accent2); }
+  /* section-complete controls */
+  .donebar {
+    display: flex; align-items: center; gap: .6rem; margin: 1.4rem 0 0;
+  }
+  .donebar button {
+    font: inherit; font-size: .82rem; cursor: pointer;
+    border: 1.5px solid var(--accent); color: var(--accent); background: none;
+    border-radius: 999px; padding: .25rem .9rem;
+  }
+  .donebar button.done { background: var(--ok); border-color: var(--ok); color: #fff; }
+  #progress-pill {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 50;
+    background: var(--ink); color: #fff; border-radius: 999px;
+    padding: .45rem 1rem; font-size: .82rem; box-shadow: 0 3px 12px rgba(0,0,0,.25);
+  }
+  /* quiz */
+  .question {
+    background: var(--panel); border: 1.5px solid var(--border);
+    border-radius: 10px; padding: 1rem 1.2rem; margin: 1.2rem 0;
+  }
+  .question > p:first-child { font-weight: 600; margin-top: 0; }
+  .options { list-style: none; margin: .6rem 0 0; padding: 0; }
+  .options li {
+    border: 1.5px solid var(--border); border-radius: 8px;
+    padding: .55rem .8rem; margin: .45rem 0; cursor: pointer; font-size: .95rem;
+    transition: border-color .12s, background .12s;
+  }
+  .options li:hover { border-color: var(--accent); background: #f4f9fd; }
+  .options li.picked-right { border-color: var(--ok); background: #eef8ee; }
+  .options li.picked-wrong { border-color: var(--bad); background: #fdeeec; }
+  .options li.locked { cursor: default; opacity: .85; }
+  .feedback { font-size: .9rem; margin: .6rem 0 0; }
+  #quiz-score { font-weight: 700; }
+  /* scenario reveals */
+  details {
+    background: var(--panel); border: 1.5px solid var(--border);
+    border-radius: 8px; padding: .6rem .9rem; margin: .7rem 0;
+  }
+  summary { cursor: pointer; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="lesson">
+  <div class="kicker">Lesson 0002 · HFT Trading Practice Repo</div>
+  <h1>Driving the Lab &amp; the HFT Concept Map</h1>
+  <p class="why">Why this matters: every future lesson in this repo teaches one square of a map.
+  This lesson gives you the whole map — what each part of the system does, how to run it,
+  and which HFT concept lives where.</p>
+</header>
+
+<!-- ============================================================ -->
+<h2 id="s1">1 · The concept: one repo, two engines</h2>
+
+<p>This repo is deliberately built as <strong>two layers of a trading firm in miniature</strong>.
+Real quant trading firms split work exactly this way:</p>
+
+<div class="arch">
+  <div class="archbox py">
+    <h4>🧠 Research layer — Python (<code>src/oil_alpha/</code>)</h4>
+    <p style="font-size:.9rem; margin:.3rem 0;">Answers <em>“is there a tradeable signal?”</em>
+    Runs at <strong>daily</strong> frequency. Speed doesn't matter; statistical correctness does.</p>
+    <ul>
+      <li>Downloads CL=F / XLE / USO / XOM / CVX closes (yfinance, FRED, Stooq)</li>
+      <li>Cleans known data traps (Apr-2020 negative WTI, roll days)</li>
+      <li>Lead-lag battery: CCF, Granger causality, cointegration</li>
+      <li>Costs the hypothetical trade in basis points</li>
+    </ul>
+  </div>
+  <div class="archbox cpp">
+    <h4>⚡ Execution-style layer — C++ (<code>cpp/</code>)</h4>
+    <p style="font-size:.9rem; margin:.3rem 0;">Answers <em>“can we process the market fast enough?”</em>
+    Runs at <strong>nanosecond</strong> scale. This is the genuinely HFT part.</p>
+    <ul>
+      <li>ITCH 5.0 binary feed parser (Add / Execute / Cancel / Delete / Replace)</li>
+      <li>Two limit-order-book implementations: <code>std::map</code> baseline vs flat array</li>
+      <li>Top-of-book signal (best bid / ask / mid)</li>
+      <li>HDR-style latency histogram: p50 / p99 / p99.9 in nanoseconds</li>
+    </ul>
+  </div>
+  <div class="bridge">🔗 Bridge: <strong>pybind11</strong> (<code>cpp/oil_volume/bindings.cpp</code> → <code>oil_volume_cpp</code>) —
+  covered in <a href="0001-pybind11-cmake-extension.html">Lesson 0001</a></div>
+</div>
+
+<p>Hold onto this framing: <strong>the Python layer finds the alpha; the C++ layer is practice
+for the machinery that would trade it at high frequency.</strong> The README's "out of scope"
+list (Kyle's&nbsp;λ, OFI, microprice, Avellaneda-Stoikov) is the future work that will connect the two.</p>
+
+<div class="donebar"><button data-complete="s1">Mark section complete</button></div>
+
+<!-- ============================================================ -->
+<h2 id="s2">2 · How to use the application</h2>
+
+<h3>One-time setup</h3>
+<pre><code><span class="com"># Python research layer</span>
+pip install -r requirements.txt
+cp .env.example .env          <span class="com"># optional — default pipeline needs no API keys</span>
+
+<span class="com"># C++ extension + benchmarks (needs CMake ≥ 3.21, C++17 compiler)</span>
+pip install -e .              <span class="com"># builds oil_volume_cpp via scikit-build-core</span>
+./scripts/build_cpp.sh        <span class="com"># builds ITCH parser, order books, bench binaries</span></code></pre>
+
+<h3>The four ways to drive it</h3>
+<div class="scrollbox">
+<table>
+  <tr><th>What you want</th><th>Command</th><th>What you'll see</th></tr>
+  <tr>
+    <td><strong>GUI dashboard</strong></td>
+    <td><code>streamlit run app/dashboard.py</code></td>
+    <td>Live stage progress, CCF plot, Granger table, API budget used/remaining, cost estimates</td>
+  </tr>
+  <tr>
+    <td><strong>Headless pipeline</strong></td>
+    <td><code>PYTHONPATH=src python -m oil_alpha.pipeline</code></td>
+    <td>Stage-by-stage progress lines, then a summary: peak lag, leader, Granger p-values, cointegration verdict</td>
+  </tr>
+  <tr>
+    <td><strong>Test suites</strong></td>
+    <td><code>pytest</code> &nbsp;·&nbsp; C++: <code>ctest</code> in <code>_build/</code></td>
+    <td>Cleaning guards, CCF sign convention, budget accounting; GoogleTest for parser + books</td>
+  </tr>
+  <tr>
+    <td><strong>Latency benchmarks</strong></td>
+    <td><code>./_build/cpp/itch/bench_main</code> (map book)<br>
+        <code>./_build/cpp/itch/bench_main_flat</code> (flat book)</td>
+    <td>p50/p99/p99.9 per-message latency over 100k synthetic ITCH Add-Orders</td>
+  </tr>
+</table>
+</div>
+
+<div class="callout">
+<strong>Sanity anchor from the README:</strong> under a stable window the study should find
+<strong>CL (futures) leads XLE</strong> at short positive lags. If your run says XLE leads CL,
+suspect a sign or alignment bug before believing you've discovered reverse causality.
+</div>
+
+<div class="donebar"><button data-complete="s2">Mark section complete</button></div>
+
+<!-- ============================================================ -->
+<h2 id="s3">3 · Minimal standalone example</h2>
+
+<p>The single most important <em>usage pattern</em> in the repo: the pipeline is a
+<strong>generator that yields progress events</strong>, and every front-end (GUI, CLI, your own
+scripts) consumes the same stream. Here's the whole pattern in miniature:</p>
+
+<pre><code><span class="com"># Consume the pipeline exactly like app/dashboard.py and the CLI do.</span>
+<span class="kw">from</span> oil_alpha.pipeline <span class="kw">import</span> run_pipeline   <span class="com"># PYTHONPATH=src</span>
+
+result = <span class="kw">None</span>
+<span class="kw">for</span> event <span class="kw">in</span> <span class="fn">run_pipeline</span>():          <span class="com"># yields ProgressEvent objects</span>
+    <span class="com"># each event: stage, status ("start"/"ok"/"warn"/"error"), pct, message</span>
+    <span class="fn">print</span>(<span class="str">f"[{event.pct:4.0%}] {event.stage:&lt;13} {event.status:&lt;5} {event.message}"</span>)
+    <span class="kw">if</span> event.stage == <span class="str">"done"</span>:          <span class="com"># final event carries the payload</span>
+        result = event.payload           <span class="com"># a PipelineResult dataclass</span>
+
+<span class="com"># Everything the study produced lives on one object:</span>
+<span class="fn">print</span>(result.leadlag.leader)             <span class="com"># "wti_fut" under a stable window</span>
+<span class="fn">print</span>(result.granger[<span class="str">"x-&gt;y"</span>].p_value)  <span class="com"># CL → XLE Granger p-value</span>
+<span class="fn">print</span>(result.budget.<span class="fn">total_requests</span>())  <span class="com"># API calls spent this run</span></code></pre>
+
+<p>And the C++ side in miniature — feed a book, read the top:</p>
+
+<pre><code><span class="com">// Flat-array book for an instrument expected to trade $99.00–$102.00.</span>
+<span class="com">// ITCH prices are fixed-point: dollars × 10000.</span>
+itch::OrderBookFlat book(<span class="num">990000</span>, <span class="num">1020000</span>);
+
+book.<span class="fn">add</span>(<span class="com">/*order_ref=*/</span><span class="num">1</span>, <span class="str">'B'</span>, <span class="num">1000000</span>, <span class="num">100</span>);  <span class="com">// bid 100 sh @ $100.00</span>
+book.<span class="fn">add</span>(<span class="num">2</span>, <span class="str">'S'</span>, <span class="num">1000500</span>, <span class="num">200</span>);              <span class="com">// ask 200 sh @ $100.05</span>
+book.<span class="fn">execute</span>(<span class="num">1</span>, <span class="num">40</span>);                          <span class="com">// 40 shares of the bid trade</span>
+
+<span class="kw">auto</span> sig = itch::<span class="fn">make_signal</span>(book);           <span class="com">// works for both book types</span>
+<span class="com">// sig.bid_price=100.00, sig.ask_price=100.05, sig.mid=100.025, sig.valid=true</span></code></pre>
+
+<div class="donebar"><button data-complete="s3">Mark section complete</button></div>
+
+<!-- ============================================================ -->
+<h2 id="s4">4 · In this project: where each piece lives</h2>
+
+<h3>The pipeline spine</h3>
+<p><span class="path">src/oil_alpha/pipeline.py</span> — <code>run_pipeline()</code> walks six stages:
+<code>download → spot-check → clean → lead-lag → cointegration → costs</code>. Each stage is wrapped in a
+<code>StageTimer</code> (from <span class="path">src/oil_alpha/metrics.py</span>) so per-stage compute time
+lands on the dashboard. Note the defensive pattern at each stage: failures append to
+<code>result.warnings</code> and the pipeline degrades instead of crashing.</p>
+
+<h3>The statistics</h3>
+<p><span class="path">src/oil_alpha/analysis/leadlag.py</span> — <code>ccf_leadlag()</code> computes
+<code>ρ(k) = corr(x_t, y_{t+k})</code> <em>by hand</em> (mean-removed dot products) rather than trusting a
+library's lag convention. A peak at <strong>k &gt; 0 means x leads y</strong>. The docstring states this
+explicitly and a unit test pins it against a synthetic known lead — a convention that "can't silently
+drift." <code>granger_both_directions()</code> runs the test both ways because predictive precedence ≠ causation.</p>
+
+<p><span class="path">src/oil_alpha/config.py</span> — the study's protagonists
+(<code>LEAD = "wti_fut"</code>, <code>LAG = "energy_etf"</code>), the Apr-2020 negative-price window
+constants, free-tier API caps, and the basis-point cost model
+(<code>AssetCost.round_trip_bp</code> = cross the spread twice + commission twice).</p>
+
+<h3>The HFT engine</h3>
+<p><span class="path">cpp/itch/itch_parser.hpp</span> — a subset of Nasdaq TotalView-ITCH 5.0:
+message types <code>'A' 'F' 'E' 'C' 'X' 'D' 'U'</code>, all fields big-endian, prices fixed-point
+(× 10000), each message preceded by a 2-byte length (MoldUDP64-style framing). The parser
+<em>never reads past the buffer</em> and counts skipped/error messages — feed handlers must be
+paranoid because a malformed message must not take down the trading system.</p>
+
+<p><span class="path">cpp/itch/order_book.hpp</span> vs <span class="path">cpp/itch/order_book_flat.hpp</span> —
+the same public interface, two data structures. The baseline stores price levels in
+<code>std::map</code> (red-black tree: pointer chasing, heap nodes, O(log&nbsp;n)). The flat book stores
+them in a <code>std::vector&lt;uint32_t&gt;</code> indexed by
+<code>(price − min_price) / tick_size</code> — O(1) updates, one contiguous 117&nbsp;KB allocation that
+fits in L2 cache. The price range must be declared at construction: <strong>a domain constraint
+(known tick range) buys a faster data structure.</strong></p>
+
+<p><span class="path">docs/perf/01-flat-book.md</span> — the before/after evidence:
+p50 <strong>83 ns → 42 ns (−49%)</strong>, p99 −21%, p99.9 −35%, with 15/15 tests still passing.
+Read this write-up in full; it is the best single document in the repo about <em>why cache locality
+is latency</em>.</p>
+
+<p><span class="path">cpp/common/latency_histogram.hpp</span> — an HDR-style histogram
+(power-of-2 buckets with sub-bucket resolution, 1 ns to ~68 s at ~1% precision). Recording a sample
+is O(1) with no allocation, so the measurement doesn't distort the thing being measured.
+<code>percentile(99.9)</code> is the headline number.</p>
+
+<p><span class="path">cpp/itch/signal.hpp</span> — <code>make_signal()</code> turns either book's
+top-of-book into <code>{bid, ask, mid, valid}</code>. The mid-price is the simplest possible
+"fair value" estimate; microprice and order-flow imbalance are its future upgrades.</p>
+
+<h3>The full concept map</h3>
+<div class="scrollbox">
+<table>
+  <tr><th>HFT / quant concept</th><th>Where it lives</th><th>Status</th></tr>
+  <tr><td>Binary market-data feed parsing (ITCH 5.0, big-endian, framing)</td><td><code>cpp/itch/itch_parser.{hpp,cpp}</code></td><td>✅ in repo</td></tr>
+  <tr><td>Limit-order-book reconstruction (add/execute/cancel/replace)</td><td><code>cpp/itch/order_book.hpp</code></td><td>✅ in repo</td></tr>
+  <tr><td>Cache-conscious data structures (map → flat array)</td><td><code>cpp/itch/order_book_flat.hpp</code> + <code>docs/perf/01-flat-book.md</code></td><td>✅ in repo</td></tr>
+  <tr><td>Latency measurement: HDR histograms, p50/p99/p99.9 tails</td><td><code>cpp/common/latency_histogram.hpp</code>, <code>bench_main*.cpp</code></td><td>✅ in repo</td></tr>
+  <tr><td>Top-of-book signals: best bid/ask, mid-price</td><td><code>cpp/itch/signal.hpp</code></td><td>✅ in repo</td></tr>
+  <tr><td>Lead-lag analysis: CCF with explicit sign convention</td><td><code>src/oil_alpha/analysis/leadlag.py</code></td><td>✅ in repo</td></tr>
+  <tr><td>Granger causality (both directions)</td><td><code>src/oil_alpha/analysis/leadlag.py</code></td><td>✅ in repo</td></tr>
+  <tr><td>Cointegration: Engle-Granger + Johansen (levels, not returns)</td><td><code>src/oil_alpha/analysis/cointegration.py</code></td><td>✅ in repo</td></tr>
+  <tr><td>Data hygiene: negative prices, futures roll days, log vs simple returns</td><td><code>src/oil_alpha/clean.py</code></td><td>✅ in repo</td></tr>
+  <tr><td>Transaction-cost modelling in basis points</td><td><code>src/oil_alpha/config.py</code>, <code>analysis/costs.py</code></td><td>✅ in repo</td></tr>
+  <tr><td>API budget discipline / free-tier caps</td><td><code>src/oil_alpha/data/budget.py</code></td><td>✅ in repo</td></tr>
+  <tr><td>Python↔C++ hybrid architecture (pybind11)</td><td><code>cpp/oil_volume/bindings.cpp</code> — Lesson 0001</td><td>✅ in repo</td></tr>
+  <tr><td>Microstructure alpha: Kyle's λ, order-flow imbalance, microprice</td><td>README "out of scope"</td><td>🔜 future milestone</td></tr>
+  <tr><td>Market-making inventory control (Avellaneda-Stoikov)</td><td>README "out of scope"</td><td>🔜 future milestone</td></tr>
+  <tr><td>Intraday / asynchronous lead-lag (Hayashi-Yoshida)</td><td>README "out of scope"</td><td>🔜 future milestone</td></tr>
+</table>
+</div>
+
+<div class="donebar"><button data-complete="s4">Mark section complete</button></div>
+
+<!-- ============================================================ -->
+<h2 id="s5">5 · Often confused: HFT vs quantitative research</h2>
+
+<p>People say "HFT" for anything algorithmic. This repo contains <strong>both</strong> disciplines,
+and knowing which layer is which keeps your mental model honest:</p>
+
+<div class="scrollbox">
+<table>
+  <tr><th></th><th>Quant research (this repo's Python layer)</th><th>HFT engineering (this repo's C++ layer)</th></tr>
+  <tr><td><strong>Question asked</strong></td><td>Does a predictive relationship exist? (CL leads XLE?)</td><td>Can we see and react to the market before competitors?</td></tr>
+  <tr><td><strong>Timescale</strong></td><td>Daily bars; lags measured in trading days</td><td>Nanoseconds; latency measured per message</td></tr>
+  <tr><td><strong>What "fast" means</strong></td><td>Irrelevant — a 6-stage pipeline taking seconds is fine</td><td>Everything — 83 ns vs 42 ns p50 is a headline result</td></tr>
+  <tr><td><strong>Enemy</strong></td><td>Statistical artifacts: sign bugs, non-stationarity, look-ahead</td><td>Cache misses, allocation, tail-latency spikes</td></tr>
+  <tr><td><strong>Evidence artifact</strong></td><td>p-values, cointegration verdicts, CCF curves</td><td>Latency histogram percentiles, perf counters</td></tr>
+  <tr><td><strong>Shared ground</strong></td><td colspan="2">Both demand measurement before belief: parity tests, sign-convention tests, before/after benchmarks</td></tr>
+</table>
+</div>
+
+<p>Two more pairs worth keeping apart:</p>
+<ul>
+  <li><strong>Lead-lag correlation vs causation</strong> — <code>granger_both_directions()</code> exists precisely
+  because x Granger-causing y only shows <em>predictive precedence</em>. The docstring says so.</li>
+  <li><strong>Correlation (returns) vs cointegration (levels)</strong> — the pipeline runs CCF/Granger on
+  <em>stationary returns</em> but Engle-Granger/Johansen on <em>price levels</em>. Cointegration asks
+  whether a spread between prices is mean-reverting; correlation of returns can be high while prices drift apart forever.</li>
+</ul>
+
+<div class="donebar"><button data-complete="s5">Mark section complete</button></div>
+
+<!-- ============================================================ -->
+<h2 id="s6">6 · Practice quiz</h2>
+<p>Options are shuffled every time you open this page. Click an answer to check it.
+Score: <span id="quiz-score">0 / 5</span></p>
+
+<div class="question" data-question>
+  <p>Q1. You want the full CL-vs-XLE study without opening a browser. Which command?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="pytest runs the test suites (cleaning guards, sign conventions) — it does not run the study itself.">pytest</li>
+    <li data-correct="true"  data-why="The pipeline module has a __main__ entry that drains run_pipeline() and prints stage progress plus a summary. PYTHONPATH=src is needed because the package lives under src/.">PYTHONPATH=src python -m oil_alpha.pipeline</li>
+    <li data-correct="false" data-why="This launches the Streamlit GUI — a browser app, exactly what we said we didn't want.">streamlit run app/dashboard.py</li>
+    <li data-correct="false" data-why="build_cpp.sh compiles the C++ ITCH parser and benchmarks; it never touches the Python study.">./scripts/build_cpp.sh</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q2. Which part of this repo is doing genuinely <em>HFT-style</em> work?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The pipeline is daily-frequency statistical research — classic quant research, not HFT. Speed is irrelevant there.">src/oil_alpha/pipeline.py — it processes market data end to end</li>
+    <li data-correct="false" data-why="The dashboard is a research UI. Streamlit re-renders in hundreds of milliseconds; nothing latency-critical lives there.">app/dashboard.py — it updates live as the pipeline runs</li>
+    <li data-correct="true"  data-why="Feed parsing + order-book maintenance + nanosecond latency measurement is exactly the tick-to-trade path an HFT system optimises.">cpp/itch/ — the ITCH parser, order books, and latency benchmarks</li>
+    <li data-correct="false" data-why="The budget tracker is API-quota bookkeeping for free data tiers — operational hygiene, not HFT.">src/oil_alpha/data/budget.py — it tracks every request</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q3. The flat-array book halved p50 latency vs the <code>std::map</code> baseline. The main mechanism?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Both books are single-threaded in the benchmark; no parallelism was added.">It parallelised updates across threads</li>
+    <li data-correct="false" data-why="Big-O improved too (O(log n) → O(1)), but for ~100 levels log n is tiny. The write-up attributes the win to memory behaviour, not asymptotics.">Purely the O(log n) → O(1) asymptotic improvement</li>
+    <li data-correct="true"  data-why="std::map chases heap-allocated tree-node pointers (each a likely cache miss, ~40–100 ns). The vector is one contiguous ~117 KB block that fits in L2 — a cache miss costs about as much as the entire baseline p50.">Cache locality — contiguous array access replaced pointer-chasing through heap-allocated tree nodes</li>
+    <li data-correct="false" data-why="Both implementations were compiled with the same flags (-O2). The comparison isolates the data structure.">It was compiled with higher optimisation flags</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q4. <code>ccf_leadlag(x=CL_returns, y=XLE_returns)</code> returns <code>peak_lag = +2</code>. What does that mean?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backwards. The convention is ρ(k) = corr(x_t, y_{t+k}) — positive k pairs today's x with FUTURE y, so x leads.">XLE leads CL by 2 days</li>
+    <li data-correct="true"  data-why="ρ(k) = corr(x_t, y_{t+k}); a peak at k = +2 means today's CL return correlates most with XLE's return two days later — CL (x) leads. This is also the expected result under a stable window.">CL leads XLE by 2 days — today's CL return best predicts XLE two days out</li>
+    <li data-correct="false" data-why="A contemporaneous relationship would peak at k = 0, not +2.">They move together on the same day</li>
+    <li data-correct="false" data-why="peak_lag says nothing about significance — that's what the Granger p-values are for. It reports where |correlation| peaks.">The relationship is statistically significant at the 2% level</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q5. Why do the C++ benchmarks headline <strong>p99 / p99.9</strong> rather than mean latency?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The histogram computes the mean fine (it's printed too). Percentiles are chosen for what they reveal, not computability.">Because the mean is too expensive to compute in a histogram</li>
+    <li data-correct="true"  data-why="Trading opportunities are fleeting: if 1-in-100 messages hits a 584 ns spike, you miss exactly the moments that matter. The tail is where money is lost, so the tail is what you engineer against.">Because rare slow messages are the ones that miss fleeting opportunities — tail latency is what costs money in trading</li>
+    <li data-correct="false" data-why="It's the opposite — the perf write-up notes max values are dominated by OS scheduling jitter, and p99.9 is used precisely because it's more robust than max.">Because p99.9 captures OS scheduling jitter, which is the book engine's fault</li>
+    <li data-correct="false" data-why="Regulators do not mandate latency percentile reporting for benchmarks.">Because exchange regulations require percentile reporting</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="donebar"><button data-complete="s6">Mark section complete</button></div>
+
+<!-- ============================================================ -->
+<h2 id="s7">7 · Check your understanding — scenarios</h2>
+
+<details>
+  <summary>Scenario A: You run the pipeline and it reports "leader: XLE" with peak lag −3. What's your first move?</summary>
+  <p>Suspect a bug, not a discovery. The README says the expected stable-window result is CL leading
+  XLE; the opposite "usually means a sign/alignment bug." Check series ordering into
+  <code>ccf_leadlag(x, y)</code>, re-run the sign-convention unit test (<code>tests/test_leadlag.py</code>),
+  and check whether your date window includes a distorted period. Only after those pass would you
+  consider it a real regime change.</p>
+</details>
+
+<details>
+  <summary>Scenario B: You want to trade a stock whose price can gap anywhere from $2 to $400 intraday. Which order book, and why?</summary>
+  <p>The <code>std::map</code> baseline (<code>order_book.hpp</code>). The flat book needs declared price
+  bounds at construction; a $2–$400 range at 0.0001 resolution would need ~4 million entries (16 MB —
+  blowing out of cache and wasting the locality advantage), and any out-of-range print just increments
+  <code>error_count</code>. The flat book wins when the tick range is <em>known and narrow</em> —
+  the usual HFT case, but not this one.</p>
+</details>
+
+<details>
+  <summary>Scenario C: Your Granger test says CL → XLE with p = 0.001. Can you say CL causes XLE moves?</summary>
+  <p>No — only that CL returns contain information that <em>predicts</em> XLE returns beyond XLE's own
+  history ("predictive precedence, not true causation," per the docstring). Both could be driven by a
+  common factor (oil news) that hits the futures market's price first. That's also why
+  <code>granger_both_directions()</code> always runs the reverse test.</p>
+</details>
+
+<div class="donebar"><button data-complete="s7">Mark section complete</button></div>
+
+<p style="margin-top:2.5rem; color: var(--muted); font-size:.85rem;">
+Sources: this repo's own code and docs (<code>README.md</code>, <code>docs/perf/01-flat-book.md</code>,
+files cited inline above). ITCH message-format facts follow Nasdaq's TotalView-ITCH 5.0 specification
+as mirrored in <code>cpp/itch/itch_parser.hpp</code>.
+</p>
+
+</div><!-- /wrap -->
+
+<div id="progress-pill">Sections: 0 / 7 · Quiz: 0 / 5</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- section completion (in-page state only) ----
+  var completed = {};
+  var TOTAL_SECTIONS = document.querySelectorAll("[data-complete]").length;
+  var quizCorrect = 0, quizAnswered = 0;
+  var TOTAL_QUESTIONS = document.querySelectorAll("[data-question]").length;
+
+  function refreshPill() {
+    var done = Object.keys(completed).length;
+    document.getElementById("progress-pill").textContent =
+      "Sections: " + done + " / " + TOTAL_SECTIONS + " · Quiz: " + quizCorrect + " / " + TOTAL_QUESTIONS;
+    document.getElementById("quiz-score").textContent = quizCorrect + " / " + TOTAL_QUESTIONS;
+  }
+
+  document.querySelectorAll("[data-complete]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var key = btn.getAttribute("data-complete");
+      if (completed[key]) { delete completed[key]; btn.classList.remove("done"); btn.textContent = "Mark section complete"; }
+      else { completed[key] = true; btn.classList.add("done"); btn.textContent = "✓ Completed"; }
+      refreshPill();
+    });
+  });
+
+  // ---- quiz: shuffle options in the DOM, check data-correct (never position) ----
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  document.querySelectorAll("[data-question]").forEach(function (q) {
+    var list = q.querySelector(".options");
+    shuffle(Array.prototype.slice.call(list.children)).forEach(function (li) {
+      list.appendChild(li); // reorder in DOM
+    });
+    var feedback = q.querySelector(".feedback");
+    var answered = false;
+    list.querySelectorAll("li").forEach(function (li) {
+      li.addEventListener("click", function () {
+        if (answered) return;          // first click locks the question
+        answered = true;
+        quizAnswered++;
+        var correct = li.dataset.correct === "true";   // attribute, NOT position
+        if (correct) quizCorrect++;
+        li.classList.add(correct ? "picked-right" : "picked-wrong");
+        list.querySelectorAll("li").forEach(function (el) {
+          el.classList.add("locked");
+          if (el.dataset.correct === "true") el.classList.add("picked-right");
+        });
+        feedback.hidden = false;
+        feedback.textContent = (correct ? "✓ Correct. " : "✗ Not quite. ") + li.dataset.why;
+        feedback.style.color = correct ? "var(--ok)" : "var(--bad)";
+        refreshPill();
+      });
+    });
+  });
+
+  refreshPill();
+})();
+</script>
+</body>
+</html>

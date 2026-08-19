@@ -1,0 +1,283 @@
+/**
+ * Grading tests — Exercise 06: C++ Order Book.
+ *
+ * Built and run by run_cpp.sh; -I points at exercises/06_cpp_order_book or
+ * solutions/06_cpp_order_book depending on HFT_EXERCISE_TARGET.
+ *
+ * Exit codes: 0 = pass, 1 = fail, 42 = not implemented (stub threw).
+ *
+ * Test cases mirror the Python test_01_order_book.py suite exactly;
+ * side strings "buy"/"sell" become chars 'B'/'A', float prices become
+ * integer ticks (×10000).
+ */
+#include "order_book.hpp"
+
+#include <chrono>
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#define ASSERT(cond, msg)                                              \
+    do {                                                               \
+        if (!(cond)) {                                                 \
+            std::cerr << "FAIL: " << msg << "\n";                     \
+            return 1;                                                  \
+        }                                                              \
+    } while (0)
+
+// ---------------------------------------------------------------------------
+// BBO tests
+// ---------------------------------------------------------------------------
+int test_empty_book_bbo() {
+    OrderBook book;
+    ASSERT(book.best_bid() == INT64_MIN, "empty book best_bid should be INT64_MIN");
+    ASSERT(book.best_ask() == INT64_MAX, "empty book best_ask should be INT64_MAX");
+    return 0;
+}
+
+int test_bbo_after_adds() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'000'000, 10);  // bid $100.00
+    book.add_limit(2, 'A', 1'010'000, 10);  // ask $101.00
+    ASSERT(book.best_bid() == 1'000'000, "best bid should be 1000000");
+    ASSERT(book.best_ask() == 1'010'000, "best ask should be 1010000");
+    return 0;
+}
+
+int test_price_priority() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'000'000, 10);  // $100.00
+    book.add_limit(2, 'B', 1'005'000, 10);  // $100.50 — better bid
+    book.add_limit(3, 'A', 1'010'000, 10);  // $101.00
+    book.add_limit(4, 'A', 1'015'000, 10);  // $101.50 — worse ask
+    ASSERT(book.best_bid() == 1'005'000,
+           "best bid should be highest: 1005000 got " + std::to_string(book.best_bid()));
+    ASSERT(book.best_ask() == 1'010'000,
+           "best ask should be lowest: 1010000 got " + std::to_string(book.best_ask()));
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Add and cancel tests
+// ---------------------------------------------------------------------------
+int test_cancel_updates_bbo() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'005'000, 10);
+    book.add_limit(2, 'B', 1'000'000, 10);
+    ASSERT(book.best_bid() == 1'005'000, "best bid before cancel");
+    book.cancel(1);
+    ASSERT(book.best_bid() == 1'000'000,
+           "best bid after cancel should fall to 1000000");
+    return 0;
+}
+
+int test_cancel_unknown_raises() {
+    OrderBook book;
+    bool threw = false;
+    try {
+        book.cancel(999);
+    } catch (const std::out_of_range&) {
+        threw = true;
+    }
+    ASSERT(threw, "cancel of unknown order_id should throw std::out_of_range");
+    return 0;
+}
+
+int test_duplicate_id_raises() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'000'000, 10);
+    bool threw = false;
+    try {
+        book.add_limit(1, 'B', 1'000'000, 5);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    ASSERT(threw, "duplicate order_id should throw std::invalid_argument");
+    return 0;
+}
+
+int test_invalid_side_raises() {
+    OrderBook book;
+    bool threw = false;
+    try {
+        book.add_limit(1, 'X', 1'000'000, 10);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    ASSERT(threw, "invalid side 'X' should throw std::invalid_argument");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Market execution tests
+// ---------------------------------------------------------------------------
+int test_fifo_at_same_price() {
+    OrderBook book;
+    // Two bids at same price; first added should fill first.
+    book.add_limit(10, 'A', 1'000'000, 5);  // first at this ask price
+    book.add_limit(11, 'A', 1'000'000, 5);  // second
+    auto fills = book.execute_market('B', 5);
+    ASSERT(fills.size() == 1, "expected 1 fill");
+    ASSERT(fills[0].order_id == 10, "first ask at level should fill first (FIFO)");
+    ASSERT(fills[0].qty == 5, "fill qty should be 5");
+    // order 11 should still rest
+    ASSERT(book.best_ask() == 1'000'000, "level should still exist with order 11");
+    return 0;
+}
+
+int test_partial_fill_stays_at_front() {
+    OrderBook book;
+    book.add_limit(1, 'A', 1'000'000, 10);
+    book.add_limit(2, 'A', 1'000'000,  5);
+    auto fills = book.execute_market('B', 4);
+    ASSERT(fills.size() == 1, "expected 1 partial fill");
+    ASSERT(fills[0].order_id == 1 && fills[0].qty == 4, "partial fill on order 1");
+    // order 1 has 6 remaining — it must remain at the FRONT of the level
+    auto fills2 = book.execute_market('B', 3);
+    ASSERT(fills2.size() == 1 && fills2[0].order_id == 1 && fills2[0].qty == 3,
+           "next fill should continue consuming order 1 (FIFO)");
+    return 0;
+}
+
+int test_market_walks_levels() {
+    OrderBook book;
+    book.add_limit(1, 'A', 1'000'000, 5);  // $100.00
+    book.add_limit(2, 'A', 1'010'000, 5);  // $101.00
+    book.add_limit(3, 'A', 1'020'000, 5);  // $102.00
+    auto fills = book.execute_market('B', 12);
+    ASSERT(fills.size() == 3, "should cross 3 levels");
+    ASSERT(fills[0].price_ticks == 1'000'000, "first fill at lowest ask");
+    ASSERT(fills[1].price_ticks == 1'010'000, "second fill at next level");
+    ASSERT(fills[2].price_ticks == 1'020'000 && fills[2].qty == 2,
+           "third level partially filled (qty 2)");
+    return 0;
+}
+
+int test_sell_hits_best_bid_first() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'010'000, 5);  // better bid $101.00
+    book.add_limit(2, 'B', 1'000'000, 5);  // worse bid  $100.00
+    auto fills = book.execute_market('A', 5);
+    ASSERT(fills.size() == 1, "expected 1 fill");
+    ASSERT(fills[0].price_ticks == 1'010'000, "sell should hit highest bid first");
+    return 0;
+}
+
+int test_insufficient_liquidity() {
+    OrderBook book;
+    book.add_limit(1, 'A', 1'000'000, 3);
+    auto fills = book.execute_market('B', 10);
+    ASSERT(fills.size() == 1 && fills[0].qty == 3,
+           "insufficient liquidity: partial fill expected");
+    ASSERT(book.best_ask() == INT64_MAX, "book should be empty after fill");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Imbalance tests
+// ---------------------------------------------------------------------------
+int test_empty_imbalance_zero() {
+    OrderBook book;
+    ASSERT(book.imbalance(1) == 0.0, "empty book imbalance should be 0.0");
+    return 0;
+}
+
+int test_imbalance_hand_computed() {
+    OrderBook book;
+    // Same numbers as Python test:
+    //   bid $100.00 qty 30, bid $99.00 qty 20, ask $101.00 qty 10
+    //   imbalance(1) = (30 - 10) / (30 + 10) = 0.5
+    book.add_limit(1, 'B', 1'000'000, 30);
+    book.add_limit(2, 'B',   990'000, 20);
+    book.add_limit(3, 'A', 1'010'000, 10);
+    double im = book.imbalance(1);
+    ASSERT(std::abs(im - 0.5) < 1e-9,
+           "imbalance(1) expected 0.5 but got " + std::to_string(im));
+    return 0;
+}
+
+int test_imbalance_multi_level() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'000'000, 30);
+    book.add_limit(2, 'B',   990'000, 20);
+    book.add_limit(3, 'A', 1'010'000, 10);
+    book.add_limit(4, 'A', 1'020'000, 15);
+    // levels=2: bid_qty=50, ask_qty=25 → (50-25)/(50+25) = 1/3
+    double im2 = book.imbalance(2);
+    ASSERT(std::abs(im2 - 1.0/3.0) < 1e-9,
+           "imbalance(2) expected 1/3 but got " + std::to_string(im2));
+    return 0;
+}
+
+int test_one_sided_saturates() {
+    OrderBook book;
+    book.add_limit(1, 'B', 1'000'000, 100);
+    double im = book.imbalance(1);
+    ASSERT(std::abs(im - 1.0) < 1e-9,
+           "one-sided (all bids) imbalance should be +1.0");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Throughput smoke test — catches O(n²) bugs
+// ---------------------------------------------------------------------------
+int test_throughput_1m() {
+    OrderBook book;
+    auto t0 = std::chrono::steady_clock::now();
+    for (int64_t i = 1; i <= 1'000'000; ++i) {
+        // spread across 100 price levels to exercise the map
+        book.add_limit(i, 'B', 1'000'000 + (i % 100) * 1000, 10);
+        book.cancel(i);
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    ASSERT(ms < 2000,
+           "1M add+cancel cycles took " + std::to_string(ms) + "ms (limit 2000ms)");
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+int main() {
+    struct Test { const char* name; int (*fn)(); };
+    Test tests[] = {
+        {"empty_book_bbo",            test_empty_book_bbo},
+        {"bbo_after_adds",            test_bbo_after_adds},
+        {"price_priority",            test_price_priority},
+        {"cancel_updates_bbo",        test_cancel_updates_bbo},
+        {"cancel_unknown_raises",     test_cancel_unknown_raises},
+        {"duplicate_id_raises",       test_duplicate_id_raises},
+        {"invalid_side_raises",       test_invalid_side_raises},
+        {"fifo_at_same_price",        test_fifo_at_same_price},
+        {"partial_fill_stays_front",  test_partial_fill_stays_at_front},
+        {"market_walks_levels",       test_market_walks_levels},
+        {"sell_hits_best_bid_first",  test_sell_hits_best_bid_first},
+        {"insufficient_liquidity",    test_insufficient_liquidity},
+        {"empty_imbalance_zero",      test_empty_imbalance_zero},
+        {"imbalance_hand_computed",   test_imbalance_hand_computed},
+        {"imbalance_multi_level",     test_imbalance_multi_level},
+        {"one_sided_saturates",       test_one_sided_saturates},
+        {"throughput_1m",             test_throughput_1m},
+    };
+
+    try {
+        int failed = 0;
+        for (auto& t : tests) {
+            if (t.fn() != 0) {
+                std::cerr << "  [FAILED] " << t.name << "\n";
+                ++failed;
+            } else {
+                std::cout << "  [PASSED] " << t.name << "\n";
+            }
+        }
+        if (failed == 0) { std::cout << "ALL TESTS PASSED\n"; return 0; }
+        std::cerr << failed << " TEST(S) FAILED\n";
+        return 1;
+    } catch (const std::logic_error& e) {
+        std::cout << "NOT IMPLEMENTED: " << e.what() << "\n";
+        return 42;
+    }
+}

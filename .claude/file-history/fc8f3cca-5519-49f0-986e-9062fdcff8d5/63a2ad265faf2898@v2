@@ -1,0 +1,49 @@
+"""Local parquet cache keyed by (kind, symbol, start, end).
+
+Re-runs over the same window hit disk instead of the network, which keeps the
+free-tier budget intact and makes the dashboard responsive.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+
+import pandas as pd
+
+from oil_alpha.config import CACHE_DIR
+
+
+def _key(kind: str, symbol: str, start: str, end: str) -> str:
+    raw = f"{kind}|{symbol}|{start}|{end}"
+    digest = hashlib.sha1(raw.encode()).hexdigest()[:12]
+    safe_symbol = symbol.replace("=", "_").replace("^", "_").replace(".", "_")
+    return f"{kind}__{safe_symbol}__{digest}.parquet"
+
+
+def _path(kind: str, symbol: str, start: str, end: str, cache_dir: str) -> str:
+    return os.path.join(cache_dir, _key(kind, symbol, start, end))
+
+
+def load(
+    kind: str, symbol: str, start: str, end: str, *, cache_dir: str = CACHE_DIR
+) -> pd.DataFrame | None:
+    path = _path(kind, symbol, start, end, cache_dir)
+    if os.path.exists(path):
+        return pd.read_parquet(path)
+    return None
+
+
+def save(
+    df: pd.DataFrame,
+    kind: str,
+    symbol: str,
+    start: str,
+    end: str,
+    *,
+    cache_dir: str = CACHE_DIR,
+) -> str:
+    os.makedirs(cache_dir, exist_ok=True)
+    path = _path(kind, symbol, start, end, cache_dir)
+    df.to_parquet(path)
+    return path

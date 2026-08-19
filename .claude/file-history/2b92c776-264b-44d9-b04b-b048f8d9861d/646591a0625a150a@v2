@@ -1,0 +1,110 @@
+"""Draft PR for the mii-style branch; close #101-#107."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Milestone #12 — the whole cast moves to a cartoony Mii/Tomodachi look
+through the ONE shared parts library (NPCs, creator, and the new player
+avatar), with a graphics-pack seam for future content packs. One atomic
+commit per issue.
+
+**Part A verdict first (per the brief): NO engine migration.** raylib is
+not a blocker — the Mii target is flat color + rounded low-poly + dark
+outlines, all achievable with the rlgl calls already in use. Reasoning in
+`.claude/plans/mii-style-visual-overhaul.md`; no migration code exists.
+
+**#101 pack seam** (`98e04a9`) — `pack` tag on every part/palette; all
+recipe branches extracted into ONE dispatch function with a documented
+contract (a pack = catalog rows + palettes + recipes, nothing else).
+Pure extraction, screenshot-verified pixel-identical.
+
+**#102 Mii proportions + pastels** (`56df349`) — heads grow to ~half the
+body+head silhouette (pinned by a live test: head.y/(socket.y+head.y) in
+0.48-0.60), bodies shorten, hair/eyes rescale, and the palettes shift to
+one cohesive Tomodachi pastel set. Pure catalog data — zero logic.
+
+**#103 inverted-hull outlines** (`4b4f4a8`) — every recipe issued twice:
+inflated 1.06x, near-black, front-faces culled, then normal; passes
+grouped per character around explicit batch drains. Clean rims on both
+sphere and box families, verified in close-ups.
+
+**#104 Mouth category** (`8b0c70d`) — fifth category exactly along the
+category-spec extension path (zero assembly changes): spec row, sockets
+on all heads, four mouth parts + recipes, Menu label. Look format grows
+to six items; five-item lines and pre-Mouth stored JSON default to the
+canonical smile so old data keeps its authored identity. Combo test
+gains the axis (now 17,280 combinations).
+
+**#105 catalog expansion** (`c8188d6`) — floors pinned by test: hair 18,
+eyes 10 (glasses! wink!), bodies 6, mouths 4, palettes 12. Seven persona
+looks refreshed in-character (the librarian finally wears glasses).
+
+**#106 player avatar** (`f487dd1`) — "Edit My Avatar" opens the SAME
+creator page in avatar mode; Save writes a look-only row under the
+reserved `player_avatar` id (which can never spawn as an NPC — tested),
+and the first-person punch arm / pistol hand tint from the avatar's
+palette.
+
+**#107 visual gate + playtest** — visual-qa subagent verdict: **PASS**
+(proportions, outlines, mouths, palette cohesion, created-character
+parity). One caveat recorded, not acted on (observations-only brief):
+the legacy mood-emote billboard now clashes with the outlined style —
+top item on the findings list in OVERNIGHT_REPORT.md (local), which also
+has 9 more playtest observations (night lighting, plaza emptiness, road
+scale...).
+
+## Verification
+- `make -C tests test` green at every commit; final **182 cases /
+  31,730 assertions** (proportion window, Mouth wiring, five-item
+  back-compat, catalog floors, avatar round-trip all pinned live).
+- Screenshot-verified at each step; QA set in
+  `docs/qa/screenshots/mii-style/` (local, gitignored).
+
+## Needs human verification (not headlessly capturable)
+- Avatar flow end-to-end: Edit My Avatar → restyle → Save → restart →
+  punch (arm should wear your palette).
+- Creator page with the new fifth part row + avatar mode layout.
+- Outline stability while characters move (hull flicker only shows in
+  motion).
+
+## Notes
+- Stacked on `feature/punch-and-jump` (PR #100). Merge order:
+  #94 → #99 → #100 → this. Do not merge; review only.
+- The pack seam means a purchased/downloaded graphics pack = new catalog
+  rows + palettes + recipe branches under its own `pack` tag; the picker,
+  assembly, and render loop are untouched by design (grep-checked: no
+  part-id literals outside the catalog + dispatch).
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="feat: Mii-style visual overhaul — proportions, outlines, mouths, packs seam, player avatar (#101-#107)",
+           body=BODY, base="feature/punch-and-jump",
+           head="feature/mii-style-visual-overhaul", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in range(101, 108):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/mii-style-visual-overhaul`. Draft PR #{pr.number} open for review (stacked on feature/punch-and-jump). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: closed, linked to PR #{pr.number}")
+print("done")

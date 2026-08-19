@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0006 — Feature Contracts at Inference</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161d26; --ink:#dfe6ee; --dim:#8b97a5; --line:#2a3644;
+          --up:#4cc38a; --down:#e5534b; --gold:#e8a33d; --hit:#4cc38a; --miss:#e5534b; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f4ef; --panel:#ffffff; --ink:#1d2733; --dim:#617080; --line:#d8d2c4;
+            --up:#0e7a4f; --down:#c0362c; --gold:#a86a10; --hit:#0e7a4f; --miss:#c0362c; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.6 -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2rem 1.25rem 5rem; }
+  h1 { font:700 1.35rem/1.3 'SF Mono', Menlo, Consolas, monospace; margin:0 0 .3rem; }
+  .tag, .chip, button, .qmeta, .bar-label { font-family:'SF Mono', Menlo, Consolas, monospace; }
+  .tape { height:6px; margin:1rem 0 1.5rem; background:
+          repeating-linear-gradient(90deg, var(--up) 0 14px, transparent 14px 20px,
+          var(--down) 20px 30px, transparent 30px 38px); border-radius:3px; opacity:.8; }
+  .chip { display:inline-block; border:1px solid var(--line); border-radius:999px;
+          padding:.3rem .8rem; margin:.25rem; cursor:pointer; font-size:.8rem; user-select:none; }
+  .chip.on { border-color:var(--gold); color:var(--gold); }
+  button { background:var(--panel); color:var(--ink); border:1px solid var(--line);
+           border-radius:8px; padding:.55rem 1.1rem; font-size:.85rem; cursor:pointer; }
+  button:hover { border-color:var(--gold); }
+  button:focus-visible, .chip:focus-visible, .options li:focus-visible
+    { outline:2px solid var(--gold); outline-offset:2px; }
+  button.primary { border-color:var(--gold); color:var(--gold); font-weight:700; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+           padding:1.2rem 1.4rem; margin:1rem 0; }
+  .qmeta { display:flex; justify-content:space-between; font-size:.75rem; color:var(--dim); }
+  .progress { height:8px; background:var(--line); border-radius:4px; margin:.5rem 0 1.2rem; }
+  .progress > div { height:100%; background:var(--gold); border-radius:4px; width:0;
+                    transition:width .25s; }
+  @media (prefers-reduced-motion: reduce) { .progress > div { transition:none; } }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px;
+        padding:.9rem; overflow-x:auto; font:12.5px/1.5 'SF Mono', Menlo, monospace; }
+  .options { list-style:none; padding:0; }
+  .options li { border:1px solid var(--line); border-radius:8px; padding:.6rem .9rem;
+                margin:.45rem 0; cursor:pointer; background:var(--bg); }
+  .options li:hover { border-color:var(--gold); }
+  .options li.right { border-color:var(--up); }
+  .options li.wrong { border-color:var(--down); }
+  textarea { width:100%; min-height:7.5rem; background:var(--bg); color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:.7rem;
+             font:14px/1.5 -apple-system, sans-serif; }
+  .feedback { margin-top:.8rem; font-size:.92rem; }
+  .hit { color:var(--hit); } .missed { color:var(--miss); }
+  .model { border-left:3px solid var(--gold); padding:.5rem .9rem; margin-top:.8rem;
+           background:var(--bg); border-radius:0 8px 8px 0; font-size:.95rem; }
+  .nav { display:flex; justify-content:space-between; margin-top:1.2rem; gap:.5rem; }
+  .note { font-size:.78rem; color:var(--dim); }
+  .score-big { font:700 2.2rem/1 'SF Mono', Menlo, monospace; color:var(--gold); }
+  .hidden { display:none; }
+  table { border-collapse:collapse; width:100%; font-size:.85rem; }
+  td, th { border:1px solid var(--line); padding:.4rem .6rem; text-align:left; }
+</style>
+</head>
+<body>
+<main>
+<h1>DRILL 0006 · feature contracts at inference</h1>
+<p class="note">Companion to lesson 0035. Recall-heavy: type before you peek.</p>
+<div class="tape"></div>
+
+<section id="start">
+  <div class="panel">
+    <p><strong>Channels</strong> — pick what to drill:</p>
+    <div id="chips"></div>
+    <p style="margin-top:1rem">
+      <label class="chip" id="shuffleChip" tabindex="0">shuffle questions: ON</label>
+    </p>
+    <p><button class="primary" id="begin">begin session ▸</button></p>
+    <p class="note">Written answers are keyword-scanned — the scan is rough; always
+    self-judge against the model answer.</p>
+  </div>
+</section>
+
+<section id="quiz" class="hidden">
+  <div class="qmeta"><span id="qpos"></span><span id="qtag"></span><span id="qtype"></span></div>
+  <div class="progress"><div id="pbar"></div></div>
+  <div class="panel" id="qbody"></div>
+  <div class="nav">
+    <button id="prev">◂ prev</button>
+    <button id="next">next ▸</button>
+  </div>
+</section>
+
+<section id="results" class="hidden">
+  <div class="panel">
+    <p class="bar-label">SESSION CLOSE</p>
+    <p class="score-big" id="finalScore"></p>
+    <div id="breakdown"></div>
+    <p style="margin-top:1rem">
+      <button class="primary" id="reviewMissed">review only what I missed ▸</button>
+      <button id="restart">full restart</button>
+    </p>
+  </div>
+</section>
+
+<script>
+const QUESTIONS = [
+// ---------- Channel: contract clauses ----------
+{ ch:"clauses", type:"written",
+  q:"Name the four clauses of a feature contract and, for each, say whether violating it fails loudly or silently.",
+  concepts:[
+    {c:"names (loud: KeyError)", terms:["name","keyerror","column exists","missing column"]},
+    {c:"order (silent garbage)", terms:["order","position","reorder"]},
+    {c:"semantics (same name, different formula)", terms:["semantic","formula","computed the same","same name different"]},
+    {c:"availability (lookahead / lag)", terms:["availab","lookahead","lag","decision time","knowable"]}],
+  model:"Names — the same columns must exist (fails LOUDLY: KeyError). Order — columns must feed the model in training order (SILENT: sklearn sees a bare array and applies weights positionally). Semantics — each column computed the same way as in training (SILENT drift, e.g. rolling-mean RSI vs Wilder EMA RSI). Availability — every input knowable at decision time (SILENT: lookahead inflates backtests, lag makes decisions stale)."},
+{ ch:"clauses", type:"mc",
+  q:"Which contract violation is the ONLY one that reliably fails loudly at run time?",
+  opts:[
+    {t:"A feature column missing from the inference frame", ok:true,
+     why:"row[self._feat_cols] raises KeyError when a name is absent — the one failure you get told about."},
+    {t:"Two feature columns swapped relative to training order", ok:false,
+     why:"Once exported to .values, numpy carries no names — weights apply positionally and nothing raises."},
+    {t:"A feature recomputed with a subtly different formula", ok:false,
+     why:"Same name, different number: the array is perfectly valid, so nothing can detect it at run time."},
+    {t:"A feature built from data that arrives one day late", ok:false,
+     why:"Stale-but-valid values look identical to fresh ones at the type level; only timing analysis finds it."}],
+},
+{ ch:"clauses", type:"written",
+  q:"Why doesn't sklearn catch a column-order mistake when you call model.predict(frame.values)?",
+  concepts:[
+    {c:"values strips names → bare numpy array", terms:["numpy", ".values", "no names", "strips", "bare array"]},
+    {c:"weights applied by position", terms:["position", "index", "order", "column i"]},
+    {c:"no error, wrong numbers", terms:["silent", "no error", "garbage", "wrong prediction"]}],
+  model:".values exports a bare numpy array — column names are gone, so sklearn has nothing to validate against. It multiplies each position by the weight learned for that position; the code runs cleanly and the predictions are silently wrong. This is why strategies/gbm_adapter.py reindexes with row[self._feat_cols] (the bundle's saved list) before predicting."},
+{ ch:"clauses", type:"mc",
+  q:"paper_trading_sim computes RSI with rolling means. A refactor swaps in Wilder's EMA smoothing but keeps the column name rsi_14. Which clause breaks?",
+  opts:[
+    {t:"Availability — the EMA needs more history than the rolling mean", ok:false,
+     why:"Both need similar warmup; timing of knowability is unchanged. The formula itself changed."},
+    {t:"Semantics — same name now labels a differently-computed number", ok:true,
+     why:"The model trained on rolling-mean RSI values; EMA RSI is a different distribution wearing the same name."},
+    {t:"Order — the refactor moves rsi_14 to a different column position", ok:false,
+     why:"Renumbering positions isn't implied by changing a formula, and order is pinned by the bundle list anyway."},
+    {t:"Names — rsi_14 no longer matches the bundle's features list", ok:false,
+     why:"The name is deliberately kept identical — that's exactly what makes this failure silent."}],
+},
+// ---------- Channel: last-bar problem ----------
+{ ch:"lastbar", type:"written",
+  q:"Why is fwd_ret_1d always NaN on the newest bar build_features sees, and why is that CORRECT for training?",
+  concepts:[
+    {c:"target = shift(-1) = tomorrow's return", terms:["shift(-1)","tomorrow","next day","forward"]},
+    {c:"tomorrow unknown at newest bar", terms:["hasn't happened","doesn't exist","unknown","not yet"]},
+    {c:"a finite value there would be lookahead", terms:["lookahead","leak","future"]},
+    {c:"training can't use an unlabeled row", terms:["label","training","learn","dropna"]}],
+  model:"The target is ret_1d.shift(-1): tomorrow's return aligned to today's row. For the newest bar tomorrow hasn't happened, so NaN is the only honest value — anything finite would be lookahead. Training must drop that row (no label to learn from), which is why build_features ends in dropna(). The bug risk is that inference wants exactly that dropped row."},
+{ ch:"lastbar", type:"written",
+  q:"Explain the padding trick in strategies/gbm_adapter.py — what does pd.concat([df, df.iloc[[-1]]]) achieve, and why can't the copy contaminate the real bar's features?",
+  concepts:[
+    {c:"copy makes real bar non-final → finite dummy target", terms:["duplicate","copy","no longer last","dummy","survives"]},
+    {c:"copy inherits the NaN target and is dropped", terms:["copy is dropped","pad row","nan target"]},
+    {c:"features only look backward", terms:["backward","look back","past","cannot see forward"]},
+    {c:"unmodified production pipeline (one implementation)", terms:["unmodified","same build_features","single source","one implementation"]}],
+  model:"Appending a copy of the newest bar makes the real bar second-to-last: its target becomes the return vs its own copy (0.0 — finite, never used as an input), so it survives dropna. The copy becomes the new final row, inherits the NaN target, and is dropped instead. Every feature is backward-looking, so a row placed AFTER the real bar can't influence the real bar's inputs. Net effect: true same-day features from the untouched production feature function — semantics clause preserved."},
+{ ch:"lastbar", type:"mc",
+  q:"You call build_features(df) directly on 200 bars of history. What does the returned frame contain for the newest bar (bar 200)?",
+  opts:[
+    {t:"Its features with fwd_ret_1d set to 0.0 as a neutral placeholder", ok:false,
+     why:"build_features never fabricates targets — that's the fillna(0) anti-pattern, and it isn't there."},
+    {t:"Nothing — that row is absent because its NaN target got dropped", ok:true,
+     why:"The trailing dropna() removes any row with a NaN in ANY column, and the newest bar's target is always NaN."},
+    {t:"Its features with fwd_ret_1d as NaN, left for the caller to handle", ok:false,
+     why:"That would be a reasonable API, but the actual function drops the row before returning."},
+    {t:"Only the close column, with the derived features masked to NaN", ok:false,
+     why:"Backward-looking features ARE computable on the newest bar; the row is dropped for its target, not its features."}],
+},
+{ ch:"lastbar", type:"written",
+  q:"Someone proposes 'fixing' the last-bar problem by changing build_features to fillna(0) the target instead of dropping. Why is that strictly worse than the adapter's padding?",
+  concepts:[
+    {c:"fabricated label (tomorrow = 0%)", terms:["fabricat","fake","invented","claims 0"]},
+    {c:"enters every training set / rolling retrain", terms:["training","retrain","walkforward","learn"]},
+    {c:"padding stays inference-only", terms:["inference only","adapter","outside training","never trained"]}],
+  model:"fillna(0) writes a fabricated label — 'tomorrow's return was exactly 0%' — into the frame for every newest bar. Since walkforward_sim's rolling retrains call the same build_features, that fake label is trained on repeatedly. The padding trick keeps the dummy value confined to the inference call's frame, and even there it's only a target column the model never reads as input."},
+{ ch:"lastbar", type:"mc",
+  q:"After the adapter's padding, the REAL newest bar's fwd_ret_1d equals 0.0. Why is that harmless?",
+  opts:[
+    {t:"Because 0.0 is statistically the best unbiased guess for a daily return", ok:false,
+     why:"Irrelevant even if roughly true — the value's quality doesn't matter because it is never consumed."},
+    {t:"Because the target column is never part of the model's input features", ok:true,
+     why:"self._feat_cols comes from the bundle's features list, which excludes fwd_ret_1d — the dummy exists only to survive dropna."},
+    {t:"Because the adapter overwrites it with the model's own prediction", ok:false,
+     why:"The adapter reads features and writes a DailySignal; it never mutates the feature frame."},
+    {t:"Because dropna removes that row before the prediction is made", ok:false,
+     why:"Backwards — the whole point of the pad is that this row now SURVIVES dropna so it can be predicted on."}],
+},
+// ---------- Channel: in this repo ----------
+{ ch:"repo", type:"written",
+  code:"feats = build_features(df).dropna()\n# ...\nlatest = feats.iloc[-1]",
+  q:"This is predict_next.py:136–144 (abridged). What subtle problem does it have in live use, and is it lookahead or lag?",
+  concepts:[
+    {c:"dropna already removed today's row", terms:["dropna","removed","dropped","eats"]},
+    {c:"iloc[-1] is yesterday's bar", terms:["yesterday","second-newest","stale","previous bar","one day"]},
+    {c:"inference lag, not lookahead", terms:["lag","stale","conservative","not lookahead"]}],
+  model:"build_features' internal dropna already deleted the newest bar (NaN target), so feats.iloc[-1] is the most recent COMPLETE bar — yesterday. Live predictions run on one-day-stale features: inference lag. It's the conservative direction (no future data leaks; edge is left on the table), which is why it survived unnoticed. Found in the 2026-07-05 overnight session; left unfixed deliberately because changing it alters live trading behavior."},
+{ ch:"repo", type:"written",
+  q:"In gbm_adapter.py, X is built as row[self._feat_cols]. Where does _feat_cols come from, and which contract clauses does this single line enforce?",
+  concepts:[
+    {c:"bundle's saved features list", terms:["bundle","joblib","features list","saved at training"]},
+    {c:"names clause", terms:["name"]},
+    {c:"order clause", terms:["order","position"]},
+    {c:"loud failure if missing", terms:["keyerror","raises","loud"]}],
+  model:"_feat_cols is the 'features' list stored in the joblib bundle at training time — the contract document itself. Indexing the row with it enforces NAMES (KeyError if a column is missing — a loud failure) and ORDER (columns are emitted in the saved sequence regardless of frame layout). Semantics and availability can't be enforced by indexing; they're guarded by using the one shared build_features and by the caller's timing."},
+{ ch:"repo", type:"mc",
+  q:"CLAUDE.md orders: 'Always retrain after changing build_features' and 're-export ONNX + rebuild the C++ binary.' These rules exist to protect which clause?",
+  opts:[
+    {t:"Availability — retraining refreshes the model with the newest bars", ok:false,
+     why:"Retraining does ingest new data, but the RULE is triggered by feature-code changes, not calendar time."},
+    {t:"Semantics — model weights must correspond to how features are now computed", ok:true,
+     why:"A model trained on old-formula features is silently skewed the moment the formula changes; retrain + re-export realigns every consumer, including the C++ path."},
+    {t:"Names — the ONNX graph must list the renamed output columns", ok:false,
+     why:"Renames would matter too, but the rule fires on ANY change to feature computation, including formula-only edits."},
+    {t:"Order — the joblib and ONNX formats disagree on column layout", ok:false,
+     why:"Order is pinned by the bundle list and tensor spec; the rule is about recomputed meanings, not layouts."}],
+},
+{ ch:"repo", type:"written",
+  q:"gradient_boosting/ re-implements feature computation in C++ for ONNX inference. Which clauses are at risk, and what is the cheapest automatic guard?",
+  concepts:[
+    {c:"semantics: two implementations drift", terms:["semantic","drift","two implementation","reimplement","diverge"]},
+    {c:"order: positional input tensor", terms:["order","position","tensor"]},
+    {c:"golden test comparing both paths", terms:["golden","fixture","same output","compare","assert equal","toleran"]}],
+  model:"Semantics (a C++ RSI/MA can drift from the pandas one while keeping the same name) and order (the ONNX input tensor is purely positional). Cheapest guard: a golden-file test — one fixed OHLCV fixture, feature vectors computed by both the Python and C++ paths, asserted equal within tolerance. It converts two silent failures into one loud CI failure."},
+{ ch:"repo", type:"mc",
+  q:"walkforward_sim.py's rolling retrain selects training rows with f[f.index < dt]. What exactly does the strict '<' prevent?",
+  opts:[
+    {t:"Training on the decision day's own row, whose target IS the return being bet on", ok:true,
+     why:"Include day dt and the model trains on the very outcome it's about to predict — direct label leakage into the backtest."},
+    {t:"Training on days when the market was closed or data was missing", ok:false,
+     why:"Calendar gaps simply aren't in the index; the comparison operator doesn't affect them."},
+    {t:"The training window growing beyond train_window_days rows", ok:false,
+     why:"Window length is capped separately by the iloc[-train_window_days:] slice."},
+    {t:"Duplicate index dates entering the training frame twice", ok:false,
+     why:"Dedup isn't handled here at all; '<' is purely a temporal cutoff."}],
+},
+// ---------- Channel: skew vs lookahead vs lag ----------
+{ ch:"skew", type:"written",
+  q:"Contrast lookahead bias and inference lag: what leaks, what each does to your backtest, and which one costs you real money finding out.",
+  concepts:[
+    {c:"lookahead: future leaks into features", terms:["future","leaks","into features","tomorrow"]},
+    {c:"lookahead → optimistic backtest, costs money", terms:["optimistic","inflate","too good","real money"]},
+    {c:"lag: stale inputs, conservative", terms:["stale","old","conservative","edge on the table"]},
+    {c:"both violate availability", terms:["availab","same clause","opposite direction"]}],
+  model:"Lookahead: future information leaks INTO features or decisions → the backtest looks better than reality, and you discover the truth with live losses. Lag: nothing leaks — inputs are merely stale → both backtest and live are slightly worse than necessary; you lose edge, not honesty. They're the same availability clause violated in opposite directions, which is why lesson 0035 pairs them."},
+{ ch:"skew", type:"written",
+  q:"An arena strategy's live Sharpe collapses far below its backtest Sharpe. Feature code is byte-identical in both paths. What is your FIRST suspect and your first diagnostic step?",
+  concepts:[
+    {c:"availability / timing skew", terms:["availab","timing","when","stale","partial bar"]},
+    {c:"compare decision timestamps / inputs between paths", terms:["timestamp","compare","log","same row","diff the inputs"]},
+    {c:"overfitting is the alternative, checked after", terms:["overfit"]}],
+  model:"First suspect: availability skew — identical code fed rows from different moments (backtest predicts on same-day completed bars; live may see yesterday's row like predict_next.py, or a partially-formed bar). First diagnostic: log and diff the exact input row + timestamp each path used for the same decision date. Only after timing is proven identical does overfitting become the leading theory — which is why the arena report carries a dedicated backtest-vs-live divergence column."},
+{ ch:"skew", type:"mc",
+  q:"Train/serve skew vs overfitting — which statement is correct?",
+  opts:[
+    {t:"A well-regularised model is protected from both problems", ok:false,
+     why:"Regularisation fights memorising noise; it does nothing about inputs shifting between training and serving."},
+    {t:"Skew is about the inputs differing between training and serving; overfitting is about memorising training noise", ok:true,
+     why:"Different diseases: skew lives in the data pipeline, overfitting in the model fit. A perfect model still fails under skew."},
+    {t:"They are the same failure observed at different sample sizes", ok:false,
+     why:"They have different causes and different fixes (pipeline discipline vs regularisation/validation)."},
+    {t:"Skew only occurs when the model is retrained too frequently", ok:false,
+     why:"Retrain cadence is orthogonal — a never-retrained model can suffer severe skew, e.g. after a feature refactor."}],
+},
+{ ch:"skew", type:"written",
+  q:"You add a news_sent_3d feature and retrain. Months later a teammate changes the news window to 5 days but keeps the column name. What breaks, how does it manifest, and what test design would have caught it?",
+  concepts:[
+    {c:"semantics clause, silent", terms:["semantic","silent","same name"]},
+    {c:"manifests as live/backtest divergence", terms:["divergence","drift","worse live","unexplained"]},
+    {c:"characterisation/golden test on feature values", terms:["golden","characteris","characterization","pinned","known input","fixture"]}],
+  model:"Semantics clause: the bundle was trained on 3-day sentiment but now runs on 5-day values under the same name. Nothing crashes; it manifests as unexplained live-vs-backtest divergence in the arena report. A characterisation test pinning a fixed input to exact expected feature values (golden values, like test_paper_trading.py does for build_features columns) turns the silent drift into a loud test failure at the moment of the edit."},
+{ ch:"skew", type:"written",
+  q:"Define 'feature contract' in one or two sentences, as if writing it at the top of strategies/gbm_adapter.py.",
+  concepts:[
+    {c:"agreement between training and inference", terms:["training","inference","between","both"]},
+    {c:"names + order + semantics + availability", terms:["name","order","semantic","availab"]},
+    {c:"violations are usually silent", terms:["silent","no error","quietly"]}],
+  model:"A feature contract is the implicit agreement that inference reproduces training's inputs exactly: same column NAMES, same ORDER, same computation SEMANTICS, and values AVAILABLE at decision time. Most violations don't raise — they silently degrade predictions, so the contract must be enforced structurally (saved feature lists, one shared feature function, golden tests)."},
+];
+
+const CH_LABELS = { clauses:"contract clauses", lastbar:"the last-bar problem",
+                    repo:"in this repo", skew:"skew · lookahead · lag" };
+
+let active = new Set(Object.keys(CH_LABELS));
+let doShuffle = true;
+let deck = [], idx = 0;
+// per-question state, keyed by bank index
+const state = QUESTIONS.map(() => ({ typed:"", mc:null, self:null, revealed:false }));
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+  [a[i],a[j]]=[a[j],a[i]]; } return a; }
+const $ = id => document.getElementById(id);
+
+// ---- start screen ----
+const chipsEl = $("chips");
+Object.entries(CH_LABELS).forEach(([k,label])=>{
+  const c = document.createElement("span");
+  c.className = "chip on"; c.tabIndex = 0; c.textContent = label; c.dataset.ch = k;
+  const toggle = ()=>{ if(active.has(k)){active.delete(k);c.classList.remove("on");}
+                       else {active.add(k);c.classList.add("on");} };
+  c.addEventListener("click", toggle);
+  c.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle();} });
+  chipsEl.appendChild(c);
+});
+$("shuffleChip").addEventListener("click", function(){
+  doShuffle = !doShuffle; this.textContent = "shuffle questions: " + (doShuffle?"ON":"OFF");
+  this.classList.toggle("on", doShuffle);
+});
+$("shuffleChip").classList.add("on");
+
+function startSession(indices){
+  deck = indices.slice();
+  if (doShuffle) shuffle(deck);
+  idx = 0;
+  $("start").classList.add("hidden"); $("results").classList.add("hidden");
+  $("quiz").classList.remove("hidden");
+  render();
+}
+$("begin").addEventListener("click", ()=>{
+  const pool = QUESTIONS.map((q,i)=>({q,i})).filter(x=>active.has(x.q.ch)).map(x=>x.i);
+  if (pool.length) startSession(pool);
+});
+
+// ---- render one question ----
+function render(){
+  const bankIdx = deck[idx], q = QUESTIONS[bankIdx], st = state[bankIdx];
+  $("qpos").textContent = "Q " + (idx+1) + " / " + deck.length;
+  $("qtag").textContent = "[" + CH_LABELS[q.ch] + "]";
+  $("qtype").textContent = q.type === "mc" ? "multiple choice" : "written recall";
+  $("pbar").style.width = (100*(idx+1)/deck.length) + "%";
+  const body = $("qbody"); body.innerHTML = "";
+  if (q.code){ const pre = document.createElement("pre"); pre.textContent = q.code; body.appendChild(pre); }
+  const p = document.createElement("p"); p.innerHTML = "<strong>"+q.q+"</strong>"; body.appendChild(p);
+  if (q.type === "mc") renderMC(q, st, body); else renderWritten(q, st, body);
+  $("prev").disabled = idx === 0;
+  $("next").textContent = idx === deck.length-1 ? "finish ▸" : "next ▸";
+}
+
+function renderMC(q, st, body){
+  const ul = document.createElement("ul"); ul.className = "options";
+  const items = q.opts.map(o=>{
+    const li = document.createElement("li");
+    li.tabIndex = 0; li.textContent = o.t;
+    li.dataset.correct = o.ok ? "true" : "false"; li.dataset.why = o.why;
+    return li;
+  });
+  shuffle(items).forEach(li=>ul.appendChild(li));   // DOM order randomized every render
+  body.appendChild(ul);
+  const fb = document.createElement("p"); fb.className = "feedback"; fb.hidden = true;
+  body.appendChild(fb);
+  const commit = li=>{
+    const correct = li.dataset.correct === "true";   // attribute, never position
+    if (st.mc === null) st.mc = correct;             // first commitment counts
+    li.classList.add(correct ? "right" : "wrong");
+    fb.hidden = false;
+    fb.innerHTML = (correct ? "<span class='hit'>✓ Correct.</span> " :
+                              "<span class='missed'>✗ Not quite.</span> ") + li.dataset.why;
+  };
+  items.forEach(li=>{
+    li.addEventListener("click", ()=>commit(li));
+    li.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();commit(li);} });
+  });
+  if (st.mc !== null){ fb.hidden = false;
+    fb.innerHTML = "<span class='note'>already answered — " +
+      (st.mc ? "<span class='hit'>correct</span>" : "<span class='missed'>missed</span>") + "</span>"; }
+}
+
+function renderWritten(q, st, body){
+  const ta = document.createElement("textarea");
+  ta.value = st.typed; ta.placeholder = "type your answer from memory…";
+  ta.addEventListener("input", ()=>{ st.typed = ta.value; });
+  body.appendChild(ta);
+  const row = document.createElement("p");
+  const check = document.createElement("button"); check.textContent = "check my answer";
+  const show = document.createElement("button"); show.textContent = "show me the answer";
+  row.append(check, " ", show); body.appendChild(row);
+  const fb = document.createElement("div"); fb.className = "feedback"; body.appendChild(fb);
+  check.addEventListener("click", ()=>{
+    const text = (st.typed||"").toLowerCase();
+    const hits = q.concepts.map(c=>({c:c.c, hit:c.terms.some(t=>text.includes(t.toLowerCase()))}));
+    const got = hits.filter(h=>h.hit).length;
+    fb.innerHTML = "<p><strong>" + got + " / " + q.concepts.length +
+      " key concepts detected</strong> <span class='note'>(rough scan — self-judge below)</span></p>" +
+      hits.map(h=>"<div class='"+(h.hit?"hit":"missed")+"'>"+(h.hit?"✓ ":"✗ ")+h.c+"</div>").join("");
+  });
+  show.addEventListener("click", ()=>{
+    st.revealed = true;
+    let html = "<div class='model'><strong>Model answer.</strong> " + q.model + "</div>";
+    html += "<p>Self-rate: <button data-rate='solid'>knew it</button> " +
+            "<button data-rate='review'>needs review</button> <span class='note' id='rated'></span></p>";
+    fb.innerHTML = html;
+    fb.querySelectorAll("[data-rate]").forEach(b=>b.addEventListener("click", ()=>{
+      st.self = b.dataset.rate;
+      fb.querySelector("#rated").textContent = "recorded: " + (st.self==="solid"?"knew it ✓":"needs review ↻");
+    }));
+  });
+  if (st.self){ const n=document.createElement("p"); n.className="note";
+    n.textContent = "previously self-rated: " + (st.self==="solid"?"knew it":"needs review"); body.appendChild(n); }
+}
+
+// ---- navigation & results ----
+$("prev").addEventListener("click", ()=>{ if(idx>0){idx--;render();} });
+$("next").addEventListener("click", ()=>{
+  if (idx < deck.length-1){ idx++; render(); } else finish();
+});
+function finish(){
+  $("quiz").classList.add("hidden"); $("results").classList.remove("hidden");
+  const mcIdx = deck.filter(i=>QUESTIONS[i].type==="mc");
+  const wIdx  = deck.filter(i=>QUESTIONS[i].type==="written");
+  const mcRight = mcIdx.filter(i=>state[i].mc===true).length;
+  const solid = wIdx.filter(i=>state[i].self==="solid").length;
+  const review = wIdx.filter(i=>state[i].self==="review").length;
+  const unrated = wIdx.length - solid - review;
+  $("finalScore").textContent = "MC " + mcRight + "/" + mcIdx.length +
+    " · written solid " + solid + "/" + wIdx.length;
+  $("breakdown").innerHTML =
+    "<table><tr><th>bucket</th><th>count</th></tr>" +
+    "<tr><td>MC correct</td><td>" + mcRight + "</td></tr>" +
+    "<tr><td>MC missed / unanswered</td><td>" + (mcIdx.length-mcRight) + "</td></tr>" +
+    "<tr><td>written — knew it</td><td>" + solid + "</td></tr>" +
+    "<tr><td>written — needs review</td><td>" + review + "</td></tr>" +
+    "<tr><td>written — unrated</td><td>" + unrated + "</td></tr></table>" +
+    "<p class='note'>Log the result in docs/learning/PROGRESS.md so the next session targets the gaps.</p>";
+}
+$("reviewMissed").addEventListener("click", ()=>{
+  const missed = deck.filter(i=>{
+    const q = QUESTIONS[i], st = state[i];
+    return q.type==="mc" ? st.mc!==true : st.self!=="solid";
+  });
+  if (missed.length) startSession(missed);
+});
+$("restart").addEventListener("click", ()=>{
+  state.forEach(s=>{ s.typed=""; s.mc=null; s.self=null; s.revealed=false; });
+  $("results").classList.add("hidden"); $("start").classList.remove("hidden");
+});
+</script>
+</main>
+</body>
+</html>

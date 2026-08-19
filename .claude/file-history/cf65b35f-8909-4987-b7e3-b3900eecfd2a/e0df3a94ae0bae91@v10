@@ -1,0 +1,293 @@
+#include <gtest/gtest.h>
+#include "../itch/itch_parser.hpp"
+#include "../itch/microstructure_signals.hpp"
+
+#include <cstdint>
+#include <vector>
+
+// ─── Framed ITCH message builders (with timestamps) ─────────────────────────
+
+static void put_be16(uint8_t* p, uint16_t v) {
+    p[0] = (v >> 8) & 0xff;
+    p[1] =  v       & 0xff;
+}
+static void put_be32(uint8_t* p, uint32_t v) {
+    p[0] = (v >> 24) & 0xff;
+    p[1] = (v >> 16) & 0xff;
+    p[2] = (v >>  8) & 0xff;
+    p[3] =  v        & 0xff;
+}
+static void put_be48(uint8_t* p, uint64_t v) {
+    put_be16(p, static_cast<uint16_t>(v >> 32));
+    put_be32(p + 2, static_cast<uint32_t>(v));
+}
+static void put_be64(uint8_t* p, uint64_t v) {
+    put_be32(p,     static_cast<uint32_t>(v >> 32));
+    put_be32(p + 4, static_cast<uint32_t>(v));
+}
+
+// Add Order ('A', 36B): timestamp at offset 5, ref 11, side 19, shares 20, price 32.
+static std::vector<uint8_t> make_add(uint64_t ts, uint64_t ref, char side,
+                                     uint32_t shares, uint32_t price) {
+    std::vector<uint8_t> buf(2 + 36, 0);
+    put_be16(buf.data(), 36);
+    buf[2] = 'A';
+    put_be48(buf.data() + 2 + 5, ts);
+    put_be64(buf.data() + 2 + 11, ref);
+    buf[2 + 19] = static_cast<uint8_t>(side);
+    put_be32(buf.data() + 2 + 20, shares);
+    put_be32(buf.data() + 2 + 32, price);
+    return buf;
+}
+
+// Execute Order ('E', 31B).
+static std::vector<uint8_t> make_execute(uint64_t ts, uint64_t ref, uint32_t shares) {
+    std::vector<uint8_t> buf(2 + 31, 0);
+    put_be16(buf.data(), 31);
+    buf[2] = 'E';
+    put_be48(buf.data() + 2 + 5, ts);
+    put_be64(buf.data() + 2 + 11, ref);
+    put_be32(buf.data() + 2 + 19, shares);
+    return buf;
+}
+
+// Cancel Order ('X', 23B) — partial cancel.
+static std::vector<uint8_t> make_cancel(uint64_t ts, uint64_t ref, uint32_t shares) {
+    std::vector<uint8_t> buf(2 + 23, 0);
+    put_be16(buf.data(), 23);
+    buf[2] = 'X';
+    put_be48(buf.data() + 2 + 5, ts);
+    put_be64(buf.data() + 2 + 11, ref);
+    put_be32(buf.data() + 2 + 19, shares);
+    return buf;
+}
+
+// Delete Order ('D', 19B).
+static std::vector<uint8_t> make_delete(uint64_t ts, uint64_t ref) {
+    std::vector<uint8_t> buf(2 + 19, 0);
+    put_be16(buf.data(), 19);
+    buf[2] = 'D';
+    put_be48(buf.data() + 2 + 5, ts);
+    put_be64(buf.data() + 2 + 11, ref);
+    return buf;
+}
+
+// Replace Order ('U', 35B).
+static std::vector<uint8_t> make_replace(uint64_t ts, uint64_t old_ref, uint64_t new_ref,
+                                         uint32_t shares, uint32_t price) {
+    std::vector<uint8_t> buf(2 + 35, 0);
+    put_be16(buf.data(), 35);
+    buf[2] = 'U';
+    put_be48(buf.data() + 2 + 5, ts);
+    put_be64(buf.data() + 2 + 11, old_ref);
+    put_be64(buf.data() + 2 + 19, new_ref);
+    put_be32(buf.data() + 2 + 27, shares);
+    put_be32(buf.data() + 2 + 31, price);
+    return buf;
+}
+
+static std::vector<uint8_t> cat(std::initializer_list<std::vector<uint8_t>> msgs) {
+    std::vector<uint8_t> out;
+    for (const auto& m : msgs) out.insert(out.end(), m.begin(), m.end());
+    return out;
+}
+
+// ─── Parser timestamp tests ──────────────────────────────────────────────────
+
+TEST(ParserTimestamps, AllMessageTypesCarryTimestamp) {
+    // 09:30:00.000000123 ET = 34200 s * 1e9 + 123 ns since midnight.
+    const uint64_t TS = 34'200'000'000'123ull;
+
+    auto buf = cat({
+        make_add(TS,     1, 'B', 100, 1000000),
+        make_execute(TS + 1, 1, 50),
+        make_replace(TS + 2, 1, 2, 50, 1000100),
+        make_delete(TS + 3, 2),
+    });
+
+    uint64_t ts_add = 0, ts_exec = 0, ts_repl = 0, ts_del = 0;
+    itch::MessageVisitor v;
+    v.on_add     = [&](const itch::AddOrder& m)     { ts_add  = m.timestamp_ns; };
+    v.on_execute = [&](const itch::ExecuteOrder& m) { ts_exec = m.timestamp_ns; };
+    v.on_replace = [&](const itch::ReplaceOrder& m) { ts_repl = m.timestamp_ns; };
+    v.on_delete  = [&](const itch::DeleteOrder& m)  { ts_del  = m.timestamp_ns; };
+
+    itch::ParseStats stats = itch::parse_buffer(buf.data(), buf.size(), v);
+    EXPECT_EQ(stats.error_count, 0u);
+    EXPECT_EQ(ts_add,  TS);
+    EXPECT_EQ(ts_exec, TS + 1);
+    EXPECT_EQ(ts_repl, TS + 2);
+    EXPECT_EQ(ts_del,  TS + 3);
+}
+
+// ─── MicrostructureEngine: hand-computed OFI / microprice sequences ─────────
+//
+// All scenarios build the same starting book:
+//   bid: order 1, 100 sh @ $100.00 (raw 1000000)
+//   ask: order 2, 200 sh @ $100.05 (raw 1000500)
+
+namespace {
+
+constexpr uint32_t MIN_P = 990000, MAX_P = 1020000;
+constexpr uint32_t BID_P = 1000000, ASK_P = 1000500;
+
+itch::MicrostructureEngine make_seeded_engine() {
+    itch::MicrostructureEngine eng(MIN_P, MAX_P);
+    eng.on_add({1000, 1, 'B', 100, BID_P});
+    eng.on_add({2000, 2, 'S', 200, ASK_P});
+    return eng;
+}
+
+}  // namespace
+
+TEST(MicroEngine, FirstTwoSidedEventIsBaseline) {
+    auto eng = make_seeded_engine();
+
+    // First add is one-sided (no ask yet) -> skipped; second add is the
+    // first computable event.
+    ASSERT_EQ(eng.events().size(), 1u);
+    EXPECT_EQ(eng.skipped_one_sided(), 1u);
+
+    const auto& ev = eng.events()[0];
+    EXPECT_EQ(ev.timestamp_ns, 2000u);
+    EXPECT_DOUBLE_EQ(ev.ofi, 0.0);           // no previous state: baseline
+    EXPECT_NEAR(ev.best_bid, 100.00, 1e-9);
+    EXPECT_NEAR(ev.best_ask, 100.05, 1e-9);
+    EXPECT_EQ(ev.bid_size, 100u);
+    EXPECT_EQ(ev.ask_size, 200u);
+    // microprice = (q_b*P_a + q_a*P_b) / (q_b+q_a)
+    //            = (100*100.05 + 200*100.00) / 300 = 30005/300 = 100.01666...
+    EXPECT_NEAR(ev.microprice, 100.0 + 0.05 / 3.0, 1e-9);
+}
+
+TEST(MicroEngine, AddingBidDepthAtSamePriceIsPositiveOFI) {
+    auto eng = make_seeded_engine();
+    eng.on_add({3000, 3, 'B', 50, BID_P});   // bid level 100 -> 150 sh
+
+    ASSERT_EQ(eng.events().size(), 2u);
+    const auto& ev = eng.events()[1];
+    // Same best-bid price: e = q_b_new - q_b_old = 150 - 100 = +50.
+    // Ask unchanged: -q_a_new + q_a_old = 0.
+    EXPECT_DOUBLE_EQ(ev.ofi, 50.0);
+    EXPECT_EQ(ev.bid_size, 150u);
+}
+
+TEST(MicroEngine, ExecutingAskDepthIsPositiveOFI) {
+    auto eng = make_seeded_engine();
+    eng.on_execute({3000, 2, 40});           // ask level 200 -> 160 sh
+
+    ASSERT_EQ(eng.events().size(), 2u);
+    const auto& ev = eng.events()[1];
+    // Buy market order consumed ask depth: e = -160 + 200 = +40.
+    EXPECT_DOUBLE_EQ(ev.ofi, 40.0);
+    EXPECT_EQ(ev.ask_size, 160u);
+}
+
+TEST(MicroEngine, DeletingBidDepthIsNegativeOFI) {
+    auto eng = make_seeded_engine();
+    eng.on_add({3000, 3, 'B', 50, BID_P});   // 150 sh at best bid
+    eng.on_delete({4000, 1});                // remove the original 100 sh
+
+    ASSERT_EQ(eng.events().size(), 3u);
+    const auto& ev = eng.events()[2];
+    // Same price, depth 150 -> 50: e = 50 - 150 = -100.
+    EXPECT_DOUBLE_EQ(ev.ofi, -100.0);
+    EXPECT_EQ(ev.bid_size, 50u);
+}
+
+TEST(MicroEngine, BidPriceImprovementCountsOnlyNewDepth) {
+    auto eng = make_seeded_engine();
+    eng.on_add({3000, 3, 'B', 30, 1000200}); // new best bid $100.02
+
+    ASSERT_EQ(eng.events().size(), 2u);
+    const auto& ev = eng.events()[1];
+    // P_b rose: only the ">=" indicator fires on the bid side: e = +30.
+    EXPECT_DOUBLE_EQ(ev.ofi, 30.0);
+    EXPECT_NEAR(ev.best_bid, 100.02, 1e-9);
+    // microprice = (30*100.05 + 200*100.02) / 230 = 23005.5/230
+    EXPECT_NEAR(ev.microprice, 23005.5 / 230.0, 1e-9);
+}
+
+TEST(MicroEngine, ReplaceMovingBidDownIsNegativeOFI) {
+    auto eng = make_seeded_engine();
+    eng.on_replace({3000, 1, 9, 80, 999500}); // bid 100@100.00 -> 80@99.95
+
+    ASSERT_EQ(eng.events().size(), 2u);
+    const auto& ev = eng.events()[1];
+    // P_b fell: only the "<=" indicator fires: e = -q_b_old = -100.
+    EXPECT_DOUBLE_EQ(ev.ofi, -100.0);
+    EXPECT_NEAR(ev.best_bid, 99.95, 1e-9);
+    EXPECT_EQ(ev.bid_size, 80u);
+}
+
+TEST(MicroEngine, OneSidedBookSkipsAndCounts) {
+    auto eng = make_seeded_engine();
+    eng.on_delete({3000, 2});                // remove the only ask
+
+    // Seed produced 1 skip (bid-only) + this delete leaves bid-only again.
+    EXPECT_EQ(eng.events().size(), 1u);      // only the baseline event
+    EXPECT_EQ(eng.skipped_one_sided(), 2u);
+
+    // Book recovers: adding an ask emits again, resuming from the last
+    // two-sided state (100 sh bid / 200 sh ask).
+    eng.on_add({4000, 5, 'S', 70, ASK_P});
+    ASSERT_EQ(eng.events().size(), 2u);
+    const auto& ev = eng.events()[1];
+    // Ask price unchanged vs last two-sided snapshot: e = -70 + 200 = +130.
+    EXPECT_DOUBLE_EQ(ev.ofi, 130.0);
+    EXPECT_EQ(ev.timestamp_ns, 4000u);
+}
+
+TEST(MicroEngine, PartialCancelReducesDepthNegativeOFI) {
+    auto eng = make_seeded_engine();
+    eng.on_cancel({3000, 1, 30});            // bid 100 sh -> 70 sh, same price
+
+    ASSERT_EQ(eng.events().size(), 2u);
+    const auto& ev = eng.events()[1];
+    // Same best-bid price, depth 100 -> 70: e = 70 - 100 = -30.
+    EXPECT_DOUBLE_EQ(ev.ofi, -30.0);
+    EXPECT_EQ(ev.bid_size, 70u);
+}
+
+TEST(MicroEngine, CancelViaParserRemovesPhantomDepth) {
+    // The real-data regression: order partially executed, remainder canceled
+    // via 'X'. Without X handling the book keeps phantom shares forever.
+    const uint64_t TS = 34'200'000'000'000ull;
+    auto buf = cat({
+        make_add(TS,      1, 'B', 100, BID_P),
+        make_add(TS + 1,  2, 'S', 200, ASK_P),
+        make_execute(TS + 2, 1, 82),          // 100 -> 18 sh remain
+        make_cancel(TS + 3, 1, 18),           // remainder canceled: bid gone
+    });
+
+    itch::MicrostructureEngine eng(MIN_P, MAX_P);
+    itch::ParseStats stats = itch::parse_buffer(buf.data(), buf.size(), eng.visitor());
+    EXPECT_EQ(stats.cancel_count, 1u);
+    EXPECT_EQ(stats.error_count,  0u);
+
+    // Bid side must be EMPTY now — the cancel event itself is one-sided
+    // (no bid left), so it is skipped and the book reports no phantom bid.
+    auto tob = eng.book().top_of_book();
+    EXPECT_FALSE(tob.best_bid.has_value());
+    ASSERT_TRUE(tob.best_ask.has_value());
+    EXPECT_EQ(eng.book().order_count(), 1u);   // only the ask order remains
+}
+
+TEST(MicroEngine, EndToEndViaParser) {
+    const uint64_t TS = 34'200'000'000'000ull;
+    auto buf = cat({
+        make_add(TS,      1, 'B', 100, BID_P),
+        make_add(TS + 10, 2, 'S', 200, ASK_P),
+        make_execute(TS + 20, 2, 40),
+    });
+
+    itch::MicrostructureEngine eng(MIN_P, MAX_P);
+    itch::ParseStats stats = itch::parse_buffer(buf.data(), buf.size(), eng.visitor());
+
+    EXPECT_EQ(stats.error_count, 0u);
+    ASSERT_EQ(eng.events().size(), 2u);
+    EXPECT_EQ(eng.events()[0].timestamp_ns, TS + 10);
+    EXPECT_EQ(eng.events()[1].timestamp_ns, TS + 20);
+    EXPECT_DOUBLE_EQ(eng.events()[1].ofi, 40.0);
+    EXPECT_EQ(eng.book().error_count(), 0u);
+}
