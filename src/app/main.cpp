@@ -1141,6 +1141,16 @@ int main(int argc, char** argv) {
         if (smokeRun) cutscene.setFixedStep(true);
         playCutscene(matchOpening);
     }
+    // THE COLD OPEN DOES NOT AUTO-PLAY, and that is deliberate — see #282.
+    //
+    // cutscenes/body_in_plaza.cutscene announces a body in the plaza and opens
+    // the case. A default launch runs no mystery at all (`bootMystery` is off
+    // without --mystery), so there is no victim, no corpse to walk up to and no
+    // seeded testimony to cross-check: the scene would promise an investigation
+    // the world cannot back up, and permanently mark the case opened in the
+    // save. Deciding whether the base game seeds a murder is a product call, so
+    // the scene ships triggerable and the hook waits on it:
+    //   --frames 780 shot.png --cutscene body_in_plaza
 
     // Journal: a pure read of the shared fact store — what the player was
     // personally told, grouped by subject, conflicts pre-flagged by core.
@@ -1201,6 +1211,38 @@ int main(int argc, char** argv) {
                 cutscene.skip();
             }
             if (!cutscene.advance(dt)) {
+                // The scene's journal write, applied on the way out. A SKIP
+                // LANDS HERE TOO — skip() ends playback and the next advance()
+                // returns false through this same branch — which is the point:
+                // skipping the cold open must not quietly cost the player the
+                // premise of the game.
+                //
+                // addFact is first-teller-wins, so replaying a scene never
+                // duplicates or re-dates its row, and the fact persisting to
+                // saves/facts.sqlite3 is also what stops the cold open from
+                // playing twice.
+                const std::string& subject = cutscene.journalSubject();
+                if (!subject.empty() && !cutscene.journalLine().empty()) {
+                    KnownFact opened;
+                    opened.subject = subject;
+                    opened.content = cutscene.journalLine();
+                    opened.factId = factIdFor(opened.subject, opened.content);
+                    // "town", the same source Mystery.cpp uses for what
+                    // everybody simply knows. journalEntries filters only
+                    // source == "player", so this renders as a normal row.
+                    opened.source = "town";
+                    opened.learnedAtSeconds = world.state().number("world_time_seconds");
+                    world.state().addFact(opened);
+                    world.state().grantKnowledge("player", opened.factId);
+                    // Persisted here, not only in memory: facts are written at
+                    // the moment they are created everywhere else in this file,
+                    // and the row surviving the process is what makes the fact
+                    // usable as the "already seen" test above. Without this the
+                    // cold open replays on every launch.
+                    factStore.saveFact(opened);
+                    factStore.saveKnowledge("player", opened.factId);
+                }
+
                 // Restore everything playback took: the pose, the mode and the
                 // cursor. A cutscene that leaves the camera moved, the mouse
                 // swallowed or a mode stuck is worse than one that never ran.
@@ -2547,12 +2589,23 @@ int main(int argc, char** argv) {
             }
         } else if (mode == AppMode::Dead) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{40, 8, 8, 200});
-            const char* headline = "You died.";
+            // "You died." is wrong for a detective game — the player is not a
+            // soldier, and the game already respawns them at the plaza with
+            // their memory intact. Same red wash, same Enter contract; the
+            // lost hours are a free plot hook, because the world clock really
+            // did advance while they were out and the NPCs really do remember
+            // what they said before it.
+            const char* headline = "You wake at the fountain.";
             DrawText(headline, (GetScreenWidth() - MeasureText(headline, 44)) / 2,
                      GetScreenHeight() / 2 - 48, 44, RAYWHITE);
-            const char* hint = "Press Enter to wake up at the plaza.";
-            DrawText(hint, (GetScreenWidth() - MeasureText(hint, 20)) / 2,
+            const std::string lost =
+                clockLabel(world.state().number("world_time_seconds")) +
+                ". Two hours you can't account for.";
+            DrawText(lost.c_str(), (GetScreenWidth() - MeasureText(lost.c_str(), 20)) / 2,
                      GetScreenHeight() / 2 + 12, 20, Color{220, 200, 200, 255});
+            const char* hint = "Press Enter to stand up.";
+            DrawText(hint, (GetScreenWidth() - MeasureText(hint, 20)) / 2,
+                     GetScreenHeight() / 2 + 44, 20, Color{180, 170, 170, 255});
         } else if (mode == AppMode::Dialogue) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
             dialog.render();
@@ -2580,6 +2633,34 @@ int main(int argc, char** argv) {
                 fade.a = static_cast<unsigned char>(255.f * alpha);
                 DrawRectangle(0, 0, w, h, fade);
             }
+            // Slug: where we are and what time it is, in the menu's label
+            // grey. In a detective game the timestamp is evidence, so every
+            // scene states the hour off the one world clock.
+            const std::string& slug = cutscene.slug();
+            if (!slug.empty() && bars > 0) {
+                DrawText(slug.c_str(), 24, bars + 14, 20, Color{170, 180, 200, 255});
+            }
+
+            // Speaker line in the transcript's amber. The player has already
+            // been trained on that colour by every conversation they have had,
+            // so reusing it means "an NPC is talking" needs no explanation.
+            const std::string& speaker = cutscene.speakerLine();
+            if (!speaker.empty()) {
+                const int tw = MeasureText(speaker.c_str(), 20);
+                DrawText(speaker.c_str(), (w - tw) / 2, h - bars - 52, 20,
+                         Color{255, 230, 180, 255});
+            }
+
+            // The case card. Its headline IS the card — a beat that sets one
+            // gets the full-bleed treatment, and the dim wash goes over the
+            // bars so the card reads as a title, not an overlay.
+            const std::string& headline = cutscene.headline();
+            if (!headline.empty()) {
+                DrawRectangle(0, 0, w, h, Color{8, 10, 16, 200});
+                const int hw = MeasureText(headline.c_str(), 44);
+                DrawText(headline.c_str(), (w - hw) / 2, h / 2 - 48, 44, RAYWHITE);
+            }
+
             const std::string& line = cutscene.caption();
             if (!line.empty()) {
                 // Size 20 off the usable ladder: the built-in bitmap font
@@ -2587,8 +2668,10 @@ int main(int argc, char** argv) {
                 // 18 space identically and only ~10 / 20 / 30 visibly differ.
                 const int size = 20;
                 const int tw = MeasureText(line.c_str(), size);
-                DrawText(line.c_str(), (w - tw) / 2, h - bars - size - 18, size,
-                         RAYWHITE);
+                // Under the headline when this beat is a card, above the lower
+                // bar otherwise.
+                const int y = headline.empty() ? h - bars - size - 18 : h / 2 + 12;
+                DrawText(line.c_str(), (w - tw) / 2, y, size, RAYWHITE);
             }
             if (cutscene.canSkip()) {
                 DrawText("Space to skip", 24, h - bars - 26, 10,

@@ -6,11 +6,16 @@
 #include <fstream>
 
 #include "Config.hpp"  // trim
+#include "Gossip.hpp"  // normalizeSubject
 #include "Journal.hpp"  // clockLabel
 #include "Zones.hpp"   // zoneName
 
 namespace llm_npc {
 namespace {
+
+// Matches the fact bus's own content limit (KnownFact::content, "one short
+// statement").
+constexpr std::size_t kMaxJournalLine = 140;
 
 // Splits "key = value". Returns false for a blank line, a comment, or a line
 // with no '='.
@@ -27,6 +32,20 @@ bool splitKeyValue(const std::string& raw, std::string& key, std::string& value)
     key = trim(line.substr(0, eq));
     value = trim(line.substr(eq + 1));
     return !key.empty();
+}
+
+// True when every character is renderable by the built-in bitmap font.
+//
+// raylib's default font has glyphs for ASCII 32-126 and nothing else, so a
+// typographer's dash or a curly quote reaches the screen as a literal "?".
+// Found the only way it could be — by looking at a capture. Every author-facing
+// string is checked at load, because prose pasted from a document does this
+// constantly and the failure is invisible until someone runs the scene.
+bool isRenderableAscii(const std::string& text) {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) > 126u) return false;
+    }
+    return true;
 }
 
 // "x, y, z" -> Vec3. Returns false if any component is missing, so a typo in a
@@ -148,6 +167,34 @@ std::optional<CutsceneDef> parseCutsceneFile(const std::filesystem::path& path,
                 }
             } else if (key == "letterbox") {
                 scene.letterboxPx = std::atoi(value.c_str());
+            } else if (key == "journal_subject") {
+                // Normalized here rather than trusted, because the journal
+                // compares subject keys EXACTLY: an authored "Body In Plaza"
+                // that reaches the bus unnormalized opens a second subject
+                // nobody's testimony can ever join.
+                scene.journalSubject = normalizeSubject(value);
+                if (scene.journalSubject.empty()) {
+                    localErrors.push_back(name + ": journal_subject `" + value +
+                                          "` normalizes to nothing");
+                }
+            } else if (key == "journal_line") {
+                if (!isRenderableAscii(value)) {
+                    localErrors.push_back(name +
+                                          ": journal_line has a non-ASCII "
+                                          "character; the built-in font renders "
+                                          "it as `?`");
+                }
+                // KnownFact::content is one short statement; the bus's own
+                // limit is 140 and an overlong line would be cut mid-word by
+                // whoever commits it.
+                if (value.size() > kMaxJournalLine) {
+                    localErrors.push_back(
+                        name + ": journal_line is " + std::to_string(value.size()) +
+                        " characters; trimmed to " + std::to_string(kMaxJournalLine));
+                    scene.journalLine = value.substr(0, kMaxJournalLine);
+                } else {
+                    scene.journalLine = value;
+                }
             } else if (key == "id") {
                 // Allowed but ignored: the filename stem is authoritative, the
                 // same rule storylines/README.md states. Saying so beats
@@ -185,22 +232,21 @@ std::optional<CutsceneDef> parseCutsceneFile(const std::filesystem::path& path,
                                       "` unknown ease `" + value +
                                       "` (linear / smooth / hold)");
             }
-        } else if (key == "caption") {
-            beat.caption = value;
-            // raylib's built-in bitmap font has glyphs for ASCII 32-126 and
-            // nothing else, so a typographer's dash or a curly quote reaches
-            // the screen as a literal "?". Found the only way it could be —
-            // by looking at a capture. Reported at load, because an author
-            // pasting prose from a document will do this constantly and the
-            // failure is invisible until someone runs the scene.
-            for (const char c : beat.caption) {
-                if (static_cast<unsigned char>(c) > 126u) {
-                    localErrors.push_back(
-                        name + ": beat `" + beat.id +
-                        "` caption has a non-ASCII character; the built-in font "
-                        "renders it as `?`");
-                    break;
-                }
+        } else if (key == "caption" || key == "slug" || key == "speaker" ||
+                   key == "headline") {
+            if (!isRenderableAscii(value)) {
+                localErrors.push_back(name + ": beat `" + beat.id + "` " + key +
+                                      " has a non-ASCII character; the built-in "
+                                      "font renders it as `?`");
+            }
+            if (key == "caption") {
+                beat.caption = value;
+            } else if (key == "slug") {
+                beat.slug = value;
+            } else if (key == "speaker") {
+                beat.speakerLine = value;
+            } else {
+                beat.headline = value;
             }
         } else if (key == "fade_in") {
             beat.fadeIn = static_cast<float>(std::atof(value.c_str()));
@@ -216,6 +262,18 @@ std::optional<CutsceneDef> parseCutsceneFile(const std::filesystem::path& path,
 
     if (scene.beats.empty()) return fail("no beats");
     if (scene.name.empty()) scene.name = scene.id;
+
+    // Both journal keys or neither. Half a pair silently does nothing: the app
+    // writes only when it has a subject AND a line, so a scene carrying just
+    // one would never open its case — and a caller using the written fact as
+    // its "already played" test would replay the scene on every launch forever.
+    if (scene.journalSubject.empty() != scene.journalLine.empty()) {
+        localErrors.push_back(name +
+                              ": journal_subject and journal_line must both be "
+                              "set or both omitted; the write is skipped");
+        scene.journalSubject.clear();
+        scene.journalLine.clear();
+    }
 
     // A beat that renders on no frame at all is never what an author meant, so
     // hold is clamped up rather than reported. Negative holds come from a typed
@@ -503,6 +561,21 @@ int CutscenePlayer::letterboxPx() const { return scene_.letterboxPx; }
 const std::string& CutscenePlayer::caption() const {
     const CutsceneBeat* b = beat();
     return b == nullptr ? emptyString() : b->caption;
+}
+
+const std::string& CutscenePlayer::slug() const {
+    const CutsceneBeat* b = beat();
+    return b == nullptr ? emptyString() : b->slug;
+}
+
+const std::string& CutscenePlayer::speakerLine() const {
+    const CutsceneBeat* b = beat();
+    return b == nullptr ? emptyString() : b->speakerLine;
+}
+
+const std::string& CutscenePlayer::headline() const {
+    const CutsceneBeat* b = beat();
+    return b == nullptr ? emptyString() : b->headline;
 }
 
 int CutscenePlayer::timesSeen(const std::string& id) const {
