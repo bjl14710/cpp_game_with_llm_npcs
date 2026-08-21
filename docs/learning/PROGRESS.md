@@ -118,3 +118,22 @@ ground-truthed from raw JSON (wrist rest position at hip height), fixed in
 Assets::rebakeVerticesToRestPose; the shared-rig insight that gave mixed
 head/body figures bone attachment for free.
 **Artifacts (local-only):** lessons/0027, drills/0027, vocab/0026.
+
+## Session 9 (2026-08-21) — overnight run
+
+### Lesson 0028 — Inverting a Clock's Ownership Without Disturbing Its Consumers
+**Concept:** how a producer can be swapped under six consumers at zero cost
+when they are coupled to a shared VALUE rather than to a producer call or a
+tick event; the inversion itself (free roam ticks the hour, a match derives it
+from phase progress so dusk lands exactly when the vote opens); enforcing
+"exactly one owner" through topology — a single `advanceWorldClock` write site
+plus `std::optional<MatchClock>` as the sole representation of whether a match
+is running, rather than a bool flag that can drift; why a new enum value
+(`MatchPhase::Intro`) is cheaper than the same condition repeated at every
+downstream switch, and why Intro holds the clock at dawn while Vote/Resolution
+hold it at dusk; the diegetic countdown (dayEndHour inside DayNight's dusk
+band) and the test that pins it; and proving an untouched path is untouched
+with a byte-identical `--frames` capture rather than an argument.
+Grounded in issue #155: MatchClock existed and was entirely unused until this
+change wired it into the loop.
+**Artifacts (local-only):** lessons/0028, drills/0028, vocab/0027.
