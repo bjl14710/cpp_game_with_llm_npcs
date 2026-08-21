@@ -151,3 +151,20 @@ reporting it for months); spacing vs. formation logic, and why a gap in the ring
 the feature; the vacuous-test trap of a movement fixture spawned inside a collider.
 
 Files: lessons/0029, drills/0029 (15 questions), vocab/0028 (12 terms), GLOSSARY.
+
+### Lesson 0030 — Diegetic Versus HUD Signalling for Time Pressure
+From issue #157 (day/phase HUD and match settings), PR #311.
+
+Covered: diegetic vs HUD signalling and the precision/attention trade; how one
+constant (`dayEndHour` inside DayNight's dusk band) turned an existing light model
+into a countdown, and why #155's clock inversion was the prerequisite; what the sky
+CANNOT say, and why two HUD lines is the answer; the stated HUD budget as a design
+guard; raylib's integer glyph advance and the 10/20/30/44 ladder; making "settings
+cannot affect a running match" structural via a single read site (weak vs strong
+invariants); trailing defaults hiding missing cases (Sandbox and Model were titled
+"Multiplayer" for months) and the no-`default:` switch that fixes it; magic layout
+offsets hiding overflow (Quit was 14px off-screen) and derived layout; the harness
+boundary — `tests/Makefile` globs only `src/core/*.cpp`, so all of `src/app/` is
+verified by capture or not at all.
+
+Files: lessons/0030, drills/0030 (15 questions), vocab/0029 (13 terms), GLOSSARY.

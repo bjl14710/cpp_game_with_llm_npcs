@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0030 — Diegetic Versus HUD Signalling for Time Pressure</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #47a; padding-bottom: .4rem; }
+  .q { background: #f2f6fb; border-left: 4px solid #47a; padding: .8rem 1rem;
+       margin: 1.2rem 0; border-radius: 0 6px 6px 0; }
+  details { margin: .5rem 0 0 .5rem; }
+  summary { cursor: pointer; color: #247; font-weight: 600; }
+  code, pre { background: #f4f4f6; border-radius: 4px; padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Drill 0030 — Diegetic Versus HUD Signalling for Time Pressure</h1>
+<p>Answer before expanding. Source: lesson 0030, issue #157.</p>
+
+<div class="q"><strong>1.</strong> Define diegetic vs HUD signalling, and give the
+trade on precision and attention.
+<details><summary>Answer</summary>
+Diegetic exists inside the world the characters inhabit (the sky darkening); HUD is
+drawn on the glass in front of it (a number). Diegetic is imprecise but free to
+read — you are already looking at it. HUD is exact but costs a glance away from the
+game.
+</details></div>
+
+<div class="q"><strong>2.</strong> What single constant made the dusk light a
+countdown, and what earlier change made that possible?
+<details><summary>Answer</summary>
+<code>dayEndHour</code> placed inside <code>DayNight</code>'s dusk band
+(18:00&ndash;21:00). It works because #155 inverted the clock's ownership so the
+match DRIVES the hour — <code>worldHour()</code> sweeps across the investigation
+phase, making the sky exactly as far through the day as the phase is. The light is
+not a metaphor for the countdown; it renders the same number.
+</details></div>
+
+<div class="q"><strong>3.</strong> If the sky is already the timer, why draw a HUD
+at all?
+<details><summary>Answer</summary>
+Dusk answers "how much is left" and nothing else. It cannot say which day this is
+(day 2 of 3 looks like day 1 of 3) or what happens next (it does not distinguish
+"the vote opens" from "the day ends"). Two short lines cover exactly the questions
+the diegetic channel cannot.
+</details></div>
+
+<div class="q"><strong>4.</strong> A comment says "if this block ever grows past
+two lines, the diegetic design has been abandoned". What work is that comment
+doing?
+<details><summary>Answer</summary>
+A HUD grows by accretion, and each addition is individually reasonable. Naming the
+threshold turns "should we add a progress bar?" from a fresh judgement call into a
+question with an answer already on record — and states the consequence, which is
+that the sky coupling becomes dead weight.
+</details></div>
+
+<div class="q"><strong>5.</strong> Why are the HUD's two lines sized 30 and 20
+rather than 18 and 16?
+<details><summary>Answer</summary>
+raylib's built-in bitmap font computes glyph advance by integer division, so every
+size from 14 to 18 renders at identical spacing. A "slightly smaller" line at 16
+next to 18 is not slightly smaller — it is the same size, and the hierarchy you
+designed does not exist. Hence the documented 10/20/30/44 ladder.
+</details></div>
+
+<div class="q"><strong>6.</strong> The issue required that settings changed
+mid-match not affect the running match. Give the weak implementation and the strong
+one.
+<details><summary>Answer</summary>
+<strong>Weak:</strong> a comment saying not to apply them, relying on every future
+author reading it. <strong>Strong:</strong> <code>pendingRules</code> is read at
+exactly one site — the <code>match.emplace</code> behind "New Mystery" — so no path
+from the settings page to a live clock exists. Nobody has to remember the rule
+because no code could break it.
+</details></div>
+
+<div class="q"><strong>7.</strong> Why does <code>Menu</code> exchange two
+<code>int</code>s with the app layer instead of a <code>MatchRules</code>?
+<details><summary>Answer</summary>
+So Menu keeps knowing nothing about <code>MatchClock</code>. The minutes-to-seconds
+conversion happens in <code>main.cpp</code>. Same separation <code>ModelHooks</code>
+already keeps by passing model names rather than an <code>LlmClient</code>.
+</details></div>
+
+<div class="q"><strong>8.</strong> The page title was a ternary chain ending in
+<code>: "Multiplayer"</code>. What was the bug, and why did nothing catch it?
+<details><summary>Answer</summary>
+Sandbox and Model had been titled "Multiplayer" since the day they were added. The
+trailing branch served two incompatible roles — "the Multiplayer page" and "any page
+nobody wrote a case for" — so a missing case was indistinguishable from the last
+one. No warning, no failure; a screenshot taken for an unrelated reason found it.
+</details></div>
+
+<div class="q"><strong>9.</strong> What is the fix, and name two other places this
+codebase uses the same technique.
+<details><summary>Answer</summary>
+A <code>switch</code> with <strong>no <code>default:</code> label</strong>, so the
+compiler names every unhandled enumerator. Also used by <code>phaseName()</code>
+over <code>MatchPhase</code> and <code>arrestLineFor()</code> over
+<code>NpcMood</code>.
+</details></div>
+
+<div class="q"><strong>10.</strong> The menu laid rows out as
+<code>y = h*0.5f - 326.f</code> stepping 72, with ten rows in a 720px window. Do the
+arithmetic and say what it proves.
+<details><summary>Answer</summary>
+Start 34; last row starts at 34 + 9&times;72 = 682; height 52, so its bottom edge is
+734 &gt; 720. <strong>Quit had been 14px off-screen the whole time.</strong> The
+arithmetic gives no hint unless you evaluate it with the row count in hand, which
+nobody does when adding a row.
+</details></div>
+
+<div class="q"><strong>11.</strong> How does deriving the layout from the row count
+change the failure mode?
+<details><summary>Answer</summary>
+<code>step = min(72, (bottom - top) / rows)</code> and
+<code>height = min(52, step - 6)</code> fit the list to the space available, so
+adding a row crowds the list but cannot push a button out of the window. The failure
+becomes impossible rather than invisible. General rule: a layout constant that must
+agree with a count is a latent bug — derive one from the other.
+</details></div>
+
+<div class="q"><strong>12.</strong> The first attempt at that adaptive layout still
+had a visible defect. What, and what does it say about deriving bounds?
+<details><summary>Answer</summary>
+It started at <code>h * 0.10</code> and ran "Resume" straight through the word
+"Paused" — the title is drawn at <code>h * 0.12</code> in size 40. Deriving the step
+from the available band is only correct if the band itself excludes everything else
+already drawn there.
+</details></div>
+
+<div class="q"><strong>13.</strong> Both the title and layout bugs left the test
+suite green and would have kept it green. What is the actual lesson?
+<details><summary>Answer</summary>
+Not "tests are insufficient", but that a class of defect lives exactly where the
+harness cannot reach — and here that boundary is a hard line:
+<code>tests/Makefile</code> globs <code>src/core/*.cpp</code> and nothing else, so
+everything in <code>src/app/</code> is verified by capture or not at all. Knowing
+precisely where the line is tells you which changes demand a screenshot.
+</details></div>
+
+<div class="q"><strong>14.</strong> The match hand-back polls
+<code>match-&gt;phase() == Ended</code> rather than reading
+<code>phase.matchEnded</code>. What does that choice change?
+<details><summary>Answer</summary>
+A direct <code>endMatch()</code> call sets the phase without firing a transition.
+Polling therefore still hands the clock back on the next frame; reading the
+transition would not. The plaza-gather release IS keyed on the transition, so it
+stays uncovered — which is exactly what <code>MatchClock::endMatch</code>'s doc note
+warns a future caller about.
+</details></div>
+
+<div class="q"><strong>15.</strong> Why is the hand-back deferred one frame past the
+Ended transition rather than done on the same frame?
+<details><summary>Answer</summary>
+The gather release and any Ended-phase presentation still need to see the clock that
+produced them. It is safe because <code>Ended</code> is terminal — a new test pins
+that a day-limit end fires nothing afterwards, so the <code>!fired</code> condition
+resolves on the very next frame and never again.
+</details></div>
+</body>
+</html>

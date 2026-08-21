@@ -61,3 +61,30 @@ Terms the learner has demonstrably grasped are added here.
   ordering and re-packs. The plaza ring is spacing, so a dead resident leaves a gap.
 - **vacuous test** — passes for a reason unrelated to its claim. A movement test whose
   fixture cannot move always passes.
+- **diegetic signal** — information carried by something inside the fiction (the dusk
+  light). Free to read, imprecise by nature.
+- **HUD signal** — information drawn on the glass in front of the world. Exact, and
+  costs a glance away from the game.
+- **shared-variable signalling** — a second signal for free because two systems
+  already read the same value: `dayEndHour` inside the dusk band makes the sky a
+  rendering of the phase clock, not a metaphor for it.
+- **stated HUD budget** — a written limit on HUD growth with the consequence of
+  exceeding it. HUDs grow by accretion; each step is individually reasonable.
+- **integer glyph advance** — raylib's built-in font spaces sizes 14-18 identically,
+  so any type hierarchy inside that range does not exist at runtime.
+- **single read site** — a value read in exactly one place, so a rule about when it
+  applies becomes topology rather than discipline.
+- **weak vs strong invariant** — "do not do X" (enforced by readers) vs "there is no
+  way to do X" (enforced by structure).
+- **trailing default** — a final branch serving both "the last real case" and "a case
+  nobody wrote", making a missing case indistinguishable from a handled one.
+- **exhaustive switch (no default)** — a switch over an enum with no `default:`, so a
+  new enumerator is a compiler warning.
+- **derived layout** — spacing computed from the item count against the available
+  band, making overflow impossible rather than invisible.
+- **latent constant disagreement** — a hardcoded constant that must agree with a
+  count nobody re-checks.
+- **harness boundary** — the precise line past which the test suite verifies nothing:
+  here, everything in `src/app/`.
+- **deferred-frame handoff** — acting one frame after a transition so same-frame
+  consumers still see the state that produced it.
