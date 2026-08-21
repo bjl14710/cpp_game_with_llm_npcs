@@ -137,3 +137,17 @@ with a byte-identical `--frames` capture rather than an argument.
 Grounded in issue #155: MatchClock existed and was entirely unused until this
 change wired it into the loop.
 **Artifacts (local-only):** lessons/0028, drills/0028, vocab/0027.
+
+### Lesson 0029 — Layering a Temporary Override Over Authored Content
+From issue #156 (plaza gather for the vote phase), PR #310.
+
+Covered: why rewriting authored schedules and adding a mode flag both fail; the
+nullable-destination-override shape and its restore-by-reset property; "out-ranked,
+not suspended" and how it stays visible in the activity label; splitting a bundled
+guard without smuggling in an incidental behaviour change; keying a release on the
+state ENTERED so untried transitions are covered; the map fact that the plaza's
+computed centre sits inside Gus's cart (and the `Mystery.cpp` warning that had been
+reporting it for months); spacing vs. formation logic, and why a gap in the ring is
+the feature; the vacuous-test trap of a movement fixture spawned inside a collider.
+
+Files: lessons/0029, drills/0029 (15 questions), vocab/0028 (12 terms), GLOSSARY.

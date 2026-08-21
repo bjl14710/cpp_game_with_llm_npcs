@@ -36,3 +36,28 @@ Terms the learner has demonstrably grasped are added here.
   being dropped, so a long frame delays a boundary instead of losing its event.
 - **byte-identical regression check** — proving an untouched path is untouched by
   hashing the same deterministic capture before and after.
+- **authored content** — data written by a human into a content file and read by the
+  game (`personas/*.persona`, `traits/*.trait`, `banks/*.bank`). Read-only at runtime.
+- **destination override** — a nullable field holding a temporary target that outranks
+  the authored one at the single point that one is read (`Npc::gatherTarget_`).
+- **out-ranked, not suspended** — the authored value still resolves and still reports
+  itself; the override only wins the destination. Contrast *suspended*, which must be
+  restarted.
+- **restore-by-reset** — undo implemented as clearing an override, not replaying a
+  saved state. Diagnostic: if restore must know what was there before, you overwrote it.
+- **guard bundling** — unrelated early-return conditions sharing one `if`. Splitting
+  them is a behaviour change until proven otherwise.
+- **incidental behaviour change** — an observable change that falls out of a refactor
+  rather than being intended by it.
+- **presentation-only system** — changes what is seen, is never consulted by a mechanic;
+  its total failure can break nothing but the view.
+- **entry-keyed transition handling** — reacting to the state being ENTERED, so routes
+  nobody has written yet are still covered. Requires an idempotent handler.
+- **authored marker** — a hand-placed reference point preferred over a computed one
+  because the computed one is wrong on the real map.
+- **geometric centre vs. clear space** — a centre describes bounds, not emptiness;
+  `zoneCentre("plaza")` is inside Gus's cart.
+- **spacing vs. formation logic** — spacing stops agents stacking; formation assigns
+  ordering and re-packs. The plaza ring is spacing, so a dead resident leaves a gap.
+- **vacuous test** — passes for a reason unrelated to its claim. A movement test whose
+  fixture cannot move always passes.
