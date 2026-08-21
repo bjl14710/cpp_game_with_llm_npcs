@@ -1,5 +1,7 @@
 #include "Zones.hpp"
 
+#include <cmath>
+
 namespace llm_npc {
 namespace {
 
@@ -75,6 +77,20 @@ Vec3 zoneCentre(const std::string& zoneId) {
     // so have no meaningful centre. The origin is the plaza's doorstep, which
     // is at least somewhere a camera can stand.
     return Vec3{};
+}
+
+Vec3 plazaGatherSpot(int index, int count) {
+    // Clears the cart (half-extent 3 on x, 2 on z) with room to stand, and
+    // stays well inside the plaza block, which spans +-24 around its centre.
+    constexpr float kGatherRadius = 8.f;
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    const Vec3 centre = zoneCentre("plaza");
+    const int slots = count > 1 ? count : 1;
+    const int slot = index > 0 ? index : 0;
+    const float angle = kTwoPi * (static_cast<float>(slot % slots) /
+                                  static_cast<float>(slots));
+    return Vec3{centre.x + kGatherRadius * std::sin(angle), centre.y,
+                centre.z + kGatherRadius * std::cos(angle)};
 }
 
 }  // namespace llm_npc

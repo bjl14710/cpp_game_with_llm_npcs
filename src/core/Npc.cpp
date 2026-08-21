@@ -200,19 +200,39 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city,
             // the SHARED clock injected by the caller (negative = no clock,
             // schedule dormant). Combat states own movement instead, and a
             // player within conversation range politely pauses the walk.
-            if (timeOfDayHours < 0.f || schedule_.empty() ||
-                state_ != NpcState::Idle) {
-                break;
+            if (state_ != NpcState::Idle) break;
+            // A gather override (issue #156) is a destination, not a mode: it
+            // reaches the same walk the schedule uses, so a resident summoned
+            // to the plaza is moved by exactly the code that already moves
+            // them to the bakery. Dead and fighting NPCs never get here, which
+            // is why nothing has to check for a corpse separately.
+            const bool hasSchedule = timeOfDayHours >= 0.f && !schedule_.empty();
+            const int active =
+                hasSchedule ? activeScheduleIndex(schedule_, timeOfDayHours) : -1;
+            // The label still reports the authored day even while the override
+            // is walking them somewhere else: the schedule is not suspended,
+            // it is out-ranked.
+            //
+            // Guarded on hasSchedule so this stays byte-identical to the
+            // pre-#156 behaviour for a clockless or scheduleless NPC, which
+            // used to return before touching the label and therefore KEPT its
+            // last one. Clearing it here instead would be an unrelated
+            // behaviour change smuggled in under a movement fix.
+            if (hasSchedule) {
+                activity_ =
+                    active >= 0 ? schedule_[static_cast<std::size_t>(active)].activity
+                                : std::string();
             }
-            const int active = activeScheduleIndex(schedule_, timeOfDayHours);
-            activity_ = active >= 0 ? schedule_[static_cast<std::size_t>(active)].activity
-                                    : std::string();
-            if (active < 0 || dist < kSchedulePause) break;
-            const Vec3& target =
-                schedule_[static_cast<std::size_t>(active)].position;
-            if (distanceXZ(position_, target) > kHomeSnapRadius) {
-                faceToward(target);
-                const Vec3 step = steerXZ(position_, target) * (kNpcWalk * dt);
+            const Vec3* target = nullptr;
+            if (gatherTarget_) {
+                target = &*gatherTarget_;
+            } else if (active >= 0) {
+                target = &schedule_[static_cast<std::size_t>(active)].position;
+            }
+            if (target == nullptr || dist < kSchedulePause) break;
+            if (distanceXZ(position_, *target) > kHomeSnapRadius) {
+                faceToward(*target);
+                const Vec3 step = steerXZ(position_, *target) * (kNpcWalk * dt);
                 position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
             }
             break;
