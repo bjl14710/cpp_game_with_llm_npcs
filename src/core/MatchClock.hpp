@@ -30,6 +30,18 @@ enum class MatchPhase {
     Ended,          // match over; nothing advances
 };
 
+// The player-facing name for a phase, e.g. "Investigation".
+//
+// Lives here rather than in the HUD because the vote UI (#224) and the phase
+// HUD (#157) both name phases, and two switch statements over the same enum
+// are two places for a seventh phase to be forgotten. Written WITHOUT a
+// `default:` label on purpose, so adding a phase is a compiler warning rather
+// than a silent "Unknown" appearing on someone's screen.
+//
+// ASCII only: it reaches raylib's built-in bitmap font, which substitutes '?'
+// for anything above 126 (see AsciiText.hpp).
+const char* phaseName(MatchPhase phase);
+
 // All durations in REAL seconds; the in-world hour is derived from them.
 struct MatchRules {
     // How many days before the killer wins by default. Clamped to >= 1.

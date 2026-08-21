@@ -387,16 +387,33 @@ int main(int argc, char** argv) {
     // --hour set here would be overwritten on the first tick anyway; saying so
     // is better than letting a smoke run silently ignore a flag it was given.
     std::optional<MatchClock> match;
+    // Settings the Match page edits (issue #157). Held here, next to the
+    // clock, and read ONLY where a match is constructed -- which is what makes
+    // "changes never reach a running match" a property of the topology rather
+    // than a rule somebody has to remember. Changing day length mid-day would
+    // make the world clock jump.
+    //
+    // Session-scoped, not written to disk: persisting them would mean a new
+    // config file, and the issue asked for a settings surface, not a settings
+    // format. Defaults come from MatchRules itself (3 days, 8 minutes), so
+    // there is exactly one place they are stated.
+    MatchRules pendingRules;
+    const auto pendingDayMinutes = [&pendingRules]() {
+        return static_cast<int>(pendingRules.investigationSeconds / 60.f + 0.5f);
+    };
     if (bootMatch) {
-        MatchRules rules;
         if (matchInvestigationSeconds > 0.f) {
-            rules.investigationSeconds = matchInvestigationSeconds;
+            pendingRules.investigationSeconds = matchInvestigationSeconds;
             // Keep the intro proportionate, so a compressed match still spends
             // most of its capture in the phase the sweep belongs to.
-            rules.introSeconds = std::fmin(rules.introSeconds,
-                                           matchInvestigationSeconds * 0.2f);
+            pendingRules.introSeconds = std::fmin(pendingRules.introSeconds,
+                                                  matchInvestigationSeconds * 0.2f);
         }
-        match.emplace(rules);
+        // Boots from pendingRules rather than a local copy so the Match
+        // Settings page shows what is actually running. A dev who opens the
+        // pause menu during a `--match 30` smoke run should not be told the
+        // day is 8 minutes long.
+        match.emplace(pendingRules);
     }
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
@@ -1112,6 +1129,19 @@ int main(int argc, char** argv) {
     };
     menu.setModels(modelHooks);
 
+    // Match settings page (#157). Menu holds no MatchRules and no MatchClock:
+    // it reads and writes two ints, and the conversion to the rules' real
+    // seconds happens here. Same separation ModelHooks keeps.
+    Menu::MatchHooks matchHooks;
+    matchHooks.dayLimit = [&pendingRules]() { return pendingRules.dayLimit; };
+    matchHooks.dayMinutes = pendingDayMinutes;
+    matchHooks.active = [&match]() { return match.has_value(); };
+    matchHooks.onChange = [&pendingRules](int dayLimit, int dayMinutes) {
+        pendingRules.dayLimit = dayLimit;
+        pendingRules.investigationSeconds = static_cast<float>(dayMinutes) * 60.f;
+    };
+    menu.setMatchSettings(matchHooks);
+
     menu.setSandbox(sandboxHooks);
     {
         std::vector<std::string> traitIds;
@@ -1695,13 +1725,10 @@ int main(int argc, char** argv) {
                     // toasts instead), so this cannot silently discard a day
                     // and a phase because someone missed Resume by one row.
                     //
-                    // KNOWN GAP, owned by #157: nothing clears `match` once
-                    // the clock reaches MatchPhase::Ended. worldHour() then
-                    // holds at dayEndHour forever and free roam's day/night
-                    // never resumes. Ending a match cleanly -- consequences,
-                    // reveal, and the hand-back to free roam -- is that
-                    // issue's subject; this one only inverts the clock.
-                    match.emplace(MatchRules{});
+                    // The Match page's settings are read HERE and nowhere
+                    // else, so an edit made while a match is running cannot
+                    // reach it (#157).
+                    match.emplace(pendingRules);
                     mode = AppMode::Playing;
                     DisableCursor();
                     break;
@@ -1792,6 +1819,31 @@ int main(int argc, char** argv) {
             } else if (phase.to == MatchPhase::Investigation || phase.matchEnded) {
                 world.setPlazaGather(false);
             }
+        }
+        // Hand the clock back to free roam when the match ends (#155's
+        // deferred gap, owned by #157).
+        //
+        // Without this, worldHour() holds at dayEndHour forever: the sky stays
+        // frozen at dusk and free roam's day/night never resumes, which reads
+        // as the game having broken rather than as a match having finished.
+        // Clearing the optional IS the hand-back -- advanceWorldClock takes
+        // the ticking branch from the next frame, and nothing else has to be
+        // told.
+        //
+        // Deferred by one frame past the transition on purpose: the gather
+        // release above and any Ended-phase presentation still need to see the
+        // clock that produced them.
+        //
+        // The condition POLLS match->phase() rather than reading
+        // phase.matchEnded, and the difference matters in one direction: an
+        // endMatch() called outside advance() sets the phase without firing a
+        // transition, so polling still hands the clock back on the next frame,
+        // whereas reading the transition would not. The gather release ABOVE
+        // is the half that stays uncovered -- it is keyed on phase.to, which
+        // such a call never produces. That asymmetry is exactly what
+        // MatchClock::endMatch's note warns a future caller about.
+        if (match && match->phase() == MatchPhase::Ended && !phase.fired) {
+            match.reset();
         }
         const float worldHour = static_cast<float>(world.state().timeOfDayHours());
 
@@ -2668,6 +2720,41 @@ int main(int argc, char** argv) {
             }
             DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 2.f,
                        Color{255, 255, 255, 200});
+            // Match HUD (#157): two short lines, top-right, and deliberately
+            // no countdown bar.
+            //
+            // The dusk light is already the timer -- dayEndHour sits inside
+            // DayNight's dusk band precisely so the orange sky IS the
+            // countdown -- so this exists to answer "which day is it and what
+            // happens next", not to replace what the sky is saying. If this
+            // block ever grows past two lines, the diegetic design has been
+            // abandoned and the sky coupling is dead weight.
+            //
+            // Sizes 30 and 20, not 18 and 16: raylib's built-in font computes
+            // glyph advance by integer division, so every size from 14 to 18
+            // renders at identical spacing and a "slightly smaller" second
+            // line would not look smaller at all (AsciiText.hpp).
+            // Not wrapped in `!joined` like the weapon HUD below, and it
+            // does not need to be: `match` is local and a guest never
+            // constructs one, so the block is already inert for them. It is
+            // also the honest state -- a guest genuinely does not have the
+            // host's day and phase yet. Replicating those is #211's job, and
+            // when it lands THIS is the block that starts drawing for guests.
+            if (match) {
+                const std::string dayLine = "Day " + std::to_string(match->day()) +
+                                            " - " + phaseName(match->phase());
+                const int remaining =
+                    static_cast<int>(match->phaseRemainingSeconds() + 0.5f);
+                const std::string timeLine =
+                    std::to_string(remaining / 60) + ":" +
+                    (remaining % 60 < 10 ? "0" : "") + std::to_string(remaining % 60) +
+                    " left";
+                const int right = GetScreenWidth() - 24;
+                DrawText(dayLine.c_str(), right - MeasureText(dayLine.c_str(), 30), 20,
+                         30, RAYWHITE);
+                DrawText(timeLine.c_str(), right - MeasureText(timeLine.c_str(), 20), 56,
+                         20, Color{200, 210, 230, 255});
+            }
             // Weapon + health HUD (bottom-left), solo/host only.
             if (!joined) {
                 const Player& p = world.player();

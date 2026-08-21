@@ -118,6 +118,27 @@ class Menu {
     };
     void setModels(ModelHooks hooks);
 
+    // Match settings page (issue #157): the day limit and how long a day
+    // runs. Two integers, deliberately — the dusk light already signals time
+    // pressure, so this page exists to set the pace, not to expose the clock.
+    //
+    // Ints rather than a MatchRules, so Menu keeps knowing nothing about
+    // MatchClock; `onChange` is what converts minutes back into the rules'
+    // real seconds. The same reason ModelHooks passes strings rather than an
+    // LlmClient.
+    //
+    // CHANGES NEVER REACH A RUNNING MATCH. main.cpp reads these when it
+    // creates one, so a mid-match edit simply applies to the next mystery —
+    // changing day length mid-day would make the world clock jump. `active`
+    // exists only so the page can SAY so rather than looking broken.
+    struct MatchHooks {
+        std::function<int()> dayLimit;
+        std::function<int()> dayMinutes;
+        std::function<void(int dayLimit, int dayMinutes)> onChange;
+        std::function<bool()> active;
+    };
+    void setMatchSettings(MatchHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -158,7 +179,7 @@ class Menu {
     // full-screen menu shipped drawn over the map editor (#215) and how every
     // UI capture in this project's history turned out to be missing its UI
     // (#216).
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model, Match };
 
     // Opens `page` directly. Intended for --menu; play reaches pages by
     // clicking, and nothing about that path changes.
@@ -170,6 +191,10 @@ class Menu {
     static std::optional<Page> pageFromName(const std::string& name);
 
    private:
+
+    // Applies one -/+ click on the match settings page, clamped to the
+    // bounds the page offers, and warns when a match is already running.
+    void nudgeMatchSetting(int id);
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -195,6 +220,7 @@ class Menu {
     AvatarHooks avatar_;
     SandboxHooks sandbox_;
     ModelHooks models_;
+    MatchHooks matchSettings_;
     std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
