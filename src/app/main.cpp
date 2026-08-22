@@ -1809,11 +1809,32 @@ int main(int argc, char** argv) {
         //
         // In a match the clock is DRIVEN rather than ticked, so the sky races
         // to dusk as the investigation phase runs out. advanceWorldClock is
-        // the single owner either way; see its comment. The transition it
-        // returns is consumed by the gather (#156) and the phase HUD (#157) —
-        // nothing reads it yet, and dropping it here keeps this issue to the
-        // clock inversion it is about.
-        advanceWorldClock(world.state(), match, dt);
+        // the single owner either way; see its comment.
+        const PhaseTransition phase = advanceWorldClock(world.state(), match, dt);
+        // The vote is a scene, not a menu (#156): entering it walks every
+        // surviving resident to the plaza, so a player can SEE who is still
+        // alive and who is missing.
+        //
+        // They stay assembled THROUGH Resolution and are released when the
+        // next investigation begins — the reveal is the reason to have
+        // everyone standing there, so releasing on Vote -> Resolution would
+        // empty the plaza exactly when the scene pays off.
+        //
+        // Keyed on the phase being ENTERED rather than on dayAdvanced, so the
+        // release also covers a match ending straight out of the vote and any
+        // future path back to Investigation. Clearing when nobody is gathered
+        // is a harmless no-op, and that is the point: the release cannot be
+        // missed by a transition nobody thought of.
+        //
+        // Guests never run this: a joined client's world is the host's
+        // snapshot, and the block below already refuses to simulate.
+        if (phase.fired && !joined) {
+            if (phase.to == MatchPhase::Vote) {
+                world.setPlazaGather(true);
+            } else if (phase.to == MatchPhase::Investigation || phase.matchEnded) {
+                world.setPlazaGather(false);
+            }
+        }
         const float worldHour = static_cast<float>(world.state().timeOfDayHours());
 
         // NPC behaviors keep running during dialogue, freeze in the menu;

@@ -83,6 +83,22 @@ class Npc {
         schedule_ = std::move(schedule);
     }
 
+    // A TEMPORARY destination that outranks the schedule (issue #156).
+    //
+    // Set while the town assembles in the plaza for the vote; cleared on the
+    // Resolution -> Investigation rollover, which puts everyone straight back
+    // on their authored day. It composes ON TOP of the schedule rather than
+    // replacing it: personas/*.persona is never rewritten, `activity()` still
+    // reports whatever the clock says the resident would otherwise be doing,
+    // and clearing the override needs no memory of what was there before.
+    //
+    // It moves the NPC and nothing else. The vote itself must never depend on
+    // the walk succeeding — a resident who cannot reach the plaza votes from
+    // where they stand — so no other system reads this.
+    void setGatherTarget(const Vec3& target) { gatherTarget_ = target; }
+    void clearGatherTarget() { gatherTarget_.reset(); }
+    const std::optional<Vec3>& gatherTarget() const { return gatherTarget_; }
+
     // The active schedule entry's activity label at the last update
     // ("baking bread"); empty when nothing is scheduled. Shown in the
     // nameplate.
@@ -287,6 +303,7 @@ class Npc {
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
     std::vector<ScheduleEntry> schedule_;     // daily routine (may be empty)
+    std::optional<Vec3> gatherTarget_;        // #156 override; outranks schedule_
     std::string activity_;                    // active entry's label
 
     // Combat state — all zero/Idle until something hurts this NPC.

@@ -57,6 +57,22 @@ class World {
     // "[T] Talk to <name>" prompt and chat targeting.
     int nearestNpcWithin(const Vec3& pos, float radius) const;
 
+    // Assemble every living resident in the plaza for the vote, or release
+    // them back to their authored day (issue #156).
+    //
+    // `gathering = true` gives each survivor a slot on the plaza ring
+    // (plazaGatherSpot); `false` clears the override on EVERY npc, dead ones
+    // included, so nothing can be left holding a stale destination.
+    //
+    // Slots are assigned over the living only, so the circle has no gaps for
+    // residents who are merely absent — but a resident who dies mid-vote keeps
+    // the slot they were given and simply stops walking, which is the gap a
+    // player is meant to notice.
+    //
+    // PRESENTATION ONLY. The vote does not consult this and must never be able
+    // to fail because a resident got stuck on a kerb.
+    void setPlazaGather(bool gathering);
+
     // --- Player access ---------------------------------------------------
 
     Player&       player()       { return player_; }

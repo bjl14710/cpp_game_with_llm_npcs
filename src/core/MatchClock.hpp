@@ -111,6 +111,14 @@ class MatchClock {
 
     // Early exit — someone won, or the host quit. Idempotent: a second call
     // fires no transition and changes nothing.
+    //
+    // IT RETURNS NOTHING, and callers that skip advance() must account for
+    // that. src/app/main.cpp releases the vote-phase plaza gather (#156) off
+    // the PhaseTransition that advance() returns, so a future feature that
+    // ends a match by calling this directly — rather than letting the day
+    // limit run out — leaves every resident holding a stale destination and
+    // standing in the plaza afterwards. Either route the exit through the
+    // frame loop's transition, or release the gather at the new call site.
     void endMatch();
 
     // The clamped rules actually in force, which may differ from those passed

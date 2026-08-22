@@ -70,4 +70,24 @@ const std::string& zoneName(const std::string& zoneId);
 // private copy is how three of them start disagreeing.
 Vec3 zoneCentre(const std::string& zoneId);
 
+// Where resident `index` of `count` stands when the town assembles in the
+// plaza for the vote (issue #156).
+//
+// A RING, NOT THE CENTRE, and the reason is on the map rather than in
+// aesthetics: Gus's hot dog cart is a solid collider spanning x [-3, 3],
+// z [-2, 2] (City.cpp, "cart"). The plaza's computed centre is INSIDE it, so
+// sending twenty-one residents to zoneCentre("plaza") walks all of them into a
+// wall and leaves them shoving at its edge. This is the authored marker the
+// issue asked for, expressed as a function so it cannot drift from the zone it
+// is derived from.
+//
+// The ring is spacing, not formation logic: there is no ordering rule, no
+// facing rule and no re-packing when somebody dies. Residents keep whatever
+// index they had, so a gap in the circle is exactly the "who is missing?"
+// signal the vote scene is for.
+//
+// `count` <= 1 or a negative index puts the single resident on the ring
+// anyway, so callers never need a special case.
+Vec3 plazaGatherSpot(int index, int count);
+
 }  // namespace llm_npc
