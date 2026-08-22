@@ -181,3 +181,21 @@ byte-identity check as the thing that keeps the seam honest; residue testing aga
 a known harness boundary; the pointer-into-argument hazard in findRole.
 
 Files: lessons/0031, drills/0031 (10 questions), vocab/0030 (8 terms), GLOSSARY.
+
+### Lesson 0032 — Side-Channel Leakage: Measuring What a System Reveals Through Its Metadata
+From issue #200 (implement the role leak probe), PR #313.
+
+Covered: the mood tag as a side channel the design never treated as one; why
+"the killer is never angry" is the wrong pass condition and separability is the
+right one; deriving a statistic from the exploit (a rank, because sorting faces is
+what a player does) and why a permutation test beats a chi-square here; how a
+collapsed statistic went blind and what the full mood distribution showed (TVD:
+killer-keepers 0.59, killer-bystanders 0.12, keepers-bystanders 0.69); reading a
+result that contradicts its own stated pass condition; the finding that the
+secret-keepers provide no cover and the killer is defended by an undocumented
+mechanism instead; why the probe names content directions without choosing one;
+the four honesty requirements (self-reported n, raw distributions, CANNOT EVALUATE
+as a distinct outcome, scaffolds never reporting a pass); recognising side channels
+in latency, length, error codes and refusal style.
+
+Files: lessons/0032, drills/0032 (14 questions), vocab/0031 (12 terms), GLOSSARY.

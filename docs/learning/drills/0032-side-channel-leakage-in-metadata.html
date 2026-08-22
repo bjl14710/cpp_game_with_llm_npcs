@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0032 — Side-Channel Leakage in Metadata</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #47a; padding-bottom: .4rem; }
+  .q { background: #f2f6fb; border-left: 4px solid #47a; padding: .8rem 1rem;
+       margin: 1.2rem 0; border-radius: 0 6px 6px 0; }
+  details { margin: .5rem 0 0 .5rem; }
+  summary { cursor: pointer; color: #247; font-weight: 600; }
+  code, pre { background: #f4f4f6; border-radius: 4px; padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Drill 0032 — Side-Channel Leakage in Metadata</h1>
+<p>Answer before expanding. Source: lesson 0032, issue #200.</p>
+
+<div class="q"><strong>1.</strong> The model never confesses under pressure. Why
+was the secret still leaking?
+<details><summary>Answer</summary>
+Through the <code>[[MOOD:]]</code> tag, which the model chooses on every reply and
+which drives the rendered face. Guilty Marge went angry on turn one where innocent
+Marge laughed. The system kept the secret in the channel it was watching, and lost
+it in one nobody designed as a channel.
+</details></div>
+
+<div class="q"><strong>2.</strong> Why is "the killer is never angry" the wrong
+pass condition?
+<details><summary>Answer</summary>
+Suppressing affect entirely gives a cast of bland androids, and it optimises the
+wrong thing. The fix for a leak is to hide the signal in noise, not delete the
+signal.
+</details></div>
+
+<div class="q"><strong>3.</strong> How was the statistic derived, and why a rank?
+<details><summary>Answer</summary>
+From the attack a player would actually run: ask everyone one question, sort the
+faces by hostility, accuse the top one. That is a rank, so the statistic is a
+rank. General rule: derive the metric from the exploit. If you cannot state the
+attack your metric detects in one sentence, it is measuring something adjacent.
+</details></div>
+
+<div class="q"><strong>4.</strong> Why a permutation test rather than a chi-square?
+<details><summary>Answer</summary>
+No distributional assumption, no expected-count floor at these sample sizes, no
+new dependency, and the result restates in plain words a person can check — "five
+residents in ten look at least this hostile".
+</details></div>
+
+<div class="q"><strong>5.</strong> The first implementation had only the rank test
+and reported a clean PASS. What was it blind to?
+<details><summary>Answer</summary>
+A rank collapses a whole distribution into one number, so it cannot see a killer
+conspicuous in some OTHER mood. Measuring the full mood distribution showed the
+issue's literal condition failing — killer vs secret-keepers TVD 0.59.
+</details></div>
+
+<div class="q"><strong>6.</strong> The literal pass condition failed but the
+verdict is not "leak". Explain the direction.
+<details><summary>Answer</summary>
+The killer is separable from the secret-keepers because the killer reads ORDINARY
+— indistinguishable from the bystanders (TVD 0.12). It is the secret-keepers who
+stand out, at <code>embarrassed</code> on 59% of turns. The killer is buried in a
+group of six ordinary residents, so sorting faces does not find them.
+</details></div>
+
+<div class="q"><strong>7.</strong> So what IS broken, even though nothing leaks?
+<details><summary>Answer</summary>
+The secret-keepers are not providing cover. They exist so "deflection is common
+and hostility stops being a unique signal" — cover requires the killer and the
+keepers to look alike, and they look nothing alike. The killer is defended by
+being unremarkable, not by being camouflaged among deflectors. That is a real
+defence that works, and it is not the one the role files describe.
+</details></div>
+
+<div class="q"><strong>8.</strong> The plan asked "how many secret-keepers is
+enough cover?". What did the data say?
+<details><summary>Answer</summary>
+The count is the wrong lever. Eight keepers would deepen the embarrassed cluster
+without moving the killer any closer to it. The lever is the keepers' demeanour,
+which the model follows very literally and very consistently.
+</details></div>
+
+<div class="q"><strong>9.</strong> Why did the probe name two directions and take
+neither?
+<details><summary>Answer</summary>
+Both are content decisions, not probe decisions. A measurement tool that also
+decides content is one you can no longer trust to report against its own
+preferences.
+</details></div>
+
+<div class="q"><strong>10.</strong> The killer contributes 8 turns. What must the
+report say about that?
+<details><summary>Answer</summary>
+Report the n beside the verdict, and say which findings survive the noise. TVD at
+n=8 is noisy; the two runs moved killer-vs-keepers from 0.85 to 0.59. What
+survives both runs is the ORDERING (killer near bystanders, far from keepers,
+keepers far from bystanders), not the values.
+</details></div>
+
+<div class="q"><strong>11.</strong> Why must "FAIL" and "CANNOT EVALUATE" be
+different exit codes?
+<details><summary>Answer</summary>
+A run that could not reach the model has measured nothing. Exit 0 PASS, 1 FAIL, 2
+CANNOT EVALUATE. Collapsing the last two into a pass is the worst thing a gate can
+do; collapsing them into a failure sends someone debugging content when Ollama is
+simply down.
+</details></div>
+
+<div class="q"><strong>12.</strong> Why did the unimplemented scaffold return 2
+rather than 0?
+<details><summary>Answer</summary>
+So a scaffold can never report a pass. An unimplemented gate that exits 0 is
+indistinguishable from a passing one, and it will sit in a pipeline being trusted.
+</details></div>
+
+<div class="q"><strong>13.</strong> Name four side channels outside this codebase
+and the general question to ask.
+<details><summary>Answer</summary>
+Latency (cache hit vs miss), response length ("I can't discuss that" is short),
+error codes ("wrong password" vs "no such user"), refusal style. The question is
+not "did it reveal the secret?" but "what differs between the case where there is
+a secret and the case where there is not?" Everything that differs is a channel.
+</details></div>
+
+<div class="q"><strong>14.</strong> Why must the probe render prompts through
+<code>persona_prompt --state</code> rather than assembling them in Python?
+<details><summary>Answer</summary>
+The role block's PLACEMENT is what the probe measures — earlier placement was
+measured to corrupt the action protocol. A Python copy would have its own
+placement, so the probe would measure the copy rather than the game, and the
+result would look real.
+</details></div>
+</body>
+</html>
