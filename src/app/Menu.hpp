@@ -15,9 +15,10 @@ namespace llm_npc {
 
 // What the main loop should do after the menu handled this frame's input.
 enum class MenuResult {
-    None,    // keep showing the menu
-    Resume,  // close the menu and return to the game
-    Quit,    // close the window
+    None,        // keep showing the menu
+    Resume,      // close the menu and return to the game
+    NewMystery,  // start a detective match, then return to the game
+    Quit,        // close the window
 };
 
 // Mouse-driven pause menu: Resume / Controls / Multiplayer / Quit on the main
@@ -76,6 +77,13 @@ class Menu {
 
     // Installs the Creator page's save callback.
     void setCreator(CreatorHooks hooks);
+
+    // Whether a detective match is currently running. Pushed in by main.cpp
+    // each frame -- a bool, so the menu still knows nothing about MatchClock
+    // or any world type. Used only to refuse a second New Mystery: starting
+    // one mid-match would throw away the day, the phase and the elapsed time
+    // for a misclick one row above Resume.
+    void setMatchActive(bool active) { matchActive_ = active; }
 
     // The player's own avatar (issue #106): the SAME creator page opens in
     // avatar mode from "Edit My Avatar" — same picker, same Randomize, same
@@ -190,6 +198,7 @@ class Menu {
     std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
+    bool matchActive_ = false;  // a match is running; New Mystery refuses
     std::string creatorName_;
     std::vector<std::string> traitChoices_;  // cycled by the trait row
     int creatorTraitIndex_ = 0;              // 0 = none; else 1-based into choices

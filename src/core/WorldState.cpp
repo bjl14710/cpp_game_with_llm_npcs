@@ -1,5 +1,6 @@
 #include "WorldState.hpp"
 
+#include <cassert>
 #include <cmath>
 
 namespace llm_npc {
@@ -30,7 +31,22 @@ const std::string* WorldState::text(const std::string& key) const {
     return it != facts_.end() ? &it->second.text : nullptr;
 }
 
+void WorldState::beginClockFrame() {
+    clockFrameArmed_ = true;
+    clockWriter_ = ClockWriter::None;
+}
+
+void WorldState::noteClockWrite(ClockWriter who) {
+    if (!clockFrameArmed_) return;  // outside the frame loop: tests, --hour
+    assert((clockWriter_ == ClockWriter::None || clockWriter_ == who) &&
+           "two owners wrote the world clock in one frame - free roam's "
+           "advanceTime and a match's setTimeOfDayHours must never both run. "
+           "See advanceWorldClock in src/app/main.cpp.");
+    clockWriter_ = who;
+}
+
 void WorldState::advanceTime(float realDtSeconds) {
+    noteClockWrite(ClockWriter::Ticked);
     double seconds = number(kTimeKey) +
                      static_cast<double>(realDtSeconds) * kGameSecondsPerRealSecond;
     seconds = std::fmod(seconds, kSecondsPerDay);
@@ -76,6 +92,7 @@ const KnownFact* WorldState::findFact(const std::string& factId) const {
 }
 
 void WorldState::setTimeOfDayHours(double hours) {
+    noteClockWrite(ClockWriter::Driven);
     double seconds = std::fmod(hours * 3600.0, kSecondsPerDay);
     if (seconds < 0.0) seconds += kSecondsPerDay;
     setNumber(kTimeKey, seconds);

@@ -31,6 +31,7 @@ constexpr int kIdJournal = 5;
 constexpr int kIdAvatar = 6;
 constexpr int kIdSandbox = 7;
 constexpr int kIdModels = 8;
+constexpr int kIdNewMystery = 9;
 constexpr int kIdModelBase = 700;
 constexpr int kMaxModelRows = 8;
 // Sandbox page: New button + one row per saved map (capped by layout).
@@ -142,8 +143,9 @@ std::vector<Menu::Hit> Menu::layout() const {
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
         float y = h * 0.5f - 326.f;
-        for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator,
-                       kIdAvatar, kIdJournal, kIdSandbox, kIdModels, kIdQuit}) {
+        for (int id : {kIdResume, kIdNewMystery, kIdControls, kIdMultiplayer,
+                       kIdCreator, kIdAvatar, kIdJournal, kIdSandbox, kIdModels,
+                       kIdQuit}) {
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
             y += 72.f;
         }
@@ -335,6 +337,16 @@ MenuResult Menu::update(float dt) {
             if (!CheckCollisionPointRec(click, hit.rect)) continue;
             hitSomething = true;
             if (hit.id == kIdResume) return MenuResult::Resume;
+            if (hit.id == kIdNewMystery) {
+                // Refuse rather than clobber, and say so. The row stays
+                // visible and clickable on purpose: hiding it would leave a
+                // player wondering where it went, and a toast explains.
+                if (matchActive_) {
+                    showToast("A mystery is already running.");
+                    return MenuResult::None;
+                }
+                return MenuResult::NewMystery;
+            }
             if (hit.id == kIdQuit) return MenuResult::Quit;
             if (hit.id == kIdControls) {
                 page_ = Page::Controls;
@@ -641,6 +653,7 @@ void Menu::render() const {
 
         std::string label;
         if (hit.id == kIdResume) label = "Resume";
+        else if (hit.id == kIdNewMystery) label = "New Mystery";
         else if (hit.id == kIdControls) label = "Controls";
         else if (hit.id == kIdMultiplayer) label = "Multiplayer";
         else if (hit.id == kIdCreator) label = "Create Character";

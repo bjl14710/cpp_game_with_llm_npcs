@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0027 — Bind Pose vs Rest Pose</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #47a; padding-bottom: .4rem; }
+  .q { background: #f2f6fb; border-left: 4px solid #47a; padding: .8rem 1rem;
+       margin: 1.2rem 0; border-radius: 0 6px 6px 0; }
+  details { margin: .5rem 0 0 .5rem; }
+  summary { cursor: pointer; color: #247; font-weight: 600; }
+  code, pre { background: #f4f4f6; border-radius: 4px; padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Drill 0028 — Inverting a Clock's Ownership Without Disturbing Its Consumers</h1>
+<p>Answer before expanding. Source: lesson 0028, issue #155.</p>
+
+<div class="q"><strong>1.</strong> State the direction of causation in free roam and
+in a match, using the world hour as the subject of both sentences.
+<details><summary>Answer</summary>
+<strong>Free roam:</strong> time passes (<code>advanceTime(dt)</code> moves the hour
+at a fixed scale) and everything else reacts to it.
+<strong>A match:</strong> the phase advances and the hour is <em>computed</em> from
+its progress — <code>worldHour()</code> sweeps <code>dayStartHour</code> &rarr;
+<code>dayEndHour</code> across the investigation. Same variable, opposite direction
+of causation.</details></div>
+
+<div class="q"><strong>2.</strong> Six systems read the world hour. Exactly how many
+of them changed in #155, and what property of their coupling is the reason?
+<details><summary>Answer</summary>
+<strong>Zero.</strong> They are coupled to a <em>value</em> (they read
+<code>world.state().timeOfDayHours()</code>) rather than to a <em>call</em> — none
+subscribes to a tick, none calls <code>advanceTime</code> itself, none caches an hour
+across frames. Swapping the writer is therefore invisible to every reader.</details></div>
+
+<div class="q"><strong>3.</strong> Name three consumer designs that would each have
+made this change expensive, and say what each would have cost.
+<details><summary>Answer</summary>
+(a) <strong>Event subscription</strong> (<code>onHourChanged</code>) — two publishers
+to reconcile plus ordering bugs when both fire. (b) <strong>Per-consumer timers</strong>
+(each holding its own <code>float myHour_</code>) — six independent drifts; the match
+could only ask nicely rather than drive. (c) <strong>Consumers calling
+<code>advanceTime()</code> themselves</strong> — six call sites to find, and the clock
+advancing six times per frame.</details></div>
+
+<div class="q"><strong>4.</strong> The issue demanded "exactly ONE owner of the clock
+— assert this rather than assuming it." Explain why a <code>bool matchRunning</code>
+plus two branches fails that requirement, and what was done instead.
+<details><summary>Answer</summary>
+A flag is a <em>second</em> representation of a fact, so it can disagree with reality,
+and branches scattered where each was convenient invite a third call site that no
+future reader will notice. Instead both owners collapse into the single free function
+<code>advanceWorldClock(state, match, dt)</code>: there is no other call site, and
+whether the <code>std::optional&lt;MatchClock&gt;</code> holds a value <em>is</em> the
+answer to "who owns the clock". One representation cannot drift from itself.</details></div>
+
+<div class="q"><strong>5.</strong> How was "free roam is byte-identical" actually
+established, and why does that beat reading the diff?
+<details><summary>Answer</summary>
+The same deterministic capture — <code>--frames 240 --camera 0 30 180</code> — was
+run against the pre-change binary and the post-change binary, and the two PNGs
+compared by md5 (<code>5d4937aa85c299c292597e6dbc276dae</code> both times). Fixed
+frame count plus fixed camera plus a deterministic world makes the artefact
+reproducible, which converts a judgement call ("looks the same to me") into a
+comparison that either holds or does not.</details></div>
+
+<div class="q"><strong>6.</strong> <code>MatchPhase::Intro</code> could have reused
+<code>Resolution</code> on "day zero" — same duration, same hold-the-clock behaviour.
+Give the argument against, in terms of downstream cost.
+<details><summary>Answer</summary>
+Every <code>switch</code> on <code>MatchPhase</code> downstream (the vote, the plaza
+gather, the phase HUD) would have to distinguish a real Resolution from the fake
+day-zero one, and each would have to get that condition right independently. One enum
+value is far cheaper than the same condition repeated at every site. A phase that
+means something different should not borrow another's name.</details></div>
+
+<div class="q"><strong>7.</strong> <code>Intro</code>, <code>Vote</code>,
+<code>Resolution</code> and <code>Ended</code> all hold the clock rather than sweeping
+it. What does <code>Intro</code> hold it at, what do the others hold it at, and why is
+that difference the whole justification for the separate enum value?
+<details><summary>Answer</summary>
+<code>Intro</code> holds at <code>dayStartHour</code> (09:00) — the day has not begun,
+and opening on a dusk sky would spend the diegetic countdown before the player has
+moved. Vote, Resolution and Ended hold at <code>dayEndHour</code> (20:00) — the day is
+spent, and letting the hour run during a slow vote would slide the town into full
+night and make the plaza gather unreadable. Sharing "hold the clock" while differing
+on <em>which value</em> to hold is exactly what a shared enum slot could not have
+expressed.</details></div>
+
+<div class="q"><strong>8.</strong> <code>MatchRules::dayEndHour</code> is 20.0 and
+<code>DayNight</code>'s dusk band is 18.0&rarr;21.0. Name the feature that overlap
+delivers, and the test that protects it.
+<details><summary>Answer</summary>
+The vote opens while the sky is visibly going orange, so the deadline is legible with
+<em>no HUD element at all</em> — the light is the countdown. Guarded by
+<code>"the vote opens inside the dusk band, so the light is the countdown"</code>,
+which asserts <code>dayEndHour</code> lies strictly inside
+<code>kDuskStart</code>&hellip;<code>kDuskEnd</code>. Without it, a later retune of
+either constant silently costs the game its only UI-free signalling and nothing
+fails.</details></div>
+
+<div class="q"><strong>9.</strong> <em>Written recall.</em> A colleague wants to add
+a "slow motion" debug mode that halves the passage of time. Where does it belong, and
+what must it <em>not</em> do?
+<details><summary>Answer</summary>
+It belongs at the single write site — scale <code>dt</code> on the way into
+<code>advanceWorldClock</code>, or scale the phase durations in
+<code>MatchRules</code>. It must <em>not</em> add a second place that writes
+<code>setTimeOfDayHours</code>, must not introduce a flag that duplicates "is a match
+running", and must not be applied inside any consumer — a consumer that scales its own
+copy of the hour re-creates precisely the per-consumer drift that made this change
+cheap to avoid.</details></div>
+
+</body>
+</html>

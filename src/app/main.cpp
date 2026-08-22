@@ -17,6 +17,7 @@
 #include <sstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -34,6 +35,7 @@
 #include "Gossip.hpp"
 #include "GroupSession.hpp"
 #include "Journal.hpp"
+#include "MatchClock.hpp"
 #include "Montage.hpp"
 #include "Mystery.hpp"
 #include "Storyline.hpp"
@@ -85,6 +87,33 @@ constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
 // tall and a six-metre sign would float unattached above it.
 inline float signHeightFor(const Building& b) {
     return std::fmin(b.height + 1.2f, 6.f);
+}
+
+// The ONE owner of the world clock, and the reason it is a function.
+//
+// Free roam ticks WorldState::advanceTime at a fixed scale. A match INVERTS
+// that: MatchClock owns pacing and drives the hour, so dusk lands exactly when
+// the vote opens. Both running in the same frame would give the day two
+// masters and make the dusk coupling meaningless.
+//
+// Routing both through one function is the enforcement. There is no second
+// call site to forget about, and no flag anyone can get wrong -- whether a
+// match exists IS the decision. Returns an unfired transition in free roam.
+//
+// That is topology, not proof: WorldState::advanceTime and setTimeOfDayHours
+// are both public, so a future feature could still become a second owner
+// without touching this function. WorldState::beginClockFrame (armed in the
+// loop below) is the runtime check that catches it -- a second, different
+// writer in the same frame trips an assert in debug builds.
+PhaseTransition advanceWorldClock(WorldState& state, std::optional<MatchClock>& match,
+                                  float dt) {
+    if (!match) {
+        state.advanceTime(dt);
+        return PhaseTransition{};
+    }
+    const PhaseTransition fired = match->advance(dt);
+    state.setTimeOfDayHours(match->worldHour());
+    return fired;
 }
 
 // Signage carries further than nameplates: a sign is how you find a place
@@ -241,6 +270,10 @@ int main(int argc, char** argv) {
     // so the mode was unreachable from the game (issue #220).
     bool bootMystery = false;
     unsigned mysterySeed = 20260809u;
+    // --match [seconds]: boot straight into a detective match (see the flag
+    // scan below). The optional value compresses the investigation phase.
+    bool bootMatch = false;
+    float matchInvestigationSeconds = -1.f;
     // --menu <page>: boot straight into a menu page. Every page but Main is
     // reached by clicking, which a headless --frames capture cannot do, so
     // none of them has ever been photographed (#216).
@@ -278,6 +311,25 @@ int main(int argc, char** argv) {
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--cutscene") == 0) {
                 bootCutscene = argv[arg + 1];
                 arg += 2;
+            } else if (std::strcmp(argv[arg], "--match") == 0) {
+                // Start a detective match at boot. The in-game entry is the
+                // menu's New Mystery, which a headless --frames capture cannot
+                // click -- and the match is the only way to see the clock
+                // inverted, so without this flag the feature is unphotographable.
+                bootMatch = true;
+                arg += 1;
+                // Optional investigation length in seconds, same shape as
+                // --mystery's optional seed (leading-dash check and all).
+                //
+                // A smoke run is ~15 real seconds at 900 frames while the real
+                // investigation is eight minutes, so a bare --match would show
+                // 3% of a day sweep -- indistinguishable from free roam in a
+                // screenshot. Compressing the phase is what makes the sky race
+                // to dusk inside a capture and the inversion actually visible.
+                if (arg < argc && argv[arg][0] != '-') {
+                    matchInvestigationSeconds = std::strtof(argv[arg], nullptr);
+                    arg += 1;
+                }
             } else if (std::strcmp(argv[arg], "--mystery") == 0) {
                 bootMystery = true;
                 arg += 1;
@@ -326,6 +378,26 @@ int main(int argc, char** argv) {
     World world(City::makeDowntown());
     // Smoke runs pin the clock so day/night screenshots are deterministic.
     if (hourOverride >= 0.f) world.state().setTimeOfDayHours(hourOverride);
+
+    // The detective match, when one is running. Empty IS free roam: the
+    // optional's state is the single source of truth for who owns the clock,
+    // which is why advanceWorldClock takes it rather than a bool.
+    //
+    // --match wins over --hour. The match drives the hour every frame, so an
+    // --hour set here would be overwritten on the first tick anyway; saying so
+    // is better than letting a smoke run silently ignore a flag it was given.
+    std::optional<MatchClock> match;
+    if (bootMatch) {
+        MatchRules rules;
+        if (matchInvestigationSeconds > 0.f) {
+            rules.investigationSeconds = matchInvestigationSeconds;
+            // Keep the intro proportionate, so a compressed match still spends
+            // most of its capture in the phase the sweep belongs to.
+            rules.introSeconds = std::fmin(rules.introSeconds,
+                                           matchInvestigationSeconds * 0.2f);
+        }
+        match.emplace(rules);
+    }
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
     for (const auto& err : personaErrors) std::cerr << "[llm_npc] persona error: " << err << "\n";
@@ -1646,8 +1718,32 @@ int main(int argc, char** argv) {
                 DisableCursor();
             }
         } else {  // Menu
+            // The menu needs one bit of match state to refuse a second New
+            // Mystery. Pushed rather than pulled so Menu keeps knowing
+            // nothing about MatchClock.
+            menu.setMatchActive(match.has_value());
             switch (menu.update(dt)) {
                 case MenuResult::Resume:
+                    mode = AppMode::Playing;
+                    DisableCursor();
+                    break;
+                case MenuResult::NewMystery:
+                    // A match is a mode you enter deliberately, never a state
+                    // free roam drifts into. Constructing the clock here is
+                    // what hands it ownership of the hour; from the next frame
+                    // advanceWorldClock takes the other branch.
+                    //
+                    // Menu refuses the click while a match is running (it
+                    // toasts instead), so this cannot silently discard a day
+                    // and a phase because someone missed Resume by one row.
+                    //
+                    // KNOWN GAP, owned by #157: nothing clears `match` once
+                    // the clock reaches MatchPhase::Ended. worldHour() then
+                    // holds at dayEndHour forever and free roam's day/night
+                    // never resumes. Ending a match cleanly -- consequences,
+                    // reveal, and the hand-back to free roam -- is that
+                    // issue's subject; this one only inverts the clock.
+                    match.emplace(MatchRules{});
                     mode = AppMode::Playing;
                     DisableCursor();
                     break;
@@ -1706,7 +1802,18 @@ int main(int argc, char** argv) {
         // The ONE world clock advances here; every time-aware system below
         // (schedules, day/night) reads this shared value — none keeps its
         // own. The town keeps living while the menu is open.
-        world.state().advanceTime(dt);
+        //
+        // Arms the one-owner-per-frame tripwire before anything can write the
+        // clock. See WorldState::beginClockFrame.
+        world.state().beginClockFrame();
+        //
+        // In a match the clock is DRIVEN rather than ticked, so the sky races
+        // to dusk as the investigation phase runs out. advanceWorldClock is
+        // the single owner either way; see its comment. The transition it
+        // returns is consumed by the gather (#156) and the phase HUD (#157) —
+        // nothing reads it yet, and dropping it here keeps this issue to the
+        // clock inversion it is about.
+        advanceWorldClock(world.state(), match, dt);
         const float worldHour = static_cast<float>(world.state().timeOfDayHours());
 
         // NPC behaviors keep running during dialogue, freeze in the menu;
