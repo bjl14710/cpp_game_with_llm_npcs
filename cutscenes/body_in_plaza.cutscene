@@ -1,0 +1,95 @@
+# The cold open: the morning the plaza finds a body.
+#
+# Plays once, on the first launch of a save, and never in a smoke run - a
+# capture harness that suddenly renders a 12-second camera move would break
+# every pixel-diff gate in the repo. Capture it deliberately instead:
+#
+#   ./cpp_game_with_llm_npcs --frames 620 shot.png --cutscene body_in_plaza
+#
+# ITS ONLY REAL JOB IS THE JOURNAL WRITE. The journal already renders
+# [conflicting accounts] in orange when two residents disagree on a subject -
+# a murder-investigation mechanic sitting finished with nothing to be
+# conflicted about. Opening `body_in_plaza` is what gives ten chatty residents
+# something to contradict each other about. The camera work is polish on top.
+#
+# Nobody is told they are a detective. The scene hands the player a name - Gus,
+# standing right there with a talk prompt when control returns - and the
+# conflicting-accounts colour does the rest.
+#
+# Geography: the plaza is the centre block (+-24 around the origin), Gus's cart
+# is authored at the origin itself (City.cpp "cart"), so shots frame toward
+# -Z from the plaza's south edge. Captions are ASCII only; the built-in font
+# renders anything else as "?".
+name = Body in the Plaza
+skippable = always
+letterbox = 96
+journal_subject = body_in_plaza
+journal_line = A body was found in the plaza around 05:40. Nobody is saying what they saw.
+
+# Title over black. The 44px headline is the game's existing big-moment voice -
+# the same size "You died." uses - and the sub-line states the hour, because in
+# a detective game the clock is evidence.
+beat = title
+  camera = 0.0, 26.0, 34.0
+  yaw = 180
+  pitch = -32
+  hold = 1.2
+  ease = hold
+  headline = LLM NPC CITY
+  caption = Downtown. Tuesday, 05:40.
+  fade_in = 0.9
+
+# Push in on the plaza at dawn. 05:40 sits inside DayNight's 05:00-07:00 dawn
+# window, so the sky does this part for free.
+beat = plaza
+  camera = 0.0, 14.0, 22.0
+  yaw = 180
+  pitch = -22
+  hold = 2.4
+  ease = smooth
+  slug = THE PLAZA - 05:40
+
+# Gus opens at five; he is the only one who would be there to find it.
+beat = gus
+  camera = 7.0, 3.0, 8.0
+  yaw = 200
+  pitch = -14
+  hold = 2.0
+  ease = smooth
+  slug = THE PLAZA - 05:41
+  speaker = Gus Romano: ...that's not a bag.
+
+# Two more arrive. Three witnesses on screen at once is three accounts that can
+# disagree, which is the whole game.
+beat = crowd
+  camera = -4.0, 3.4, 11.0
+  yaw = 165
+  pitch = -14
+  hold = 2.0
+  ease = smooth
+  slug = THE PLAZA - 05:42
+  speaker = Yuki Tanaka: Don't photograph it. Don't photograph it.
+
+# Brooks takes the scene. Her line sets the rules: everyone stays, everyone
+# talks, nobody touches anything.
+beat = brooks
+  camera = 1.0, 2.2, 6.0
+  yaw = 185
+  pitch = -12
+  hold = 2.0
+  ease = smooth
+  slug = THE PLAZA - 05:44
+  speaker = Officer Dana Brooks: Nobody touches anything. Nobody leaves the block.
+
+# The card. This is the beat that converts residents into suspects.
+beat = case
+  hold = 1.6
+  ease = hold
+  headline = Body in the Plaza
+  caption = Ten residents. All of them talk. One of them is lying.
+
+# Control returns: letterbox out, HUD back, Gus standing right there.
+beat = handoff
+  hold = 0.8
+  ease = hold
+  fade_out = 0.5

@@ -794,3 +794,178 @@ TEST_CASE("the shipped win.cutscene parses and is ASCII") {
         for (const char c : beat.caption) CHECK(static_cast<unsigned char>(c) <= 126u);
     }
 }
+
+// ---- overlay text and the journal write (issue #280) -----------------------
+//
+// These keys exist because every dramatic moment the game had before them was
+// one line of HUD text. The journal write is the load-bearing one: it is what
+// opens a subject key for ten residents to contradict each other about.
+
+TEST_CASE("slug, speaker and headline parse onto their beats") {
+    const char* const text = R"(name = Cold Open
+journal_subject = body_in_plaza
+journal_line = A body was found in the plaza around 05:40.
+
+beat = title
+  hold = 1.2
+  headline = LLM NPC CITY
+  caption = Downtown. Tuesday, 05:40.
+
+beat = gus
+  hold = 2.0
+  slug = THE PLAZA - 05:41
+  speaker = Gus Romano: ...that's not a bag.
+)";
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(text, "overlay_keys", &errors);
+
+    CHECK(errors.empty());
+    REQUIRE(scene.beats.size() == 2);
+    CHECK(scene.beats[0].headline == "LLM NPC CITY");
+    CHECK(scene.beats[0].caption == "Downtown. Tuesday, 05:40.");
+    CHECK(scene.beats[0].slug.empty());
+    CHECK(scene.beats[1].slug == "THE PLAZA - 05:41");
+    CHECK(scene.beats[1].speakerLine == "Gus Romano: ...that's not a bag.");
+    CHECK(scene.journalSubject == "body_in_plaza");
+    CHECK(scene.journalLine == "A body was found in the plaza around 05:40.");
+}
+
+TEST_CASE("journal_subject is normalized, not trusted") {
+    // The journal compares subject keys EXACTLY, so an authored "Body In
+    // Plaza" reaching the bus unnormalized would open a second subject that no
+    // testimony can ever join — the conflict pass would never fire.
+    const char* const text = R"(beat = a
+  hold = 1.0
+)";
+    std::string withSubject =
+        std::string("journal_subject = Body In Plaza!\njournal_line = A body.\n") +
+        text;
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(withSubject, "subject_norm", &errors);
+    CHECK(scene.journalSubject == "body_in_plaza");
+    CHECK(errors.empty());
+}
+
+TEST_CASE("a journal_subject that normalizes to nothing is reported") {
+    const char* const text = R"(journal_subject = !!!
+beat = a
+  hold = 1.0
+)";
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(text, "subject_empty", &errors);
+    CHECK(scene.journalSubject.empty());
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].find("normalizes to nothing") != std::string::npos);
+}
+
+TEST_CASE("non-ASCII is reported in every author-facing string, not just captions") {
+    // The built-in bitmap font has glyphs for 32-126 and renders anything else
+    // as a literal "?". An em-dash in a slug is exactly as invisible a failure
+    // as one in a caption.
+    const char* const text =
+        "journal_subject = body_in_plaza\n"
+        "journal_line = A body \xE2\x80\x94 in the plaza.\n"
+        "beat = a\n"
+        "  hold = 1.0\n"
+        "  slug = THE PLAZA \xE2\x80\x94 05:40\n"
+        "  speaker = Gus: it\xE2\x80\x99s not a bag.\n"
+        "  headline = Body \xE2\x80\x94 in the Plaza\n";
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(text, "non_ascii_all", &errors);
+
+    // Four separate reports: journal_line, slug, speaker, headline.
+    CHECK(errors.size() == 4);
+    for (const std::string& e : errors) {
+        CHECK(e.find("non-ASCII") != std::string::npos);
+    }
+    // Still usable — a typo must not cost the whole scene.
+    CHECK(scene.beats.size() == 1);
+}
+
+TEST_CASE("an overlong journal_line is trimmed to the bus's limit and reported") {
+    const std::string longLine(200, 'x');
+    const std::string text = "journal_subject = body_in_plaza\njournal_line = " +
+                             longLine + "\nbeat = a\n  hold = 1.0\n";
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(text, "long_journal", &errors);
+    CHECK(scene.journalLine.size() == 140);
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].find("trimmed") != std::string::npos);
+}
+
+TEST_CASE("the player reports the playing beat's overlay text") {
+    CutsceneDef scene;
+    scene.id = "overlay_play";
+    scene.skippable = Skippable::Always;
+    scene.journalSubject = "body_in_plaza";
+    scene.journalLine = "A body was found in the plaza.";
+    CutsceneBeat a;
+    a.id = "a";
+    a.hold = 1.f;
+    a.slug = "THE PLAZA - 05:40";
+    CutsceneBeat b;
+    b.id = "b";
+    b.hold = 1.f;
+    b.headline = "Body in the Plaza";
+    b.speakerLine = "Gus Romano: that's not a bag.";
+    scene.beats = {a, b};
+
+    CutscenePlayer player;
+    player.setFixedStep(true);
+    player.play(scene, CameraPose{});
+
+    CHECK(player.slug() == "THE PLAZA - 05:40");
+    CHECK(player.headline().empty());
+    // The scene-level journal write is readable from the first frame, so the
+    // app can apply it on any exit — including a skip.
+    CHECK(player.journalSubject() == "body_in_plaza");
+
+    // Into the second beat: 1.0s of holds at a 1/60 fixed step.
+    for (int i = 0; i < 61; ++i) player.advance(0.016f);
+    CHECK(player.beatIndex() == 1);
+    CHECK(player.headline() == "Body in the Plaza");
+    CHECK(player.speakerLine() == "Gus Romano: that's not a bag.");
+    CHECK(player.slug().empty());
+
+    // Skipping does not erase the write the app still has to apply.
+    player.skip();
+    CHECK(player.journalSubject() == "body_in_plaza");
+    CHECK(player.journalLine() == "A body was found in the plaza.");
+}
+
+TEST_CASE("the shipped cold open is loadable, ASCII-clean and 12 seconds") {
+    // The authored scene itself, not a fixture: a non-ASCII character or a
+    // drifted duration in the real file is exactly the failure these keys were
+    // added to catch, and no other test reads cutscenes/.
+    // Walk up to wherever cutscenes/ lives, the same way the roster test finds
+    // personas/ — the test binary's working directory is not fixed.
+    std::filesystem::path dir = "cutscenes";
+    for (int i = 0; i < 4 && !std::filesystem::exists(dir); ++i) dir = ".." / dir;
+    REQUIRE(std::filesystem::exists(dir));
+
+    std::vector<std::string> errors;
+    const std::vector<CutsceneDef> all = loadCutscenes(dir, &errors);
+    const CutsceneDef* cold = findCutscene(all, "body_in_plaza");
+    REQUIRE(cold != nullptr);
+    CHECK(errors.empty());
+    CHECK(cold->beats.size() == 7);
+    CHECK(cold->journalSubject == "body_in_plaza");
+    CHECK(cold->duration() == doctest::Approx(12.0f));
+    CHECK(cold->skippable == Skippable::Always);
+}
+
+TEST_CASE("half a journal pair is refused rather than silently doing nothing") {
+    // A scene carrying only one of the two keys would never write its fact, and
+    // anything using that fact as an "already played" test would replay the
+    // scene on every launch forever.
+    const char* const text = R"(journal_subject = body_in_plaza
+beat = a
+  hold = 1.0
+)";
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(text, "half_journal", &errors);
+    CHECK(scene.journalSubject.empty());
+    CHECK(scene.journalLine.empty());
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].find("both be set or both omitted") != std::string::npos);
+}
