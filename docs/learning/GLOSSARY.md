@@ -88,3 +88,18 @@ Terms the learner has demonstrably grasped are added here.
   here, everything in `src/app/`.
 - **deferred-frame handoff** — acting one frame after a transition so same-frame
   consumers still see the state that produced it.
+- **invalid instrument** — apparatus producing plausible numbers about the wrong
+  thing. A bug gives a wrong answer you notice; this gives a believable one forever.
+- **behaviour export** — crossing a language boundary by having the owning language
+  print its result, rather than re-deriving it.
+- **hand-synced duplicate** — a copy kept in step by discipline alone.
+- **fail closed (measurement boundary)** — refusing output on bad input where the
+  product would degrade and continue.
+- **zero-byte refusal** — printing no partial result, so a broken fixture cannot be
+  mistaken for data.
+- **identity check** — asserting a new path is byte-for-byte equal to the existing
+  one where they should agree.
+- **residue testing** — testing only what an existing harness demonstrably does not
+  cover.
+- **pointer-into-argument** — a function returning a pointer into a container it was
+  passed; the inline call form dangles.

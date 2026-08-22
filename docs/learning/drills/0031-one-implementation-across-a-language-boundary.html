@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0031 — One Implementation Across a Language Boundary</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #47a; padding-bottom: .4rem; }
+  .q { background: #f2f6fb; border-left: 4px solid #47a; padding: .8rem 1rem;
+       margin: 1.2rem 0; border-radius: 0 6px 6px 0; }
+  details { margin: .5rem 0 0 .5rem; }
+  summary { cursor: pointer; color: #247; font-weight: 600; }
+  code, pre { background: #f4f4f6; border-radius: 4px; padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Drill 0031 — One Implementation Across a Language Boundary</h1>
+<p>Answer before expanding. Source: lesson 0031, issue #304.</p>
+
+<div class="q"><strong>1.</strong> A Python harness needs a prompt that C++
+assembles. Give the two options and say which this codebase takes.
+<details><summary>Answer</summary>
+Re-implement the assembly in Python, or add a mode to an existing C++ tool that
+prints it and shell out. The codebase takes the second — <code>persona_prompt
+--state</code> — and had already taken it once before for reply parsing with
+<code>--parse</code>.
+</details></div>
+
+<div class="q"><strong>2.</strong> "Duplication is a maintenance cost" understates
+the problem here. Why?
+<details><summary>Answer</summary>
+The probe exists to measure the consequences of the role block's PLACEMENT. A
+Python copy would have its own placement, so the measurement would be of the copy
+rather than of the game — and would look exactly like a real result. That is not a
+bug you eventually notice; it is an invalid instrument producing plausible answers
+indefinitely.
+</details></div>
+
+<div class="q"><strong>3.</strong> The comment above <code>--parse</code> names a
+sibling tool that took the shortcut. Which, and why does citing it strengthen the
+argument?
+<details><summary>Answer</summary>
+<code>tools/bench_npc_models.py</code>, which duplicates the mood keyword list in
+Python and whose own comment admits it has to be hand-synced. The codebase
+contains both the pattern and the counterexample, with the counterexample
+conceding fault — the failed variant is usually more instructive than the
+successful one.
+</details></div>
+
+<div class="q"><strong>4.</strong> What is the actual payload of
+<code>stateMode()</code>, and what is everything else in the function?
+<details><summary>Answer</summary>
+One line: the call to the same <code>renderSystemPrompt</code> overload, with the
+same argument order, that <code>Npc::ask</code> uses. Everything else is argument
+preparation — loading the persona, resolving traits, finding the role, rendering
+the role block.
+</details></div>
+
+<div class="q"><strong>5.</strong> The game demotes an unknown trait id with a log;
+the tool refuses. Both are correct. Explain.
+<details><summary>Answer</summary>
+They answer to different worst outcomes. For the game it is "a player loses a
+character over a typo", so it degrades and continues. For a measurement it is "a
+number that means nothing", so it refuses. A measurement taken with a silently
+missing trait is worse than no measurement, because it still produces a number and
+that number enters a comparison.
+</details></div>
+
+<div class="q"><strong>6.</strong> Why does every failure path print zero bytes
+rather than a partial prompt?
+<details><summary>Answer</summary>
+A partial prompt reads as a result rather than as a broken fixture. The one
+outcome a probe must never be handed is something that looks like data but is not.
+</details></div>
+
+<div class="q"><strong>7.</strong> Which single check carries most of the weight,
+and what does it protect?
+<details><summary>Answer</summary>
+An uncast persona must render BYTE-IDENTICALLY through <code>--state</code> and
+through the plain mode. Probes work by comparing a prompt with a role block
+against one without; if the two paths differ by even a newline, that comparison
+measures the tool instead of the role — and still yields a number.
+</details></div>
+
+<div class="q"><strong>8.</strong> Why is <code>findRole</code>'s result bound
+through a named vector rather than called inline?
+<details><summary>Answer</summary>
+It returns a pointer INTO its argument. <code>findRole(loadAllRoles(dir), id)</code>
+dangles the moment the statement ends — <code>Role.hpp:104</code> records that this
+is how a test failed the first time it ran, passing the null check and then reading
+freed memory.
+</details></div>
+
+<div class="q"><strong>9.</strong> Why is the contract checked by a shell script
+rather than doctest, and what is the reusable reasoning?
+<details><summary>Answer</summary>
+<code>tests/Makefile</code> globs <code>src/core/*.cpp</code> and nothing else, so
+<code>tools/</code> is outside the test binary. The reasoning: rather than treating
+"untestable in the harness" as untestable, identify what the harness DOES cover
+(the core contract is pinned at <code>test_role.cpp:294</code>) and write a check
+for the residue — whether the tool passes the right arguments to already-tested
+code.
+</details></div>
+
+<div class="q"><strong>10.</strong> State the four-part general shape.
+<details><summary>Answer</summary>
+Export the behaviour rather than re-deriving it; weigh duplication by what the copy
+is used for; fail closed at a measurement boundary even where the product fails
+open; pin the seam with an identity check against the path that already worked.
+</details></div>
+</body>
+</html>
