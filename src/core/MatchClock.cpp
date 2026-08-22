@@ -125,4 +125,18 @@ void MatchClock::endMatch() {
     elapsedInPhase_ = 0.f;
 }
 
+const char* phaseName(MatchPhase phase) {
+    switch (phase) {
+        case MatchPhase::Intro: return "Intro";
+        case MatchPhase::Investigation: return "Investigation";
+        case MatchPhase::Vote: return "Vote";
+        case MatchPhase::Resolution: return "Resolution";
+        case MatchPhase::Ended: return "Ended";
+    }
+    // Unreachable for a valid enumerator; present because a function with a
+    // declared return type must return on every path, not as a fallback for a
+    // phase somebody forgot to add above. The missing case is a warning.
+    return "Ended";
+}
+
 }  // namespace llm_npc

@@ -1,4 +1,6 @@
 // Match day counter and phase machine (issues #154, #155).
+#include <algorithm>
+#include <string>
 #include <vector>
 
 #include "DayNight.hpp"
@@ -247,3 +249,64 @@ TEST_CASE("a zero-length intro is clamped like every other phase") {
     CHECK(clock.phase() == MatchPhase::Intro);
     CHECK(clock.phaseProgress() == doctest::Approx(0.f));  // finite, not NaN
 }
+
+TEST_CASE("every phase has an ASCII name and none of them collide") {
+    // The HUD (#157) and the vote UI (#224) both name phases. This is the
+    // reason there is one table rather than two switch statements.
+    const MatchPhase all[] = {MatchPhase::Intro, MatchPhase::Investigation,
+                              MatchPhase::Vote, MatchPhase::Resolution,
+                              MatchPhase::Ended};
+    std::vector<std::string> seen;
+    for (const MatchPhase phase : all) {
+        const std::string name = phaseName(phase);
+        CAPTURE(name);
+        CHECK_FALSE(name.empty());
+        // raylib's built-in font substitutes '?' above 126, so a non-ASCII
+        // phase name would reach the screen as punctuation.
+        for (const char c : name) {
+            CHECK(static_cast<unsigned char>(c) >= 32);
+            CHECK(static_cast<unsigned char>(c) <= 126);
+        }
+        CHECK(std::find(seen.begin(), seen.end(), name) == seen.end());
+        seen.push_back(name);
+    }
+    CHECK(seen.size() == 5);
+}
+
+TEST_CASE("the day length the menu shows round-trips through MatchRules") {
+    // The Match page edits MINUTES; MatchRules stores real SECONDS. A
+    // conversion that does not round-trip would make a setting drift by a
+    // minute every time the page is reopened.
+    for (int minutes = 2; minutes <= 20; ++minutes) {
+        MatchRules rules;
+        rules.investigationSeconds = static_cast<float>(minutes) * 60.f;
+        const int shown = static_cast<int>(rules.investigationSeconds / 60.f + 0.5f);
+        CAPTURE(minutes);
+        CHECK(shown == minutes);
+    }
+}
+
+TEST_CASE("the default rules are the settings page's advertised defaults") {
+    // The issue states 3 days and 8 minutes. Stating them in MatchRules alone
+    // means main.cpp does not restate them, so they cannot disagree.
+    const MatchRules rules;
+    CHECK(rules.dayLimit == 3);
+    CHECK(static_cast<int>(rules.investigationSeconds / 60.f + 0.5f) == 8);
+}
+
+TEST_CASE("a match that ends by day limit fires nothing afterwards") {
+    // src/app/main.cpp hands the clock back to free roam on the first frame
+    // AFTER the Ended transition, keyed on `!fired`. That is only safe while
+    // Ended is genuinely terminal on the natural path too -- "endMatch is
+    // idempotent" pins the manual one. If a future phase machine loops out of
+    // Ended, the hand-back silently stops happening and the sky freezes at
+    // dusk, so the invariant is pinned here rather than left implied.
+    MatchClock clock(fastRules());
+    run(clock, 1.f, 400);
+    REQUIRE(clock.phase() == MatchPhase::Ended);
+    for (int i = 0; i < 50; ++i) {
+        CHECK_FALSE(clock.advance(1.f).fired);
+        CHECK(clock.phase() == MatchPhase::Ended);
+    }
+}
+

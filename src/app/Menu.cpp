@@ -32,6 +32,20 @@ constexpr int kIdAvatar = 6;
 constexpr int kIdSandbox = 7;
 constexpr int kIdModels = 8;
 constexpr int kIdNewMystery = 9;
+constexpr int kIdMatchSettings = 10;
+// Match-settings page: two values, each with a decrement and an increment.
+constexpr int kIdDaysDown = 800;
+constexpr int kIdDaysUp = 801;
+constexpr int kIdLengthDown = 802;
+constexpr int kIdLengthUp = 803;
+// Bounds for the two settings. A day limit of 1 is a legitimate one-day
+// mystery; 7 is where a session stops being one sitting. Day length is
+// bounded below by "long enough to walk across downtown and hold two
+// conversations" and above by the same sitting argument.
+constexpr int kDayLimitMin = 1;
+constexpr int kDayLimitMax = 7;
+constexpr int kDayMinutesMin = 2;
+constexpr int kDayMinutesMax = 20;
 constexpr int kIdModelBase = 700;
 constexpr int kMaxModelRows = 8;
 // Sandbox page: New button + one row per saved map (capped by layout).
@@ -119,6 +133,35 @@ void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
 
 void Menu::setModels(ModelHooks hooks) { models_ = std::move(hooks); }
 
+void Menu::setMatchSettings(MatchHooks hooks) { matchSettings_ = std::move(hooks); }
+
+void Menu::nudgeMatchSetting(int id) {
+    if (!matchSettings_.onChange || !matchSettings_.dayLimit ||
+        !matchSettings_.dayMinutes) {
+        return;
+    }
+    int days = matchSettings_.dayLimit();
+    int minutes = matchSettings_.dayMinutes();
+    if (id == kIdDaysDown) --days;
+    else if (id == kIdDaysUp) ++days;
+    else if (id == kIdLengthDown) --minutes;
+    else if (id == kIdLengthUp) ++minutes;
+    // Clamped rather than refused: a click at either end is a no-op instead
+    // of a toast saying so, which would be noise for the one input a player
+    // can see the result of directly. MatchRules clamps again on
+    // construction; this bound is about what the page will offer, not about
+    // what the clock will accept.
+    days = std::clamp(days, kDayLimitMin, kDayLimitMax);
+    minutes = std::clamp(minutes, kDayMinutesMin, kDayMinutesMax);
+    matchSettings_.onChange(days, minutes);
+    // Say it once per edit rather than only on the page's static line: a
+    // player changing settings DURING a match is exactly the person who will
+    // otherwise assume it took effect and wonder why the day did not change.
+    if (matchSettings_.active && matchSettings_.active()) {
+        showToast("Saved - applies to the next mystery, not this one.");
+    }
+}
+
 void Menu::setTraitChoices(std::vector<std::string> ids) {
     traitChoices_ = std::move(ids);
     creatorTraitIndex_ = 0;
@@ -141,13 +184,31 @@ std::vector<Menu::Hit> Menu::layout() const {
     std::vector<Hit> hits;
 
     if (page_ == Page::Main) {
+        const int ids[] = {kIdResume,  kIdNewMystery,   kIdControls, kIdMultiplayer,
+                           kIdCreator, kIdAvatar,       kIdJournal,  kIdSandbox,
+                           kIdModels,  kIdMatchSettings, kIdQuit};
+        // Derived from the row count rather than a fixed offset and step.
+        //
+        // The previous form started at `h * 0.5f - 326.f` and stepped 72,
+        // which put the tenth row's bottom edge at y = 734 in the fixed
+        // 1280x720 window — Quit was already 14px off-screen before this issue
+        // added an eleventh row, and the arithmetic gave no hint of it. Fitting
+        // the list to the space available means adding a row can crowd the
+        // buttons but can never push one out of the window.
+        const int rows = static_cast<int>(std::size(ids));
+        // Below the page title, which render() draws at h * 0.12 in size 40.
+        // The first attempt at this started at h * 0.10 and put "Resume"
+        // straight through the word "Paused" -- the list has to start under
+        // the title, not under the top of the screen.
+        const float top = h * 0.20f;
+        const float bottom = h * 0.94f;
+        const float step = std::min(72.f, (bottom - top) / static_cast<float>(rows));
+        const float height = std::min(52.f, step - 6.f);
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 326.f;
-        for (int id : {kIdResume, kIdNewMystery, kIdControls, kIdMultiplayer,
-                       kIdCreator, kIdAvatar, kIdJournal, kIdSandbox, kIdModels,
-                       kIdQuit}) {
-            hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
-            y += 72.f;
+        float y = top + ((bottom - top) - step * static_cast<float>(rows)) * 0.5f;
+        for (const int id : ids) {
+            hits.push_back({Rectangle{x, y, 320.f, height}, id});
+            y += step;
         }
     } else if (page_ == Page::Journal) {
         // Rows draw in render(); only paging + back are clickable.
@@ -200,6 +261,19 @@ std::vector<Menu::Hit> Menu::layout() const {
         for (int i = 0; i < rows; ++i) {
             hits.push_back({Rectangle{x, y, 420.f, 44.f}, kIdMapBase + i});
             y += 56.f;
+        }
+        hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 44.f}, kIdBack});
+    } else if (page_ == Page::Match) {
+        // Two rows, each "- value +": the minus and plus are the clickable
+        // parts and render() draws the value between them.
+        const float x = (w - 420.f) * 0.5f;
+        float y = h * 0.34f;
+        for (const std::pair<int, int> pair :
+             {std::pair<int, int>{kIdDaysDown, kIdDaysUp},
+              std::pair<int, int>{kIdLengthDown, kIdLengthUp}}) {
+            hits.push_back({Rectangle{x, y, 64.f, 44.f}, pair.first});
+            hits.push_back({Rectangle{x + 356.f, y, 64.f, 44.f}, pair.second});
+            y += 96.f;
         }
         hits.push_back({Rectangle{(w - 320.f) * 0.5f, h * 0.86f, 320.f, 44.f}, kIdBack});
     } else if (page_ == Page::Model) {
@@ -369,6 +443,11 @@ MenuResult Menu::update(float dt) {
                 page_ = Page::Sandbox;
                 sandboxMaps_ = sandbox_.listMaps ? sandbox_.listMaps()
                                                  : std::vector<std::string>{};
+            } else if (hit.id == kIdMatchSettings) {
+                page_ = Page::Match;
+            } else if (hit.id == kIdDaysDown || hit.id == kIdDaysUp ||
+                       hit.id == kIdLengthDown || hit.id == kIdLengthUp) {
+                nudgeMatchSetting(hit.id);
             } else if (hit.id == kIdModels) {
                 page_ = Page::Model;
                 modelList_ = models_.listModels ? models_.listModels()
@@ -589,11 +668,26 @@ void Menu::render() const {
     const unsigned char dim = page_ == Page::Creator ? 90 : 170;
     DrawRectangle(0, 0, static_cast<int>(w), static_cast<int>(h), Color{8, 10, 16, dim});
 
-    const char* title = page_ == Page::Main       ? "Paused"
-                        : page_ == Page::Controls ? "Controls"
-                        : page_ == Page::Creator  ? "Create a Character"
-                        : page_ == Page::Journal  ? "Journal"
-                                                  : "Multiplayer";
+    // A switch with NO `default:` label, so adding a page is a compiler
+    // warning rather than a page silently wearing another's name.
+    //
+    // The chain this replaces ended in `: "Multiplayer"`, which meant the
+    // Sandbox and Model pages had both been titled "Multiplayer" since they
+    // were added -- nothing failed, nothing warned, and the screenshot for
+    // this issue is what finally showed it. A trailing default in a
+    // page-to-string mapping cannot distinguish "the last case" from "a case
+    // nobody wrote".
+    const char* title = "Paused";
+    switch (page_) {
+        case Page::Main: title = "Paused"; break;
+        case Page::Controls: title = "Controls"; break;
+        case Page::Creator: title = "Create a Character"; break;
+        case Page::Journal: title = "Journal"; break;
+        case Page::Multiplayer: title = "Multiplayer"; break;
+        case Page::Sandbox: title = "Sandbox Maps"; break;
+        case Page::Model: title = "LLM Model"; break;
+        case Page::Match: title = "Match Settings"; break;
+    }
     drawCenteredLine(title, 40, h * 0.12f, Color{235, 240, 250, 255});
 
     if (page_ == Page::Journal) {
@@ -641,6 +735,23 @@ void Menu::render() const {
         drawCenteredLine("Click a key, then press the new key. Esc cancels.", 18,
                          h * 0.24f - 40.f, Color{170, 180, 200, 255});
     }
+    if (page_ == Page::Match) {
+        const int days = matchSettings_.dayLimit ? matchSettings_.dayLimit() : 0;
+        const int minutes = matchSettings_.dayMinutes ? matchSettings_.dayMinutes() : 0;
+        // 20 and 30, not 16 and 18: raylib's built-in font computes glyph
+        // advance by integer division, so every size from 14 to 18 spaces
+        // identically and a "slightly bigger" heading would render the same
+        // size as the body text (see AsciiText.hpp).
+        drawCenteredLine("Applies to the NEXT mystery, not one already running.",
+                         20, h * 0.24f, Color{170, 180, 200, 255});
+        drawCenteredLine("Days: " + std::to_string(days), 30, h * 0.34f + 6.f,
+                         Color{225, 230, 240, 255});
+        drawCenteredLine("Day length: " + std::to_string(minutes) + " min", 30,
+                         h * 0.34f + 102.f, Color{225, 230, 240, 255});
+        drawCenteredLine(
+            "Dusk falls as the day runs out - the sky is the timer.", 20,
+            h * 0.62f, Color{140, 150, 170, 255});
+    }
 
     const Vector2 mouse = GetMousePosition();
     for (const Hit& hit : layout()) {
@@ -660,6 +771,9 @@ void Menu::render() const {
         else if (hit.id == kIdAvatar) label = "Edit My Avatar";
         else if (hit.id == kIdSandbox) label = "Sandbox Maps";
         else if (hit.id == kIdModels) label = "LLM Model";
+        else if (hit.id == kIdMatchSettings) label = "Match Settings";
+        else if (hit.id == kIdDaysDown || hit.id == kIdLengthDown) label = "-";
+        else if (hit.id == kIdDaysUp || hit.id == kIdLengthUp) label = "+";
         else if (hit.id >= kIdModelBase && hit.id < kIdModelBase + kMaxModelRows) {
             const std::size_t index = static_cast<std::size_t>(hit.id - kIdModelBase);
             label = index < modelList_.size() ? modelList_[index] : "?";
@@ -755,6 +869,7 @@ std::optional<Menu::Page> Menu::pageFromName(const std::string& name) {
     if (name == "journal") return Page::Journal;
     if (name == "sandbox") return Page::Sandbox;
     if (name == "model") return Page::Model;
+    if (name == "match") return Page::Match;
     return std::nullopt;
 }
 
