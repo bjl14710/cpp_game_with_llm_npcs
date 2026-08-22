@@ -168,3 +168,16 @@ boundary — `tests/Makefile` globs only `src/core/*.cpp`, so all of `src/app/` 
 verified by capture or not at all.
 
 Files: lessons/0030, drills/0030 (15 questions), vocab/0029 (13 terms), GLOSSARY.
+
+### Lesson 0031 — One Implementation Across a Language Boundary
+From issue #304 (persona_prompt --state), PR #312.
+
+Covered: why re-implementing prompt assembly in Python would produce an invalid
+instrument rather than merely duplicated code (placement is what the probe
+measures); the `--parse` precedent and the codebase's own admitted counterexample
+in bench_npc_models.py; inverting the unknown-id policy at a measurement boundary
+(the game demotes, the tool refuses) and why zero-byte refusal matters; the
+byte-identity check as the thing that keeps the seam honest; residue testing against
+a known harness boundary; the pointer-into-argument hazard in findRole.
+
+Files: lessons/0031, drills/0031 (10 questions), vocab/0030 (8 terms), GLOSSARY.
