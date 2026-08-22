@@ -1,893 +1,147 @@
 # Overnight Build Report
-Date: 2026-07-14 (session 9 — milestone #17: stylized character assets)
+Date: 2026-08-21
+Issues attempted: 5 (4 completed, 1 skipped)
 
 ## Summary
-Issues #137–#143 (7 of 7) shipped on `feature/stylized-characters` (base
-dev), one atomic commit each. The game's characters moved to a committed
-cartoon style: Quaternius CC0 modular mesh characters assembled through the
-existing socket/size-contract system, a banded cel shader composed with the
-fog stage, black inverted-hull outlines on every character surface
-(including the first-person arm), flat texture face decals with mood
-variants replacing the emote billboard for the new family, all ten personas
-re-authored, and — the session's big win — real rigged Idle/Walk locomotion
-after root-causing a bind-vs-rest pose mismatch between the pack and
-raylib's skinning convention.
+
+Four issues completed with draft PRs, all stacked on the unmerged #155 work.
+Two of them turned up **pre-existing bugs that nothing was going to catch** —
+the Sandbox and Model menu pages have been titled "Multiplayer" since they were
+added, and the main menu's Quit button has been rendering 14px off-screen. Both
+were found by looking at screenshots, not by tests, and both are fixed.
+
+The night's most substantive result is #200: the role leak probe now runs
+against a real model for the first time and says the mystery's headline exploit
+is closed — but that the secret-keepers are **not providing the cover the design
+says they provide**. The killer is defended by an entirely different, undocumented
+mechanism. That is a design finding, not a bug, and it needs a human decision.
+
+A milestone of 11 issues (#299-#309) was also planned and filed for the two-loop
+NPC dialogue measurement system, with scaffolds on disk.
 
 ## Completed ✅
-| Issue | Title | Commit |
-|-------|-------|--------|
-| #137 | fetch Quaternius modular pack, pinned + provenance | fa63be3 |
-| #138 | banded cel shader composed with fog + mesh outlines | 165141b |
-| #139 | quaternius mesh part family through the pack seam | 71002ab |
-| #140 | flat texture faces + creator picks + mood variants | da9fffa |
-| #141 | unified rollout — NPCs, creator, avatar together | f9639a5 |
-| #142 | Tier-B rigged locomotion with bone-attached parts | d38ea32 |
-| #143 | three-consumer style gate (consistency + no-uncanny) | 7ea9a96 |
 
-## Decisions logged (autonomy calls)
-- **#137 acquisition:** quaternius.com distributes only via a Google Drive
-  folder (unpinnable, not automatable). Fetched a GitHub mirror
-  (hukasu/bevy-modular-characters) pinned by commit + sha256 — CC0 permits
-  mirroring; provenance note in assets/LICENSES.md. A second mirror with
-  the original date-stamped pack exports (agentkaerf/FreeModels) was
-  probed during #142 and confirmed byte-different but behaviorally
-  identical for our purposes; no fetch change needed.
-- **#138 banding normals:** rlgl batch primitives only carry normals for
-  cubes (spheres/cylinders push none), so the cel shader derives flat
-  facet normals from screen-space derivatives of world position — one
-  program correctly bands batch primitives, skinned meshes, and part
-  meshes. Shadow floor lifted 0.62→0.70 over the pack's dark palette.
-- **#139 strict family:** the mesh family is authored in real glTF units
-  (~4x smaller than core parts), so the "any" style-bridge tag deliberately
-  does not reach it (tagsCompatible). Proportion window for the family is
-  0.14–0.28 (measured 0.159–0.269; realistically-proportioned pack), with
-  the core Mii window 0.48–0.60 now scoped to core parts.
-- **#139/#141 palette semantics:** mesh parts keep their baked material
-  colors; palettes still drive face-mark/decal tint + the viewmodel arm.
-  Listed as the family's known non-feature, not hidden.
-- **#142 root cause (the session's find):** the pack stores skinned
-  vertices in T-pose BIND space over an arms-DOWN REST skeleton; raylib
-  never reads inverseBindMatrices and assumes bind==rest, so arm deltas
-  came out ~identity ("fingers move, shoulders don't"). Fixed by re-baking
-  vertices into rest space once at load (restGlobal × IBM per joint, IBMs
-  parsed from the glTF's own JSON). This fixed the static stance AND made
-  clips play as authored — Tier B landed inside its timebox instead of
-  being dropped.
-- **#143 gate:** first run FAILED style-consistency with a concrete
-  finding (viewmodel had cel shading but no outline pass). Fixed
-  (per-shape inverted hull on the prop), re-judged: PASS. No-uncanny
-  passed first run.
-
-## Known limitations / follow-up candidates
-- KayKit rigged fallbacks (multiplayer-only surface) shade richer than the
-  modular family — mild style gap, judge-noted, worth a small follow-up.
-- Flat face decals can partially hide behind the face at very steep
-  viewing angles (45°+); normal gameplay angles read correctly.
-- Composite locomotion clock is continuous (idle↔walk transitions jump
-  mid-cycle); per-NPC clock offsets prevent unison. Fine at plaza density.
-- Minor witch hat/hair clipping at some angles (cosmetic).
-
-## Test Status
-Suite green throughout: 221 cases / 235,580 assertions (was 217/32,205 at
-session start — the exhaustive combo test absorbed the new family). One
-skipped: llm_live (needs a running model; deliberate).
-
-## Visual QA
-Gate verdicts recorded in the #143 commit; screenshots (local-only) in
-docs/qa/screenshots/stylized/: 137 (n/a), 138_cel_day/night,
-138_rigged_day/night, 138_chars, 139_family, 140_faces, 141_plaza(2),
-142_anim, 142_plaza_anim, 143_three_consumers.
-
-## Learning Materials (local-only)
-| Concept | Lesson | Drill | Vocab |
-|---------|--------|-------|-------|
-| Bind pose vs rest pose in glTF skinning | 0027 ✅ | 0027 ✅ | 0026 ✅ |
-
-## Suggested First Move
-Open draft PR #<n> (feature/stylized-characters → dev), run the game, and
-walk up to the plaza NPCs — the whole roster is on the new style with real
-idle/walk cycles. Then decide whether to queue the worldgen-fix-and-catalog
-plan (still un-queued from the last planning pass).
-
-## Draft PRs Awaiting Review
-- feature/stylized-characters → dev: the full milestone (7 commits).
-
----
-
-# Overnight Build Report
-Date: 2026-07-13 → 07-14 (session 8 — FOUR milestones: sandbox editor,
-traits, group conversations, LLM world generation)
-
-## Summary
-Issues #109–#129 (21 of 21) shipped across four stacked draft PRs on the
-new `dev`-based chain. The game gained: a sandbox map editor that compiles
-player-built maps into the existing collision/rendering systems; a trait
-system with a human-curated rating loop; follow + N-way group
-conversations over the existing dialogue pipeline; and natural-language
-map/character generation gated by a validator whose errors double as model
-retry feedback.
-
-## Completed ✅ (one draft PR per milestone; merge order #130→#131→#132→#133→#134)
-| Milestone | Issues | Branch | PR |
-|-----------|--------|--------|----|
-| #13 Sandbox map editor | #109–#114 | feature/sandbox-map-editor | #131 |
-| #14 Traits + ratings | #115–#119 | feature/npc-traits | #132 |
-| #15 Follow + groups | #120–#124 | feature/group-conversations | #133 |
-| #16 LLM world generation | #125–#129 | feature/llm-world-generation | #134 |
-
-## Decisions logged (autonomy briefs)
-- Chains now target `dev` (the consolidation line; PR #130 dev→main awaits
-  YOUR merge click).
-- Sandbox v1 cuts: no piece rotation; road-paint pieces schema-only; New
-  auto-names maps; schedules suppressed in sandbox play; hand-loads are
-  repairable, LLM-loads strict.
-- Ratings: F1/F2 keys (+/− would collide with the dialogue text input);
-  one trait per character via the creator UI (three via file).
-- Groups: cap = player + 3 NPCs; NPC↔NPC ≤2 consecutive turns; group
-  ratings solo-only for now.
-- Worldgen: the failing cast contract was MINE, not the models' — when
-  all three locals failed identically, the strings-with-newlines contract
-  was replaced with per-character JSON objects; the style-family
-  annotation in the vocabulary took qwen3:8b from 0% to first-attempt
-  valid. No auto-repair anywhere (bracket-stripping wrapper normalization
-  only, logged).
-
-## Schema-validity bench (issue #127 — model picked by measurement)
-| model | valid | first-try | mean s |
-|-------|-------|-----------|--------|
-| qwen3:8b | 50% | 0% | 54.6 |
-| qwen2.5:3b-instruct | 25% | 25% | 19.3 |
-| gemma3:4b | 0% | 0% | 42.9 |
-
-Winner qwen3:8b = the existing dialogue model (one shared client;
-documented in llm.cfg). gen-village is the hard mode nobody one-shots —
-the in-game retry chain + editable-draft design absorb exactly that.
-"Ornith" isn't pulled locally: noted untested, not assumed.
-
-## Live worldgen evidence
-"a grumpy old sailor who runs the docks, and two curious kids who pester
-him" → **valid on attempt 1** (qwen3:8b, ~21s): Captain Elias Grimsby,
-Dockmaster ("short, clipped sentences with a growl", blocky angry look,
-trait grumpy) + two kids in round-family looks. Bench table below.
-
-## Findings / follow-ups (observations, not acted on)
-1. Ambient NPC↔NPC chatter did NOT fall out of the group mechanism — it
-   needs a proximity trigger + an overhear UI. Clean follow-up: reuse
-   GroupSession with schedule-colocated pairs and a range-gated transcript
-   bubble.
-2. The hot-dog cart renders as a generic crate in sandbox maps — same as
-   downtown (curated map sends "cart"→box_B); a dedicated mesh or model
-   choice fixes both at once.
-3. Generated personas sometimes place characters outside ±110 (cast
-   `position` isn't bounds-checked; village PLACEMENTS are). Harmless
-   (movement clamps) but worth a validator rule later.
-4. qwen3:8b keeps writing request adjectives ("curious") as trait ids
-   despite feedback — the retry loop catches it, but a stricter
-   trait-vocabulary line or a bigger model would lift first-try validity.
-5. Editor QoL for later: no undo, no rotation, no multi-select drag.
-
-## Test status
-Green at every commit across all four milestones. Final: **204 cases /
-32,078 assertions, 0 failed**; every scaffold stub from the four plans is
-now a live test; only llm_live stays skipped by design.
-
-## Needs human verification
-- Sandbox editor FEEL (pan/zoom/ghost/Tab/[ ]), the Sandbox menu page,
-  and play-mode dialogue with a placed NPC.
-- A trait-carrying NPC holding personality across a long conversation
-  (the post-memory reinforcement's purpose) + F1/F2 rating hints.
-- A real three-way group conversation (party line, NPC↔NPC replies).
-- In-game Generate: type a description on the Sandbox page, watch the
-  status line, and hand-edit the result.
-
-## Suggested first move
-Merge PR #130 (dev→main) if you haven't, then play: sandbox → Generate →
-"a fishing village with a grumpy old sailor and two kids" → walk it, talk
-to the sailor, rate a reply with F1.
-
----
-
-# Overnight Build Report — SESSION 7
-Date: 2026-07-10 (session 7 — Mii-style visual overhaul, milestone #12)
-
-## Part A — engine assessment (recorded before implementation, per the brief)
-**Verdict: NO migration. raylib is not a blocker for the Mii/Tomodachi
-target.** The look is low-poly rounded shapes + flat color + dark outlines:
-flat-shaded palette primitives were already the baseline; inverted-hull
-outlines need only the rlgl calls the composite renderer already uses;
-proportions/palette are catalog data. A migration (Unity/Godot) would strand
-the C++ core, 182 tests, and the PR chain to buy rendering features a toon
-style doesn't use. No migration plan document produced because none is
-recommended. (Full reasoning: .claude/plans/mii-style-visual-overhaul.md.)
-
-## Session 7 summary — issues #101-#107, one branch, PR below
-| Issue | What landed | Commit |
-|-------|-------------|--------|
-| #101 | pack tags + recipes isolated behind ONE dispatch (graphics-pack seam); pixel-identical | 98e04a9 |
-| #102 | Mii proportions (head ≈ half the body+head silhouette) + cohesive pastel palettes — pure data | 56df349 |
-| #103 | inverted-hull outlines (1.06x, front-cull, batch-drained; grouped passes) | 4b4f4a8 |
-| #104 | Mouth as fifth category + six-item look, five-item/no-key back-compat | 8b0c70d |
-| #105 | catalog floors: hair 18, eyes 10, bodies 6, mouths 4, palettes 12; 7 persona looks refreshed | c8188d6 |
-| #106 | player avatar: same creator page in avatar mode, reserved store row, viewmodel tint | f487dd1 |
-| #107 | visual gate + free playtest (below) | — |
-
-## Decisions logged (autonomy brief)
-- **Proportion metric refined** from the scaffold stub: hair height varies
-  per look, so the pinned measure is head.y/(headSocket.y+head.y) in
-  0.48-0.60 — lands the plan's "~40-45% of standing height" once hair joins.
-- **Five-item look lines and pre-Mouth stored JSON default to mouth_smile**
-  (not a per-name hash for the one slot): preserves each character's
-  authored identity, simpler, and Tomodachi mouths are mostly smiles.
-- **eyes_star and body_broad deliberately use the generic recipes** (big
-  pupils / declared box) — the fallback path is a feature, exercised.
-- **Avatar lives in the existing CharacterStore look table** under reserved
-  id `player_avatar`; look-only rows never spawn (loadAll needs both
-  records) — pinned by test.
-- **Emote-billboard style clash NOT fixed** (gate passed; it's finding #1
-  below and the brief says observations are not acted on).
-
-## Visual-QA gate (subagent): PASS with caveats
-- Mii proportions everywhere (measured ~60% head on close-ups) ✓
-- Single crisp outline rim on sphere AND box families, no artifacts ✓
-- Mouths legible at close range ✓; pastel cohesion across all shots ✓
-- Player-created character indistinguishable (its pre-Mouth stored look
-  correctly resolved to the default smile) ✓
-- **Caveat:** the legacy mood-emote billboard (un-outlined flat face
-  floating at 2.45u) clashes with the new style; smoke runs (--frames)
-  force emotes on 5/6 NPCs so screenshots overstate it, but it also shows
-  in normal play on mood shifts. Recorded as finding #1.
-- Shots: docs/qa/screenshots/mii-style/ (best: musician_closeup4,
-  baker_closeup, player_char_closeup).
-
-## Playtest findings (observations ONLY — not acted on, per the brief)
-1. Mood-emote billboard is now the biggest cohesion breaker (no outline,
-   disconnected second face) — retire for composites or restyle to match;
-   composite heads have real mouths now.
-2. Night (h23) has no lit windows or streetlamp glow — reads as "day with a
-   dark filter", not a night city.
-3. Dusk (h20) tints the whole frame one flat rust-orange — reads dust-storm,
-   not sunset; check the grading curve at that hour.
-4. Plaza is a huge flat beige plane with 2-3 NPCs and no props; park is
-   fountain+bench+two plants — neither reads lived-in or distinct.
-5. Street clutter (box, lone shrub) floats in open ground with no
-   relationship to storefronts.
-6. Building facades repeat one window-grid module palette-swapped.
-7. Roads are 6+ lanes wide vs pedestrian-scale shops and 0-2 cars — streets
-   feel oversized and empty.
-8. NPCs idle in open space; nobody uses benches/doorways/conversation poses
-   — "figures parked in a lot", not street life.
-9. mouth_smile reads as "bar with two dots" at distance; a slight upward
-   curve would sell the smile better.
-10. Street-furniture variety is thin (plants + traffic lights); 1-2 more
-    prop types would help.
-
-## Test status
-Green at every commit; final: **182 cases / 31,730 assertions, 0 failed,
-1 skipped** (llm_live). The exhaustive combo test now sweeps 17,280
-part combinations. Game builds clean.
-
-## Needs human verification (not headlessly capturable)
-- Creator page in avatar mode (menu + typing input): open "Edit My Avatar",
-  restyle, Save; restart and confirm persistence.
-- First-person avatar tint: punch and pistol hand should wear your palette.
-- Outline stability in MOTION (hull flicker only shows when moving).
-
-## Suggested first move
-Play 5 minutes: walk the plaza (the townsfolk are transformed), open
-Edit My Avatar, pick a palette, then punch — your arm wears it.
-
----
-
-# Overnight Build Report — SESSION 6
-Date: 2026-07-08 (session 6 — shared character library)
-
-## Audit finding (recorded before implementation, per the brief)
-"Expand hairstyles" and "created characters don't match roaming NPCs" share
-one root cause, and it is **not** two pools of different sizes — it is **two
-unrelated construction methods**:
-- **NPCs are rigged glTF KayKit models** (`drawCharacter`; five fixed
-  adventurers loaded in `Assets.cpp:170-172`, Knight doubling as police). The
-  NPC render loop (`src/app/main.cpp:985-991`) only uses composites for
-  entries in `customLooks` — i.e. player-created characters — and falls back
-  to the rigged model for everyone else.
-- **The creator is the only part-based system**: the socketed
-  `CharacterParts` catalog rendered by `drawCompositeCharacter` from
-  primitives. Rigged KayKit models physically cannot donate swappable
-  heads/hair/bodies — which is why the composite system exists at all.
-
-**Decision (logged):** make the composite `CharacterParts` catalog the single
-shared library — every roaming NPC gets a composite look from the same pool
-the creator picks from; the rigged path is retired as the *NPC* source (its
-loading stays dormant for remote players). Trade-off accepted: rigged art
-fidelity is exchanged for one-pool cohesion, per the brief's explicit
-priority ("literally the same assets"). NPC variety baseline (five distinct
-looks + police variant) is preserved by authoring a distinct look per persona
-— the pool's combinatorics exceed the old range immediately.
-Full plan + alternatives: `.claude/plans/shared-character-library.md`.
-
-## Visual-QA report (visual-qa subagent, side-by-side gate before the PR)
-**Verdict: PASS on all three criteria.**
-- **One art source:** every humanoid across 9 shots is a flat-shaded
-  primitive composite (round/oval/block head atop cone/block torso, hair
-  bolted on). No rigged KayKit mesh, no orange fallback cylinder anywhere.
-  The orange shapes in wide shots were identified as the hot-dog cart prop
-  and the first-person fist viewmodel (confirmed by pixel-diffing two shots
-  from different cameras), not broken looks.
-- **Created character indistinguishable:** the stored character
-  ("doctor steve", position 0,8 — on the plaza spawn ring) framed with the
-  hot-dog vendor and tourist is identical in construction to the townsfolk.
-- **Variety:** cop = block head + visor + cap + slate uniform; musician =
-  tall head + mohawk; baker = bun; taxi = side-sweep + bulk body; tourist =
-  mint bowl cut; 10/10 personas carry authored looks, zero look errors in
-  the run log.
-- Best shots: `docs/qa/screenshots/shared-character-library/`
-  (`qa_shot_wide2.png` side-by-side, `qa_shot_cop.png` close-up).
-
-## Session 6 results
-Milestone #11 complete + two live user-requested fixes.
-
-### Completed ✅
-| Issue | Title | Branch | PR | Concept |
-|-------|-------|--------|----|---------|
-| #95 | persona `look` + deterministic fallback | feature/shared-character-library | #99 | authored data with a derived fallback |
-| #96 | unify NPC rendering onto the composite pool | feature/shared-character-library | #99 | collapsing two render paths behind an existing dispatch hook |
-| #97 | expand shared hairstyle pool (6 → 12) | feature/shared-character-library | #99 | additive catalog growth in one shared pool |
-| #98 | ten authored in-character looks | feature/shared-character-library | #99 | art-directing a cast in a constrained part system |
-| — | camera-locked viewmodel: hidden punching fist, held pistol (user request) | feature/punch-and-jump | #100 | camera-local vs world-aligned prop space |
-| — | height-aware collision + Space jump (user request: curb snagging) | feature/punch-and-jump | #100 | solidity as a function of foot height |
-
-### Decisions logged
-- Implemented #97 (hair) BEFORE #98 (looks) — reversing the plan's order —
-  so the cop's uniform could use the new `hair_cap`.
-- Composite NPCs keep mood billboards and gain a tip-over death pose;
-  gestures drive the walk bob (no gesture clips on composites, logged in
-  PR #99 as a fidelity note).
-- Joined-multiplayer clients resolve looks by NPC index against their own
-  roster (same persona files ⇒ same looks); out-of-range indices fall back
-  to the rigged mesh rather than guessing.
-
-### Test status
-`make -C tests test` green at every commit; final: **176 cases / 3337
-assertions, 0 failed, 1 skipped** (llm_live). Game builds clean.
-
-### Draft PRs awaiting review
-- **#99** — shared character library (#95–#98), base feature/aim-styles-preview.
-- **#100** — punch/pistol viewmodel + jump, base feature/shared-character-library.
-- Merge order: #94 → #99 → #100 (stacked; each shows only its own diff).
-
-### Suggested first move
-Play it: click-punch with the fist (arm shoots out, nothing at rest), fire
-the pistol (held silhouette + recoil), Space-jump onto a car roof, and walk
-the plaza to meet the composited townsfolk (cop = cap + visor + slate).
-
-### Learning materials (LOCAL-ONLY)
-| Concept | Lesson | Drill | Vocab |
-|---------|--------|-------|-------|
-| one shared asset pool / authored-or-derived resolver | 0024 ✅ | 0024 ✅ | 0023 ✅ |
-
----
-
-# Overnight Build Report — SESSION 5
-Date: 2026-07-07 → 07-08 (session 5 — aim / styles / preview milestone)
-Milestone #10 — three ready-for-ai issues, one stacked draft PR **#94**.
-
-## Session 5 summary
-Three independent fixes shipped as one atomic-commit-per-issue branch
-(`feature/aim-styles-preview`, stacked on `feature/player-journal`) and a
-single draft PR #94:
-
-| Issue | Title | Commit |
-|-------|-------|--------|
-| #91 | fix(combat): aim the gun where the camera looks, from eye height | `c811e88` |
-| #92 | feat(creator): more style-tagged character parts and palettes | `3ea616f` |
-| #93 | feat(creator): player-driven preview rotation, idle return-to-front | `31b8c17` |
-| — | fix(review): latch preview drag at press, cull grounded shots | `7be3057` |
-
-**#91** — the weapon reconstructed a separate yaw-only, flat aim from the
-player's feet, drifting from the camera's real 3D look (the *moonwalk* bug
-class, cf. #61). Now one authoritative `lookDirection(yaw, pitch)` feeds both
-camera and weapon, and shots leave from `kEyeHeight` along the full vector, so
-new weapons can't reintroduce the drift.
-
-**#92** — +2 parts per category and +3 palettes, additive within the existing
-socket/style-tag size-contract, with renderer recipes. **Screenshot-verified**
-in-engine.
-
-**#93** — replaced the unconditional auto-spin with two states: drag/keys
-rotate; after an idle timeout the figure eases back to face the camera
-(`shortestAngleDelta` short-arc). No autonomous spin remains.
-
-**Review fixes (`7be3057`)** — strict review found a real HIGH in #93: the
-drag-vs-click gate was sampled per-frame against the live cursor, so a
-control-click flicked off its rect spun the preview and a genuine drag grazing
-a hit-rect stalled. The decision is now **latched once at press** and held
-until release (a held drag also counts as active input, so the figure never
-eases away under a grabbing cursor). Plus a #91 LOW: a missed *downward* shot —
-newly possible now that aim follows pitch — kept travelling underground until
-its lifetime expired; it's now retired once it passes below ground descending.
-
-## Completed ✅
-| Issue | Title | Branch | PR | Concept |
-|-------|-------|--------|----|---------|
-| #91 | gun aim from shared look vector | feature/aim-styles-preview | #94 | single authoritative source |
-| #92 | more style-tagged parts & palettes | feature/aim-styles-preview | #94 | additive socket catalog |
-| #93 | player-driven creator preview | feature/aim-styles-preview | #94 | latch-at-event vs sample-per-frame |
-
-## Test status
-`make -C tests test` green: **165 cases / 2343 assertions, 0 failed, 1 skipped**
-(4 new aim tests, a `shortestAngleDelta` test, and the exhaustive
-part-combination test extended to the new parts). Game target builds clean.
-
-## Needs human verification
-- **#91 in-game feel** — firing while mouse-looking and watching rounds land is
-  interactive; the aim math is unit-tested but the felt behaviour is yours.
-- **#93 entirely** — the creator preview only renders with the Creator page
-  open, which a headless smoke run can't trigger. Drag feel, the idle
-  return-to-front, and "no spin" need you to open the Creator page and try it.
-
-## Learning materials (LOCAL-ONLY — not committed)
-| Concept | Lesson | Drill | Vocab |
-|---------|--------|-------|-------|
-| single authoritative source / the moonwalk bug class | 0023 ✅ | 0023 ✅ | 0022 ✅ |
-
-## Suggested first move
-Open the Creator page and confirm #93's drag + idle-ease feel, then fire uphill
-and downhill in-game to confirm #91. If both feel right, PR #94 is ready to
-promote out of draft (into its `feature/player-journal` base, not main).
-
-## Next work item (not started)
-`shared-character-library` — plan authored at
-`.claude/plans/shared-character-library.md`. Audit found NPCs render from
-rigged glTF (`drawCharacter`) while created characters use primitive composites
-(`drawCompositeCharacter`) — two pools, no shared assets, hence the
-created-vs-roaming mismatch. Decision: make the composite CharacterParts pool
-the single shared library and render NPCs from it. Not yet issues or code.
-
----
-
-# Overnight Build Report — SESSION 4
-Date: 2026-07-06 → 07-07 (session 4 — four chained `/idea` projects)
-Tickets: #72–#88 across milestones #6–#9. Four stacked draft PRs:
-**#77** (character creator), **#82** (world time), **#89** (gossip),
-**#90** (journal).
-
-## Session summary
-Four features shipped as one stacked draft-PR chain, each `/idea` →
-`/plan-github` → build in sequence: a Mii-style **character creator**, a
-shared **world clock + NPC schedules + day/night** cycle that establishes
-the "world bus" pattern, **gossip** (structured facts that spread NPC to
-NPC through that bus), and a player **journal** that reads the same bus
-and flags contradictions. Every project logged its autonomy decisions in
-its `.claude/plans/*.md` and below. The suite grew 127/782 → 160/1517
-cases/assertions, green at every commit.
-
-Full merge order (top-down, each PR shows only its own diff):
-`main ← #60 ← #68 ← #69 ← #70 ← #71 ← #77 ← #82 ← #89 ← #90`.
-
----
-
-# Project 1 — Character creator  (#72–#76, milestone #6, PR #77)
-
-## Summary
-The character creator shipped end to end on `feature/character-creator`
-(stacked on #71): players write a personality and assemble a Mii-style
-look from socketed 3D parts with palettes, preview it live, and Save &
-Spawn it into the town — the character talks through the existing LLM
-persona pipeline (memory included) and survives restarts. Suite grew
-127→139 cases / 886→1384 assertions, all green.
-
-## Autonomy decisions (full detail in .claude/plans/character-creator.md)
-- **3D premise correction**: the brief's "sprite pixel dimensions"
-  predates the raylib migration — parts are low-poly primitive recipes
-  (the fountain pattern), since KayKit's rigged characters can't donate
-  swappable parts.
-- **Socket contract**: parts declare their own local sockets; category
-  spec rows wire parent/child. No per-pair offsets anywhere. Knowledge
-  grows as parts + categories, not parts².
-- **Size-contract interaction** (the flagged question): sockets resolve
-  in unscaled local space, then ONE uniform scale to the same 1.8-unit
-  height contract pack characters use — no parallel sizing system.
-- **Persona format**: player personas serialize through the new
-  `renderPersonaText` (exact inverse of `parsePersonaText`) — one format,
-  one parser for designer files and stored characters alike.
-- **Independence enforced by schema**: `character_persona` and
-  `character_look` are separate SQLite tables joined only by
-  character_id at the spawn site.
-- Composite v1 animation is a procedural walk bob (no skeleton); the
-  in-world preview renders behind a lighter menu dim; spawn spots probe
-  rings around the plaza against real collision.
-
-## Verification
-- Exhaustive combination test: every style-compatible part combination
-  assembles fully (validity == compatibility, both directions).
-- End-to-end screenshot: three planted store records spawned as three
-  distinct correctly-snapped composites at pack-character height.
-- Store round-trips, corrupt/missing-row degradation, deterministic
-  randomize, unopenable-DB fallback — all tested.
-
-## Needs your eyes
-- **PR #77's Creator page UI** (typing, part cycling, randomize, save
-  toast) — scripted smoke runs can't click the menu. Everything below
-  the UI is test/screenshot-verified.
-- Merge order is now: #60 → #68 → #69 → #70 → #71 → #77.
-
-## Known v1 limits (logged, not bugs)
-No skeleton/gestures/death pose for composites; no multiplayer look
-replication (guests see a pack model); duplicate character names share
-memory rows.
-
-## Learning materials (local-only per your rule)
-Lesson/drill/vocab 0020 "Socket contracts: per-part attach points vs
-per-pair offsets"; index updated.
-
----
-
-# Project 2 — World time, schedules, day/night  (#78–#81, milestone #7, PR #82)
-
-## Summary
-`feature/world-time` (stacked on #77) introduces the **world bus**: a
-single generic shared-fact store (`WorldState`, owned by `World`) that
-every time-aware system reads instead of keeping a private timer. The
-clock is its first tenant. NPCs follow authored `.persona` schedules
-(walk to a spot, do an activity per time-of-day range), and sky, fog, and
-light all shift through a full day/night cycle from the same hour. This
-is deliberately the seam gossip and the journal plug into next.
-
-## Autonomy decisions (full detail in .claude/plans/world-time-and-schedules.md)
-- **Store shape**: `WorldFact {double number; std::string text;}` in a
-  string-keyed map — generic enough for the clock now and gossip/journal
-  later, and no more. Explicitly NOT built tonight: subscriptions,
-  persistence, replication (no consumer yet).
-- **Injected time, never a private timer**: consumers take
-  `timeOfDayHours` as a parameter (`Npc::update(..., timeOfDayHours)`,
-  `renderer.setTimeOfDay`). Testable by varying the argument.
-- **Clock rate**: 1 real second = 1 game minute (24-minute day), start
-  09:00, no cross-restart persistence (deferred with gossip's store).
-- **Schedules authored in `.persona` files** as `schedule = HH-HH, x, z,
-  activity` lines (a placement concern like position, parsed by
-  PersonaLoader — not part of Persona identity); midnight-wrap allowed;
-  the player standing in talk range pauses schedule walking.
-- **Day/night = pure curves in core** (`DayNight.hpp`): sky, fog color,
-  and light all sample the SAME hour so fog can never disagree with the
-  sky (lesson 0019's rule); renderer maps them to a Color + shader
-  uniforms.
-- **Smoke determinism**: `--frames` gains `--hour H` to pin the clock, so
-  day/night doesn't make every screenshot depend on wall-clock frames
-  (same pattern as `--camera`).
-
-## Verification
-`Schedule`/`DayNight`/`WorldState` unit tests (first-match + midnight
-wrap; band continuity at 5/7/18/21; clock advance + fact round-trips);
-day/dusk/night street screenshots via `--hour`.
-
-## Known v1 limits (logged)
-Time doesn't persist across restarts; multiplayer guests run their own
-clock from 09:00 (replication deferred to the gossip protocol bump);
-schedule activity is shown on the nameplate but not yet injected into the
-LLM prompt.
-
----
-
-# Project 3 — Gossip  (#83–#86, milestone #8, PR #89)
-
-## Summary
-`feature/gossip-facts` (stacked on #82) makes NPCs learn structured facts
-from the player and each other and spread them conservatively. Facts are
-first-class records on the same `WorldState` bus, with a per-agent
-knowledge set tracking who has heard what. The discipline is
-**propose → validate → commit**: the model proposes candidate facts as
-strict JSON, code validates all-or-nothing, and only validated records
-touch the store. Spread is a proximity- and time-gated tick over the
-shared store — never an NPC→NPC message channel.
-
-## Autonomy decisions (full detail in .claude/plans/gossip-facts.md)
-- **Facts on the bus**: `KnownFact {factId, subject, content, source,
-  learnedAtSeconds}` + knowledge tracking (`grantKnowledge`, `knows`,
-  `factsKnownBy`). Subjects normalized to `[a-z0-9_]` so the journal's
-  contradiction check compares them exactly.
-- **Propose → validate → commit**: on conversation close, a second LLM
-  request asks for 0–2 facts as strict JSON with a direction
-  (`npc_learned`/`player_learned`); non-throwing parse, validate
-  (normalized subject, content ≤ 140, ≤ 2 facts, known direction),
-  commit only then. `factIdFor` hashes subject+content so repeats are
-  idempotent and the first teller's stamp/source survive. Malformed
-  output is dropped with a stderr note — a fact is a bonus, never a
-  crash.
-- **Conservative propagation** (per the brief): a tick every 15 real
-  seconds pairs NPCs within 6 units; a fact transfers only if the teller
-  has known it > 30 game minutes, the hearer doesn't know it, and a 35%
-  roll passes — at most one fact per pair per tick, content never mutates
-  in transit. Pure `propagateGossip(state, agents, rng)` so tests drive
-  it with fixed rolls.
-- **No NPC→NPC messages**: propagation only flips knowledge bits on the
-  shared store, so any future reader (the journal tonight) sees the whole
-  state in one place with zero new wiring.
-- **Persistence**: `FactStore` (saves/facts.sqlite3, two tables) follows
-  ConversationStore's exact open/ok()/degrade pattern; loaded at startup,
-  upserted on commit/propagation.
-- **Read path**: `renderSystemPrompt(memory, gossip)` gains a gossip
-  block injected before the ACTION protocol, refreshed when an NPC's
-  knowledge set changes.
-
-## Verification
-Validation tests (all-or-nothing rejection, direction/length/count
-bounds, subject normalization, idempotent ids); deterministic
-`propagateGossip` with fixed rng/positions across the gates; FactStore
-round-trip + degrade-on-unopenable-DB; end-to-end planted-fact spread.
-
-## Known v1 limits (logged)
-Content never distorts in transit (no telephone-game v1); no fact expiry
-or contradiction resolution; multiplayer fact replication still deferred.
-
----
-
-# Project 4 — Player journal  (#87–#88, milestone #9, PR #90)
-
-## Summary
-`feature/player-journal` (stacked on #89) adds a pause-menu journal that
-is a **pure reader** of the gossip fact store: it lists every fact the
-player was personally told, grouped by subject and attributed ("heard
-from Marge at 14:20"), and flags two facts that share a subject but
-disagree as conflicting accounts. It writes nothing, owns no data, and
-needed no schema change — the payoff of gossip spreading as shared state
-rather than messages.
-
-## Autonomy decisions (full detail in .claude/plans/player-journal.md)
-- **Visibility filter**: show facts where `knows("player", factId)` AND
-  `source != "player"` — exactly what the player was told, never what
-  they said or gossip they weren't part of.
-- **Contradiction v1 = same normalized subject, different content** (both
-  sides flagged, no verdict); same subject + same content is
-  corroboration, not flagged. Semantic contradiction detection logged as
-  the future upgrade point.
-- **Pure read path**: `Journal.hpp` helpers (`journalEntries`,
-  conflict-flagging) render from `WorldState` each time the page opens —
-  no cache, no store, no new fields.
-- **UI**: `Page::Journal` reuses the existing Page/Hit/layout machinery
-  with a `JournalHooks` std::function so the menu stays free of
-  `WorldState`; page up/down when entries overflow.
-
-## Verification
-Journal helper tests (filter excludes player-sourced and unheard facts;
-stable subject-then-time grouping; conflict flagged exactly when
-same-subject contents differ); `clockLabel` HH:MM formatting.
-
-## Needs your eyes (whole batch)
-- The **Creator and Journal menu pages** — typing, part cycling,
-  randomize, save toast, journal paging — can't be clicked by scripted
-  smoke runs. Everything below the UI is test/screenshot-verified.
-- Four stacked PRs to review in order: **#77 → #82 → #89 → #90** (after
-  the city-polish chain #68–#71).
-
-## Learning materials (local-only per your rule)
-Lessons/drills 0021 "The world bus and injected time" and 0022 "Propose,
-validate, commit"; vocab 0021 "World bus, gossip, journal"; socket
-contracts covered by 0020. Index updated.
-
----
----
-
-# Overnight Build Report
-Date: 2026-07-05 (session 3 — city polish milestone)
-Issues attempted: 4 (#64–#67, milestone #5 "City polish: aesthetic fixes")
-
-## Summary
-All four city-polish issues shipped as a stacked draft-PR chain on top of
-PR #60: a real tiered fountain, marked road tiles with zebra crossings and
-junctions, parked cars + alley props with honest colliders, and a distance
-fog + warm tint atmosphere pass. Every change was screenshot-verified from
-scripted camera vantages; the suite grew from 127/782 to 128/886 and stays
-green at every commit.
-
-## Completed ✅
 | Issue | Title | Branch | PR | Concept Taught |
 |-------|-------|--------|----|----------------|
-| #64 | Plaza fountain from primitives | feature/issue-64-plaza-fountain | #68 | Composite modeling from primitives |
-| #65 | Road tiles with lane markings | feature/issue-65-road-tiles | #69 | Tiling modular kits over a parametric grid |
-| #66 | Parked cars + alley props | feature/issue-66-street-dressing | #70 | Set dressing as authored data |
-| #67 | Distance fog + warm tint | feature/issue-67-atmosphere-pass | #71 | Distance fog in a forward renderer |
-
-## Failed ❌
-None.
+| #156 | Gather every resident at the plaza for the vote phase | `feature/issue-156-plaza-gather` | #310 | Layering a temporary override over authored content |
+| #157 | Day/phase HUD and match settings | `feature/issue-157-match-hud-settings` | #311 | Diegetic versus HUD signalling for time pressure |
+| #304 | `persona_prompt --state` renders the full prompt for a scripted state | `feature/issue-304-persona-prompt-state` | #312 | One implementation across a language boundary |
+| #200 | Implement the leak probe and record a baseline | `feature/issue-200-role-leak-probe` | #313 | Side-channel leakage: measuring what a system reveals through its metadata |
 
 ## Skipped (needs human) ⏭
-None.
 
-## Merge order (stacked chain)
-main ← #60 (motion/collision/viewmodel) ← #68 ← #69 ← #70 ← #71.
-Merge top-down; each PR shows only its own diff. #60 was retarget-checked
-to main at session start (its old base merged via #58).
+| Issue | Title | Reason |
+|-------|-------|--------|
+| #173 | Author eleven new residents, flip roster to 21 | Its own precondition is unmet: `bench_npc_render.py --gate 16.67` still fails (p99 18.42 ms, 228/900 frames over, at the far camera). Confirmed the premise rather than re-running the bench — `git log 044de83..origin/dev -- src/app/RaylibRenderer.cpp src/core/CharacterParts.cpp` is empty, so nothing could have moved the number. Removed `ready-for-ai`, which was making a BLOCKED issue look actionable. |
 
-## Decisions logged (autonomous)
-- **Branch base**: stacked on #60's branch, not main — #64/#65 touch
-  renderer code #60 changed, #66 extends the completeness test that only
-  exists there.
-- **#64**: fountain SizeSpec raised 1.2 → 2.6 (the old value was the flat
-  base-tile's height; it read as a pancake on an 8-unit footprint). Sizing
-  stays table-driven. Water discs float above the stone caps because
-  raylib's DrawCylinder is a capped solid that hides recessed geometry.
-- **#65**: tile centers anchored to the junctions (multiples of 16), 6-unit
-  compressed end caps at the ±110 edge; tile thickness pinned to 0.05 (a
-  true Fill would raise a 0.8-unit curb); cube-strip fallback kept for the
-  assets-missing path.
-- **#66**: KayKit cars are Z-long at identity and the Uniform path doesn't
-  rotate → all parking on the Z-running streets; the police car parks
-  BESIDE its station block (the pure-data reading of "outside the station",
-  honoring the zero-new-rendering-code economy note). First draft's
-  oversized mid-lane AABBs caught by screenshot → curb-hugging 4-unit
-  boxes. Added a clearance test so set dressing can never trap a persona
-  or block a crossing.
-- **#67**: one shader serves both draw paths — material assignment for
-  models, BeginShaderMode for the rlgl batch (grass/slabs/fountain/
-  viewmodel) so nothing stays saturated while neighbors haze. fogColor =
-  sky clear color; density 0.006; warm tint pre-fog. CPU skinning verified
-  intact by screenshot.
-- **Smoke tooling**: added `--camera x z yaw` to the `--frames` flag (own
-  commit on #68) — park/street/alley vantages are now scriptable; used for
-  every verification tonight.
-- Mystery resolved: the beige slab in every smoke screenshot is the #60
-  fist viewmodel (fixed screen position), not a world artifact.
+## The two findings worth your attention
 
-## Learning Materials Created (local-only per your rule)
-| Concept | Lesson | Drill | Vocab |
-|---------|--------|-------|-------|
-| Composite modeling from primitives | 0016 ✅ | ✅ | ✅ |
-| Tiling modular kits on a grid | 0017 ✅ | ✅ | ✅ |
-| Set dressing as authored data | 0018 ✅ | ✅ | ✅ |
-| Distance fog in a forward renderer | 0019 ✅ | ✅ | ✅ |
-docs/learning/index.html updated locally with the new section.
+### 1. The secret-keepers are not doing their job (#200)
+
+The probe ran 130 model calls against `qwen3:8b` across two independent runs.
+
+- **Action leak: fixed.** Zero forbidden directives. The killer emitting
+  `[[ACTION: call_police]]` does not reproduce at the shipped role-block placement.
+- **Mood leak, as a player would exploit it: PASS.** Killer ranks 4th of 10 by
+  hostility, behind three bystanders (p = 0.50, rank permutation).
+- **The issue's literal pass condition FAILS**, reproducibly:
+
+| Comparison | Run A | Run B |
+|---|---|---|
+| killer vs secret-keepers | 0.85 | **0.59** — separable |
+| killer vs bystanders | 0.20 | **0.12** — indistinguishable |
+| secret-keepers vs bystanders | 0.80 | **0.69** — separable |
+
+It is not a leak, because the direction is inverted from the harmful one: the
+killer reads *ordinary*, and it is the **secret-keepers** who stand out —
+`secret_keeper.role`'s demeanour line yields `[[MOOD: embarrassed]]` on ~59% of
+turns against ~0% for everyone else.
+
+So the exploit does not open. But cover requires the killer and the keepers to
+look alike, and they look nothing alike. **The killer hides among the bystanders
+by being unremarkable** — a real, measurable defence that no one would learn from
+reading the role files.
+
+This also answers the plan's open question 1 ("how many secret-keepers is enough
+cover?"): the count is the wrong lever. Eight keepers would deepen the embarrassed
+cluster without moving the killer nearer to it. `bench/ROLE-LEAK.md` names two
+directions and takes neither — both are content calls.
+
+**Caveat, stated plainly:** the killer contributes 8 turns. TVD at that n is
+noisy, and the 0.85 → 0.59 move between runs is what the noise looks like. What
+survives both runs is the *ordering*, not the values.
+
+### 2. Two menu bugs that had been shipping for months (#157)
+
+- The page-title chain ended in `: "Multiplayer"`, so **every unhandled page wore
+  that title** — Sandbox and Model both have, since they were added. Replaced with
+  a `switch` carrying no `default:`, so the next page is a compiler warning.
+- The main menu started at a fixed `h*0.5 - 326` stepping 72px. With ten rows the
+  last button's bottom edge sat at y=734 in a 720px window: **Quit has been 14px
+  off-screen.** This is the "menu row-count budget undocumented" low from #155's
+  review, now a real defect. Layout now derives from the row count.
+
+Neither is expressible as a test here: `tests/Makefile` globs `src/core/*.cpp` and
+nothing else, so all of `src/app/` is verified by screenshot or not at all.
+
+## Also delivered: milestone 34 planned and scaffolded
+
+Eleven issues filed for the two-loop dialogue measurement system
+(#299-#307, #309, plus #308 flagged `needs-human`). Plan at
+`.claude/plans/npc-dialogue-measurement.md`; scaffolds are on disk but
+**uncommitted**, because they carry TODOs and CLAUDE.md forbids committing those.
+
+Recon corrected four things about the original spec — the dialogue path emits
+directive tags rather than JSON; `RatingLog` already implements half the curation
+bridge; `role_leak_probe.py` was a live queued issue rather than dead code (so the
+plan's "absorb and delete it" was wrong and is now corrected); and
+`docs/learning/`, `OVERNIGHT_REPORT.md` and `.claude/memory/*` are **tracked, not
+gitignored** as the instructions assumed.
 
 ## Test Status
-128 cases / 886 assertions, all green (new: 8 obstacle-completeness ids +
-the persona/crossing clearance case). Build + smoke runs clean at every
-step.
+
+All gates green on every branch at the point of commit.
+
+| Gate | Result |
+|---|---|
+| `make -C tests test` | **546 passed / 0 failed / 48 skipped** (15 new tests tonight) |
+| `cmake --build build` | clean, no warnings |
+| `make -C tests portability` | macOS 11.0 floor holds |
+| `python3 -m unittest discover -s tools` | green |
+| `scripts/check-persona-prompt-state.sh` | 8/8 |
+| `role_leak_probe.py --turns 8` | PASS, exit 0 |
+
+The 48 skips include 24 from tonight's uncommitted scaffolds (`DirectiveCheck`,
+`TelemetryLog`, `GoldenSet`) — they compile and are skipped, as intended.
 
 ## Suggested First Move
-Merge the chain top-down starting with #60 (it's been open since last
-night and everything tonight stacks on it), then #68 → #71 in order. Two
-minutes in-game afterward: walk the park to see the fountain, then look
-down any street.
+
+**Read `bench/ROLE-LEAK.md` and decide what the secret-keepers are for.** Two
+options, both coherent: widen their affect so `embarrassed` stops being a group
+signature, or accept that the killer hides among ordinary residents and re-state
+that in `roles/README.md`. Everything else tonight is reviewable at your leisure;
+this one is a design decision blocking nothing yet but quietly shaping the mystery.
 
 ## Draft PRs Awaiting Review
-- #60 — derived facing, collider completeness, weapon viewmodels (base of the chain)
-- #68 — composite plaza fountain (+ `--camera` smoke flag)
-- #69 — road tiles with lane markings
-- #70 — parked cars + alley props with colliders
-- #71 — distance fog + warm tint
-Also still open from before: #56 (stale raylib-characters PR — probably
-closeable after the merges), issue #41 (the human two-instance multiplayer
-pass), and the flagged "speaking options" design question.
 
----
----
+Stacked — each targets the previous, so review in order and merge from the bottom:
 
-# Overnight Build Report
-Date: 2026-07-05 (session 2 — raylib migration + NPC memory)
-Sessions: #1 multiplayer (earlier tonight, PRs #28-#34, merged by you),
-#2 raylib overhaul + your 1:30 AM /idea project (this report)
+| PR | Base | Summary |
+|---|---|---|
+| #298 (#155) | `dev` | Match drives the world clock |
+| #310 (#156) | #298's branch | Plaza gather for the vote phase |
+| #311 (#157) | #310's branch | Day/phase HUD, match settings, + two menu bugs |
+| #312 (#304) | #311's branch | `persona_prompt --state` |
+| #313 (#200) | #312's branch | Leak probe implemented and baselined |
 
-## Summary
-The ENTIRE raylib milestone shipped as stacked draft PRs — SFML and the
-hand-rolled GL renderer are gone; the game runs on raylib 5.5 with a KayKit
-low-poly city, animated characters, mood emote billboards, the full
-dialogue/menu/HUD, complete multiplayer wiring, and the legacy renderer
-deleted. Your mid-session /idea (NPC memory + local model benchmark) is
-implemented: NPCs persist first-person memories in SQLite across restarts,
-and the model benchmark ran against the game's real directive contract.
-Stale weapons issues were triaged with an integration map.
+## Standing items that are yours, not mine
 
-## Completed ✅
-| Issue | Title | PR | Notes |
-|-------|-------|----|----|
-| #35 | FetchContent raylib + blank window | #43 | raylib 5.5 pinned; SFML gone; `--frames` smoke flag |
-| #36 | input/camera/mode machine | #44 | keybindings.cfg still loads; macOS cursor hack deleted |
-| #37 | low-poly city scene | #47 | KayKit packs pinned+sha256; screenshot-verified |
-| #38 | animated glTF characters | #48 | 5 adventurers, clips by name; screenshot-verified |
-| #39 | mood faces | #51 | emote billboards (KayKit uses one atlas material — plan's documented fallback) |
-| #40 | DialogUI/Menu/HUD parity | #52 | full gameplay + multiplayer wiring back; your interactive checklist is in the PR |
-| #42 | legacy renderer deletion | #53 | -607 lines; face side-by-side gate = review of this draft |
-| /idea | NPC memory + model bench | #54 | qwen3:8b adopted with think=false; see below |
-| — | weapons issues #7-13 triage | — | needs-human + integration map in issue #46 |
-| — | multiplayer stack consolidation | #45 (**ready to merge**) | your stacked merges only reached feature branches; #45 carries them into main |
-
-## Your /idea project (autonomous decisions logged)
-Plan + full decision log: `.claude/plans/npc-memory-and-model.md`. Highlights:
-1. **Your brief said Gemma + `format: json` — the repo actually runs
-   qwen2.5:3b with `[MOOD:]`/`[ACTION:]` text tags** (config/llm.cfg,
-   NpcAction.hpp). Benchmarked the real tag contract; the C++ interface is
-   untouched as you required.
-2. **Mistral Small (24B) doesn't fit 16 GB RAM** → substituted
-   mistral:7b-instruct.
-3. Persona consistency is proxy-scored (fourth-wall breaks, identity drift,
-   sustained tag compliance) — fully local, no cloud judge.
-4. SQLite = vendored amalgamation 3.50.2 in external/ (public domain), since
-   MinGW lacks system sqlite; single table `conversations(npc_id, summary,
-   transcript_json, updated_at)`.
-5. Memory = the NPC's own model summarizes on conversation close; injected
-   before the action protocol so directives stay last.
-6. Transcript persistence is currently bounded to the NPC's 10-turn history
-   window; the unbounded transcript needs #40's dialogue port to observe
-   turns. Full end-to-end in-game memory demo also lands with #40 — the
-   store/injection loop is covered by 7 new unit tests meanwhile.
-7. **Benchmark verdict (bench/REPORT.md, committed on PR #54): qwen3:8b
-   ADOPTED with `think = false`.** Baseline qwen2.5:3b = 70% tag compliance /
-   1.1s TTFT; qwen3:8b = 100% compliance but 24s TTFT with thinking on,
-   2.7s with thinking disabled — so LlmClient gained a `think` config
-   passthrough and llm.cfg ships qwen3:8b + think=false. gemma3:4b and
-   mistral:7b skipped-with-reason (downloads repeatedly killed by the flaky
-   connection); one command reruns them. Suite now 106 cases green.
-
-## Needs your hands ⏭
-| Issue | Why |
-|-------|-----|
-| #41 multiplayer parity pass | it IS the human verification: two instances, checklist in PR #52 |
-
-## Skipped (needs human)
-Weapons issues #7-#13 — written for the pre-multiplayer, pre-raylib codebase
-and the merged weapons code itself contains unfinished TODO stubs. Issue #46
-holds the full integration map (what to salvage, where it conflicts).
-
-## Test Status
-`make -C tests test`: **103 cases / 732 assertions, 0 failed** (96 → 103 with
-the ConversationStore + memory-prompt tests). Game builds and smoke-runs
-clean; two screenshots verified the city and characters visually.
-
-## Findings worth knowing
-- raylib 5.5 segfaults in `rlglInit` if launched while the display is asleep
-  (environmental; players unaffected). Smoke runs `caffeinate -u` first.
-- raylib 5.5 CPU skinning crashes on unskinned attachment meshes in character
-  glbs — stripped at load; v1 characters are bare-handed.
-- GetMouseDelta noise accumulates in unattended runs — smoke runs pin the
-  camera (`--frames N [shot.png]` renders deterministically + screenshots).
-
-## Suggested First Move
-Merge **#45** (multiplayer → main), then the raylib stack in order
-(#43 → #44 → #47 → #48 → #51 → #52 → #53), then the memory/bench PR (#54). Then run
-the #41 two-instance checklist from PR #52 — that's the one thing that needs
-your eyes.
-
-## Learning materials
-Session 1 shipped 6 lessons/drills/vocab (PR #34). Session 2 concepts are
-queued rather than written (context budget went to your /idea project):
-FetchContent pinning, AABB-fitted kit-bashing, glTF clip switching, the
-lost-GL-context crash class, prompt-injected memory. Say the word and a
-follow-up session generates them.
-
-
-## Morning addendum — the 2-MR pair you asked for
-- **MR 1 — #57** (`integration/npc-memory-into-raylib` → main, ready): last
-  night's NPC memory + qwen3:8b swap, pre-merged against current main (the one
-  conflict was main.cpp; memory hooks grafted into the full raylib loop).
-  Merge this first.
-- **MR 2 — #58** (`feature/size-contract-and-weapons` → the #57 branch,
-  draft): entity size contracts (Fill/Uniform — taxi/cart/fountain no longer
-  stretch to their collision boxes; zero per-asset scale constants) + the
-  weapons system ported from the old weapons stack and rebuilt on raylib
-  (attack input, HUD, death screen, callouts, death poses). 124 tests green.
-- Premise notes for the "aesthetic and refactoring" brief: the game is 3D
-  glTF (not sprites) but the size-contract diagnosis mapped exactly; the
-  menu + dialogue UI already shipped in #52 (nothing re-invented); weapons
-  existed in exactly one branch and were ported per issue #46's map.
-- Flagged, not built: canned "speaking option" replies (design question for
-  you) and multiplayer combat replication (combat is host-side; the wire
-  protocol was deliberately left untouched).
-
-
-## Addendum — moonwalk / clipping / weapon-animation ticket (PR #60)
-Third PR in the chain (#57 -> #58 -> #60). All three premises verified real
-and fixed at the source level the ticket demanded (tickets #61-#63):
-- **Moonwalk confirmed, root cause exactly as you diagnosed**: facing was
-  stored state; the combat movement added in #58 moved NPCs without updating
-  it. `Npc::deriveFacingFromMotion` now derives facing from per-frame
-  displacement (walking-pace threshold preserves chat turns and corpse
-  poses) — called once after all movers, so future systems can't regress it.
-- **Clipping was a data-completeness gap**: traffic lights and park bushes
-  were renderer-only. Now authored as City obstacles; the renderer draws
-  them from collision data through the size contracts. Audit found nothing
-  else clippable (sidewalks/roads are flat by design).
-- **Weapon animations didn't exist** (no first-person viewmodel). Added one
-  driven purely by the authoritative equipped state + attackAnimFraction;
-  per-weapon visuals are table rows. The screenshot loop caught a mirrored
-  right-vector in the first draft — fixed against the game's own strafe
-  convention.
-- Suite: 127 cases / 782 assertions green.
+- **Rotate `GH_TOKEN`** — I leaked it in plaintext in an earlier session.
+- **Rotate the `.claude/.claude/.credentials.json` OAuth tokens** — still in `dev`
+  history on a **public** repo since 2026-07-18.
+- **PR #281** — open, non-draft, base `main`, empty body, 144 commits, carries the
+  credentials file. Should be closed.
+- **#308** — decide whether `docs/learning/` (76 tracked files), `OVERNIGHT_REPORT.md`
+  and `.claude/memory/*` should be untracked. Untracking deletes them from the remote.
+- **#173** — decide between optimising ~2 ms of character rendering or relaxing the
+  16.67 ms gate. The gap is 1.75 ms at p99, not the ~3.5 ms the old arithmetic implied.
