@@ -103,3 +103,27 @@ Terms the learner has demonstrably grasped are added here.
   cover.
 - **pointer-into-argument** — a function returning a pointer into a container it was
   passed; the inline call form dangles.
+- **side channel** — information reaching an observer through a path nobody designed
+  as a communication path (the `[[MOOD:]]` tag).
+- **separability** — whether one group's outputs can be told apart from another's.
+  Preferred over "never emits X" because the fix is to hide the signal in noise.
+- **exploit-derived metric** — a statistic whose shape comes from the attack it
+  detects. "Sort faces by hostility" is a rank, so the statistic is a rank.
+- **rank permutation test** — p as the fraction of the population scoring at least
+  as high as the subject. No distributional assumption, no dependency.
+- **total variation distance (TVD)** — 0..1 distance between two distributions;
+  0 identical, 1 nothing in common.
+- **collapsed statistic** — a summary that reduces a distribution to one number and
+  is blind to structure in the other dimensions.
+- **cover (hidden-role design)** — innocents behaving enough like the guilty one
+  that its behaviour stops being a unique signal. Requires the groups to look alike.
+- **undocumented defence** — a protection that works for a reason other than the one
+  the design describes.
+- **CANNOT EVALUATE** — a third outcome beside pass and fail, for a gate that could
+  not run at all.
+- **scaffold exit code** — an unimplemented gate returning non-zero so it can never
+  be mistaken for a passing one.
+- **self-reported n** — sample size printed beside the verdict; a probe that hides
+  its own n is worse than no probe.
+- **ordering-stable finding** — a conclusion that survives run-to-run noise because
+  it depends on rank rather than magnitude.
