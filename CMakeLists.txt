@@ -133,6 +133,7 @@ add_library(llm_npc_core STATIC
     src/core/TopicMatcher.cpp
     src/core/Trait.cpp
     src/core/Vote.cpp
+    src/core/WalkCycle.cpp
     src/core/WorldGen.cpp
     src/core/WorldGenValidate.cpp
     src/core/Zones.cpp

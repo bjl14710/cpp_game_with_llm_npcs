@@ -13,6 +13,12 @@ namespace {
 // trailing rather than shoving, while an arrest can nearly keep pace.
 constexpr float kNpcWalk = 3.8f;       // follow speed
 constexpr float kNpcRun = 6.0f;        // arrest speed
+// A follower that falls this far behind runs to catch up (the walk cycle
+// blends into its run gait from the speed), and drops back to a walk once
+// it is close again. Kept under kNpcRun so an arrest still closes faster.
+constexpr float kNpcCatchUp = 5.6f;
+constexpr float kCatchUpStart = 7.f;
+constexpr float kCatchUpStop = 4.f;
 constexpr float kNpcRadius = 0.45f;    // collision circle, matches the player
 constexpr float kFollowStop = 2.5f;    // stop this close when following
 constexpr float kCatchRadius = 1.6f;   // arrest succeeds within this range
@@ -162,8 +168,11 @@ void Npc::update(float dt, const Vec3& playerPos, const City& city,
     switch (behavior_) {
         case NpcAction::Follow: {
             faceToward(playerPos);
+            if (dist > kCatchUpStart) catchingUp_ = true;
+            if (dist < kCatchUpStop) catchingUp_ = false;
             if (dist > kFollowStop) {
-                const Vec3 step = steerXZ(position_, playerPos) * (kNpcWalk * dt);
+                const float speed = catchingUp_ ? kNpcCatchUp : kNpcWalk;
+                const Vec3 step = steerXZ(position_, playerPos) * (speed * dt);
                 position_ = city.resolveMovement(position_, position_ + step, kNpcRadius);
             }
             break;

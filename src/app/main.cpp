@@ -61,6 +61,7 @@
 #include "Theme.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
+#include "WalkCycle.hpp"
 #include "Zones.hpp"
 #include "World.hpp"
 
@@ -661,6 +662,9 @@ int main(int argc, char** argv) {
     std::unique_ptr<NetClient> netClient;
     std::vector<PlayerPose> remotePlayers;              // avatars to draw (both modes)
     std::vector<NetNpcPose> netNpcs;                    // join mode: NPCs from snapshots
+    // Join mode: walk cycles keyed by npcIndex, fed from snapshot positions
+    // (snapshots rebuild netNpcs, so the gait memory lives beside it).
+    std::unordered_map<int, WalkState> netNpcWalk;
     std::vector<int> netMoods(world.npcs().size(), 0);  // join mode: mood per NPC
     bool netChatWaiting = false;                        // join mode: reply pending
 
@@ -676,6 +680,7 @@ int main(int argc, char** argv) {
         }
         remotePlayers.clear();
         netNpcs.clear();
+        netNpcWalk.clear();
         std::fill(netMoods.begin(), netMoods.end(), 0);
         netChatWaiting = false;
     };
@@ -765,8 +770,10 @@ int main(int argc, char** argv) {
     // Arrest bookkeeping: catch fires once per latch (see hasCaughtPlayer).
     float jailSecondsLeft = 0.f;
     std::vector<bool> wasCaught;
-    // Previous frame's NPC positions, for walk-animation detection.
+    // Previous frame's NPC positions (facing derivation) and each NPC's
+    // distance-driven walk cycle.
     std::vector<Vec3> npcLastPos;
+    std::vector<WalkState> npcWalk;
 
     // ---- World population (issue #110) -------------------------------
     // The town roster and the per-NPC bookkeeping are (re)built through
@@ -825,8 +832,10 @@ int main(int argc, char** argv) {
         savedTurns.assign(world.npcs().size(), 0);
         wasCaught.assign(world.npcs().size(), false);
         npcLastPos.resize(world.npcs().size());
+        npcWalk.clear();
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             npcLastPos[i] = world.npcs()[i].position();
+            npcWalk.push_back(makeWalkState(static_cast<unsigned>(i)));
         }
         for (Npc& npc : world.npcs()) {
             refreshGossip(npc);
@@ -1028,6 +1037,7 @@ int main(int argc, char** argv) {
         world.addNpc(std::move(npc));
         wasCaught.push_back(false);
         npcLastPos.push_back(loaded.position);
+        npcWalk.push_back(makeWalkState(static_cast<unsigned>(world.npcs().size())));
         savedTurns.push_back(0);
 
         if (!persisted) {
@@ -2514,7 +2524,7 @@ int main(int argc, char** argv) {
             for (const PlacedNpc& placed : sandboxDoc.npcs) {
                 renderer.drawCompositeCharacter(lookForSource(placed.source),
                                                 Vec3{placed.x, 0.f, placed.z},
-                                                placed.facingDeg, false, 0.f);
+                                                placed.facingDeg);
             }
         }
         if (sandboxEditing && sandboxGhostLive && sandboxPlacingNpc) {
@@ -2522,7 +2532,7 @@ int main(int argc, char** argv) {
             renderer.drawCompositeCharacter(
                 lookForSource(sandboxGhostNpc.source),
                 Vec3{sandboxGhostNpc.x, 0.f, sandboxGhostNpc.z},
-                sandboxGhostNpc.facingDeg, false, 0.f);
+                sandboxGhostNpc.facingDeg);
             Building box;
             box.minX = sandboxGhostNpc.x - 0.6f;
             box.maxX = sandboxGhostNpc.x + 0.6f;
@@ -2555,10 +2565,17 @@ int main(int argc, char** argv) {
                 // than guessing a look.
                 if (netNpc.npcIndex >= 0 &&
                     netNpc.npcIndex < static_cast<int>(npcLooks.size())) {
+                    // Gait from the replicated positions, so remote NPCs
+                    // walk too instead of gliding.
+                    auto [slot, fresh] = netNpcWalk.try_emplace(
+                        netNpc.npcIndex,
+                        makeWalkState(static_cast<unsigned>(netNpc.npcIndex)));
+                    WalkState& walk = slot->second;
+                    if (fresh) walk.speedSmoothing = 0.3f;
+                    advanceWalk(walk, netNpc.position, dt);
                     renderer.drawCompositeCharacter(
                         npcLooks[static_cast<std::size_t>(netNpc.npcIndex)],
-                        netNpc.position, netNpc.facingDeg, false,
-                        static_cast<float>(GetTime()), face);
+                        netNpc.position, netNpc.facingDeg, walkPose(walk), face);
                 } else {
                     CharacterVisual visual;
                     visual.position = netNpc.position;
@@ -2572,22 +2589,23 @@ int main(int argc, char** argv) {
             PROF_SCOPE_N("render.characters");
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 const Npc& npc = world.npcs()[i];
-                const bool walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
                 npcLastPos[i] = npc.position();
+                // A gesture adds a soft idle bounce so a talking NPC still
+                // reads as animated (composites have no gesture clip).
+                advanceWalk(npcWalk[i], npc.position(), dt,
+                            npc.pose() != NpcAction::None);
                 NpcFace face = faceForMood(npc.mood());
                 if (smokeRun) face = static_cast<NpcFace>(i % 6);
                 // ONE shared library: every NPC — designer persona or
                 // player-created — draws from the same composite parts pool
                 // the creator picks from (plan: shared-character-library).
-                // A gesture drives the bob so a talking NPC still reads as
-                // animated (composites have no gesture clip).
-                // Per-NPC clock offset so mesh-family idle/walk cycles
-                // don't play in eerie unison across the plaza (#142).
+                WalkPose pose = walkPose(npcWalk[i]);
+                // Mesh figures have no gesture clip either: a talking one
+                // plays its Walk clip so it still reads as animated.
+                if (npc.pose() != NpcAction::None) pose.gait = 1.f;
                 renderer.drawCompositeCharacter(
-                    npcLooks[i], npc.position(), npc.facingDeg(),
-                    walking || npc.pose() != NpcAction::None,
-                    static_cast<float>(GetTime()) + static_cast<float>(i) * 1.618f,
-                    face, npc.combatState() == NpcState::Dead);
+                    npcLooks[i], npc.position(), npc.facingDeg(), pose, face,
+                    npc.combatState() == NpcState::Dead);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a
@@ -2654,7 +2672,7 @@ int main(int argc, char** argv) {
             }
             const Vec3 previewAt = player.position + flatForward(player.yawDeg) * 3.4f;
             renderer.drawCompositeCharacter(*menu.creatorPreview(), previewAt,
-                                            previewYaw, false, 0.f);
+                                            previewYaw);
         }
         previewWasOpen = previewOpen;
         // No viewmodel during a cutscene: the camera is not the player's
