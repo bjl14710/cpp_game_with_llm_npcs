@@ -137,6 +137,11 @@ add_library(llm_npc_core STATIC
     src/core/WorldGenValidate.cpp
     src/core/Zones.cpp
     src/core/AnthropicBackend.cpp
+    src/core/ElevenLabsBackend.cpp
+    src/core/TtsBackend.cpp
+    src/core/TtsCache.cpp
+    src/core/TtsClient.cpp
+    src/core/TtsConfig.cpp
     src/core/LlmBackend.cpp
     src/core/LlmClient.cpp
     src/core/OllamaBackend.cpp
@@ -177,6 +182,7 @@ add_executable(cpp_game_with_llm_npcs
     src/app/Menu.cpp
     src/app/RaylibRenderer.cpp
     src/app/Theme.cpp
+    src/app/Speech.cpp
 )
 target_include_directories(cpp_game_with_llm_npcs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src

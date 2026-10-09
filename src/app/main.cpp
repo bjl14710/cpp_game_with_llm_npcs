@@ -57,6 +57,7 @@
 #include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
+#include "Speech.hpp"
 #include "Theme.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
@@ -626,6 +627,8 @@ int main(int argc, char** argv) {
     // UI faces (Nocturne design): optional drop-in TTFs, raylib's font else.
     ui::loadFonts((projectRoot / "assets").string());
     RaylibRenderer renderer(assets);
+    // NPC voices (plan: elevenlabs-tts-backend). provider = none opens no audio device.
+    Speech speech(projectRoot);
 
     // The player's own avatar (issue #106): a look-only row under the
     // reserved id in the SAME store created characters use (look-only rows
@@ -2246,6 +2249,7 @@ int main(int argc, char** argv) {
                         break;
                     }
                     default:
+                        break;  // NpcSpeechBubble has no floating-text UI yet
                 }
             }
         }
@@ -2398,6 +2402,7 @@ int main(int argc, char** argv) {
             // Hosting: our own conversations broadcast the same speech/mood
             // updates remote-initiated ones do.
             if (chatRouter && text) {
+                chatRouter->announceNpcSpeech(npcIndex, *text);
                 chatRouter->announceNpcMood(npcIndex);
             }
 
@@ -2411,6 +2416,7 @@ int main(int argc, char** argv) {
                 if (text && !text->empty()) {
                     dialog.appendLine(
                         {TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                    speech.speak(npc.persona().name, *text);
                     group.addLine(npc.persona().name, *text);
                 } else {
                     dialog.appendLine({TranscriptLine::Kind::System, "",
@@ -2447,6 +2453,7 @@ int main(int argc, char** argv) {
                 if (text) {
                     if (!text->empty()) {
                         dialog.appendLine({TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                        speech.speak(npc.persona().name, *text);
                     }
                     const std::string sd = stageDirection(npc.lastAction());
                     if (!sd.empty()) {
@@ -2470,6 +2477,7 @@ int main(int argc, char** argv) {
                 dialog.setInputEnabled(true);
             }
         }
+        speech.update();
 
         // ---- render ----
         PROF_SPAN_END();  // closes "sim"
