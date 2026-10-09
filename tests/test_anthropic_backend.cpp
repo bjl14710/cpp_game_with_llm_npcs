@@ -290,6 +290,86 @@ TEST_CASE("an unreachable provider is retried once and then handed to the fallba
     CHECK(result.error.find("could not reach") != std::string::npos);
 }
 
+TEST_CASE("a 200 that is not JSON declines without crashing") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::BadJson);
+    FakeOllama ollama;
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama));
+    std::vector<std::string> deltas;
+    const BackendResult result = chatOnce(backend, requestWith("sys", {}, "hi"), &deltas);
+    CHECK_FALSE(result.ok);
+    CHECK(result.fallback);
+    CHECK(deltas.empty());
+    CHECK(result.error.find("unparsable") != std::string::npos);
+}
+
+TEST_CASE("malformed content blocks are skipped, and a text-less 200 declines") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::MalformedBlocks);
+    FakeOllama ollama;
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama));
+    std::vector<std::string> deltas;
+    const BackendResult result = chatOnce(backend, requestWith("sys", {}, "hi"), &deltas);
+    CHECK_FALSE(result.ok);
+    CHECK(result.fallback);
+    CHECK(deltas.empty());
+}
+
+TEST_CASE("an empty content array declines rather than rendering a blank line") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::EmptyContent);
+    FakeOllama ollama;
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama));
+    const BackendResult result = chatOnce(backend, requestWith("sys", {}, "hi"));
+    CHECK_FALSE(result.ok);
+    CHECK(result.fallback);
+    CHECK(result.error.find("no text content") != std::string::npos);
+}
+
+TEST_CASE("the key never appears in an error string, whatever the server echoes") {
+    FakeAnthropic anthropic;
+    FakeOllama ollama;
+    const LlmConfig config = anthropicConfig(anthropic, ollama);
+
+    SUBCASE("401") {
+        anthropic.setMode(FakeAnthropic::Mode::Http401);
+        AnthropicBackend backend(config);
+        const BackendResult result = chatOnce(backend, requestWith("sys", {}, "hi"));
+        CHECK(result.error.find(config.apiKey) == std::string::npos);
+    }
+    SUBCASE("a 200 body that echoes the key back is masked before it is kept") {
+        anthropic.setMode(FakeAnthropic::Mode::EmptyContent);
+        anthropic.setReply("irrelevant");
+        AnthropicBackend backend(config);
+        BackendRequest req = requestWith("sys", {}, "hi");
+        const BackendResult result = chatOnce(backend, req);
+        CHECK(result.error.find(config.apiKey) == std::string::npos);
+    }
+}
+
+TEST_CASE("plain http to anything but the machine itself is refused") {
+    FakeAnthropic anthropic;
+    FakeOllama ollama;
+    LlmConfig config = anthropicConfig(anthropic, ollama);
+    config.anthropicBaseUrl = "http://example.invalid:" + std::to_string(anthropic.port());
+    AnthropicBackend backend(config);
+    const BackendResult result = chatOnce(backend, requestWith("sys", {}, "hi"));
+    CHECK(result.fallback);
+    CHECK(result.error.find("plain http") != std::string::npos);
+    CHECK(anthropic.requestBodies().empty());
+}
+
+TEST_CASE("empty history turns are dropped from the request") {
+    FakeAnthropic anthropic;
+    FakeOllama ollama;
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama));
+    REQUIRE(chatOnce(backend, requestWith("sys", {{"user", "hi"}, {"assistant", ""}}, "x")).ok);
+    const json body = json::parse(anthropic.requestBodies().at(0));
+    REQUIRE(body["messages"].size() == 2);
+    CHECK(body["messages"][0]["content"] == "hi");
+    CHECK(body["messages"][1]["content"] == "x");
+}
+
 TEST_CASE("a warm-up request never reaches the provider") {
     FakeAnthropic anthropic;
     FakeOllama ollama;

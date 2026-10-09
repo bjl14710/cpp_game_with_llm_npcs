@@ -71,6 +71,10 @@ struct LlmConfig {
     std::uint64_t anthropicTokenBudget = 0;
     // Pause before the single retry a 429/5xx/timeout earns.
     int anthropicRetryBackoffMs = 750;
+    // Per-attempt read timeout. Shorter than requestTimeoutSeconds on purpose:
+    // the fallback path is try, back off, retry, then Ollama, and at the local
+    // model's 60 s that is two minutes before the player hears anything.
+    int anthropicTimeoutSeconds = 20;
 
     // --- Line bank (banks/*.bank; see banks/README.md) --------------------
     // Authored replies for recurring topics, served locally instead of a round

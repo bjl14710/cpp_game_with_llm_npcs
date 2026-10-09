@@ -15,6 +15,9 @@ namespace {
 // (BackendResult::fallback), in which case `secondary` takes the same request.
 // Warm-up goes straight to the secondary — the cloud has nothing to keep
 // resident, and the local model must be warm for the moment the cloud drops out.
+// Model controls (listModels/model/setModel) reach the primary only: the
+// in-game picker switches the cloud model, and the Ollama fallback keeps the
+// model named in config. Changing the fallback live is not a use case.
 class FallbackBackend : public LlmBackend {
    public:
     FallbackBackend(std::unique_ptr<LlmBackend> primary, std::unique_ptr<LlmBackend> secondary)

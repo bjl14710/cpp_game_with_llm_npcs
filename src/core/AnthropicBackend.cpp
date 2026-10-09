@@ -1,6 +1,7 @@
 #include "AnthropicBackend.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <iostream>
 #include <thread>
 #include <utility>
@@ -23,11 +24,32 @@ constexpr const char* kMessagesPath = "/v1/messages";
 constexpr const char* kLog = "[llm_npc] anthropic: ";
 
 // Provider error bodies are short JSON, but a proxy can hand back a whole HTML
-// page; keep the log to one readable line.
-std::string clipForLog(const std::string& text) {
+// page; keep the log to one readable line. The API never echoes request
+// headers, but a proxy might, so the key is masked before anything is kept.
+std::string clipForLog(std::string text, const std::string& apiKey) {
+    if (!apiKey.empty()) {
+        for (std::size_t at = text.find(apiKey); at != std::string::npos;
+             at = text.find(apiKey, at + 3)) {
+            text.replace(at, apiKey.size(), "***");
+        }
+    }
     constexpr std::size_t kMax = 240;
     if (text.size() <= kMax) return text;
     return text.substr(0, kMax) + "...";
+}
+
+// Plain http is only acceptable to the machine itself (the tests' fakes); to
+// anything else it would send the key in the clear.
+bool isLoopback(const std::string& origin) {
+    for (const char* host : {"http://127.0.0.1", "http://localhost", "http://[::1]"}) {
+        const std::string prefix = host;
+        if (origin.rfind(prefix, 0) == 0 &&
+            (origin.size() == prefix.size() || origin[prefix.size()] == ':' ||
+             origin[prefix.size()] == '/')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::uint64_t countOrZero(const json& usage, const char* key) {
@@ -96,6 +118,13 @@ void AnthropicBackend::disable(const std::string& why) {
 }
 
 BackendResult AnthropicBackend::decline(const std::string& why) const {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (why != lastDeclineReason_) {
+            lastDeclineReason_ = why;
+            std::cerr << kLog << why << "; this request goes to Ollama\n";
+        }
+    }
     BackendResult result;
     result.fallback = true;
     result.error = why;
@@ -134,6 +163,8 @@ std::string AnthropicBackend::buildBody(const BackendRequest& req) const {
 
     json messages = json::array();
     for (std::size_t i = begin; i < history.size(); ++i) {
+        // The API rejects an empty text block, and an empty turn carries nothing.
+        if (history[i].content.empty()) continue;
         messages.push_back({{"role", history[i].role}, {"content", history[i].content}});
     }
     messages.push_back({{"role", "user"}, {"content", req.userMessage}});
@@ -161,8 +192,8 @@ std::string AnthropicBackend::buildBody(const BackendRequest& req) const {
 AnthropicBackend::Exchange AnthropicBackend::send(const ParsedUrl& url,
                                                   const std::string& body) const {
     httplib::Client cli(url.origin);
-    cli.set_read_timeout(config_.requestTimeoutSeconds, 0);
-    cli.set_write_timeout(config_.requestTimeoutSeconds, 0);
+    cli.set_read_timeout(config_.anthropicTimeoutSeconds, 0);
+    cli.set_write_timeout(config_.anthropicTimeoutSeconds, 0);
     cli.set_connection_timeout(10, 0);
 
     // The key travels in this header and nowhere else: never logged, never in
@@ -207,6 +238,9 @@ BackendResult AnthropicBackend::chat(const BackendRequest& req, const DeltaCallb
         return decline("built without OpenSSL; https provider unreachable");
     }
 #endif
+    if (!url.https && !isLoopback(url.origin)) {
+        return decline("refusing to send the key over plain http to " + url.origin);
+    }
 
     const std::string body = buildBody(req);
 
@@ -245,7 +279,7 @@ BackendResult AnthropicBackend::chat(const BackendRequest& req, const DeltaCallb
         case AnthropicOutcome::Fallback:
             return decline(exchange.reached
                                ? "HTTP " + std::to_string(exchange.status) + ": " +
-                                     clipForLog(exchange.body)
+                                     clipForLog(exchange.body, config_.apiKey)
                                : "could not reach " + config_.anthropicBaseUrl + " (" +
                                      exchange.transportError + ")");
         case AnthropicOutcome::Retry:  // converted to Fallback above
@@ -257,7 +291,7 @@ BackendResult AnthropicBackend::chat(const BackendRequest& req, const DeltaCallb
 
     const json parsed = json::parse(exchange.body, nullptr, false);
     if (parsed.is_discarded() || !parsed.contains("content") || !parsed["content"].is_array()) {
-        return decline("unparsable 200 body: " + clipForLog(exchange.body));
+        return decline("unparsable 200 body: " + clipForLog(exchange.body, config_.apiKey));
     }
     if (parsed.contains("usage") && parsed["usage"].is_object()) {
         const json& usage = parsed["usage"];
@@ -284,14 +318,26 @@ BackendResult AnthropicBackend::chat(const BackendRequest& req, const DeltaCallb
         return result;
     }
 
+    // Only well-formed text blocks count; thinking blocks and anything else are
+    // skipped by type. Shape is checked field by field because json::value()
+    // throws on a non-object block or a non-string field, and nothing above
+    // this thread catches.
     std::string text;
     for (const json& block : parsed["content"]) {
-        // Thinking blocks and anything else are skipped by type.
-        if (block.value("type", "") == "text") text += block.value("text", "");
+        if (!block.is_object()) continue;
+        const auto type = block.find("type");
+        const auto body = block.find("text");
+        if (type == block.end() || !type->is_string() || *type != "text") continue;
+        if (body == block.end() || !body->is_string()) continue;
+        text += body->get<std::string>();
+    }
+    if (text.empty()) {
+        // A 200 with nothing to say is not a reply; let Ollama answer.
+        return decline("200 with no text content: " + clipForLog(exchange.body, config_.apiKey));
     }
     result.ok = true;
     result.content = std::move(text);
-    if (!result.content.empty()) onDelta(result.content);
+    onDelta(result.content);
     return result;
 }
 

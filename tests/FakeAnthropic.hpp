@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "httplib.h"
@@ -26,6 +27,9 @@ class FakeAnthropic {
         Http429,         // rate_limit_error
         Http500,         // api_error
         FailOnceThenOk,  // first request 500, every later one Ok
+        BadJson,         // 200 whose body is not JSON
+        MalformedBlocks, // 200 whose content blocks are the wrong shape
+        EmptyContent,    // 200 with an empty content array
     };
 
     FakeAnthropic() {
@@ -113,9 +117,15 @@ class FakeAnthropic {
             case Mode::FailOnceThenOk:
                 error(500, "api_error", "internal server error");
                 return;
+            case Mode::BadJson:
+                res.status = 200;
+                res.set_content("<html>not json</html>", "text/html");
+                return;
             case Mode::Ok:
             case Mode::Refusal:
             case Mode::MaxTokens:
+            case Mode::MalformedBlocks:
+            case Mode::EmptyContent:
                 break;
         }
         nlohmann::json body = {
@@ -137,6 +147,16 @@ class FakeAnthropic {
         if (mode == Mode::Refusal) {
             body["stop_details"] = {{"type", "refusal"}, {"category", "general_harms"}};
             body["content"] = nlohmann::json::array();
+        }
+        if (mode == Mode::EmptyContent) body["content"] = nlohmann::json::array();
+        if (mode == Mode::MalformedBlocks) {
+            // A bare string, a block with a null text, a block whose type is
+            // not a string, and a thinking block: none of them is a reply.
+            body["content"] = nlohmann::json::array(
+                {"just a string",
+                 {{"type", "text"}, {"text", nullptr}},
+                 {{"type", 7}, {"text", "x"}},
+                 {{"type", "thinking"}, {"thinking", "..."}}});
         }
         res.status = 200;
         res.set_content(body.dump(), "application/json");

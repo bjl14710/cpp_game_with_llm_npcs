@@ -1,5 +1,6 @@
 #include "Config.hpp"
 
+#include <iostream>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -110,6 +111,9 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
     if (auto it = kv.find("anthropic_retry_backoff_ms"); it != kv.end()) {
         cfg.anthropicRetryBackoffMs = std::stoi(it->second);
     }
+    if (auto it = kv.find("anthropic_timeout_s"); it != kv.end()) {
+        cfg.anthropicTimeoutSeconds = std::stoi(it->second);
+    }
 
     // Line bank. Anything other than an explicit "on" leaves it off, so a
     // typo disables the feature rather than half-enabling it.
@@ -128,7 +132,22 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
         cfg.apiKey = env;
     } else {
         auto secrets = readKv(configDir / "secrets.cfg");
-        if (auto it = secrets.find("api_key"); it != secrets.end()) cfg.apiKey = it->second;
+        if (auto it = secrets.find("api_key"); it != secrets.end()) {
+            // secrets.cfg has one key slot shared by every cloud provider, so a
+            // key left over from another provider must not be sent to this one:
+            // an Anthropic key going out as a Bearer token to a third-party
+            // endpoint is the one way it could leave the machine in the clear.
+            // Anthropic keys are prefixed sk-ant-; nothing else is.
+            const bool anthropicKey = it->second.rfind("sk-ant-", 0) == 0;
+            const bool anthropicProvider = cfg.provider == "anthropic";
+            if (anthropicKey == anthropicProvider) {
+                cfg.apiKey = it->second;
+            } else {
+                std::cerr << "[llm_npc] ignoring config/secrets.cfg api_key: it is "
+                          << (anthropicKey ? "an Anthropic key" : "not an Anthropic key")
+                          << " but provider = " << cfg.provider << "\n";
+            }
+        }
     }
     return cfg;
 }

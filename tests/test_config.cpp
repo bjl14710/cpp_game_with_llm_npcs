@@ -178,6 +178,7 @@ TEST_CASE("loadLlmConfig keeps Anthropic defaults when none are set") {
     CHECK(cfg.anthropicHistoryTurns == 12);
     CHECK(cfg.anthropicTokenBudget == 0);
     CHECK(cfg.anthropicRetryBackoffMs == 750);
+    CHECK(cfg.anthropicTimeoutSeconds == 20);
     // The key env var follows the provider when api_key_env is not named.
     CHECK(cfg.apiKeyEnv == "NPC_GAME_ANTHROPIC_API_KEY");
     CHECK(cfg.apiKey.empty());
@@ -192,13 +193,38 @@ TEST_CASE("loadLlmConfig reads every anthropic_* key") {
               "anthropic_max_tokens = 300\n"
               "anthropic_history_turns = 6\n"
               "anthropic_token_budget = 250000\n"
-              "anthropic_retry_backoff_ms = 10\n");
+              "anthropic_retry_backoff_ms = 10\n"
+              "anthropic_timeout_s = 7\n");
     const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
     CHECK(cfg.anthropicBaseUrl == "http://127.0.0.1:9");
     CHECK(cfg.anthropicMaxTokens == 300);
     CHECK(cfg.anthropicHistoryTurns == 6);
     CHECK(cfg.anthropicTokenBudget == 250000);
     CHECK(cfg.anthropicRetryBackoffMs == 10);
+    CHECK(cfg.anthropicTimeoutSeconds == 7);
+}
+
+TEST_CASE("secrets.cfg api_key is only used by the provider it belongs to") {
+    unsetenv("NPC_GAME_ANTHROPIC_API_KEY");
+    unsetenv("OPENROUTER_API_KEY");
+    SUBCASE("an Anthropic key is not handed to an OpenAI-compatible provider") {
+        TempDir tmp;
+        tmp.write("llm.cfg", "provider = openrouter\n");
+        tmp.write("secrets.cfg", "api_key = sk-ant-leftover\n");
+        CHECK(llm_npc::loadLlmConfig(tmp.path).apiKey.empty());
+    }
+    SUBCASE("a non-Anthropic key is not sent to Anthropic") {
+        TempDir tmp;
+        tmp.write("llm.cfg", "provider = anthropic\n");
+        tmp.write("secrets.cfg", "api_key = sk-or-v1-leftover\n");
+        CHECK(llm_npc::loadLlmConfig(tmp.path).apiKey.empty());
+    }
+    SUBCASE("a matching key is used") {
+        TempDir tmp;
+        tmp.write("llm.cfg", "provider = anthropic\n");
+        tmp.write("secrets.cfg", "api_key = sk-ant-matching\n");
+        CHECK(llm_npc::loadLlmConfig(tmp.path).apiKey == "sk-ant-matching");
+    }
 }
 
 TEST_CASE("the Anthropic key is read from NPC_GAME_ANTHROPIC_API_KEY and never written anywhere") {

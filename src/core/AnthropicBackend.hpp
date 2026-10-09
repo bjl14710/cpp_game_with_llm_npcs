@@ -83,7 +83,9 @@ class AnthropicBackend : public LlmBackend {
 
     std::string buildBody(const BackendRequest& req) const;
     Exchange send(const ParsedUrl& url, const std::string& body) const;
-    // A result that asks the fallback to take the request, logging `why`.
+    // A result that asks the fallback to take the request. Logs `why` once per
+    // distinct reason, so a provider that is down for an hour prints one line,
+    // not one per NPC turn.
     BackendResult decline(const std::string& why) const;
     void disable(const std::string& why);
     // Adds one response's usage block to the totals and applies the budget.
@@ -97,6 +99,8 @@ class AnthropicBackend : public LlmBackend {
     std::string model_;
     AnthropicUsage usage_;
     bool disabled_ = false;
+    mutable std::string lastDeclineReason_;
+    // Touched only from chat() on the single worker thread.
     bool loggedTls_ = false;
 };
 

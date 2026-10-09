@@ -164,7 +164,7 @@ byte for byte, plus one log line.
 
 | Gate | Result |
 |---|---|
-| `make -C tests test` | **581 passed / 0 failed / 48 skipped** (27 new) |
+| `make -C tests test` | **588 passed / 0 failed / 48 skipped** (34 new) |
 | `cmake -S . -B build && cmake --build build` | clean; `OpenSSL 3.6.3 found — https LLM providers enabled` |
 | `make -C tests portability` | macOS 11.0 floor holds |
 | Live TLS probe (invalid key, real endpoint) | handshake OK, HTTP 401, backend disabled, fallback requested |
@@ -251,6 +251,24 @@ or the pages fetched on 2026-10-09; nothing here is from memory.
 16. **Commits use explicit paths.** The branch carried unrelated staged
     scaffolds (DirectiveCheck, GoldenSet, TelemetryLog, SignLayout, tools/*.py,
     AGENTS.md). They were left exactly as found; nothing here commits them.
+
+17. **Reviewer pass (reviewer subagent) and what it changed.** One crash path
+    and a few robustness gaps, all in the new code, all fixed and tested:
+    a 200 whose content blocks are not objects or carry `"text": null` used to
+    throw out of `json::value()` on the worker thread (uncaught → terminate);
+    blocks are now checked field by field. A text-less 200 now declines to
+    Ollama instead of rendering a blank line. `decline()` now logs once per
+    distinct reason, so a persistent 400 is visible. secrets.cfg's single
+    `api_key` slot is now provider-checked by the `sk-ant-` prefix, so an
+    Anthropic key can never go out as a Bearer token to a third-party
+    endpoint and vice versa. Plain http is refused to any host but loopback.
+    Error-body clips mask the key before they are kept. Empty history turns
+    are dropped (the API rejects empty text blocks). New `anthropic_timeout_s`
+    (default 20) bounds the try/retry/fallback chain to well under a minute
+    instead of two minutes at Ollama's 60 s timeout.
+18. **behavior-qa pass.** Everything runnable passed; nothing statistical
+    could run because no eval baseline or golden set exists yet. It flagged
+    the OpenSSL deployment-target link warning noted below.
 
 ## Acceptance criteria
 
