@@ -30,6 +30,7 @@
 #include "Config.hpp"
 #include "ConversationStore.hpp"
 #include "Cutscene.hpp"
+#include "DayNight.hpp"
 #include "DialogUI.hpp"
 #include "FactStore.hpp"
 #include "Gossip.hpp"
@@ -56,6 +57,7 @@
 #include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
+#include "Theme.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
 #include "Zones.hpp"
@@ -220,23 +222,109 @@ NpcFace faceForMood(NpcMood mood) {
     return NpcFace::Neutral;
 }
 
-// Draws `str` centered horizontally at height `y` with a dark backdrop bar.
+// Draws `str` centered horizontally at height `y` in a Nocturne pill: the
+// background at .72 behind neutral-200 text (status lines, editor HUD).
 void drawCenteredHudText(const std::string& str, int size, float y) {
-    const int width = MeasureText(str.c_str(), size);
-    const float x = (static_cast<float>(GetScreenWidth()) - static_cast<float>(width)) * 0.5f;
-    DrawRectangleRec(Rectangle{x - 12.f, y - 6.f, static_cast<float>(width) + 24.f,
-                               static_cast<float>(size) + 16.f},
-                     Color{10, 14, 22, 170});
-    DrawText(str.c_str(), static_cast<int>(x), static_cast<int>(y), size, WHITE);
+    const float fsize = static_cast<float>(size);
+    const float width = ui::measure(ui::Face::Ui, str, fsize);
+    const float x = (static_cast<float>(GetScreenWidth()) - width) * 0.5f;
+    const Rectangle box{x - 12.f, y - 6.f, width + 24.f, fsize + 12.f};
+    DrawRectangleRounded(box, 10.f / box.height, 6, ui::bgAlpha(0.72f));
+    ui::text(ui::Face::Ui, str, x, y, fsize, ui::kNeutral200);
 }
 
-// Nameplate: centered text with an outline-ish shadow at a projected point.
-void drawNameplate(const std::string& name, Vector2 screen, Color color) {
-    const int width = MeasureText(name.c_str(), 14);
-    const int x = static_cast<int>(screen.x) - width / 2;
-    const int y = static_cast<int>(screen.y) - 14;
-    DrawText(name.c_str(), x + 1, y + 1, 14, Color{0, 0, 0, 200});
-    DrawText(name.c_str(), x, y, 14, color);
+// Nameplate: a 12px label pill above a projected point. `talkable` marks the
+// resident the talk key would address with the accent ring and tick.
+void drawNameplate(const std::string& name, Vector2 screen, Color color, bool talkable) {
+    ui::pill(ui::Face::Ui, name, screen, 12.f, color, talkable);
+}
+
+// Building sign: display face, 17px, with a drop shadow and a short accent
+// underline — the one world label that is not a pill, so a sign and a name
+// never read as the same kind of thing.
+void drawSign(const std::string& name, Vector2 screen) {
+    const float w = ui::measure(ui::Face::Display, name, 17.f);
+    const float x = screen.x - w * 0.5f;
+    const float y = screen.y - 24.f;
+    ui::text(ui::Face::Display, name, x + 1.f, y + 1.f, 17.f, ui::bgAlpha(0.8f));
+    ui::text(ui::Face::Display, name, x, y, 17.f, ui::kNeutral100);
+    DrawRectangle(static_cast<int>(screen.x - 14.f), static_cast<int>(y + 21.f), 28, 1,
+                  ui::kAccent);
+}
+
+// The HUD's "HH:MM" for a world hour.
+std::string hourLabel(float worldHour) {
+    const int minutes = static_cast<int>(worldHour * 60.f) % (24 * 60);
+    const int h = minutes / 60;
+    const int m = minutes % 60;
+    return (h < 10 ? "0" : "") + std::to_string(h) + ":" + (m < 10 ? "0" : "") +
+           std::to_string(m);
+}
+
+// "Xh Ym until dusk" from the day/night bands, or "" after dusk begins.
+std::string untilDusk(float worldHour) {
+    if (worldHour >= daynight::kDuskStart) return "";
+    const int minutes = static_cast<int>((daynight::kDuskStart - worldHour) * 60.f + 0.5f);
+    std::string out;
+    if (minutes >= 60) out += std::to_string(minutes / 60) + "h ";
+    out += std::to_string(minutes % 60) + "m until dusk";
+    return out;
+}
+
+// The player's mood tag text for an NPC mood.
+const char* moodLabel(NpcMood mood) {
+    switch (mood) {
+        case NpcMood::Happy: return "Warm";
+        case NpcMood::Angry: return "Irritated";
+        case NpcMood::Sad: return "Low";
+        case NpcMood::Embarrassed: return "Flustered";
+        case NpcMood::Surprised: return "Startled";
+        case NpcMood::Neutral: return "";
+    }
+    return "";
+}
+
+// Compass strip, top centre: a 400x30 card showing the +/-90 degrees of
+// heading around the camera with cardinal labels and a marker per NPC
+// (accent when the talk key would address them). North is -Z, so the
+// bearing of a point is atan2(dx, -dz) and the camera heading is
+// 180 - yaw (flatForward points down +Z at yaw 0).
+void drawCompass(float yawDeg, const std::vector<std::pair<float, bool>>& markers) {
+    const float w = static_cast<float>(GetScreenWidth());
+    const Rectangle bar{w * 0.5f - 200.f, 16.f, 400.f, 30.f};
+    ui::roundedPanel(bar, 0.72f, ui::alpha(ui::kText, 0.10f));
+    const float heading = 180.f - yawDeg;
+    const auto xFor = [&](float bearingDeg, float& outX) {
+        float rel = std::fmod(bearingDeg - heading + 540.f, 360.f) - 180.f;
+        if (rel < -90.f || rel > 90.f) return false;
+        outX = bar.x + bar.width * 0.5f + rel / 90.f * (bar.width * 0.5f - 16.f);
+        return true;
+    };
+    const char* names[4] = {"N", "E", "S", "W"};
+    for (int i = 0; i < 4; ++i) {
+        float x;
+        if (!xFor(static_cast<float>(i) * 90.f, x)) continue;
+        ui::textCentered(ui::Face::Ui, names[i], x, bar.y + 8.f, 12.f,
+                         i == 0 ? ui::kAccent300 : ui::kNeutral400);
+    }
+    for (int tick = 0; tick < 360; tick += 30) {
+        if (tick % 90 == 0) continue;
+        float x;
+        if (!xFor(static_cast<float>(tick), x)) continue;
+        DrawRectangle(static_cast<int>(x), static_cast<int>(bar.y + 12.f), 1, 6,
+                      ui::kNeutral700);
+    }
+    for (const auto& [bearing, talkable] : markers) {
+        float x;
+        if (!xFor(bearing, x)) continue;
+        if (talkable) {
+            ui::glowDot(Vector2{x, bar.y + 25.f}, true);
+        } else {
+            DrawCircleV(Vector2{x, bar.y + 25.f}, 2.f, ui::kNeutral300);
+        }
+    }
+    DrawRectangle(static_cast<int>(bar.x + bar.width * 0.5f), static_cast<int>(bar.y + 2.f), 1,
+                  6, ui::kAccent);
 }
 
 }  // namespace
@@ -535,6 +623,8 @@ int main(int argc, char** argv) {
 
     // Models need the GL context, so Assets loads after InitWindow.
     Assets assets((projectRoot / "assets").string());
+    // UI faces (Nocturne design): optional drop-in TTFs, raylib's font else.
+    ui::loadFonts((projectRoot / "assets").string());
     RaylibRenderer renderer(assets);
 
     // The player's own avatar (issue #106): a look-only row under the
@@ -1431,6 +1521,15 @@ int main(int argc, char** argv) {
                 isActionJustPressed(bindings, Action::OpenMenu) || IsKeyPressed(KEY_ESCAPE);
             if (menuKey) {
                 menu.open();
+                {
+                    const float hourNow =
+                        static_cast<float>(world.state().timeOfDayHours());
+                    std::string kicker = zoneName(zoneAt(player.position.x, player.position.z));
+                    if (match) kicker += " - Day " + std::to_string(match->day());
+                    std::string sub = hourLabel(hourNow);
+                    if (match) sub += " - " + std::string(phaseName(match->phase()));
+                    menu.setHeader(kicker, sub);
+                }
                 mode = AppMode::Menu;
                 EnableCursor();
             } else if (isActionJustPressed(bindings, Action::Talk) && nearbyNpc >= 0 &&
@@ -1465,6 +1564,7 @@ int main(int argc, char** argv) {
                     for (const std::string& n : memberNames) party += " " + n + ",";
                     party.back() = '.';
                     dialog.reset();
+                    dialog.setSpeaker("", party, "", "");
                     dialog.appendLine({TranscriptLine::Kind::System, "", party});
                     dialog.setInputEnabled(true);
                     mode = AppMode::Dialogue;
@@ -1479,11 +1579,13 @@ int main(int argc, char** argv) {
                     npc.lookAt(player.position);
                 }
                 dialog.reset();
+                dialog.setSpeaker(npc.persona().name, npc.persona().role,
+                                  npc.activity().empty()
+                                      ? zoneName(zoneAt(npc.position().x, npc.position().z))
+                                      : npc.activity(),
+                                  moodLabel(npc.mood()));
                 dialog.setInputEnabled(true);
                 dialog.swallowPendingText();
-                dialog.appendLine({TranscriptLine::Kind::System, "",
-                                   "You are talking to " + npc.persona().name + " (" +
-                                       npc.persona().role + "). Enter sends, Esc leaves."});
                 mode = AppMode::Dialogue;
                 EnableCursor();
             }
@@ -2144,7 +2246,6 @@ int main(int argc, char** argv) {
                         break;
                     }
                     default:
-                        break;  // NpcSpeechBubble has no floating-text UI yet
                 }
             }
         }
@@ -2297,7 +2398,6 @@ int main(int argc, char** argv) {
             // Hosting: our own conversations broadcast the same speech/mood
             // updates remote-initiated ones do.
             if (chatRouter && text) {
-                chatRouter->announceNpcSpeech(npcIndex, *text);
                 chatRouter->announceNpcMood(npcIndex);
             }
 
@@ -2568,14 +2668,10 @@ int main(int argc, char** argv) {
         }
         if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
             session.npcIndex() < static_cast<int>(world.npcs().size())) {
-            const auto& ratedHistory =
-                world.npcs()[static_cast<std::size_t>(session.npcIndex())].history();
-            if (!client.busy() && ratedHistory.size() >= 2 &&
-                ratedHistory.back().role == "assistant" &&
-                !(ratedNpc == session.npcIndex() &&
-                  ratedHistorySize == ratedHistory.size())) {
-                drawCenteredHudText("[F1] like reply    [F2] flag reply", 16, 12.f);
-            }
+            // The panel's hint row already names F1/F2; keep its mood tag
+            // following the NPC's reaction to the last exchange.
+            dialog.setMood(
+                moodLabel(world.npcs()[static_cast<std::size_t>(session.npcIndex())].mood()));
         }
         if (sandboxEditing) {
             const std::string current =
@@ -2633,15 +2729,17 @@ int main(int argc, char** argv) {
             Vector2 screen;
             std::string text;
             Color color;
+            bool talkable;
         };
         std::vector<PlateCandidate> plates;
-        const auto plateFor = [&](const Vec3& feet, std::string name, Color color) {
+        const auto plateFor = [&](const Vec3& feet, std::string name, Color color,
+                                  bool talkable) {
             if (cutscenePlaying || menuOpen) return;
             const float range = distanceXZ(player.position, feet);
             if (range > kNameplateRange) return;
             Vector2 screen;
             if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
-            plates.push_back({range, screen, std::move(name), color});
+            plates.push_back({range, screen, std::move(name), color, talkable});
         };
         if (joined) {
             for (const auto& netNpc : netNpcs) {
@@ -2649,21 +2747,23 @@ int main(int argc, char** argv) {
                     netNpc.npcIndex >= static_cast<int>(world.npcs().size())) continue;
                 plateFor(netNpc.position,
                          world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().name,
-                         WHITE);
+                         ui::kNeutral200, netNpc.npcIndex == nearbyNpc);
             }
         } else {
-            for (const Npc& npc : world.npcs()) {
+            for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                const Npc& npc = world.npcs()[i];
                 // Nameplate carries the schedule activity ("Marge - baking
                 // bread") so the routine reads at a glance.
+                const bool talkable = static_cast<int>(i) == nearbyNpc;
                 plateFor(npc.position(),
                          npc.activity().empty()
                              ? npc.persona().name
                              : npc.persona().name + " - " + npc.activity(),
-                         WHITE);
+                         talkable ? ui::kAccent200 : ui::kNeutral200, talkable);
             }
         }
         for (const auto& remote : remotePlayers) {
-            plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
+            plateFor(remote.position, remote.name, ui::kAccent300, false);
         }
         std::sort(plates.begin(), plates.end(),
                   [](const PlateCandidate& a, const PlateCandidate& b) {
@@ -2671,7 +2771,7 @@ int main(int argc, char** argv) {
                   });
         for (const PlateCandidate& plate : plates) {
             if (!claimLabelSpot(plate.screen)) continue;
-            drawNameplate(plate.text, plate.screen, plate.color);
+            drawNameplate(plate.text, plate.screen, plate.color, plate.talkable);
         }
 
         // ---- building signage (issue #166) ----
@@ -2725,7 +2825,7 @@ int main(int argc, char** argv) {
                 // case. Nearest wins — and a nameplate that claimed the spot
                 // first beats any sign; the loser is simply not drawn.
                 if (!claimLabelSpot(screen)) continue;
-                drawNameplate(building->name, screen, Color{255, 232, 170, 255});
+                drawSign(building->name, screen);
             }
         }
 
@@ -2743,25 +2843,49 @@ int main(int argc, char** argv) {
             const Npc& npc = world.npcs()[static_cast<std::size_t>(callout.npcIndex)];
             Vector2 screen;
             if (renderer.worldToScreen(npc.position() + Vec3{0.f, 2.6f, 0.f}, screen)) {
-                drawNameplate(callout.text, screen, Color{255, 200, 120, 255});
+                drawNameplate(callout.text, screen, ui::kAccent200, false);
             }
         }
 
         if (mode == AppMode::Playing) {
+            const float sw = static_cast<float>(GetScreenWidth());
+            const float sh = static_cast<float>(GetScreenHeight());
             if (nearbyNpc >= 0 && nearbyNpc < static_cast<int>(world.npcs().size())) {
+                // Talk prompt: keycap + "Talk to NAME" in one pill.
                 const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
-                drawCenteredHudText(
-                    "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name, 20,
-                    static_cast<float>(GetScreenHeight()) - 84.f);
+                const std::string key = bindings.key(Action::Talk);
+                const std::string label = "Talk to " + npc.persona().name;
+                const float keyW = ui::keycapWidth(key);
+                const float labelW = ui::measure(ui::Face::Ui, label, 14.f);
+                const Rectangle box{(sw - (keyW + 8.f + labelW + 28.f)) * 0.5f, sh - 92.f,
+                                    keyW + 8.f + labelW + 28.f, 36.f};
+                ui::roundedPanel(box, 0.72f, ui::alpha(ui::kAccent700, 1.f));
+                ui::keycap(key, box.x + 14.f, box.y + 8.f, true);
+                ui::text(ui::Face::Ui, label, box.x + 14.f + keyW + 8.f, box.y + 11.f, 14.f,
+                         ui::kNeutral100);
             }
             if (jailSecondsLeft > 0.f) {
                 const int secs = static_cast<int>(jailSecondsLeft) + 1;
                 drawCenteredHudText("Arrested: disturbing the peace. Released in " +
                                         std::to_string(secs) + "s",
-                                    22, static_cast<float>(GetScreenHeight()) - 120.f);
+                                    14, sh - 132.f);
             }
-            DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 2.f,
-                       Color{255, 255, 255, 200});
+            // Crosshair: a 3px dot.
+            DrawCircleV(Vector2{sw * 0.5f, sh * 0.5f}, 1.5f, ui::alpha(ui::kNeutral100, 0.9f));
+            // Compass strip with a marker per resident in nameplate range.
+            if (!sandboxEditing) {
+                std::vector<std::pair<float, bool>> markers;
+                for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                    const Npc& npc = world.npcs()[i];
+                    if (distanceXZ(player.position, npc.position()) > kNameplateRange) continue;
+                    const float dx = npc.position().x - player.position.x;
+                    const float dz = npc.position().z - player.position.z;
+                    const float bearing =
+                        std::atan2(dx, -dz) * (180.f / 3.14159265f);
+                    markers.emplace_back(bearing, static_cast<int>(i) == nearbyNpc);
+                }
+                drawCompass(player.yawDeg, markers);
+            }
             // Match HUD (#157): two short lines, top-right, and deliberately
             // no countdown bar.
             //
@@ -2783,58 +2907,90 @@ int main(int argc, char** argv) {
             // host's day and phase yet. Replicating those is #211's job, and
             // when it lands THIS is the block that starts drawing for guests.
             if (match) {
-                const std::string dayLine = "Day " + std::to_string(match->day()) +
-                                            " - " + phaseName(match->phase());
-                const int remaining =
-                    static_cast<int>(match->phaseRemainingSeconds() + 0.5f);
-                const std::string timeLine =
-                    std::to_string(remaining / 60) + ":" +
-                    (remaining % 60 < 10 ? "0" : "") + std::to_string(remaining % 60) +
-                    " left";
-                const int right = GetScreenWidth() - 24;
-                DrawText(dayLine.c_str(), right - MeasureText(dayLine.c_str(), 30), 20,
-                         30, RAYWHITE);
-                DrawText(timeLine.c_str(), right - MeasureText(timeLine.c_str(), 20), 56,
-                         20, Color{200, 210, 230, 255});
+                // Clock card: zone + day kicker, the hour in the display face,
+                // and the phase with the time left before dusk.
+                const std::string kicker =
+                    ui::upper(zoneName(zoneAt(player.position.x, player.position.z))) +
+                    " - DAY " + std::to_string(match->day());
+                const std::string hour = hourLabel(worldHour);
+                std::string sub = phaseName(match->phase());
+                const std::string dusk = untilDusk(worldHour);
+                if (!dusk.empty()) sub += " - " + dusk;
+                const float cardW = std::max({ui::measure(ui::Face::Ui, kicker, 11.f, 1.3f),
+                                              ui::measure(ui::Face::Display, hour, 38.f),
+                                              ui::measure(ui::Face::Ui, sub, 12.f)}) + 32.f;
+                const Rectangle box{sw - 24.f - cardW, 16.f, cardW, 96.f};
+                ui::roundedPanel(box, 0.72f, ui::alpha(ui::kText, 0.10f));
+                ui::kicker(kicker, box.x + 16.f, box.y + 12.f);
+                ui::text(ui::Face::Display, hour, box.x + 16.f, box.y + 28.f, 38.f, ui::kText);
+                ui::text(ui::Face::Ui, sub, box.x + 16.f, box.y + 72.f, 12.f, ui::kNeutral400);
             }
             // Weapon + health HUD (bottom-left), solo/host only.
             if (!joined) {
+                // Weapon card: slot keycap, weapon name, ammo, and a thin
+                // health bar underneath.
                 const Player& p = world.player();
                 const WeaponDef& def = weaponDef(p.weapon);
-                std::string weaponLine = std::string("[1/2] ") + def.name;
+                const Rectangle box{24.f, sh - 24.f - 64.f, 228.f, 64.f};
+                ui::roundedPanel(box, 0.72f, ui::alpha(ui::kText, 0.10f));
+                const std::string slot = p.weapon == WeaponKind::Pistol ? "2" : "1";
+                const float keyW = ui::keycap(slot, box.x + 14.f, box.y + 12.f, false);
+                ui::text(ui::Face::Ui, def.name, box.x + 14.f + keyW + 8.f, box.y + 14.f, 14.f,
+                         ui::kNeutral100);
                 if (def.ammoMax > 0) {
                     const auto it = p.ammo.find(static_cast<std::uint8_t>(p.weapon));
-                    weaponLine += "  ammo " +
-                                  std::to_string(it != p.ammo.end() ? it->second : 0);
+                    const std::string ammo =
+                        std::to_string(it != p.ammo.end() ? it->second : 0) + " rounds";
+                    ui::textRight(ui::Face::Ui, ammo, box.x + box.width - 14.f, box.y + 15.f,
+                                  12.f, ui::kNeutral400);
                 }
-                DrawText(weaponLine.c_str(), 24, GetScreenHeight() - 64, 18, RAYWHITE);
-                DrawRectangle(24, GetScreenHeight() - 40, 180, 14, Color{40, 20, 20, 220});
-                DrawRectangle(24, GetScreenHeight() - 40,
-                              static_cast<int>(180.f * static_cast<float>(p.hp) /
-                                               static_cast<float>(p.hpMax)),
-                              14, Color{200, 60, 60, 255});
+                const float frac = std::clamp(static_cast<float>(p.hp) /
+                                                  static_cast<float>(std::max(1, p.hpMax)),
+                                              0.f, 1.f);
+                DrawRectangle(static_cast<int>(box.x + 14.f), static_cast<int>(box.y + 44.f), 180,
+                              4, ui::kNeutral800);
+                DrawRectangle(static_cast<int>(box.x + 14.f), static_cast<int>(box.y + 44.f),
+                              static_cast<int>(180.f * frac), 4,
+                              frac > 0.3f ? ui::kAccent : Color{214, 92, 92, 255});
             }
         } else if (mode == AppMode::Dead) {
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{40, 8, 8, 200});
             // "You died." is wrong for a detective game — the player is not a
             // soldier, and the game already respawns them at the plaza with
-            // their memory intact. Same red wash, same Enter contract; the
-            // lost hours are a free plot hook, because the world clock really
-            // did advance while they were out and the NPCs really do remember
-            // what they said before it.
-            const char* headline = "You wake at the fountain.";
-            DrawText(headline, (GetScreenWidth() - MeasureText(headline, 44)) / 2,
-                     GetScreenHeight() / 2 - 48, 44, RAYWHITE);
-            const std::string lost =
-                clockLabel(world.state().number("world_time_seconds")) +
-                ". Two hours you can't account for.";
-            DrawText(lost.c_str(), (GetScreenWidth() - MeasureText(lost.c_str(), 20)) / 2,
-                     GetScreenHeight() / 2 + 12, 20, Color{220, 200, 200, 255});
-            const char* hint = "Press Enter to stand up.";
-            DrawText(hint, (GetScreenWidth() - MeasureText(hint, 20)) / 2,
-                     GetScreenHeight() / 2 + 44, 20, Color{180, 170, 170, 255});
+            // their memory intact. A dark vignette instead of a red wash, the
+            // same Enter contract; the lost hours are a free plot hook,
+            // because the world clock really did advance while they were out
+            // and the NPCs really do remember what they said before it.
+            const float sw = static_cast<float>(GetScreenWidth());
+            const float sh = static_cast<float>(GetScreenHeight());
+            ui::vignette(0.55f, 0.92f);
+            std::string when = clockLabel(world.state().number("world_time_seconds"));
+            if (match) when = "Day " + std::to_string(match->day()) + " - " + when;
+            const float cx = sw * 0.5f;
+            ui::textCentered(ui::Face::Ui, ui::upper(when), cx, sh * 0.5f - 96.f, 11.f,
+                             ui::kAccent300);
+            ui::textCentered(ui::Face::Display, "You wake at the fountain.", cx,
+                             sh * 0.5f - 72.f, 56.f, ui::kText);
+            ui::ruleH(cx - 120.f, sh * 0.5f + 2.f, 240.f, ui::kAccent);
+            const std::vector<std::string> body = ui::wrap(
+                ui::Face::Ui,
+                "Two hours you can't account for. The town kept its clock running - and "
+                "its memory of what you said.",
+                16.f, 520.f);
+            float by = sh * 0.5f + 20.f;
+            for (const std::string& line : body) {
+                ui::textCentered(ui::Face::Ui, line, cx, by, 16.f, ui::kNeutral300);
+                by += 22.f;
+            }
+            const float keyW = ui::keycapWidth("Enter");
+            const float hintW = keyW + 8.f + ui::measure(ui::Face::Ui, "Stand up", 13.f);
+            ui::keycap("Enter", cx - hintW * 0.5f, by + 18.f, true);
+            ui::text(ui::Face::Ui, "Stand up", cx - hintW * 0.5f + keyW + 8.f, by + 21.f, 13.f,
+                     ui::kNeutral300);
         } else if (mode == AppMode::Dialogue) {
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
+            // The world dims more toward the panel so the scene stays legible
+            // on the left while the transcript gets its contrast.
+            DrawRectangleGradientH(0, 0, GetScreenWidth(), GetScreenHeight(),
+                                   ui::bgAlpha(0.35f), ui::bgAlpha(0.75f));
             dialog.render();
         } else if (mode == AppMode::Cutscene) {
             // Letterbox, fade and caption — the whole visual vocabulary. There
@@ -2846,8 +3002,11 @@ int main(int argc, char** argv) {
             const int h = GetScreenHeight();
             const int bars = cutscene.letterboxPx();
             if (bars > 0) {
-                DrawRectangle(0, 0, w, bars, BLACK);
-                DrawRectangle(0, h - bars, w, bars, BLACK);
+                DrawRectangle(0, 0, w, bars, ui::kBg);
+                DrawRectangle(0, h - bars, w, bars, ui::kBg);
+                ui::ruleH(0.f, static_cast<float>(bars), static_cast<float>(w), ui::kNeutral700);
+                ui::ruleH(0.f, static_cast<float>(h - bars - 1), static_cast<float>(w),
+                          ui::kNeutral700);
             }
             const float alpha = cutscene.fadeAlpha();
             if (alpha > 0.f) {
@@ -2864,8 +3023,14 @@ int main(int argc, char** argv) {
             // grey. In a detective game the timestamp is evidence, so every
             // scene states the hour off the one world clock.
             const std::string& slug = cutscene.slug();
-            if (!slug.empty() && bars > 0) {
-                DrawText(slug.c_str(), 24, bars + 14, 20, Color{170, 180, 200, 255});
+            if (!slug.empty()) {
+                // In the top bar when it is deep enough, just below it else.
+                const float slugY = bars >= 80 ? static_cast<float>(bars) - 48.f
+                                               : static_cast<float>(bars) + 16.f;
+                std::string when = hourLabel(worldHour);
+                if (match) when = "Day " + std::to_string(match->day()) + " - " + when;
+                ui::kicker(when, 40.f, slugY - 16.f);
+                ui::text(ui::Face::Display, slug, 40.f, slugY, 22.f, ui::kNeutral100);
             }
 
             // Speaker line in the transcript's amber. The player has already
@@ -2873,9 +3038,8 @@ int main(int argc, char** argv) {
             // so reusing it means "an NPC is talking" needs no explanation.
             const std::string& speaker = cutscene.speakerLine();
             if (!speaker.empty()) {
-                const int tw = MeasureText(speaker.c_str(), 20);
-                DrawText(speaker.c_str(), (w - tw) / 2, h - bars - 52, 20,
-                         Color{255, 230, 180, 255});
+                ui::textCentered(ui::Face::Ui, speaker, static_cast<float>(w) * 0.5f,
+                                 static_cast<float>(h - bars) - 58.f, 17.f, ui::kAccent200);
             }
 
             // The case card. Its headline IS the card — a beat that sets one
@@ -2883,9 +3047,11 @@ int main(int argc, char** argv) {
             // bars so the card reads as a title, not an overlay.
             const std::string& headline = cutscene.headline();
             if (!headline.empty()) {
-                DrawRectangle(0, 0, w, h, Color{8, 10, 16, 200});
-                const int hw = MeasureText(headline.c_str(), 44);
-                DrawText(headline.c_str(), (w - hw) / 2, h / 2 - 48, 44, RAYWHITE);
+                DrawRectangle(0, 0, w, h, ui::bgAlpha(0.8f));
+                ui::textCentered(ui::Face::Display, headline, static_cast<float>(w) * 0.5f,
+                                 static_cast<float>(h) * 0.5f - 60.f, 48.f, ui::kText);
+                ui::ruleH(static_cast<float>(w) * 0.5f - 120.f, static_cast<float>(h) * 0.5f,
+                          240.f, ui::kAccent);
             }
 
             const std::string& line = cutscene.caption();
@@ -2893,16 +3059,21 @@ int main(int argc, char** argv) {
                 // Size 20 off the usable ladder: the built-in bitmap font
                 // computes glyph spacing with integer division, so 14 through
                 // 18 space identically and only ~10 / 20 / 30 visibly differ.
-                const int size = 20;
-                const int tw = MeasureText(line.c_str(), size);
+                const float size = 19.f;
                 // Under the headline when this beat is a card, above the lower
                 // bar otherwise.
-                const int y = headline.empty() ? h - bars - size - 18 : h / 2 + 12;
-                DrawText(line.c_str(), (w - tw) / 2, y, size, RAYWHITE);
+                const float y = headline.empty() ? static_cast<float>(h - bars) - size - 16.f
+                                                 : static_cast<float>(h) * 0.5f + 16.f;
+                ui::textCentered(ui::Face::Ui, line, static_cast<float>(w) * 0.5f, y, size,
+                                 ui::kNeutral100);
             }
             if (cutscene.canSkip()) {
-                DrawText("Space to skip", 24, h - bars - 26, 10,
-                         Color{200, 200, 200, 180});
+                const float keyW = ui::keycapWidth("Space");
+                const float skipW = keyW + 6.f + ui::measure(ui::Face::Ui, "skip", 11.f);
+                const float sx = static_cast<float>(w) - 40.f - skipW;
+                const float sy = bars >= 40 ? static_cast<float>(bars) * 0.5f - 10.f : 16.f;
+                ui::keycap("Space", sx, sy, false);
+                ui::text(ui::Face::Ui, "skip", sx + keyW + 6.f, sy + 4.f, 11.f, ui::kNeutral400);
             }
         } else if (mode == AppMode::SandboxEdit) {
             // Draw NOTHING here, and that is the whole fix.
@@ -2973,6 +3144,7 @@ shutdown:
     }
 
     leaveSession();
+    ui::unloadFonts();
     CloseWindow();
     return 0;
 }

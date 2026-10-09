@@ -176,6 +176,7 @@ add_executable(cpp_game_with_llm_npcs
     src/app/InputMap.cpp
     src/app/Menu.cpp
     src/app/RaylibRenderer.cpp
+    src/app/Theme.cpp
 )
 target_include_directories(cpp_game_with_llm_npcs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
