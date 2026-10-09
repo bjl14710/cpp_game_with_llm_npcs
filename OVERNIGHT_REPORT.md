@@ -402,3 +402,255 @@ draw calls and feeds the new header/speaker strings to the menu and dialog.
   layout is identical in raylib's default font.
 - **Dialogue panel** was not screenshot-verified headless. Open a
   conversation once and look at the header, transcript and hint row.
+
+# Overnight Build Report — ElevenLabs TTS backend
+Date: 2026-10-09
+Branch: `design_updates_and_haiku_usage` (draft PR; main untouched)
+Plan: `.claude/plans/elevenlabs-tts-backend.md`
+
+## Summary
+
+`provider = elevenlabs` in `config/tts.cfg` plus a per-NPC `voice_id` in
+`config/voices.cfg` makes the host speak that NPC's replies through
+ElevenLabs. No key, no provider or no voice entry means the line is silent,
+exactly as the game is today. The key comes from `NPC_GAME_ELEVENLABS_API_KEY`
+or the gitignored `config/secrets.cfg`, is only ever sent to `*.elevenlabs.io`
+(or loopback for tests), and never reaches a log, an error string or the cache.
+
+Spec note: the spec says "alongside the existing local Kokoro-82M backend" and
+"Rhubarb lip sync ... unchanged". Neither exists in this repository (decision
+1), so the fallback for every failure path is silence, logged once per cause.
+
+| Gate | Result |
+|---|---|
+| `make -C tests test` | 649 passed / 0 failed / 48 skipped (61 new) |
+| `cmake --build build` and `cmake --build build-tts` | clean |
+| `make -C tests portability` | macOS 11.0 floor holds |
+| `git grep -i "xi-api-key\|elevenlabs_api_key"` | header name, config key name, commented example, `*-never-real` fixtures only |
+
+## Decision log
+
+
+1. **Fallback is silence, because that is what exists.** `grep -ri
+   "kokoro|rhubarb|tts|InitAudioDevice|speech" src tests config` finds nothing
+   before this change. The spec's "fall back to the local pipeline" has no
+   target in this repo, so every failure path ends in "this line is silent",
+   logged once per cause. Stated plainly in the plan's Out of Scope.
+
+2. **`provider = none` is the default and opens nothing.** `Speech`'s
+   constructor returns before `InitAudioDevice()` when `makeTtsBackend` returns
+   null, so a clean clone never initialises raylib audio, never starts the
+   worker, never touches the network. Verified by a 30-frame smoke run of
+   `build-tts/cpp_game_with_llm_npcs --frames 30`: zero `[llm_npc] tts:` lines
+   (the only "audio" line is raylib's own `raudio: loaded (optional)` which
+   predates this work).
+
+3. **Request raw PCM and wrap it in a WAV header in code.** Output format
+   default `pcm_22050`; `WavEncode.hpp` writes the canonical 44-byte RIFF
+   header (format 1, 16-bit, 1 channel). No decoder dependency, lossless, and
+   the cache holds one format. `wav_*` is also accepted and passed through
+   after `parseWavHeader` validates it; mp3/opus/ulaw are refused at
+   construction and replaced with `pcm_22050` with a log line. 22050 because
+   "PCM and WAV formats with 44.1kHz sample rate requires you to be subscribed
+   to Pro tier or above" — https://elevenlabs.io/docs/api-reference/text-to-speech/convert
+
+   Caveat: no fetched page states that `pcm_*` is signed 16-bit little-endian
+   mono. The code assumes it. Manual check 1 below confirms it by ear.
+
+4. **Default model `eleven_flash_v2_5`.** The models page lists it at ~75 ms
+   with a 40,000-character limit; the spec asked for the low-latency Flash
+   model. Per-NPC `model_id` can override it in `voices.cfg`.
+   https://elevenlabs.io/docs/models
+
+5. **Character limits are enforced locally per model** before any request:
+   flash_v2_5 40,000; flash_v2 / turbo 30,000; multilingual_v2 / v4 10,000;
+   everything else (incl. `eleven_v3`) 5,000. Unknown models get the most
+   conservative value; a server-side `text_too_long` (400) is still handled.
+
+6. **Outcome policy is a pure function** `classifyTtsExchange(reached,
+   status, body)` so the whole error table is one unit test. Mapping: not
+   reached -> Retry; 200 -> Deliver; 401/402 -> Disable; 404 -> UnknownVoice;
+   429 -> Retry unless `detail.code` (or legacy `detail.status`) contains
+   `quota`, then Disable; >=500 -> Retry; anything else -> Fallback (silent, no
+   retry). The errors page lists only rate-limit codes under 429
+   (`rate_limit_exceeded`, `concurrent_limit_exceeded`, `system_busy`) and
+   puts credit exhaustion under 402 `insufficient_credits`; the `quota` branch
+   covers the legacy `quota_exceeded` status the spec named.
+   https://elevenlabs.io/docs/eleven-api/resources/errors.md
+
+7. **Unknown voice is tracked per NPC inside the backend.** `TtsVoice` carries
+   `npcId`; a 404 inserts it into `unknownVoiceNpcs_`, logs voice + NPC once,
+   and later calls for that NPC return without a request. Other NPCs keep
+   their voices; the session is not disabled.
+
+8. **Key resolution mirrors the LLM path but uses a new slot.** Env var
+   `NPC_GAME_ELEVENLABS_API_KEY` (name configurable via `api_key_env`), else
+   `config/secrets.cfg` key `elevenlabs_api_key`. The LLM `api_key` slot is
+   never read for TTS (tested). No key -> provider downgraded to `none`, one
+   log line. The key is never printed: `clipForLog` masks it in any logged
+   body, and the "key never in error strings" test echoes the key from the
+   fake server in four failure modes.
+
+9. **Plain http to a non-loopback host is refused; https needs OpenSSL.**
+   Copied from `AnthropicBackend`. The tests build has no OpenSSL so the
+   `#ifndef CPPHTTPLIB_OPENSSL_SUPPORT` branch is what runs there and is
+   tested; the CMake build found OpenSSL 3.6.3 and takes the https path.
+
+10. **Cache key is FNV-1a 64 over text, voice_id, model_id, output_format**
+    (0xFF separator between fields), 16 hex chars, files `<key>.wav` in
+    `saves/tts_cache/` (default; `saves/` is already gitignored at
+    `.gitignore:14`). Writes go to `<key>.part` then rename, so a crash never
+    leaves a half WAV that later plays as noise. Eviction sorts by mtime and
+    removes oldest until under `cache_max_mb`; a hit refreshes mtime (true LRU
+    without a sidecar index). FNV over SHA because nothing in the repo has a
+    hash and the key space (a few thousand lines) does not need collision
+    resistance beyond 64 bits.
+
+11. **Cache hits are not billed and not counted.** `TtsUsage.charactersSent`
+    is incremented only on a 200. `TtsClient` checks the cache before the
+    backend, so a hit never reaches `synthesize`. The shutdown line
+    `[llm_npc] tts: session usage: requests=N characters=N cache_hits=N` is
+    printed by `TtsClient`'s destructor when anything happened.
+
+12. **Budget is checked before sending** (`sent + chars > budget` -> disable,
+    not sent) and after recording (`sent >= budget` -> disable). So the budget
+    is never exceeded and the line that reaches it exactly still plays.
+
+13. **Host-only, host's own lines only.** `speech.speak` is called at the two
+    sites where the local player's dialog renders an NPC reply (solo
+    `session.replyArrived` and local `group`), after `announceNpcSpeech` has
+    already routed text to remote players. Remote players' NPC replies are not
+    spoken on the host and no audio is sent over the LAN (new `NetMessage`
+    type; out of scope, filed as a suggested issue).
+
+14. **`Speech` owns the audio device only when a provider is live**, and is a
+    stack object declared after `InitWindow` and destroyed before
+    `CloseWindow()`. Its destructor resets `TtsClient` first (worker joined, no
+    result lands on a closed device), unloads sounds, then `CloseAudioDevice`.
+    Finished sounds are unloaded in place and the vector compacted; an earlier
+    draft used `remove_if` and would have unloaded the wrong handles from the
+    unspecified tail — caught in review before any run.
+
+15. **Voice map keyed by `persona().name`**, the identity every other store
+    uses. `voices.cfg` lines are `npc.<name>.voice_id|model_id|backend`,
+    split on the first `npc.` and the LAST `.` so names may contain dots.
+    Names containing `#` cannot be voiced because `readKv` treats `#` as a
+    comment; documented in the file header rather than forking the parser.
+
+16. **Doc fetches that did not help**, so nobody repeats them:
+    `https://elevenlabs.io/docs/developer-guides/error-messages` (404) and
+    `https://elevenlabs.io/docs/api-reference/introduction` (no error shapes).
+    The errors `.md` URL above is the one that worked.
+
+## Review fixes
+
+The reviewer subagent found nothing blocking and twelve items worth fixing;
+all twelve are in, each with a test:
+
+1. Invalid UTF-8 in a line made `json::dump` throw inside the worker.
+   Now dumped with `error_handler_t::replace`, and the worker wraps each job
+   in try/catch so a throwing backend yields a silent line (logged once)
+   instead of a dead thread.
+2. The key is only sent to `api.elevenlabs.io`, `*.elevenlabs.io` or a
+   loopback host; any other `base_url` is declined before a request is built.
+3. `TtsBackend::requestStop()` lets the client's destructor cut a pending
+   retry backoff short, so quitting mid-retry no longer blocks for the
+   backoff interval.
+4. A cache hit is validated with `parseWavHeader`; a corrupt slot is removed
+   (`TtsCache::remove`) and re-synthesised instead of played as noise.
+5. The unwritable-cache-dir test now targets a path under a regular file so
+   it fails for root too.
+6. `lastDeclineReason_` is cleared on a delivered 200 so a repeated error is
+   logged again.
+7. `voice_id` must match `[A-Za-z0-9_-]+`; anything else is treated as an
+   unknown voice before any URL is built.
+8. The env var value is trimmed; whitespace-only falls back to secrets.cfg.
+9. Numeric config values are parsed digits-only with bounds; garbage keeps
+   the default with one log line instead of throwing.
+10. Corrected the `Speech.hpp` lifetime comment (audio device is
+    window-independent).
+11. Doc comments on `TtsClient::config()` / `backend()`.
+12. Tests pinned: 401 logged exactly once across two requests (stderr
+    captured), the key is absent from every cache file name and body, and
+    the shutdown usage line is asserted.
+
+Left as designed: `parseWavHeader` rejects `wav_*` replies with extra chunks
+before `data` (default `pcm_22050` is unaffected; noted in `WavEncode.hpp`),
+fixed `.part` temp naming, FNV-1a cache key, local character limits, and
+"one over-budget line disables the session".
+
+## Acceptance criteria
+
+
+| # | Criterion | Status | How |
+|---|-----------|--------|-----|
+| 1 | Default config is byte-for-byte today's game | PASS | 30-frame smoke run; no `tts:` line; `Speech` returns before `InitAudioDevice` |
+| 2 | Request shape (path, `xi-api-key`, `output_format`, `text`, `model_id`) | PASS | `test_tts_backend.cpp` "the outbound request is the convert endpoint..." |
+| 3 | Buffer is WAV, configured rate, mono, 16-bit | PASS | "raw PCM is returned as a 16-bit mono WAV..." (24000 Hz, 2205 samples) |
+| 4 | 401 disables | PASS | unit |
+| 5 | 402 disables | PASS | unit |
+| 6 | 429 retried once then declines; 429-quota disables | PASS | unit (2 requests observed / 1 request + disabled) |
+| 7 | 500 retried once then declines | PASS | unit; plus 500-then-200 delivers |
+| 8 | Unknown voice declines, logs NPC id once, no second request | PASS | unit |
+| 9 | Over-limit text declines without request; at-limit sends | PASS | unit |
+| 10 | No network declines, not disabled | PASS | unit against a closed port |
+| 11 | Budget disables | PASS | unit (two cases) |
+| 12 | Character totals exclude cache hits | PASS | `TtsClient` + cache test: 2 submits, 1 request, 13 chars, 1 hit |
+| 13 | Key never in error strings | PASS | fake echoes the key in 4 modes |
+| 14 | WAV header bytes, parse round-trip | PASS | `test_wav_encode.cpp` |
+| 15 | Cache key sensitivity, hit/miss, LRU eviction | PASS | `test_tts_cache.cpp` |
+| 16 | Config keys, key precedence, downgrade, voice map | PASS | `test_tts_config.cpp` |
+| 17 | `make -C tests test -j8` | PASS | 649 cases / 366,109 assertions / 0 failed (after review fixes) |
+| 18 | `make -C tests portability` | PASS | floor holds at macOS 11.0 |
+| 19 | `cmake --build build-tts` and `cmake --build build` | PASS | both link; no warnings in new files (pre-existing ld dylib warnings for OpenSSL only) |
+| 20 | No key material in tree | PASS | `git grep -iE "xi-api-key|elevenlabs_api_key"` -> code + commented example only |
+| 21 | A voiced NPC is heard at correct pitch (pcm_* is S16LE mono) | MANUAL | needs a real key and speakers; cannot be asserted without a live account |
+| 22 | Second identical line is a cache hit in a live run | MANUAL | same; the unit test proves the logic, the live run proves the file-system path under the real binary |
+| 23 | Wrong `voice_id` logs once, game continues | MANUAL | needs a live 404 from the real API |
+
+## Manual verification commands
+
+
+```sh
+cd /Users/brandonlee/development/repos/products/cpp_games/cpp_game_with_llm_npcs
+
+# 1. Builds and tests (all already green tonight)
+make -C tests test -j8
+make -C tests portability
+cmake -S . -B build-tts && cmake --build build-tts -j8
+
+# 2. Key hygiene — expect only test-key-never-real and the commented example
+git grep -nI -iE "xi-api-key|elevenlabs_api_key|sk_[0-9a-f]{20}" -- . ':!external'
+git log -p --all | grep -ciE "xi-api-key: [a-z0-9]"     # expect 0
+git check-ignore -v saves/tts_cache config/secrets.cfg  # both ignored
+
+# 3. Live run (host machine, speakers on)
+export NPC_GAME_ELEVENLABS_API_KEY='<your key>'         # never commit this
+sed -i '' 's/^provider = none/provider = elevenlabs/' config/tts.cfg
+cat >> config/voices.cfg <<'V'
+npc.Marge Holloway.voice_id = <a voice id from your ElevenLabs library>
+V
+./build-tts/cpp_game_with_llm_npcs 2>&1 | grep "tts:"
+#   talk to Marge; expect to hear her, then on a repeated line:
+#   [llm_npc] tts: cache hit for Marge Holloway (<16 hex>)
+#   on exit:
+#   [llm_npc] tts: session usage: requests=N characters=N cache_hits=M
+ls -la saves/tts_cache/
+
+# 4. Wrong voice id: change the voice_id to "nonexistent", relaunch, expect one
+#   [llm_npc] tts: voice "nonexistent" for NPC "Marge Holloway" is unknown to the API (HTTP 404); ...
+#   and the game keeps running.
+
+# 5. Restore the defaults before committing
+git checkout -- config/tts.cfg config/voices.cfg   # (once they are tracked)
+unset NPC_GAME_ELEVENLABS_API_KEY
+```
+
+## Needs your attention
+
+- **`pcm_*` is assumed to be signed 16-bit little-endian mono.** No fetched
+  ElevenLabs page states it. Manual check 3 above confirms it by ear; if a
+  voice sounds like static, that assumption is the first thing to look at.
+- **Only the host hears voices.** Remote players' NPC replies are not spoken
+  on the host and no audio crosses the LAN (out of scope per the spec;
+  suggested follow-up issue: an `NpcAudio` NetMessage carrying the cache key).
