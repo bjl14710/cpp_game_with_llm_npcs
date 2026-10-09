@@ -86,7 +86,30 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
     if (auto it = kv.find("think"); it != kv.end()) cfg.think = it->second;
     if (auto it = kv.find("provider"); it != kv.end()) cfg.provider = it->second;
     if (auto it = kv.find("base_url"); it != kv.end()) cfg.baseUrl = it->second;
-    if (auto it = kv.find("api_key_env"); it != kv.end()) cfg.apiKeyEnv = it->second;
+    // The key's env var defaults per provider, so `provider = anthropic` alone
+    // reads NPC_GAME_ANTHROPIC_API_KEY and never an OpenRouter key by accident.
+    // An explicit api_key_env still wins.
+    if (auto it = kv.find("api_key_env"); it != kv.end()) {
+        cfg.apiKeyEnv = it->second;
+    } else if (cfg.provider == "anthropic") {
+        cfg.apiKeyEnv = "NPC_GAME_ANTHROPIC_API_KEY";
+    }
+    if (auto it = kv.find("anthropic_model"); it != kv.end()) cfg.anthropicModel = it->second;
+    if (auto it = kv.find("anthropic_base_url"); it != kv.end()) {
+        cfg.anthropicBaseUrl = it->second;
+    }
+    if (auto it = kv.find("anthropic_max_tokens"); it != kv.end()) {
+        cfg.anthropicMaxTokens = std::stoi(it->second);
+    }
+    if (auto it = kv.find("anthropic_history_turns"); it != kv.end()) {
+        cfg.anthropicHistoryTurns = std::stoi(it->second);
+    }
+    if (auto it = kv.find("anthropic_token_budget"); it != kv.end()) {
+        cfg.anthropicTokenBudget = std::stoull(it->second);
+    }
+    if (auto it = kv.find("anthropic_retry_backoff_ms"); it != kv.end()) {
+        cfg.anthropicRetryBackoffMs = std::stoi(it->second);
+    }
 
     // Line bank. Anything other than an explicit "on" leaves it off, so a
     // typo disables the feature rather than half-enabling it.

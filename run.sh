@@ -23,8 +23,10 @@ HOST="${OLLAMA_HOST:-$(cfg_get host localhost)}"
 PORT="${OLLAMA_PORT:-$(cfg_get port 11434)}"
 MODEL="$(cfg_get model qwen2.5:3b-instruct)"
 
-# Local provider only: make sure Ollama is serving and the model is present.
-if [[ "$PROVIDER" == "ollama" ]]; then
+# Make sure Ollama is serving and the model is present. The anthropic provider
+# needs it too: Ollama is its fallback, and the first request after a cloud
+# failure should not also pay a cold start.
+if [[ "$PROVIDER" == "ollama" || "$PROVIDER" == "anthropic" ]]; then
     if ! curl -fsS --max-time 2 "http://${HOST}:${PORT}/api/tags" >/dev/null 2>&1; then
         if ! command -v ollama >/dev/null 2>&1; then
             echo "Ollama is not installed. Get it from https://ollama.com/download" >&2
