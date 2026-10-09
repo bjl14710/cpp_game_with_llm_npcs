@@ -309,7 +309,96 @@ Set `provider = ollama` back afterwards.
   so the link emits `building for macOS-11.0, but linking with dylib ... built
   for newer version 14.0`. Harmless on this machine; a user on macOS 11-13 who
   wants the cloud path needs an OpenSSL built for their floor.
-- **Design import was blocked.** The `claude_design` MCP server is not
-  configured in this session, `DesignSync` requires `/design-login`, and the
-  claude.ai design URL returns HTTP 403 to a plain fetch. Run `/design-login`
-  (or add the MCP) and the `Redesign.dc.html` import can proceed.
+
+# Overnight Build Report — Design import (Nocturne redesign)
+Date: 2026-10-09
+Branch: `design_updates_and_haiku_usage` (draft PR; main untouched)
+Source: `Redesign.dc.html` from the claude.ai design project, read through
+the `claude_design` MCP after `/design-login`; design system
+`_ds/nocturne-...`, direction 1b (Inter UI + Instrument Serif display).
+
+## Summary
+
+The pause menu, every sub-page, the dialogue panel, the in-world HUD, the
+death screen and the cutscene letterbox now follow the Nocturne design:
+bg `#161826`, surface `#232532`, text `#e9e9ed`, accent `#9184d9`, the
+neutral and accent ramps, 8px radius, outlined buttons, keycaps and tags.
+No gameplay, input or networking code changed; `main.cpp` only swapped the
+draw calls and feeds the new header/speaker strings to the menu and dialog.
+
+| Gate | Result |
+|---|---|
+| `make -C tests test` | 649 passed / 0 failed / 48 skipped |
+| `cmake -S . -B build && cmake --build build` | clean (pre-existing httplib + OpenSSL warnings only) |
+| `make -C tests portability` | macOS 11.0 floor holds |
+| Headless captures | every menu page, HUD, match HUD, cutscene, viewed and correct |
+
+## Decision log
+
+1. **One theme module, `src/app/Theme.{hpp,cpp}` (namespace `llm_npc::ui`).**
+   The design's tokens, text helpers (`text`, `measure`, `wrap`, `ellipsize`)
+   and widgets (panel, card, rule, kicker, keycap, tag, chip, pill, button,
+   input, toast, vignette) live in one place so Menu, DialogUI and the HUD
+   cannot drift. raylib `DrawText` ignores fractional spacing, so everything
+   goes through `DrawTextEx` with a 10px floor.
+2. **Fonts are an optional drop-in, not fetched.** `assets/LICENSES.md`
+   permits CC0 assets only; Inter and Instrument Serif are OFL. The theme
+   loads `assets/fonts/ui.ttf` and `assets/fonts/display.ttf` when present
+   and falls back to raylib's default font otherwise. `tools/fetch_assets.sh`
+   is untouched; adding the fonts (and their licence line) is the owner's call.
+3. **ASCII-only UI strings.** raylib's default font covers code points
+   32-126 only, so every arrow, dash and ellipsis in the design is spelled
+   `<-`, `-`, `...`. The drop-in fonts would render the same strings.
+4. **Menu: left 400px panel with groups Play / You / World / System**,
+   keyboard Up/Down/Enter plus mouse, `setHeader(kicker, sub)` fed by
+   main.cpp (zone + day, hour + phase). Sub-pages share one
+   `renderPageHeader` (kicker, display title, sub-line, rule, `<- Back (Esc)`).
+   All page logic, hooks and rebind semantics are unchanged.
+5. **Dialogue: right 460px panel** (`DialogUI::kPanelWidth`), header with
+   avatar initials, name, role - location and a mood tag, transcript filling
+   from the bottom with YOU / NAME labels, streaming caret, outlined input,
+   keycap hint row. New `setSpeaker` / `setMood`; the old "You are talking
+   to ... Enter sends, Esc leaves." system line is gone because the header
+   now carries it, and the F1/F2 HUD hint block moved into the hint row.
+   The rest of the frame dims with a left-to-right gradient so the NPC stays
+   visible beside the panel.
+6. **HUD:** nameplates are pills (accent when talkable, neutral otherwise),
+   signs are display text with an accent underline, a compass strip at the
+   top (heading = 180 - yaw, markers for NPCs within nameplate range), a
+   match clock card top-right (zone + day kicker, hour, phase + time until
+   dusk from `daynight::kDuskStart`), a weapon card bottom-left (keycap,
+   name, rounds, health bar; red below 30%), and the talk prompt as a
+   keycap + "Talk to NAME". Crosshair is a 1.5px dot.
+7. **Mood label mapping** Happy/Angry/Sad/Embarrassed/Surprised ->
+   Warm/Irritated/Low/Flustered/Startled; Neutral shows no tag. The design
+   showed a single example tag; the mapping is the smallest readable set.
+8. **Death screen:** vignette, day/time kicker, display headline "You wake
+   at the fountain.", accent rule, wrapped body, "Enter / Stand up" keycap.
+9. **Cutscene:** letterbox bars in `kBg` with neutral-700 rules, slug as
+   kicker + display line, speaker in accent-200 above the caption, headline
+   wash + accent rule, "Space / skip" keycap top-right.
+10. **Screenshots are local only** under `docs/qa/screenshots/nocturne/`
+    (`menu_main`, `menu_controls`, `menu_multiplayer`, `menu_creator`,
+    `menu_journal`, `menu_sandbox`, `menu_model`, `menu_match`, `hud`,
+    `hud_match`, `cutscene`). Captured with `--frames N shot.png --menu <page>`
+    / `--cutscene` / `--match 30 --hour 10`; raylib writes the basename to
+    the working directory so each shot was moved afterwards. The dialogue
+    panel cannot be captured headless (it needs a key press to open), so it
+    was verified by compiling and by the shared Theme helpers the captured
+    pages exercise.
+11. **Sign overlap** (Gus's Hot Dogs over City Police Station in the HUD
+    captures) is the pre-existing label-collision pass with 20px clearance
+    and is unchanged by this work.
+12. **Commit split.** `CMakeLists.txt`, `src/app/main.cpp` and
+    `config/secrets.cfg.example` carry both design and TTS hunks. The design
+    commit stages those files with the TTS lines removed; the TTS commit
+    restores them. Each commit builds on its own.
+
+## Needs your attention
+
+- **Fonts.** Drop `Inter` as `assets/fonts/ui.ttf` and `Instrument Serif`
+  as `assets/fonts/display.ttf` (both OFL) and add them to
+  `assets/LICENSES.md` if you want the design's typography; without them the
+  layout is identical in raylib's default font.
+- **Dialogue panel** was not screenshot-verified headless. Open a
+  conversation once and look at the header, transcript and hint row.
