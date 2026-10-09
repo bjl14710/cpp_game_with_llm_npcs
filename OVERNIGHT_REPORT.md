@@ -145,3 +145,153 @@ Stacked — each targets the previous, so review in order and merge from the bot
   and `.claude/memory/*` should be untracked. Untracking deletes them from the remote.
 - **#173** — decide between optimising ~2 ms of character rendering or relaxing the
   16.67 ms gate. The gap is 1.75 ms at p99, not the ~3.5 ms the old arithmetic implied.
+
+---
+
+# Overnight Build Report — Anthropic Haiku 5.5 backend
+Date: 2026-10-09
+Branch: `design_updates_and_haiku_usage` (draft PR; main untouched)
+Plan: `.claude/plans/anthropic-haiku-backend.md`
+
+## Summary
+
+`provider = anthropic` in `config/llm.cfg` now sends NPC dialogue to
+`claude-haiku-5-5` through the Messages API, with the configured Ollama model as
+the automatic fallback. Nothing above the LLM layer changed: the same system
+prompt is assembled, the same directive tags are parsed, the same role gate
+decides whether a secret is in the prompt. No key means the game is Ollama,
+byte for byte, plus one log line.
+
+| Gate | Result |
+|---|---|
+| `make -C tests test` | **581 passed / 0 failed / 48 skipped** (27 new) |
+| `cmake -S . -B build && cmake --build build` | clean; `OpenSSL 3.6.3 found — https LLM providers enabled` |
+| `make -C tests portability` | macOS 11.0 floor holds |
+| Live TLS probe (invalid key, real endpoint) | handshake OK, HTTP 401, backend disabled, fallback requested |
+
+## Decision log
+
+Every fork in the spec, the option taken, and why. Sources are the files read
+or the pages fetched on 2026-10-09; nothing here is from memory.
+
+1. **Reuse the existing seam, do not build a second one.** `LlmBackend`
+   (`src/core/LlmBackend.hpp`) already is "generate(request) -> text or error"
+   with Ollama and OpenAI-compatible implementations behind `makeBackend`. The
+   new `AnthropicBackend` is a third implementation; the only seam change is one
+   `bool fallback` on `BackendResult` so a backend can decline a request without
+   failing it.
+2. **Fallback as a composite, not as flags inside LlmClient.** `makeBackend`
+   returns a `FallbackBackend(Anthropic, Ollama)` for `provider = anthropic`.
+   LlmClient, Npc and main.cpp did not change. Warm-up goes to Ollama because
+   that is the model that has to be resident when the cloud drops out.
+3. **Godot HTTP constraint is inapplicable; cpp-httplib is used; OpenSSL made
+   optional.** The project is C++/raylib with cpp-httplib 0.15.3 vendored.
+   httplib cannot speak https without `CPPHTTPLIB_OPENSSL_SUPPORT` and no build
+   defined it (grep of `CMakeLists.txt`, `tests/Makefile`). CMake now does
+   `find_package(OpenSSL QUIET)` and enables it when found; a machine without
+   OpenSSL still builds and the backend logs once and falls back. No vendored
+   dependency added. The test build stays TLS-free: the fakes speak http.
+4. **Thinking disabled and effort low, both sent.** Migration guide: thinking is
+   adaptive by default on Haiku 5.5, `{"type":"disabled"}` is accepted at effort
+   low/medium/high, and thinking tokens count toward `max_tokens` so a small cap
+   "can stop with stop_reason: max_tokens after a thinking block and before any
+   text". With a 200-token cap that risk is the whole budget, so disabled wins
+   over the guide's general "use effort as the lever" advice. Effort low is sent
+   as well so the choice is explicit if thinking is ever re-enabled.
+5. **No temperature / top_p / top_k.** Migration guide: any non-default value
+   returns 400 on this model and the defaults are what we would send.
+6. **No structured outputs.** The reply contract is directive-tagged prose
+   (`[[MOOD: x]]`, `[[ACTION: y]]`, `src/core/NpcAction.hpp`,
+   `src/core/DirectiveCheck.hpp`), not a JSON schema, so `output_config.format`
+   has nothing to enforce. Replies go through the existing `checkReply` path
+   unchanged. Documented as supported on Haiku 5.5 should the contract ever
+   become JSON.
+7. **No backend-level "1-3 sentences" instruction.** Every persona's `style`
+   field already says it (`personas/baker.persona:4` etc.), and the client is
+   shared with world generation, whose JSON prompt a brevity line would damage.
+   The prompt layer is untouched, which is what the goal asked for.
+8. **Prompt caching: one `system` text block with `cache_control: ephemeral`,
+   history capped to the last 12 turns.** Caching docs: cache hierarchy is
+   tools → system → messages, the breakpoint goes on the last stable block, and
+   the minimum cacheable prefix on Haiku 5.5 is 512 tokens. The whole rendered
+   prompt is one block because `Persona::renderSystemPrompt` already orders it
+   stable-first; memory and gossip sit inside it, so a memory write invalidates
+   that NPC's cache for one turn. Short personas may fall under 512 tokens and
+   be silently uncached: both cache counters then read 0 and nothing is wrong.
+9. **History window opens with a user turn.** After the cap, leading
+   non-user turns are dropped so `messages` never starts with an orphaned
+   assistant line.
+10. **Key handling.** Read from `NPC_GAME_ANTHROPIC_API_KEY` or gitignored
+    `config/secrets.cfg` (`api_key`), via the existing resolver in
+    `src/core/Config.cpp`. The env var name follows the provider when
+    `api_key_env` is not set, so switching providers cannot read an OpenRouter
+    key by accident. The key travels only in the `x-api-key` header: never in a
+    body, an error string, a log line, or a network message to clients
+    (multiplayer already routes every remote player through the host's single
+    `LlmClient`, `src/core/HostChatRouter.hpp`).
+11. **Refusal line.** `stop_reason: "refusal"` yields
+    `I'd rather not get into that. [[MOOD: neutral]]` as a successful reply, with
+    no retry and no Ollama: the API has no server-side fallback and re-asking a
+    local model a question Claude declined would defeat the refusal.
+12. **max_tokens is a failed reply, not a fallback.** The existing failure path
+    (`Npc::onReplyArrived` → "seems distracted") is what the player sees, and no
+    truncated word is emitted as a delta. Ollama is not asked, because a prompt
+    that overran the cap once would overrun it again.
+13. **Retry once with backoff on 429 / 5xx / timeout / unreachable, then
+    Ollama for that request.** 401 disables the backend for the session. 400
+    and other 4xx go straight to Ollama for that request with the error body
+    clipped into the log. Pinned by `classifyExchange` and its test.
+14. **Cost visibility.** All four `usage` counters summed per session; one
+    `[llm_npc] anthropic: session usage:` line from the backend destructor,
+    which runs when LlmClient leaves scope at shutdown. `anthropic_token_budget`
+    (0 = none) switches the session to Ollama when the sum reaches it.
+15. **Shared URL parser.** `parseBaseUrl` moved from a private copy in
+    `OpenAiBackend.cpp` to `src/core/BaseUrl.hpp` so both cloud backends use
+    one. The only change to existing code outside the seam.
+16. **Commits use explicit paths.** The branch carried unrelated staged
+    scaffolds (DirectiveCheck, GoldenSet, TelemetryLog, SignLayout, tools/*.py,
+    AGENTS.md). They were left exactly as found; nothing here commits them.
+
+## Acceptance criteria
+
+| Criterion | Status |
+|---|---|
+| Valid key → schema-valid reply from `claude-haiku-5-5` | **Not run: no key on this machine** (env var unset, `config/secrets.cfg` absent). Steps below. |
+| No key → Ollama exactly as before | Tested: Ollama bodies byte-identical, one log line |
+| Gated secret absent from outbound body | Tested both ways: absent with the gate closed, present with it open (so the first case is not vacuous), and only ever inside the cached system block |
+| Mocked refusal → in-character line | Tested |
+| Mocked 500 → Ollama answers | Tested, including "500 then 200 delivers from Anthropic" |
+| Second consecutive request shows nonzero `cache_read_input_tokens` | **Not run: needs a key.** Steps below. |
+| No key material in repo or history | **Fails on a pre-existing item, not on this work** — see below |
+| Existing tests pass; both builds green | Yes |
+
+### Manual verification (needs your key)
+
+```
+export NPC_GAME_ANTHROPIC_API_KEY=sk-ant-...
+sed -i '' 's/^provider = ollama/provider = anthropic/' config/llm.cfg
+./run.sh
+```
+Talk to one resident twice in a row and quit. The shutdown line
+`[llm_npc] anthropic: session usage: ... cache_write=N cache_read=M` should show
+`cache_write > 0` after the first turn and `cache_read > 0` after the second;
+if both stay 0 the persona's prompt is under the 512-token minimum (decision 8).
+Set `provider = ollama` back afterwards.
+
+## Needs your attention
+
+- **Key material in the repo (pre-existing).** `git grep` for `sk-ant-` finds
+  `.claude/.credentials.json` and `.claude/.claude/.credentials.json`, both
+  **tracked on this branch** (commit `1e0cd87 saving claude files to be used on
+  remote`) and in history. These are the OAuth tokens already listed under
+  standing items above. Untracking them deletes tracked files and rewriting
+  history is a force-push, so neither was done tonight. The acceptance criterion
+  cannot pass until they are removed and rotated.
+- **OpenSSL deployment target.** Homebrew's `openssl@3` is built for macOS 14,
+  so the link emits `building for macOS-11.0, but linking with dylib ... built
+  for newer version 14.0`. Harmless on this machine; a user on macOS 11-13 who
+  wants the cloud path needs an OpenSSL built for their floor.
+- **Design import was blocked.** The `claude_design` MCP server is not
+  configured in this session, `DesignSync` requires `/design-login`, and the
+  claude.ai design URL returns HTTP 403 to a plain fetch. Run `/design-login`
+  (or add the MCP) and the `Redesign.dc.html` import can proceed.
