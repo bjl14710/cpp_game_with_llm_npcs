@@ -1,0 +1,81 @@
+# PARKED UNTIL PR #283 MERGES -- rename to arrest.cutscene then.
+#
+# This file is authored and complete, but it is deliberately NOT named
+# *.cutscene yet. loadCutscenes globs on extension() == ".cutscene"
+# (Cutscene.cpp:252), so the .pending suffix keeps it out of the load pass.
+#
+# Why that matters: the slug / speaker / journal_subject / journal_line keys
+# below arrive with PR #283. Dev's parser does not know them, reports each as
+# an unknown key, and two shipped tests -- "the shipped opening.cutscene
+# parses and fits the Intro budget" and "the shipped win.cutscene parses and
+# is ASCII" -- load the WHOLE cutscenes/ directory and assert errors.empty().
+# Dropping this file in early turns the suite red for a reason that has
+# nothing to do with the arrest.
+#
+# The arrest: six seconds explaining a teleport that currently has none.
+#
+# Today an arrest moves the player across the map and prints one HUD line
+# ("Arrested: disturbing the peace. Released in 10s"). The teleport is the
+# problem, not the text -- you are relocated without seeing why. This scene
+# spends six seconds on the officer who took you in, then hands the existing
+# jail HUD line back untouched.
+#
+# ORDER MATTERS, AND GETTING IT WRONG IS INVISIBLE IN TESTS.
+# main.cpp's playCutscene snapshots the player on entry and RESTORES that
+# position on exit -- "so a cutscene never teleports anyone". The arrest IS a
+# teleport. Fire this before the teleport and the restore silently undoes the
+# arrest: the player ends up back where they were caught while the HUD insists
+# they are in jail. Teleport FIRST, then play, so the snapshot is taken at the
+# station. The slug below says POLICE STATION STEPS for exactly that reason.
+#
+# CAMERA IS ABSOLUTE WORLD SPACE, unlike opening.cutscene.
+# The opening authors offsets from the body because the body lands somewhere
+# different every match. An arrest always ends at the same place: the police
+# station AABB is (-20,-80)..(20,-40) (City.cpp:28) and the teleport puts the
+# player at ((minX+maxX)/2, 0, maxZ+2) = (0, 0, -38). So absolute coordinates
+# are correct here and need no translation pass.
+#
+# Poses are EYE SPACE -- the y below is the eye height, not the feet height.
+# yaw 0 faces +Z, so yaw 180 looks back at the station's north face.
+#
+# {officer}, {line} and {clock} are substituted per arrest, the same way
+# {zone} and {hour} are substituted in opening.cutscene:
+#   {officer}  the arresting NPC's persona name
+#   {line}     arrestLineFor(mood) -- src/core/ArrestLine.hpp
+#   {clock}    the world clock at the moment of the arrest
+#
+# Captions and lines are ASCII only. The built-in bitmap font covers 32-126
+# and renders anything else as '?'.
+name = Taken In
+skippable = always
+letterbox = 96
+journal_subject = arrested_by_brooks
+journal_line = An officer took me in at {clock}. Disturbing the peace.
+
+# PUSH. Starts back and above the steps, closing on the officer. Deliberately
+# begins wide enough to show WHERE you now are -- the station -- because that
+# is the fact the old teleport never communicated.
+beat = approach
+  camera = 0.0, 2.6, -33.0
+  yaw = 180
+  pitch = -6
+  hold = 2.4
+  ease = smooth
+  slug = POLICE STATION STEPS - {clock}
+  fade_in = 0.5
+
+# HOLD. The shot has arrived; she says her line and the camera stops moving.
+# One line, hand-written, varying only by her mood.
+beat = line
+  camera = 0.0, 1.75, -36.4
+  yaw = 180
+  pitch = -2
+  hold = 2.6
+  ease = smooth
+  speaker = {officer}: {line}
+
+# Out. No camera key, so the pose holds while the frame fades; the existing
+# jail HUD line resumes on the far side with nothing done to it.
+beat = out
+  hold = 1.0
+  fade_out = 0.8
