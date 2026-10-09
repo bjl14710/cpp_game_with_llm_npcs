@@ -327,3 +327,27 @@ TEST_CASE("schedules: midnight-wrapping ranges and edge hours") {
     CHECK(activeScheduleIndex(schedule, 5.99f) == 0); // end-exclusive
     CHECK(activeScheduleIndex(schedule, 15.f) == -1); // gap: nothing active
 }
+
+TEST_CASE("A follower far behind runs to catch up, then walks the last stretch") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city;
+    const Vec3 player{0.f, 0.f, 0.f};
+
+    npc.setPlacement(Vec3{0.f, 0.f, 20.f}, 0.f, "");
+    instruct(npc, "Wait up! [[ACTION: follow]]");
+
+    // Far away: faster than the 3.8 u/s walk.
+    Vec3 before = npc.position();
+    npc.update(0.1f, player, city);
+    CHECK(distanceXZ(before, npc.position()) / 0.1f > 5.f);
+
+    // Close in: back to walking pace before the polite stop.
+    for (int i = 0; i < 200 && distanceXZ(npc.position(), player) > 3.5f; ++i) {
+        npc.update(0.02f, player, city);
+    }
+    before = npc.position();
+    npc.update(0.02f, player, city);
+    CHECK(distanceXZ(before, npc.position()) / 0.02f == doctest::Approx(3.8f).epsilon(0.01));
+}

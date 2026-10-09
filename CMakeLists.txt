@@ -39,6 +39,7 @@ add_library(llm_npc_core STATIC
     src/core/RatingLog.cpp
     src/core/SandboxMap.cpp
     src/core/Trait.cpp
+    src/core/WalkCycle.cpp
     src/core/WorldGen.cpp
     src/core/WorldGenValidate.cpp
     src/core/LlmBackend.cpp

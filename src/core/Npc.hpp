@@ -211,6 +211,7 @@ class Npc {
     float poseTimer_ = 0.f;                   // seconds of gesture remaining
     float gesturePhase_ = 0.f;                // seconds elapsed in current gesture
     bool caughtPlayer_ = false;               // arrest reached the player
+    bool catchingUp_ = false;                 // follow: running to close a gap
     Vec3 homePosition_{};                     // spawn spot for ReturnHome
     float homeFacingDeg_ = 0.f;               // spawn facing for ReturnHome
     std::vector<ScheduleEntry> schedule_;     // daily routine (may be empty)

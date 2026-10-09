@@ -331,9 +331,20 @@ constexpr Color kOutlineColor{32, 30, 38, 255};
 // size, both already in world units (contract scale applied); a part
 // without a bespoke branch falls through to the generic declared-box
 // recipe at the bottom, so new catalog rows always render.
+//
+// `hairDeg` swings hanging hair (tails, buns, long falls, braids) about the
+// hair anchor — the walk cycle's follow-through; 0 at rest.
 void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
-                    const RecipeColors& c) {
+                    const RecipeColors& c, float hairDeg = 0.f) {
     const float cy = at.y + dim.y * 0.5f;  // box center height
+    // Pitch about the hair anchor: + lifts pieces behind the head and
+    // trails pieces hanging below it backward.
+    const auto beginSwing = [&]() {
+        rlPushMatrix();
+        rlTranslatef(at.x, at.y, at.z);
+        rlRotatef(hairDeg, 1.f, 0.f, 0.f);
+        rlTranslatef(-at.x, -at.y, -at.z);
+    };
 
     if (part.id == "body_round") {
         // Tapered trunk: narrow shoulders over a wider base.
@@ -366,8 +377,10 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     } else if (part.id == "hair_pony") {
         // A rounded cap plus a small tail behind the head.
         DrawSphere({at.x, at.y + dim.y * 0.30f, at.z}, dim.x * 0.5f, c.hair);
+        beginSwing();
         DrawSphere({at.x, at.y - dim.y * 0.10f, at.z - dim.z * 0.5f},
                    dim.x * 0.34f, c.hair);
+        rlPopMatrix();
     } else if (part.id == "hair_mohawk") {
         // A single tall narrow crest running front-to-back.
         DrawCube({at.x, cy, at.z}, dim.x * 0.5f, dim.y, dim.z, c.hair);
@@ -403,8 +416,10 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     } else if (part.id == "hair_bun") {
         // A rounded cap with a bun perched top-back.
         DrawSphere({at.x, at.y - dim.y * 0.25f, at.z}, dim.x * 0.52f, c.hair);
+        beginSwing();
         DrawSphere({at.x, at.y + dim.y * 0.55f, at.z - dim.z * 0.35f},
                    dim.x * 0.30f, c.hair);
+        rlPopMatrix();
     } else if (part.id == "hair_side") {
         // A slab swept to one side, with a longer fall down that side.
         DrawCube({at.x - dim.x * 0.12f, cy, at.z}, dim.x * 0.76f, dim.y,
@@ -418,20 +433,24 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
     } else if (part.id == "hair_long") {
         // Crown plus a long fall down the back.
         DrawSphere({at.x, at.y - dim.y * 0.55f, at.z}, dim.x * 0.50f, c.hair);
+        beginSwing();
         DrawCube({at.x, at.y - dim.y * 1.05f, at.z - dim.z * 0.42f},
                  dim.x * 0.82f, dim.y * 1.9f, dim.z * 0.22f, c.hair);
+        rlPopMatrix();
     } else if (part.id == "hair_afro") {
         // One big proud sphere.
         DrawSphere({at.x, at.y + dim.y * 0.20f, at.z}, dim.x * 0.52f, c.hair);
     } else if (part.id == "hair_braids") {
         // Crown with a stacked braid hanging at each side.
         DrawSphere({at.x, at.y - dim.y * 0.30f, at.z}, dim.x * 0.48f, c.hair);
+        beginSwing();
         for (const float side : {-1.f, 1.f}) {
             DrawSphere({at.x + side * dim.x * 0.46f, at.y - dim.y * 0.95f, at.z},
                        dim.x * 0.15f, c.hair);
             DrawSphere({at.x + side * dim.x * 0.46f, at.y - dim.y * 1.35f, at.z},
                        dim.x * 0.12f, c.hair);
         }
+        rlPopMatrix();
     } else if (part.id == "hair_flat_top") {
         DrawCube({at.x, cy, at.z}, dim.x * 0.92f, dim.y, dim.z * 0.92f, c.hair);
     } else if (part.id == "hair_helmet") {
@@ -513,7 +532,7 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
 
 void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
-                                            bool walking, float phase, NpcFace face,
+                                            const WalkPose& pose, NpcFace face,
                                             bool dead) {
     const AssembledLook assembled = assembleLook(look);
     if (!assembled.ok) {
@@ -525,7 +544,9 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // ONE uniform scale takes the whole assembly to the same height
     // contract pack characters use — parts were snapped in local space, so
     // proportions and socket alignment survive any future contract change.
-    const float s = 1.8f / assembled.height;
+    // The legs take the bottom kHipHeight, so the parts shrink to fit the
+    // rest and the figure still stands kCharacterHeight tall.
+    const float s = kCharacterHeight / assembled.height * pose.shrink;
 
     const PartPalette* palette = &paletteCatalog().front();
     for (const PartPalette& candidate : paletteCatalog()) {
@@ -537,14 +558,74 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         Color{palette->outfit[0], palette->outfit[1], palette->outfit[2], 255},
         Color{38, 38, 44, 255}};
 
-    // Whole-figure transform: facing + procedural walk bob. Parts then draw
-    // at their assembly-local positions and rotate correctly for free.
+    // The head and everything on it nod about the neck: the head's anchor.
+    Vec3 neck{};
+    for (const PlacedPart& placed : assembled.parts) {
+        if (placed.part->category == PartCategory::Head) neck = placed.position * s;
+    }
+
+    // Two-bone legs from the hips to the planted/swinging ankles (see
+    // WalkCycle). Solved once; both draw passes reuse them.
+    LegJoints legs[2];
+    for (int j = 0; j < 2; ++j) {
+        legs[j] = solveLeg(poseHip(pose, j), poseAnkle(pose, j), kLegSegment,
+                           kLegStretch, pose.kneeStiff[j]);
+    }
+    const auto v3 = [](const Vec3& v) { return Vector3{v.x, v.y, v.z}; };
+
+    // Legs in the outfit color (palettes have no trouser color yet), stubby
+    // dark feet under each clamped ankle. `grow` thickens for the hull.
+    const auto drawLowerBody = [&](float grow, Color legColor, Color footColor) {
+        for (const LegJoints& leg : legs) {
+            DrawCapsule(v3(leg.hip), v3(leg.knee), kLegRadius + grow, 8, 3, legColor);
+            DrawCapsule(v3(leg.knee), v3(leg.ankle), kLegRadius + grow, 8, 3, legColor);
+            rlPushMatrix();
+            rlTranslatef(leg.ankle.x, leg.ankle.y - kAnkleHeight + 0.075f,
+                         leg.ankle.z + 0.05f);
+            rlScalef(0.13f + grow, 0.075f + grow, 0.17f + grow);
+            DrawSphere({0.f, 0.f, 0.f}, 1.f, footColor);
+            rlPopMatrix();
+        }
+    };
+    // Body, head, and face parts riding the hips: sway, roll, lean, contact
+    // squash, then the head's nod. `hull` inflates each part about its
+    // center for the outline pass.
+    const auto drawUpperBody = [&](const RecipeColors& c, bool hull) {
+        constexpr float kHullScale = 1.06f;
+        rlPushMatrix();
+        rlTranslatef(pose.sway, pose.bodyLift + pose.bob, 0.f);
+        rlRotatef(pose.rollDeg, 0.f, 0.f, 1.f);
+        rlRotatef(pose.leanDeg, 1.f, 0.f, 0.f);
+        rlScalef(pose.squashXZ, pose.squashY, pose.squashXZ);
+        for (const PlacedPart& placed : assembled.parts) {
+            // Anchor and size in world units — the contract scale is
+            // applied HERE so recipes never see it.
+            const Vec3 at = placed.position * s;
+            const Vec3 dim = placed.part->localSize * s;
+            const float cy = at.y + dim.y * 0.5f;
+            rlPushMatrix();
+            if (placed.part->category != PartCategory::Body) {
+                rlTranslatef(neck.x, neck.y, neck.z);
+                rlRotatef(pose.nodDeg, 1.f, 0.f, 0.f);
+                rlTranslatef(-neck.x, -neck.y, -neck.z);
+            }
+            if (hull) {  // inflate about the part's center, not the feet
+                rlTranslatef(at.x, cy, at.z);
+                rlScalef(kHullScale, kHullScale, kHullScale);
+                rlTranslatef(-at.x, -cy, -at.z);
+            }
+            drawPartRecipe(*placed.part, at, dim, c, pose.hairDeg);
+            rlPopMatrix();
+        }
+        rlPopMatrix();
+    };
+
+    // Whole-figure transform: facing, then the walk pose in local space.
     // Death pose: the figure tips onto its back (a rigid tip-over, the
     // composite counterpart of the pack models' death clip), lifted a
     // little so the torso doesn't sink through the ground slab.
-    const float bob = (walking && !dead) ? std::fabs(std::sin(phase * 7.f)) * 0.05f : 0.f;
     rlPushMatrix();
-    rlTranslatef(position.x, position.y + bob + (dead ? 0.30f : 0.f), position.z);
+    rlTranslatef(position.x, position.y + (dead ? 0.30f : 0.f), position.z);
     rlRotatef(facingDeg, 0.f, 1.f, 0.f);
     if (dead) rlRotatef(-90.f, 1.f, 0.f, 0.f);
 
@@ -554,31 +635,17 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // around the real geometry), then normally. The passes are grouped —
     // not interleaved per part — because the cull-face switch must drain
     // the rlgl batch; two drains per character instead of two per part.
-    constexpr float kHullScale = 1.06f;
     const RecipeColors outlineColors{kOutlineColor, kOutlineColor,
                                      kOutlineColor, kOutlineColor};
     rlDrawRenderBatchActive();
     rlSetCullFace(RL_CULL_FACE_FRONT);
-    for (const PlacedPart& placed : assembled.parts) {
-        const Vec3 at = placed.position * s;
-        const Vec3 dim = placed.part->localSize * s;
-        const float cy = at.y + dim.y * 0.5f;
-        rlPushMatrix();  // inflate about the part's center, not the feet
-        rlTranslatef(at.x, cy, at.z);
-        rlScalef(kHullScale, kHullScale, kHullScale);
-        rlTranslatef(-at.x, -cy, -at.z);
-        drawPartRecipe(*placed.part, at, dim, outlineColors);
-        rlPopMatrix();
-    }
+    drawLowerBody(0.0175f, kOutlineColor, kOutlineColor);
+    drawUpperBody(outlineColors, true);
     rlDrawRenderBatchActive();
     rlSetCullFace(RL_CULL_FACE_BACK);
 
-    for (const PlacedPart& placed : assembled.parts) {
-        // Anchor and size in world units — the contract scale is applied
-        // HERE so recipes never see it.
-        drawPartRecipe(*placed.part, placed.position * s,
-                       placed.part->localSize * s, colors);
-    }
+    drawLowerBody(0.f, colors.outfit, colors.dark);
+    drawUpperBody(colors, false);
     rlPopMatrix();
 
     // Same emote billboard the pack path draws, at the same height — the
