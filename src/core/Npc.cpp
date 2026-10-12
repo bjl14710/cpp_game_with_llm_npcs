@@ -116,6 +116,7 @@ void Npc::applyAction(NpcAction action) {
         case NpcAction::Arrest:
             behavior_ = action;
             caughtPlayer_ = false;  // a new instruction clears the latch
+            catchingUp_ = false;
             break;
         case NpcAction::CallPolice:
             // The world (main loop) routes the summons to police NPCs; the

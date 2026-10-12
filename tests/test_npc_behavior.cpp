@@ -452,3 +452,24 @@ TEST_CASE("A follower far behind runs to catch up, then walks the last stretch")
     npc.update(0.02f, player, city);
     CHECK(distanceXZ(before, npc.position()) / 0.02f == doctest::Approx(3.8f).epsilon(0.01));
 }
+
+TEST_CASE("A re-issued follow walks when the earlier catch-up was cut short") {
+    FakeOllama fake;
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(civilianPersona(), client);
+    City city;
+    const Vec3 player{0.f, 0.f, 0.f};
+
+    // Start a catch-up run from far away, then call the follower off mid-run.
+    npc.setPlacement(Vec3{0.f, 0.f, 20.f}, 0.f, "");
+    instruct(npc, "Wait up! [[ACTION: follow]]");
+    npc.update(0.1f, player, city);
+    instruct(npc, "Hold on. [[ACTION: stop]]");
+
+    // Re-followed from inside the hysteresis band (4..7 u): no reason to run.
+    npc.setPlacement(Vec3{0.f, 0.f, 5.5f}, 0.f, "");
+    instruct(npc, "Okay, come on. [[ACTION: follow]]");
+    const Vec3 before = npc.position();
+    npc.update(0.02f, player, city);
+    CHECK(distanceXZ(before, npc.position()) / 0.02f == doctest::Approx(3.8f).epsilon(0.01));
+}
