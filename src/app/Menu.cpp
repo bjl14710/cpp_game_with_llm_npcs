@@ -24,6 +24,7 @@ constexpr int kIdSandbox = 7;
 constexpr int kIdModels = 8;
 constexpr int kIdNewMystery = 9;
 constexpr int kIdMatchSettings = 10;
+constexpr int kIdCredits = 11;
 constexpr int kIdBack = 100;
 // Controls-page chips use ids [kIdChipBase, kIdChipBase + kActionCount).
 constexpr int kIdChipBase = 200;
@@ -71,6 +72,12 @@ constexpr int kDayLimitMax = 7;
 constexpr int kDayMinutesMin = 2;
 constexpr int kDayMinutesMax = 20;
 
+// Credits-page widgets: the two tier cards and one Buy button per amount.
+constexpr int kIdTierFree = 900;
+constexpr int kIdTierPaid = 901;
+constexpr int kIdBuyBase = 910;  // +index into kBuyAmountsUsd
+constexpr int kBuyAmountsUsd[] = {5, 10, 20};
+
 // ---- geometry shared by layout() and render() -----------------------------
 constexpr float kPanelWidth = 400.f;  // main page: the left panel
 constexpr float kPad = 36.f;          // sub-pages: outer padding
@@ -101,6 +108,7 @@ constexpr MainEntry kMainEntries[] = {
     {kIdSandbox, "Sandbox Maps", nullptr},
     {kIdControls, "Controls", "System"},
     {kIdModels, "LLM Model", nullptr},
+    {kIdCredits, "AI: Free / Paid", nullptr},
     {kIdQuit, "Quit", nullptr},
 };
 constexpr int kMainCount = static_cast<int>(std::size(kMainEntries));
@@ -311,6 +319,8 @@ void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
 
 void Menu::setModels(ModelHooks hooks) { models_ = std::move(hooks); }
 
+void Menu::setCredits(CreditsHooks hooks) { credits_ = std::move(hooks); }
+
 void Menu::setMatchSettings(MatchHooks hooks) { matchSettings_ = std::move(hooks); }
 
 void Menu::setHeader(std::string kicker, std::string sub) {
@@ -430,6 +440,17 @@ std::vector<Menu::Hit> Menu::layout() const {
             hits.push_back({Rectangle{kPad + 480.f - 24.f - 36.f, y + 18.f, 36.f, 36.f},
                             pair.second});
             y += 88.f;
+        }
+    } else if (page_ == Page::Credits) {
+        // Two tier cards side by side, then a row of Buy buttons under the
+        // balance line that render() draws between them.
+        const float y = kContentTop + 8.f;
+        hits.push_back({Rectangle{kPad, y, 340.f, 96.f}, kIdTierFree});
+        hits.push_back({Rectangle{kPad + 356.f, y, 340.f, 96.f}, kIdTierPaid});
+        const float buyY = y + 96.f + 56.f;
+        for (int i = 0; i < static_cast<int>(std::size(kBuyAmountsUsd)); ++i) {
+            hits.push_back({Rectangle{kPad + 152.f * static_cast<float>(i), buyY, 140.f, kButtonH},
+                            kIdBuyBase + i});
         }
     } else if (page_ == Page::Model) {
         float y = kContentTop;
@@ -604,6 +625,19 @@ MenuResult Menu::activate(int id) {
     } else if (id == kIdDaysDown || id == kIdDaysUp || id == kIdLengthDown ||
                id == kIdLengthUp) {
         nudgeMatchSetting(id);
+    } else if (id == kIdCredits) {
+        page_ = Page::Credits;
+    } else if (id == kIdTierFree || id == kIdTierPaid) {
+        if (credits_.onSetPaid) {
+            const bool paid = id == kIdTierPaid;
+            const std::string error = credits_.onSetPaid(paid);
+            showToast(!error.empty() ? "Paid unavailable: " + error
+                      : paid         ? "Paid: NPCs now answer with Claude Haiku"
+                                     : "Free: NPCs now answer with the local model");
+        }
+    } else if (id >= kIdBuyBase &&
+               id < kIdBuyBase + static_cast<int>(std::size(kBuyAmountsUsd))) {
+        if (credits_.onBuy) showToast(credits_.onBuy(kBuyAmountsUsd[id - kIdBuyBase]));
     } else if (id == kIdModels) {
         page_ = Page::Model;
         modelList_ = models_.listModels ? models_.listModels() : std::vector<std::string>{};
@@ -1109,6 +1143,68 @@ void Menu::render() const {
             }
             ui::ruleH(hit.rect.x, hit.rect.y + hit.rect.height + 2.f, hit.rect.width, divider());
         }
+    } else if (page_ == Page::Credits) {
+        renderPageHeader("System", "AI: Free / Paid",
+                         "Free runs NPCs on the local model. Paid uses Claude Haiku and "
+                         "spends credits per reply.");
+        const bool paid = credits_.paid && credits_.paid();
+        const std::string unavailable =
+            credits_.paidUnavailable ? credits_.paidUnavailable() : std::string();
+        const float y = kContentTop + 8.f;
+        for (const Hit& hit : layout()) {
+            if (hit.id == kIdTierFree || hit.id == kIdTierPaid) {
+                const bool isPaidCard = hit.id == kIdTierPaid;
+                const bool on = isPaidCard == paid;
+                ui::card(hit.rect);
+                if (hovered(hit.rect)) DrawRectangleRec(hit.rect, ui::alpha(ui::kAccent, 0.08f));
+                ui::glowDot(Vector2{hit.rect.x + 24.f, hit.rect.y + 32.f}, on);
+                ui::text(Face::Display, isPaidCard ? "Paid - Claude Haiku" : "Free - local model",
+                         hit.rect.x + 44.f, hit.rect.y + 20.f, 20.f,
+                         on ? ui::kText : ui::kNeutral300);
+                const char* blurb = !isPaidCard           ? "Ollama on this machine. No cost."
+                                    : unavailable.empty() ? "Charged per reply from your balance."
+                                                          : "Not available right now:";
+                ui::text(Face::Ui, blurb, hit.rect.x + 44.f, hit.rect.y + 52.f, 13.f,
+                         ui::kNeutral500);
+                if (isPaidCard && !unavailable.empty()) {
+                    ui::text(Face::Ui, unavailable, hit.rect.x + 44.f, hit.rect.y + 70.f, 12.f,
+                             ui::kNeutral300);
+                }
+                if (on) {
+                    ui::tag("Current",
+                            hit.rect.x + hit.rect.width - 12.f - ui::tagWidth("Current"),
+                            hit.rect.y + hit.rect.height - 30.f);
+                }
+            } else if (hit.id >= kIdBuyBase &&
+                       hit.id < kIdBuyBase + static_cast<int>(std::size(kBuyAmountsUsd))) {
+                ui::button(hit.rect,
+                           "Buy $" + std::to_string(kBuyAmountsUsd[hit.id - kIdBuyBase]),
+                           ui::ButtonKind::Secondary, hovered(hit.rect));
+            }
+        }
+        const float balanceY = y + 96.f + 18.f;
+        ui::text(Face::Display, "Balance  " + (credits_.balance ? credits_.balance() : "?"),
+                 kPad, balanceY, 20.f, ui::kText);
+        float lineY = balanceY + 38.f + kButtonH + 12.f;
+        ui::text(Face::Ui, "Test credits - no money is charged.", kPad, lineY, 13.f,
+                 ui::kNeutral500);
+        lineY += 30.f;
+        const std::vector<std::string> lines =
+            credits_.details ? credits_.details() : std::vector<std::string>{};
+        // Tab-separated cells line up in fixed columns; the UI font is
+        // proportional, so padding with spaces would not.
+        constexpr float kColumnX[] = {0.f, 200.f, 340.f};
+        for (const std::string& line : lines) {
+            std::size_t start = 0;
+            for (const float columnX : kColumnX) {
+                const std::size_t tab = line.find('\t', start);
+                ui::text(Face::Ui, line.substr(start, tab - start), kPad + columnX, lineY, 13.f,
+                         ui::kNeutral300);
+                if (tab == std::string::npos) break;
+                start = tab + 1;
+            }
+            lineY += 20.f;
+        }
     } else if (page_ == Page::Match) {
         renderPageHeader("Play", "Match Settings",
                          "Applies to the NEXT mystery, not one already running.");
@@ -1152,6 +1248,7 @@ std::optional<Menu::Page> Menu::pageFromName(const std::string& name) {
     if (name == "sandbox") return Page::Sandbox;
     if (name == "model") return Page::Model;
     if (name == "match") return Page::Match;
+    if (name == "credits") return Page::Credits;
     return std::nullopt;
 }
 

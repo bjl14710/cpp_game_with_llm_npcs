@@ -144,6 +144,36 @@ Findings applied from the sibling games and the original companion demo:
    the network; 60 FPS is independent of Ollama health.
 5. Small default model (`qwen2.5:3b-instruct`) — swap via `config/llm.cfg`.
 
+## Free vs Paid (Claude Haiku)
+
+Menu → **AI: Free / Paid** switches what answers NPCs, live:
+
+- **Free**: the local Ollama model. Nothing leaves the machine.
+- **Paid**: Claude Haiku through `AnthropicBackend`. Each reply is charged to a
+  prepaid balance at Anthropic's cost plus `markup_percent`.
+
+Setup for Paid:
+1. In `config/llm.cfg`, set `provider = anthropic`.
+2. Export `NPC_GAME_ANTHROPIC_API_KEY`, or put `api_key` in the gitignored
+   `config/secrets.cfg`. Never commit a key.
+
+Without both, the Credits page refuses Paid and says why.
+
+How it works:
+- The wallet (`src/core/Wallet.*`) is a gate, not a backend swap.
+  `AnthropicBackend::chat()` declines to the Ollama fallback when the tier is
+  Free or the balance is $0. Otherwise it charges the reply's `usage` block
+  after a 200.
+- Money is integer micro-dollars. The price is rounded up per reply.
+- Running out moves NPCs to the local model and shows a HUD notice.
+
+Purchases are **simulated**: "Buy" adds test credits, and your own API key pays
+Anthropic. The balance and tier persist in `saves/wallet.cfg`. Prices live in
+`config/llm.cfg` (`price_*_per_mtok`), copied from Anthropic's pricing page.
+
+Real payments would need a server that holds the key and takes payment.
+A key must never ship inside the client.
+
 ## Adding an NPC
 
 1. Create `personas/<id>.persona` (see existing files; `name` is required,

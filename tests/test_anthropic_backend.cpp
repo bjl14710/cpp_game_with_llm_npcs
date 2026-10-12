@@ -2,6 +2,8 @@
 // shape, every row of the error-handling table, the Ollama fallback it is
 // wrapped in, and the proof that a gated secret never leaves the machine.
 #include <chrono>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -14,6 +16,7 @@
 #include "Npc.hpp"
 #include "Persona.hpp"
 #include "Role.hpp"
+#include "Wallet.hpp"
 #include "doctest.h"
 #include "json.hpp"
 
@@ -419,6 +422,155 @@ TEST_CASE("reaching the token budget switches the session to the fallback") {
     const BackendResult third = chatOnce(backend, requestWith("sys", {}, "three"));
     CHECK(third.fallback);
     CHECK(anthropic.requestBodies().size() == 2);
+}
+
+// --- The Free/Paid wallet gate ---------------------------------------------------
+
+namespace {
+
+std::shared_ptr<Wallet> walletWith(AiTier tier, std::int64_t balanceMicros) {
+    WalletSettings settings;
+    settings.pricing.markupPercent = 40.0;
+    settings.starterCreditMicros = balanceMicros;
+    auto wallet = std::make_shared<Wallet>(settings);
+    wallet->setTier(tier);
+    return wallet;
+}
+
+}  // namespace
+
+TEST_CASE("paid tier: Free declines before any request reaches the provider") {
+    FakeAnthropic anthropic;
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Free, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    const BackendResult r = chatOnce(backend, requestWith("sys", {}, "hello"));
+    CHECK(r.fallback);
+    CHECK(anthropic.requestBodies().empty());
+    CHECK(wallet->balanceMicros() == 1'000'000);
+}
+
+TEST_CASE("paid tier: an empty balance declines before any request") {
+    FakeAnthropic anthropic;
+    FakeOllama ollama;
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), walletWith(AiTier::Paid, 0));
+
+    CHECK(chatOnce(backend, requestWith("sys", {}, "hello")).fallback);
+    CHECK(anthropic.requestBodies().empty());
+}
+
+TEST_CASE("paid tier: a delivered reply is charged its marked-up price") {
+    FakeAnthropic anthropic;
+    anthropic.setUsage(1000, 200, 0, 0);  // $0.0002 cost; $0.00028 at 40%
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Paid, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    REQUIRE(chatOnce(backend, requestWith("sys", {}, "hello")).ok);
+    CHECK(anthropic.requestBodies().size() == 1);
+    CHECK(wallet->balanceMicros() == 1'000'000 - 280);
+    CHECK(wallet->sessionSpentMicros() == 280);
+}
+
+// Billing follows what Anthropic bills: every 200 with a usage block, whatever
+// its stop_reason, and nothing else. These check Anthropic's cost (costMicros),
+// which does not depend on the markup.
+
+TEST_CASE("paid tier: a refusal is billed and still never reaches Ollama") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::Refusal);
+    anthropic.setUsage(1000, 200, 0, 0);  // 200 micros of cost
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Paid, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    const BackendResult r = chatOnce(backend, requestWith("sys", {}, "tell me how to..."));
+    CHECK(r.ok);
+    CHECK_FALSE(r.fallback);
+    CHECK(wallet->sessionCostMicros() == doctest::Approx(200.0));
+}
+
+TEST_CASE("paid tier: a max_tokens truncation is billed") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::MaxTokens);
+    anthropic.setUsage(1000, 200, 0, 0);
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Paid, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    CHECK_FALSE(chatOnce(backend, requestWith("sys", {}, "go on")).ok);
+    CHECK(wallet->sessionCostMicros() == doctest::Approx(200.0));
+}
+
+TEST_CASE("paid tier: a 500 then a 200 bills exactly once") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::FailOnceThenOk);
+    anthropic.setUsage(1000, 200, 0, 0);
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Paid, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    REQUIRE(chatOnce(backend, requestWith("sys", {}, "hi")).ok);
+    CHECK(anthropic.requestBodies().size() == 2);
+    CHECK(wallet->sessionCostMicros() == doctest::Approx(200.0));
+}
+
+TEST_CASE("paid tier: a request that never gets a 200 bills nothing") {
+    FakeAnthropic anthropic;
+    anthropic.setMode(FakeAnthropic::Mode::Http500);
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Paid, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    CHECK(chatOnce(backend, requestWith("sys", {}, "hi")).fallback);
+    CHECK(wallet->sessionCostMicros() == doctest::Approx(0.0));
+    CHECK(wallet->balanceMicros() == 1'000'000);
+}
+
+TEST_CASE("paid tier: switching to Free mid-session moves the next request") {
+    FakeAnthropic anthropic;
+    anthropic.setUsage(10, 10, 0, 0);
+    FakeOllama ollama;
+    auto wallet = walletWith(AiTier::Paid, 1'000'000);
+    AnthropicBackend backend(anthropicConfig(anthropic, ollama), wallet);
+
+    REQUIRE(chatOnce(backend, requestWith("sys", {}, "one")).ok);
+    wallet->setTier(AiTier::Free);
+    CHECK(chatOnce(backend, requestWith("sys", {}, "two")).fallback);
+    CHECK(anthropic.requestBodies().size() == 1);
+    // Unlike the token budget, the tier is not a session-long disable.
+    CHECK_FALSE(backend.disabled());
+}
+
+TEST_CASE("paid tier: running out answers the next request from Ollama") {
+    FakeAnthropic anthropic;
+    anthropic.setUsage(1000, 200, 0, 0);
+    FakeOllama ollama;
+    ollama.setReply("Local model here. [[MOOD: neutral]]");
+    auto wallet = walletWith(AiTier::Paid, 100);  // less than one reply's price
+    LlmClient client(anthropicConfig(anthropic, ollama), wallet);
+
+    REQUIRE(waitForReply(client, client.submit("sys", {}, "first")).ok);
+    CHECK(wallet->balanceMicros() == 0);
+    CHECK(wallet->takeRanOutEvent());
+
+    const ChatReply second = waitForReply(client, client.submit("sys", {}, "second"));
+    REQUIRE(second.ok);
+    CHECK(second.content == "Local model here. [[MOOD: neutral]]");
+    CHECK(anthropic.requestBodies().size() == 1);
+}
+
+TEST_CASE("paid tier: cloudUnavailableReason names what is missing") {
+    LlmConfig config;
+    config.provider = "ollama";
+    CHECK_FALSE(LlmClient(config).cloudUnavailableReason().empty());
+    config.provider = "anthropic";
+    config.apiKeyEnv = "NPC_GAME_ANTHROPIC_API_KEY";
+    CHECK(LlmClient(config).cloudUnavailableReason().find("NPC_GAME_ANTHROPIC_API_KEY") !=
+          std::string::npos);
+    config.apiKey = "test-key-never-real";
+    CHECK(LlmClient(config).cloudUnavailableReason().empty());
 }
 
 // --- Through makeBackend / LlmClient: the fallback actually answers ------------

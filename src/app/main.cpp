@@ -54,6 +54,7 @@
 #include "Npc.hpp"
 #include "PersonaLoader.hpp"
 #include "RatingLog.hpp"
+#include "Wallet.hpp"
 #include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
@@ -452,7 +453,22 @@ int main(int argc, char** argv) {
 
     // World: the downtown map plus one NPC per persona file.
     const LlmConfig llmConfig = loadLlmConfig(configDir);
-    LlmClient client(llmConfig);
+    // Free / Paid AI tier. The wallet is player state (saves/ is gitignored);
+    // the cloud backend checks it before every request and charges it after,
+    // so the menu's tier switch takes effect on the next NPC turn.
+    const fs::path walletPath = projectRoot / "saves" / "wallet.cfg";
+    auto wallet = std::make_shared<Wallet>(loadWalletSettings(configDir));
+    if (!wallet->load(walletPath)) {
+        std::cerr << "[llm_npc] wallet: " << walletPath << " has no balance; starting fresh\n";
+    }
+    LlmClient client(llmConfig, wallet);
+    // A saved Paid tier on a machine that cannot reach the cloud would show as
+    // Paid while every reply came from the local model.
+    if (wallet->tier() == AiTier::Paid && !client.cloudUnavailableReason().empty()) {
+        std::cerr << "[llm_npc] wallet: Paid tier unavailable ("
+                  << client.cloudUnavailableReason() << "); using Free\n";
+        wallet->setTier(AiTier::Free);
+    }
     // Authored replies for recurring topics, served locally instead of a round
     // trip (banks/README.md). Off by default: with no bank installed every
     // request reaches the backend exactly as it always has.
@@ -1201,6 +1217,9 @@ int main(int argc, char** argv) {
     std::string worldgenDescription;
     std::string worldgenStatus;         // HUD line
     float worldgenStatusTtl = 0.f;
+    float outOfCreditsTtl = 0.f;  // HUD notice after the Paid balance runs out
+    float walletSaveTimer = 0.f;  // seconds since spend was last checked for saving
+    constexpr float kWalletSaveEverySec = 10.f;
     const auto worldgenSay = [&](const std::string& s) {
         worldgenStatus = s;
         worldgenStatusTtl = 6.f;
@@ -1231,6 +1250,60 @@ int main(int argc, char** argv) {
         return "";
     };
     menu.setModels(modelHooks);
+
+    // Credits page: tier switch and simulated purchases. Saved on every change
+    // so a crash never loses a purchase; spend is saved every few seconds by
+    // the frame loop and again at shutdown.
+    Menu::CreditsHooks creditsHooks;
+    // "Current" follows who actually answers: Paid at $0 is answered locally.
+    creditsHooks.paid = [&wallet]() { return wallet->cloudAllowed(); };
+    creditsHooks.paidUnavailable = [&wallet, &client]() -> std::string {
+        std::string why = client.cloudUnavailableReason();
+        if (why.empty() && wallet->tier() == AiTier::Paid && wallet->balanceMicros() <= 0) {
+            why = "out of credits - buy more to resume";
+        }
+        return why;
+    };
+    creditsHooks.onSetPaid = [&wallet, &client, &walletPath](bool paid) -> std::string {
+        if (paid) {
+            const std::string why = client.cloudUnavailableReason();
+            if (!why.empty()) return why;
+            if (wallet->balanceMicros() <= 0) return "balance is $0 - buy credits first";
+        }
+        wallet->setTier(paid ? AiTier::Paid : AiTier::Free);
+        wallet->save(walletPath);
+        return "";
+    };
+    creditsHooks.balance = [&wallet]() { return formatUsd(wallet->balanceMicros()); };
+    creditsHooks.onBuy = [&wallet, &walletPath](int usd) -> std::string {
+        wallet->credit(static_cast<std::int64_t>(usd) * kMicrosPerUsd);
+        wallet->save(walletPath);
+        return "Added $" + std::to_string(usd) + " of test credits";
+    };
+    creditsHooks.details = [&wallet]() {
+        const CloudPricing& p = wallet->pricing();
+        const double factor = 1.0 + p.markupPercent / 100.0;
+        // Config prices are USD per million tokens; formatUsd takes micros.
+        const auto perMTok = [](double usd) {
+            return formatUsd(static_cast<std::int64_t>(usd * kMicrosPerUsd + 0.5));
+        };
+        const std::int64_t spent = wallet->sessionSpentMicros();
+        const auto cost = static_cast<std::int64_t>(wallet->sessionCostMicros() + 0.5);
+        return std::vector<std::string>{
+            "Per million tokens\tAnthropic cost\tYou pay (+" +
+                std::to_string(static_cast<int>(p.markupPercent + 0.5)) + "%)",
+            "  Input\t" + perMTok(p.inputPerMTok) + "\t" + perMTok(p.inputPerMTok * factor),
+            "  Output\t" + perMTok(p.outputPerMTok) + "\t" + perMTok(p.outputPerMTok * factor),
+            "  Cache write\t" + perMTok(p.cacheWritePerMTok) + "\t" +
+                perMTok(p.cacheWritePerMTok * factor),
+            "  Cache read\t" + perMTok(p.cacheReadPerMTok) + "\t" +
+                perMTok(p.cacheReadPerMTok * factor),
+            "",
+            "This session: spent " + formatUsd(spent) + ", Anthropic cost " + formatUsd(cost) +
+                ", margin " + formatUsd(spent - cost),
+        };
+    };
+    menu.setCredits(creditsHooks);
 
     // Match settings page (#157). Menu holds no MatchRules and no MatchClock:
     // it reads and writes two ints, and the conversion to the rules' real
@@ -2692,6 +2765,21 @@ int main(int argc, char** argv) {
             worldgenStatusTtl -= dt;
             drawCenteredHudText(worldgenStatus, 16, 40.f);
         }
+        // Charges land on the worker thread; persist them from here so a crash
+        // or force-quit loses at most a few seconds of spend.
+        walletSaveTimer += dt;
+        if (wallet->takeRanOutEvent()) {
+            outOfCreditsTtl = 6.f;
+            walletSaveTimer = kWalletSaveEverySec;
+        }
+        if (walletSaveTimer >= kWalletSaveEverySec) {
+            walletSaveTimer = 0.f;
+            if (wallet->takeUnsavedCharges()) wallet->save(walletPath);
+        }
+        if (outOfCreditsTtl > 0.f) {
+            outOfCreditsTtl -= dt;
+            drawCenteredHudText("Out of credits - NPCs are using the free local model", 16, 64.f);
+        }
         if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
             session.npcIndex() < static_cast<int>(world.npcs().size())) {
             // The panel's hint row already names F1/F2; keep its mood tag
@@ -3169,6 +3257,7 @@ shutdown:
         }
     }
 
+    wallet->save(walletPath);
     leaveSession();
     ui::unloadFonts();
     CloseWindow();

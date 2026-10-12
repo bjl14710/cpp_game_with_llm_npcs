@@ -153,6 +153,7 @@ add_library(llm_npc_core STATIC
     src/core/NetServer.cpp
     src/core/Npc.cpp
     src/core/PersonaLoader.cpp
+    src/core/Wallet.cpp
     src/core/World.cpp
     src/core/WorldState.cpp
 )

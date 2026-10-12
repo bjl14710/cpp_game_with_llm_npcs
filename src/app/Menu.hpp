@@ -119,6 +119,25 @@ class Menu {
     };
     void setModels(ModelHooks hooks);
 
+    // Credits page: the Free (local model) / Paid (Claude Haiku) switch and
+    // the simulated prepaid wallet. Strings and ints rather than a Wallet, for
+    // the same reason ModelHooks passes strings: main.cpp formats the money.
+    struct CreditsHooks {
+        // True when Paid is what actually answers now (marks it "Current").
+        std::function<bool()> paid;
+        // Why Paid cannot be used on this machine, or "" when it can.
+        std::function<std::string()> paidUnavailable;
+        // Switches tier; returns "" on success or why Paid cannot be used.
+        std::function<std::string(bool paid)> onSetPaid;
+        std::function<std::string()> balance;
+        // A simulated purchase of `usd` dollars; returns the toast text.
+        std::function<std::string(int usd)> onBuy;
+        // Lines drawn under the buttons: the price table and session spend.
+        // A '\t' splits a line into up to three aligned columns.
+        std::function<std::vector<std::string>()> details;
+    };
+    void setCredits(CreditsHooks hooks);
+
     // Match settings page (issue #157): the day limit and how long a day
     // runs. Two integers, deliberately — the dusk light already signals time
     // pressure, so this page exists to set the pace, not to expose the clock.
@@ -186,7 +205,7 @@ class Menu {
     // full-screen menu shipped drawn over the map editor (#215) and how every
     // UI capture in this project's history turned out to be missing its UI
     // (#216).
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model, Match };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model, Match, Credits };
 
     // Opens `page` directly. Intended for --menu; play reaches pages by
     // clicking, and nothing about that path changes.
@@ -240,6 +259,7 @@ class Menu {
     AvatarHooks avatar_;
     SandboxHooks sandbox_;
     ModelHooks models_;
+    CreditsHooks credits_;
     MatchHooks matchSettings_;
     std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry

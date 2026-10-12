@@ -6,6 +6,7 @@
 #include <thread>
 #include <utility>
 
+#include "Wallet.hpp"
 #include "httplib.h"
 #include "json.hpp"
 
@@ -74,8 +75,8 @@ AnthropicOutcome classifyExchange(bool reached, int status, const std::string& s
     return AnthropicOutcome::Deliver;
 }
 
-AnthropicBackend::AnthropicBackend(LlmConfig config)
-    : config_(std::move(config)), model_(config_.anthropicModel) {}
+AnthropicBackend::AnthropicBackend(LlmConfig config, std::shared_ptr<Wallet> wallet)
+    : config_(std::move(config)), wallet_(std::move(wallet)), model_(config_.anthropicModel) {}
 
 AnthropicBackend::~AnthropicBackend() {
     const AnthropicUsage u = usage();
@@ -226,6 +227,12 @@ BackendResult AnthropicBackend::chat(const BackendRequest& req, const DeltaCallb
         return result;
     }
     if (disabled()) return decline("anthropic backend is disabled for this session");
+    // The Free/Paid switch. Checked per request, so flipping it in the menu
+    // takes effect on the next NPC turn with no backend swap.
+    if (wallet_ && !wallet_->cloudAllowed()) {
+        return decline(wallet_->tier() == AiTier::Free ? "free tier selected; using the local model"
+                                                       : "out of credits; using the local model");
+    }
 
     const ParsedUrl url = parseBaseUrl(config_.anthropicBaseUrl);
 #ifndef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -295,9 +302,17 @@ BackendResult AnthropicBackend::chat(const BackendRequest& req, const DeltaCallb
     }
     if (parsed.contains("usage") && parsed["usage"].is_object()) {
         const json& usage = parsed["usage"];
-        recordUsage(countOrZero(usage, "input_tokens"), countOrZero(usage, "output_tokens"),
-                    countOrZero(usage, "cache_creation_input_tokens"),
-                    countOrZero(usage, "cache_read_input_tokens"));
+        AnthropicUsage thisResponse;
+        thisResponse.requests = 1;
+        thisResponse.inputTokens = countOrZero(usage, "input_tokens");
+        thisResponse.outputTokens = countOrZero(usage, "output_tokens");
+        thisResponse.cacheWriteTokens = countOrZero(usage, "cache_creation_input_tokens");
+        thisResponse.cacheReadTokens = countOrZero(usage, "cache_read_input_tokens");
+        recordUsage(thisResponse.inputTokens, thisResponse.outputTokens,
+                    thisResponse.cacheWriteTokens, thisResponse.cacheReadTokens);
+        // Anthropic bills every 200, refusals and truncations included, so the
+        // player is charged for them too.
+        if (wallet_) wallet_->charge(thisResponse);
     }
 
     BackendResult result;

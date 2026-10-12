@@ -9,6 +9,8 @@
 
 namespace llm_npc {
 
+class Wallet;
+
 // One chat turn handed to a backend. `internal` marks a warm-up request that
 // must produce no user-visible reply or deltas.
 struct BackendRequest {
@@ -57,7 +59,10 @@ class LlmBackend {
 // the native Ollama backend; "anthropic" selects the Claude Messages API with
 // Ollama as the automatic fallback (or plain Ollama, with one log line, when no
 // key is configured); any other value selects the OpenAI-compatible backend
-// (OpenRouter, OpenAI, Gemini's compat layer, a local /v1, ...).
-std::unique_ptr<LlmBackend> makeBackend(const LlmConfig& config);
+// (OpenRouter, OpenAI, Gemini's compat layer, a local /v1, ...). `wallet`, when
+// given, gates and is charged by the Anthropic backend (the Free/Paid tier); the
+// other providers ignore it.
+std::unique_ptr<LlmBackend> makeBackend(const LlmConfig& config,
+                                        std::shared_ptr<Wallet> wallet = nullptr);
 
 }  // namespace llm_npc

@@ -14,6 +14,8 @@
 
 namespace llm_npc {
 
+class Wallet;
+
 class LlmBackend;  // the swappable provider; see LlmBackend.hpp
 
 // A single turn in a chat history. Role is "user" or "assistant".
@@ -126,7 +128,9 @@ struct ChatReply {
 // request they sent.
 class LlmClient {
    public:
-    explicit LlmClient(LlmConfig config);
+    // `wallet` is the Free/Paid gate handed to the cloud backend (see
+    // makeBackend); null leaves the backend ungated.
+    explicit LlmClient(LlmConfig config, std::shared_ptr<Wallet> wallet = nullptr);
     ~LlmClient();
 
     LlmClient(const LlmClient&) = delete;
@@ -172,6 +176,9 @@ class LlmClient {
     // switch models without restarting. availableModels() may hit the network
     // (e.g. Ollama's /api/tags), so call it off the hot path (menu open).
     std::vector<std::string> availableModels();
+    // Why the Paid (cloud) tier cannot run with this config, or "" when it can:
+    // it needs provider = anthropic and an API key.
+    std::string cloudUnavailableReason() const;
     std::string model() const;
     void setModel(std::string model);
 

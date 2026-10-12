@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -10,6 +11,8 @@
 #include "LlmClient.hpp"  // LlmConfig
 
 namespace llm_npc {
+
+class Wallet;
 
 // What one HTTP exchange with the Messages API means for the request it carried.
 // This is the ERROR HANDLING table of plan anthropic-haiku-backend as a type, so
@@ -58,7 +61,10 @@ extern const char* const kAnthropicRefusalLine;
 // model: a short persona is silently uncached and both cache counters stay 0.
 class AnthropicBackend : public LlmBackend {
    public:
-    explicit AnthropicBackend(LlmConfig config);
+    // With a wallet, every request is gated on it (Paid tier with money left;
+    // otherwise declined to the fallback before anything is sent) and every
+    // delivered response is charged to it. Without one, nothing is gated.
+    explicit AnthropicBackend(LlmConfig config, std::shared_ptr<Wallet> wallet = nullptr);
     // Prints the session's usage totals as one [llm_npc] line, if anything was
     // sent. LlmClient destructs at shutdown, so this is the shutdown summary.
     ~AnthropicBackend() override;
@@ -93,6 +99,8 @@ class AnthropicBackend : public LlmBackend {
                      std::uint64_t cacheRead);
 
     LlmConfig config_;
+    // Thread-safe on its own; shared with the menu that buys and switches tier.
+    std::shared_ptr<Wallet> wallet_;
     // Guards model_, usage_ and disabled_: chat() runs on the worker thread while
     // the picker, usage() and the destructor run on the main thread.
     mutable std::mutex mutex_;

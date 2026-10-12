@@ -40,7 +40,7 @@ class FallbackBackend : public LlmBackend {
 
 }  // namespace
 
-std::unique_ptr<LlmBackend> makeBackend(const LlmConfig& config) {
+std::unique_ptr<LlmBackend> makeBackend(const LlmConfig& config, std::shared_ptr<Wallet> wallet) {
     if (config.provider.empty() || config.provider == "ollama") {
         return std::make_unique<OllamaBackend>(config);
     }
@@ -54,7 +54,7 @@ std::unique_ptr<LlmBackend> makeBackend(const LlmConfig& config) {
                       << config.model << " at " << config.host << ":" << config.port << ")\n";
             return std::make_unique<OllamaBackend>(config);
         }
-        return std::make_unique<FallbackBackend>(std::make_unique<AnthropicBackend>(config),
+        return std::make_unique<FallbackBackend>(std::make_unique<AnthropicBackend>(config, std::move(wallet)),
                                                  std::make_unique<OllamaBackend>(config));
     }
     // Every other provider (openrouter, openai, gemini, a local /v1, ...) speaks

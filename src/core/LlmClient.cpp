@@ -8,8 +8,8 @@
 
 namespace llm_npc {
 
-LlmClient::LlmClient(LlmConfig config)
-    : config_(std::move(config)), backend_(makeBackend(config_)) {
+LlmClient::LlmClient(LlmConfig config, std::shared_ptr<Wallet> wallet)
+    : config_(std::move(config)), backend_(makeBackend(config_, std::move(wallet))) {
     worker_ = std::thread(&LlmClient::workerLoop, this);
 }
 
@@ -86,6 +86,12 @@ std::vector<ChatReply> LlmClient::drainReplies() {
 }
 
 std::vector<std::string> LlmClient::availableModels() { return backend_->listModels(); }
+
+std::string LlmClient::cloudUnavailableReason() const {
+    if (config_.provider != "anthropic") return "set provider = anthropic in config/llm.cfg";
+    if (config_.apiKey.empty()) return "no API key: set $" + config_.apiKeyEnv;
+    return "";
+}
 
 std::string LlmClient::model() const { return backend_->model(); }
 
