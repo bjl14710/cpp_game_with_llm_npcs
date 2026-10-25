@@ -14,7 +14,7 @@ Optional focus: "$ARGUMENTS"
 ## 0. Orient (keep it short)
 - Read the context layer (guardrails §2).
 - `git log --since="14 days ago" --stat --oneline`; `gh pr list --state all --limit 20`.
-- Identify which project this is from the Project Focus section below. If none matches, run the generic checks only.
+- If `.claude/project/FOCUS.md` exists, its checks are this repo's project-specific checks. Otherwise identify the project from the Project Focus section below; if none matches, run the generic checks only.
 - Note what this environment lacks and list skipped checks under "Not run here".
 
 ## 1. Deterministic signals first
@@ -28,7 +28,7 @@ Delegate the runs to the `scout-analyst` subagent and have it return counts and 
 - Metrics listed under "Quality bars" in DIRECTION.md: measure what you can here and compare to the last digest.
 
 ## 2. Project-specific checks
-Run the matching Project Focus block below.
+Run `.claude/project/FOCUS.md`'s scout checks, or else the matching Project Focus block below.
 
 ## 3. Recent-work review
 - What stalled, got reverted, or needed several fix-up commits? What does that suggest about a skill, a CLAUDE.md rule, or ticket sizing? (Feed this to the run summary's tooling line.)
@@ -44,16 +44,13 @@ Per guardrails §8, and include a health snapshot table: metric | value | trend 
 
 ## Project Focus
 
-### LLM-NPC game (C++17 + raylib: bjl14710/cpp_game_with_llm_npcs)
-- Tests: `make -C tests test` (doctest, headless; builds all of `src/core/` + `tests/`). Record pass/fail counts and the slowest suites. CMake + raylib also configures here, but the game window doesn't run.
-- Core/app split: `grep -rn "raylib\|rlgl\|raymath" src/core/` must be empty.
-- Model output as contract: trace every path from an LLM reply (`LlmClient` drain → `DialogueSession`/`GroupSession` → `NpcAction` directive tags, `PersonaLoader`, `WorldGen`/`WorldGenValidate`) to world state. Flag anything that reaches state unparsed or unvalidated, and any validation failure without a deterministic fallback.
-- Host authority and threading: NetServer/NetClient threads must never touch `World`, `Npc`, or `LlmClient` (docs/DEVELOPER.md thread rule). Also flag nondeterminism in replicated state (unseeded RNG, wall-clock time, unordered-map iteration feeding snapshots) and wire-format changes without a `kNetProtocolVersion` bump.
-- Secrets: no API key in code, `config/*.cfg`, or history (`config/secrets.cfg` stays gitignored); keys only from env or secrets.cfg.
-- Prompt context: memory/fact/gossip injection should be gated in code (`FactStore`, `Gossip`, `ConversationStore`), not only by prompt wording.
-- Vendored deps in `external/` (httplib, json.hpp, doctest, sqlite3) and the raylib FetchContent tag: report versions vs. latest upstream.
-- `src/app/main.cpp` size and churn (it's the largest file); propose extractions only with a test seam.
-- Not runnable in the cloud: Ollama models (bench_npc_models.py, bench_schema_models.py, test_llm_live), the raylib window and screenshots, OpenRouter (no key).
+### LLM-NPC game (Godot 4, C++ GDExtension)
+- Schema-as-contract: any path where LLM output reaches execution without JSON schema validation; validation failures must fall back deterministically.
+- Secret-keeping: gated injection at the data layer; flag anywhere a secret enters prompt context unconditionally.
+- Server authority: client-side mutations that belong on the server; nondeterminism in replicated code (unseeded RNG, wall-clock time, unordered-map iteration).
+- Golden eval set: run if possible and record the pass rate. Never edit the golden set.
+- BYOK only: no API key in client code or committed config.
+- Usually not runnable remotely: Godot editor, Ollama models, Kokoro TTS.
 
 ### Algorithmic trading platform
 - Leakage audit: future data in features, fitting/scaling before the split, missing purge/embargo.

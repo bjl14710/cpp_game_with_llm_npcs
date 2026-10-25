@@ -7,7 +7,7 @@ argument-hint: Optional — number of days, default 7
 
 Load the `routine-guardrails` skill first. Run this from any directory; it works across repos via `gh`.
 
-1. Read `~/.claude/routines/repos.txt`, or `.claude/routines/repos.txt` in the repo if the first doesn't exist (one `owner/repo` per line; `#` comments allowed).
+1. Read `~/.claude/routines/repos.txt`, or in a cloud session `.claude/project/repos.txt` (one `owner/repo` per line; `#` comments allowed). A cloud run can only reach the repos selected on its routine, so list exactly those.
 2. Delegate collection to the `digest-writer` subagent: for each repo, in the last $ARGUMENTS days (default 7): new `proposed`/`bug`/`research`/`design`/`teach` issues, open `preview-ready` draft PRs, merged PRs, the latest `digest` issue's health table, and any failing CI on the default branch.
 3. Rank across all repos into one list:
    - **Decide now** (≤5): previews ready to merge/reject, bugs with constraint violations, anything blocking a DIRECTION.md phase exit criterion.

@@ -34,9 +34,12 @@ GitHub labels are the single source of truth for what may be built.
 
 Every routine starts by reading, if present:
 1. `.claude/project/DIRECTION.md` — north star, current phase, pivots, non-goals, constraints. Proposals that contradict a non-goal are dropped, not filed.
-2. `CLAUDE.md`
-3. Closed issues labeled `rejected` (titles + closing comment): `gh issue list --state closed --label rejected --limit 100`. Never re-propose a rejected idea unless something material changed — and then say what changed.
-4. The most recent open `digest` issue, for trend comparison.
+2. `.claude/project/FOCUS.md` — this repo's own project-specific checks and what can or can't run in a cloud session. When present it replaces the matching built-in "Project Focus" block in /scout and the "Project Lens" in /design-scout, and its research notes go to every researcher.
+3. `CLAUDE.md`
+4. Closed issues labeled `rejected` (titles + closing comment): `gh issue list --state closed --label rejected --limit 100`. Never re-propose a rejected idea unless something material changed — and then say what changed.
+5. The most recent open `digest` issue, for trend comparison.
+
+Layout rule: everything under `.claude/skills/` and `.claude/agents/` that came from this kit is shared, identical in every repo. Never edit it to fit one project. Per-project knowledge lives only in `.claude/project/` (DIRECTION.md, FOCUS.md, NIGHTLY.md, repos.txt).
 
 ## 3. Evidence and provenance
 
@@ -96,7 +99,7 @@ Every routine ends by printing (and, if it ran headless, posting as a comment on
 
 - Python: `uv` only, never bare pip. Don't modify the repo's lockfile in a read-only routine.
 - If neither `gh` nor the GitHub MCP tools (§10) work, write the would-be issues to `.claude/reports/<routine>-YYYY-MM-DD.md` (gitignored) and say so. In a cloud session that file vanishes with the container, so also print the issues in full in the final message.
-- Never commit `OVERNIGHT_REPORT.md`, `.claude/memory/`, or `.claude/reports/`. In this repo `docs/learning/` IS committed (lessons and drills live there); routines never write to it, since that belongs to /teach and /drill-me.
+- Never commit `OVERNIGHT_REPORT.md`, `.claude/memory/`, or `.claude/reports/`. Routines never write to `docs/learning/` (that belongs to /teach and /drill-me), and never commit it unless the repo already tracks it (`git ls-files docs/learning`).
 - Commit messages on preview branches: `type(scope): description`.
 
 ## 10. GitHub access (local `gh` or cloud MCP)
@@ -111,11 +114,11 @@ Run `gh auth status` once. If it succeeds, use `gh` as written in each routine. 
 | `gh issue close` | `issue_write` (method `update`, `state: closed`, `state_reason`) |
 | `gh pr list` / `gh pr view` | `list_pull_requests` / `search_pull_requests` / `pull_request_read` |
 
-The owner/repo is the `origin` remote (`git remote get-url origin`). Never use the MCP tools to apply `approved`, `ready-for-ai`, or `rejected`, to merge, or to touch any other repository. The §1 gate applies to every tool.
+The owner/repo is the `origin` remote (`git remote get-url origin`). Only touch the repo(s) this run was set up for. Never use the MCP tools to apply `approved`, `ready-for-ai`, or `rejected`, or to merge. The §1 gate applies to every tool.
 
 ## 11. Running inside a scheduled cloud session
 
 - The container is fresh and is reclaimed after the run. GitHub issues and comments are the only output that persists, so put everything worth keeping there.
 - Custom agents (`scout-analyst`, `researcher`, `fresh-eyes-reviewer`, `skeptic`, `digest-writer`, `proposal-builder`) live in `.claude/agents/`. If a routine names one and the Agent tool doesn't offer that type (for example, the kit was checked out after the session started), spawn a `general-purpose` agent whose prompt begins with that agent file's body, and pass the `model` from its frontmatter. For `researcher`, also tell it explicitly that it must not run shell commands or write files.
-- No Ollama, GPU, display, or OpenRouter key here. Live-model checks, the game window, and screenshots go under "Not run here". The core suite (`make -C tests test`) and clang-tidy do run.
-- `~/.claude/routines/repos.txt` doesn't exist in the cloud; use `.claude/routines/repos.txt` from the repo.
+- What can and can't run here (local models, GPUs, displays, hardware, credentials) is listed in `.claude/project/FOCUS.md`. Anything else that's unavailable goes under "Not run here"; never fake it.
+- `~/.claude/routines/repos.txt` doesn't exist in the cloud; use `.claude/project/repos.txt` from the repo.

@@ -9,15 +9,13 @@ Load the `routine-guardrails` skill first and follow it throughout. §4 (web con
 
 Question: "$ARGUMENTS" (if blank, use DIRECTION.md's "Open research questions" plus the current phase's priorities).
 
-For this repo, the game stays C++ (see DIRECTION.md). Tell every researcher: techniques and prior art from any language are welcome as ideas, but concrete recommendations must be implementable in C++, and library suggestions must be C/C++ libraries usable as a vendored header or a pinned FetchContent dependency.
-
-If the arguments start with `lanes:` (e.g. `lanes: ecosystem, pitfalls`), run only those lanes in §2 and use DIRECTION.md's open research questions as the question. The nightly rotation splits the five lanes across two nights this way.
+If the arguments start with `lanes:` (e.g. `lanes: ecosystem, pitfalls`), run only those lanes in §2 and use DIRECTION.md's open research questions as the question. A nightly rotation can split the five lanes across nights this way.
 
 ## 1. Local-first (Rung 0)
 Before any web call: read DIRECTION.md, check installed versions of the key dependencies (lockfiles, `uv pip list`, `godot --version`, CMake/FetchContent pins, submodule SHAs), and note what the repo already does. Research is only useful relative to what exists.
 
 ## 2. Research (delegate)
-Spawn the `researcher` subagent, one per lane, in parallel. Give each the project summary, the installed versions, and its lane. Each returns at most 5 findings with URL, date, and a one-line "why it matters here".
+Spawn the `researcher` subagent, one per lane, in parallel. Give each the project summary, the installed versions, DIRECTION.md's non-goals and hard constraints (so it doesn't recommend what's ruled out, e.g. a language or engine change), any research notes in `.claude/project/FOCUS.md`, and its lane. Each returns at most 5 findings with URL, date, and a one-line "why it matters here".
 
 Lanes:
 - **Ecosystem:** releases, deprecations, and security advisories since the last digest for the repo's key dependencies.
