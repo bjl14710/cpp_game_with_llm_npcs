@@ -94,11 +94,14 @@ void main() {
         vec3 pool = vec3(0.0);
         vec3 haze = vec3(0.0);
         vec3 spec = vec3(0.0);
+        float reach = lampRadius * (wet > 0.0 ? 2.5 : 1.0);
         for (int i = 0; i < lampCount; ++i) {
             vec3 toLamp = lampPos[i] - fragPosition;
-            float dist = length(toLamp);
+            float dist2 = dot(toLamp, toLamp);
+            if (dist2 > reach * reach) continue;  // out of this lamp's reach
+            float dist = sqrt(dist2);
             vec3 l = toLamp / max(dist, 1e-3);
-            float k = clamp(1.0 - (dist * dist) / (lampRadius * lampRadius), 0.0, 1.0);
+            float k = clamp(1.0 - dist2 / (lampRadius * lampRadius), 0.0, 1.0);
             float atten = k * k;
             float ndl = max(dot(n, l), 0.0);
             pool += lampColor * atten * (0.25 + 0.75 * ndl);
@@ -108,8 +111,8 @@ void main() {
                 float hs = dot(h, side);
                 float hf = dot(h, fwd);
                 float streak = exp(-(hs * hs) / 0.0016 - (hf * hf) / 0.035);
-                float reach = clamp(1.0 - dist / (lampRadius * 2.5), 0.0, 1.0);
-                spec += lampColor * streak * reach;
+                float fade = clamp(1.0 - dist / (lampRadius * 2.5), 0.0, 1.0);
+                spec += lampColor * streak * fade;
             }
         }
         warm += texel.rgb * pool;
