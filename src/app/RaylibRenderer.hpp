@@ -12,6 +12,7 @@
 #include "City.hpp"
 #include "FaceTexture.hpp"
 #include "Math.hpp"
+#include "NoirLook.hpp"
 
 namespace llm_npc {
 
@@ -42,6 +43,10 @@ class RaylibRenderer {
    public:
     // `assets` outlives the renderer (loaded once at startup by main).
     explicit RaylibRenderer(Assets& assets);
+    ~RaylibRenderer();
+
+    RaylibRenderer(const RaylibRenderer&) = delete;
+    RaylibRenderer& operator=(const RaylibRenderer&) = delete;
 
     // Begins the 3D pass: BeginMode3D with a Camera3D derived from `pose`
     // (position + yaw/pitch → target vector), sky clear color, fog shader.
@@ -56,6 +61,10 @@ class RaylibRenderer {
     // The sky clear color for the current time of day (main passes it to
     // ClearBackground so sky and fog always agree).
     Color skyColor() const { return skyColor_; }
+
+    // Noir night switches (config noir_night / rain). Off restores today's
+    // night exactly; takes effect at the next setTimeOfDay.
+    void setNoirOptions(bool noirNight, bool rain);
 
     // Draws ground, roads, and one asset-pack model per City building
     // (facadeKind/spotId → model via Assets), plus street props.
@@ -120,6 +129,18 @@ class RaylibRenderer {
     Camera3D camera_{};  // rebuilt each beginFrame; kept for worldToScreen
     Color skyColor_{135, 190, 235, 255};  // daylight until the clock speaks
     float lightLevel_ = 1.f;              // scene brightness multiplier
+    Texture2D glowTexture_{};             // radial falloff for lamp halos
+    NoirLook noir_{};                     // night look for the current hour
+    bool noirEnabled_ = true;             // config: noir_night
+    bool rainEnabled_ = true;             // config: rain
+
+    // Feeds the nearest lamp heads (cap noir::kMaxLamps) to the fog shader,
+    // or zero lamps in daylight so the shader takes its day path.
+    void uploadLamps(const City& city);
+
+    // Night-only glowing bulbs at every lamp head, drawn unlit (outside the
+    // fog shader) so they read as light sources rather than lit surfaces.
+    void drawLampGlows(const City& city);
 
     // Per-entity animation playback (keyed by variantSeed, which is unique
     // per entity): which clip is playing and the running frame clock. The

@@ -116,22 +116,100 @@ void drawFountain(const Building& b, float worldHeight) {
 
 }  // namespace
 
-RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {}
+RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {
+    // Soft radial falloff for the lamp-bulb glow billboards (white core
+    // fading to transparent; tinted per lamp at draw time).
+    Image glow = GenImageGradientRadial(64, 64, 0.f, WHITE, BLANK);
+    glowTexture_ = LoadTextureFromImage(glow);
+    UnloadImage(glow);
+}
+
+RaylibRenderer::~RaylibRenderer() {
+    if (IsTextureValid(glowTexture_)) UnloadTexture(glowTexture_);
+}
+
+void RaylibRenderer::setNoirOptions(bool noirNight, bool rain) {
+    noirEnabled_ = noirNight;
+    rainEnabled_ = rain;
+}
 
 void RaylibRenderer::setTimeOfDay(float hours) {
     // Sky, fog, and light all read the same curves from the same clock —
-    // fog keeps melting distant geometry into the horizon at any hour.
-    const SkyColor sky = skyColorAt(hours);
+    // fog keeps melting distant geometry into the horizon at any hour. The
+    // noir look blends in by the night factor (0 all day, so daylight is
+    // untouched); without the noir shader it stays off entirely.
+    noir_ = noirLookAt(hours, noirEnabled_ && assets_.noirShader());
+    if (!rainEnabled_) noir_.rain = 0.f;
+    const SkyColor sky = noir_.sky;
     skyColor_ = Color{static_cast<unsigned char>(sky.r * 255.f),
                       static_cast<unsigned char>(sky.g * 255.f),
                       static_cast<unsigned char>(sky.b * 255.f), 255};
-    lightLevel_ = lightLevelAt(hours);
+    lightLevel_ = lightLevelAt(hours) * noir_.ambientScale;
     if (const Shader* fog = assets_.fogShader()) {
         const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
+        const float density = Assets::kFogDensity * noir_.fogDensityScale;
         SetShaderValue(*fog, assets_.fogColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(*fog, assets_.fogLightLoc(), &lightLevel_,
                        SHADER_UNIFORM_FLOAT);
+        SetShaderValue(*fog, assets_.noirLocs().fogDensity, &density,
+                       SHADER_UNIFORM_FLOAT);
     }
+}
+
+void RaylibRenderer::uploadLamps(const City& city) {
+    const Shader* fog = assets_.fogShader();
+    if (!fog || !assets_.noirShader()) return;
+    const Assets::NoirLocs& locs = assets_.noirLocs();
+    int count = 0;
+    if (noir_.lampIntensity > 0.f) {
+        const std::vector<Vec3> lamps =
+            nearestLamps(city.lampHeads(), Vec3{camera_.position.x, camera_.position.y,
+                                                camera_.position.z});
+        float packed[noir::kMaxLamps * 3];
+        for (const Vec3& head : lamps) {
+            packed[count * 3 + 0] = head.x;
+            packed[count * 3 + 1] = head.y;
+            packed[count * 3 + 2] = head.z;
+            ++count;
+        }
+        if (count > 0) {
+            SetShaderValueV(*fog, locs.lampPos, packed, SHADER_UNIFORM_VEC3, count);
+        }
+        const float color[3] = {noir_.lampColor.r * noir_.lampIntensity,
+                                noir_.lampColor.g * noir_.lampIntensity,
+                                noir_.lampColor.b * noir_.lampIntensity};
+        SetShaderValue(*fog, locs.lampColor, color, SHADER_UNIFORM_VEC3);
+        SetShaderValue(*fog, locs.lampRadius, &noir_.lampRadius, SHADER_UNIFORM_FLOAT);
+    }
+    SetShaderValue(*fog, locs.lampCount, &count, SHADER_UNIFORM_INT);
+}
+
+void RaylibRenderer::drawLampGlows(const City& city) {
+    if (noir_.lampIntensity <= 0.f) return;
+    const Shader* fog = assets_.fogShader();
+    if (fog) EndShaderMode();
+    const float n = noir_.night;
+    const auto channel = [n](float lamp) {
+        return static_cast<unsigned char>(std::min(255.f, lamp * 255.f));
+    };
+    const Color bulb{channel(noir_.lampColor.r), channel(noir_.lampColor.g),
+                     channel(noir_.lampColor.b), static_cast<unsigned char>(255.f * n)};
+    for (const Vec3& head : city.lampHeads()) {
+        DrawSphere({head.x, head.y, head.z}, 0.2f, bulb);
+    }
+    // Additive halos: brighten whatever is behind the bulb, never darken.
+    if (IsTextureValid(glowTexture_)) {
+        rlDrawRenderBatchActive();
+        rlDisableDepthMask();
+        BeginBlendMode(BLEND_ADDITIVE);
+        const Color halo{bulb.r, bulb.g, bulb.b, static_cast<unsigned char>(150.f * n)};
+        for (const Vec3& head : city.lampHeads()) {
+            DrawBillboard(camera_, glowTexture_, {head.x, head.y, head.z}, 1.6f, halo);
+        }
+        EndBlendMode();
+        rlEnableDepthMask();
+    }
+    if (fog) BeginShaderMode(*fog);
 }
 
 void RaylibRenderer::beginFrame(const CameraPose& pose) {
@@ -163,6 +241,7 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
 
 void RaylibRenderer::drawCity(const City& city) {
     const float half = city.halfSize();
+    uploadLamps(city);
 
     // Ground: grass base with the street grid and block slabs on top.
     DrawPlane({0.f, 0.f, 0.f}, {half * 2.f, half * 2.f}, kGrass);
@@ -223,6 +302,9 @@ void RaylibRenderer::drawCity(const City& city) {
     // Buildings and street props from the collision AABBs — the models scale
     // to fit the authoritative footprints, never the other way around.
     for (const Building& b : city.buildings()) {
+        // Lamp poles draw from City::streetLamps below (they need the arm's
+        // yaw, which the collider box doesn't carry).
+        if (b.id.rfind("streetlamp#", 0) == 0) continue;
         // The fountain is composed from primitives (no pack model). Must be
         // dispatched by id BEFORE the model lookup: modelForBuilding falls
         // back to a hashed generic building for uncurated ids.
@@ -253,6 +335,30 @@ void RaylibRenderer::drawCity(const City& city) {
                           Color{40, 45, 60, 255});
         }
     }
+
+    // Street lamps: the pack's streetlight, pole on the lamp's collider and
+    // arm (the model's -X) turned to the lamp's yaw so the bulb hangs over
+    // lampHead(). Missing model: a primitive pole and arm.
+    const Model* streetlight = assets_.prop("streetlight");
+    for (const StreetLamp& lamp : city.streetLamps()) {
+        if (streetlight) {
+            const BoundingBox bb = GetModelBoundingBox(*streetlight);
+            const float h = bb.max.y - bb.min.y;
+            if (h <= 0.f) continue;
+            const float s = lamp.height / h;
+            DrawModelEx(*streetlight, {lamp.x, -bb.min.y * s, lamp.z},
+                        Vector3{0.f, 1.f, 0.f}, lamp.yawDeg + 90.f, Vector3{s, s, s},
+                        WHITE);
+        } else {
+            const Vec3 head = lampHead(lamp);
+            DrawCylinder({lamp.x, 0.f, lamp.z}, 0.08f, 0.1f, lamp.height, 8,
+                         Color{52, 56, 62, 255});
+            DrawCylinderEx({lamp.x, lamp.height, lamp.z},
+                           {head.x, lamp.height, head.z}, 0.06f, 0.06f, 6,
+                           Color{52, 56, 62, 255});
+        }
+    }
+    drawLampGlows(city);
 }
 
 void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
