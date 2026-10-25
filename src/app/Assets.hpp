@@ -112,6 +112,7 @@ class Assets {
         int lampCount = -1;
         int lampColor = -1;
         int lampRadius = -1;
+        int wetness = -1;
     };
     const NoirLocs& noirLocs() const { return noirLocs_; }
 

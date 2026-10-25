@@ -68,6 +68,7 @@ uniform vec3 lampPos[MAX_LAMPS];
 uniform int lampCount;
 uniform vec3 lampColor;
 uniform float lampRadius;
+uniform float wetness;
 #endif
 out vec4 finalColor;
 void main() {
@@ -81,19 +82,39 @@ void main() {
         vec3 n = normalize(cross(dFdx(fragPosition), dFdy(fragPosition)));
         vec3 v = normalize(cameraPos - fragPosition);
         if (dot(n, v) < 0.0) n = -n;
+        bool ground = abs(n.y) > 0.9 && fragPosition.y < 0.15;
+        bool grass = texel.g > texel.r * 1.12 && texel.g > texel.b;
+        float wet = (ground && !grass) ? wetness : 0.0;
+        vec3 fwd = vec3(v.x, 0.0, v.z);
+        fwd = dot(fwd, fwd) > 1e-6 ? normalize(fwd) : vec3(0.0, 0.0, 1.0);
+        vec3 side = vec3(fwd.z, 0.0, -fwd.x);
         vec3 pool = vec3(0.0);
         vec3 haze = vec3(0.0);
+        vec3 spec = vec3(0.0);
         for (int i = 0; i < lampCount; ++i) {
             vec3 toLamp = lampPos[i] - fragPosition;
             float dist = length(toLamp);
+            vec3 l = toLamp / max(dist, 1e-3);
             float k = clamp(1.0 - (dist * dist) / (lampRadius * lampRadius), 0.0, 1.0);
             float atten = k * k;
-            float ndl = max(dot(n, toLamp / max(dist, 1e-3)), 0.0);
+            float ndl = max(dot(n, l), 0.0);
             pool += lampColor * atten * (0.25 + 0.75 * ndl);
             haze += lampColor * atten;
+            if (wet > 0.0) {
+                vec3 h = normalize(l + v);
+                float hs = dot(h, side);
+                float hf = dot(h, fwd);
+                float streak = exp(-(hs * hs) / 0.0016 - (hf * hf) / 0.035);
+                float reach = clamp(1.0 - dist / (lampRadius * 2.5), 0.0, 1.0);
+                spec += lampColor * streak * reach;
+            }
         }
         warm += texel.rgb * pool;
         fogRgb += haze * 0.35;
+        if (wet > 0.0) {
+            float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+            warm = warm * (1.0 - 0.3 * wet) + (spec + fogRgb * fres * 0.25) * wet;
+        }
     }
 #endif
     finalColor = vec4(mix(warm, fogRgb, fog), texel.a);
@@ -139,6 +160,7 @@ Assets::Assets(const std::string& assetsDir) {
             noirLocs_.lampCount = GetShaderLocation(fogShader_, "lampCount");
             noirLocs_.lampColor = GetShaderLocation(fogShader_, "lampColor");
             noirLocs_.lampRadius = GetShaderLocation(fogShader_, "lampRadius");
+            noirLocs_.wetness = GetShaderLocation(fogShader_, "wetness");
             const int noLamps = 0;
             SetShaderValue(fogShader_, noirLocs_.lampCount, &noLamps, SHADER_UNIFORM_INT);
         }

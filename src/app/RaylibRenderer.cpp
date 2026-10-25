@@ -180,6 +180,7 @@ void RaylibRenderer::uploadLamps(const City& city) {
                                 noir_.lampColor.b * noir_.lampIntensity};
         SetShaderValue(*fog, locs.lampColor, color, SHADER_UNIFORM_VEC3);
         SetShaderValue(*fog, locs.lampRadius, &noir_.lampRadius, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(*fog, locs.wetness, &noir_.wetSpecular, SHADER_UNIFORM_FLOAT);
     }
     SetShaderValue(*fog, locs.lampCount, &count, SHADER_UNIFORM_INT);
 }
