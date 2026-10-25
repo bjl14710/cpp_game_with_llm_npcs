@@ -41,7 +41,7 @@ Per guardrails §8, plus rejected ideas one line each with the reason, and anyth
 ---
 
 ## Project Lens
-- **NPC game:** emergent NPC behavior, gossip and memory payoffs, economy loops, cutscenes. Constraints: deterministic LAN sync, schema-as-contract, BYOK only, local-first.
+- **NPC game:** emergent NPC behavior, gossip and memory payoffs, economy loops, cutscenes. Constraints: stays C++ (no rewrites or engine moves; ideas must be C++ implementations), host-authoritative LAN sync, schema-as-contract, BYOK only, local-first.
 - **Trading platform:** new GBM features, Arena competitors, risk and portfolio construction, monitoring the paper runner. Constraints: DSR and purged-CV gates, dry-run only.
 - **HFT repo:** realism (replay, queue position, fees), latency, market-making simulation. Constraint: every claim measurable.
 - **Silmulator:** new instruments, fault injection, a HIL bridge, test-authoring UX. Constraint: SCPI fidelity.

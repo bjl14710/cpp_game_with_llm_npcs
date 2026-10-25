@@ -2,6 +2,8 @@
 Last reviewed: 2026-10-25 — DRAFT seeded from README, docs/VISION.md, docs/DEVELOPER.md and the last ~60 commits. Lines marked (confirm) are inferred; fix them, then run /direction refresh.
 
 ## North star
+A C++ game, by choice: the engine, game logic, networking, and LLM plumbing are hand-written C++17 on raylib, and staying in C++ is part of the point (learning and portfolio), not an accident to be optimized away.
+
 A walkable first-person 3D town where every inhabitant is a live LLM character, heading toward "Character.ai in a 3D world": players describe a character in a sentence, a creation model turns it into a validated `.persona`, and a conversation model plays it in role. NPCs remember, gossip, keep to schedules, and act in the world through validated directive tags. Local Ollama stays the free, offline default; cloud models are BYO-key via OpenRouter. (confirm: portfolio piece first, sellable BYO-key game second?)
 
 ## Current phase (confirm)
@@ -18,7 +20,8 @@ VISION.md Phase B, "Cloud live + creator". Exit criteria:
 4. Visual polish on raylib (Mii-style composite characters, outlines, fog) without breaking the core/app split
 
 ## Non-goals (routines must not propose these)
-- Porting to Godot, Unity, Unreal, or any other engine
+- Rewriting any part of the game in another language (Rust, C#, Python, JS, ...) or moving to an engine (Godot, Unity, Unreal). The game stays C++.
+- Replacing the hand-written C++ core with a framework that hides it (ECS frameworks, game engines, Python-scripted gameplay) unless it is a C++ library that clearly beats the current code on a measured problem
 - Shipping any API key in the client or committed config (BYO-key or a server proxy only)
 - LLM output that becomes game state, files, or actions without parser/validator checks
 - Fine-tuning or LoRA before prompt conditioning plateaus (docs/design/TRAIT_FINE_TUNE_PATH.md: document, don't build)
@@ -32,7 +35,9 @@ VISION.md Phase B, "Cloud live + creator". Exit criteria:
 - Model output is parsed and validated (directive tags, persona format, worldgen schema) before it changes anything; failures fall back deterministically
 - Cloud replies aren't reproducible: tests use FakeOllama and fakes, never live models
 - Dependencies are pinned (raylib FetchContent tag, vendored single headers, checksummed CC0 asset packs); licenses checked for anything new (assets must stay CC0 or similarly permissive)
-- C++17, builds on Windows (MSYS2 UCRT64), macOS, and Linux
+- Language: the game is C++ (C++17 today; moving to C++20 is fair game to propose). Python is allowed only for offline tools and benchmarks in `tools/`.
+- Any suggested library must be C++ (or C with a C++-friendly API), license-checked, and pullable as a vendored single header or a pinned CMake FetchContent dependency, like raylib and the headers in `external/`.
+- Builds on Windows (MSYS2 UCRT64), macOS, and Linux
 
 ## Pivots under consideration (confirm)
 - Cloud conversation model as default vs local-first: exploring; decided by quality/latency/cost per turn

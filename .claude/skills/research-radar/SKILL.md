@@ -9,6 +9,8 @@ Load the `routine-guardrails` skill first and follow it throughout. §4 (web con
 
 Question: "$ARGUMENTS" (if blank, use DIRECTION.md's "Open research questions" plus the current phase's priorities).
 
+For this repo, the game stays C++ (see DIRECTION.md). Tell every researcher: techniques and prior art from any language are welcome as ideas, but concrete recommendations must be implementable in C++, and library suggestions must be C/C++ libraries usable as a vendored header or a pinned FetchContent dependency.
+
 If the arguments start with `lanes:` (e.g. `lanes: ecosystem, pitfalls`), run only those lanes in §2 and use DIRECTION.md's open research questions as the question. The nightly rotation splits the five lanes across two nights this way.
 
 ## 1. Local-first (Rung 0)
