@@ -79,8 +79,11 @@ void main() {
     vec3 fogRgb = fogColor.rgb;
 #ifdef NOIR
     if (lampCount > 0) {
-        vec3 n = normalize(cross(dFdx(fragPosition), dFdy(fragPosition)));
         vec3 v = normalize(cameraPos - fragPosition);
+        // Lines (rain) have no area: their derivative normal can vanish,
+        // so fall back to facing the viewer instead of normalizing zero.
+        vec3 nRaw = cross(dFdx(fragPosition), dFdy(fragPosition));
+        vec3 n = dot(nRaw, nRaw) > 1e-12 ? normalize(nRaw) : v;
         if (dot(n, v) < 0.0) n = -n;
         bool ground = abs(n.y) > 0.9 && fragPosition.y < 0.15;
         bool grass = texel.g > texel.r * 1.12 && texel.g > texel.b;

@@ -903,7 +903,59 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     rlPopMatrix();
 }
 
+void RaylibRenderer::drawRain() {
+    // Box around the eye: drops spawn up to kAbove overhead, recycle once
+    // they fall kBelow under the eye, and wrap horizontally to stay within
+    // +-kHalf so walking never outruns the shower.
+    constexpr float kHalf = 18.f;
+    constexpr float kAbove = 10.f;
+    constexpr float kBelow = 4.f;
+    constexpr float kFallSpeed = 22.f;
+    constexpr float kStreak = 0.9f;
+    const Vector3 wind{2.6f, 0.f, 1.1f};
+    const Vector3 eye = camera_.position;
+    std::uniform_real_distribution<float> unit(0.f, 1.f);
+    const auto respawn = [&](Vector3& p, float y) {
+        p = {eye.x + (unit(rainRng_) * 2.f - 1.f) * kHalf, y,
+             eye.z + (unit(rainRng_) * 2.f - 1.f) * kHalf};
+    };
+    if (!rainSeeded_) {
+        for (Vector3& p : rainDrops_) {
+            respawn(p, eye.y - kBelow + unit(rainRng_) * (kAbove + kBelow));
+        }
+        rainSeeded_ = true;
+    }
+
+    const float dt = std::min(GetFrameTime(), 0.05f);
+    const float fall = kFallSpeed * dt;
+    for (Vector3& p : rainDrops_) {
+        p.y -= fall;
+        p.x += wind.x * dt;
+        p.z += wind.z * dt;
+        if (p.y < eye.y - kBelow || p.y < 0.f) {
+            respawn(p, eye.y + kAbove - unit(rainRng_) * 2.f);
+            continue;
+        }
+        if (p.x - eye.x > kHalf) p.x -= 2.f * kHalf;
+        if (eye.x - p.x > kHalf) p.x += 2.f * kHalf;
+        if (p.z - eye.z > kHalf) p.z -= 2.f * kHalf;
+        if (eye.z - p.z > kHalf) p.z += 2.f * kHalf;
+    }
+
+    const auto count = static_cast<std::size_t>(
+        static_cast<float>(kRainDrops) * std::clamp(noir_.rain, 0.f, 1.f));
+    const Color streak{220, 228, 240, static_cast<unsigned char>(210.f * noir_.rain)};
+    // Each streak trails up-wind of its head, so the slant matches the drift.
+    const float wx = wind.x / kFallSpeed * kStreak;
+    const float wz = wind.z / kFallSpeed * kStreak;
+    for (std::size_t i = 0; i < count; ++i) {
+        const Vector3& p = rainDrops_[i];
+        DrawLine3D(p, {p.x - wx, p.y + kStreak, p.z - wz}, streak);
+    }
+}
+
 void RaylibRenderer::endFrame() {
+    if (noir_.rain > 0.f) drawRain();
     if (assets_.fogShader()) EndShaderMode();
     EndMode3D();
     if (grading_) {

@@ -5,6 +5,8 @@
 // Plan: .claude/plans/raylib-visual-overhaul.md, steps 1-3.
 #include "raylib.h"
 
+#include <array>
+#include <random>
 #include <unordered_map>
 
 #include "Assets.hpp"
@@ -150,6 +152,17 @@ class RaylibRenderer {
 
     // Draws sceneTarget_ fullscreen through the grade shader.
     void drawGradedScene();
+
+    // Rain: a fixed pool of drops in a camera-relative box, advanced and
+    // recycled in place each frame (never reallocated). The first
+    // rain-intensity share of the pool is drawn as short slanted streaks
+    // through the fog shader, so drops fade into the haze with distance and
+    // catch the lamp pools; drawn inside the 3D pass, before the grade.
+    static constexpr std::size_t kRainDrops = 900;
+    std::array<Vector3, kRainDrops> rainDrops_{};
+    bool rainSeeded_ = false;
+    std::minstd_rand rainRng_{1234567u};
+    void drawRain();
     NoirLook noir_{};                     // night look for the current hour
     bool noirEnabled_ = true;             // config: noir_night
     bool rainEnabled_ = true;             // config: rain
