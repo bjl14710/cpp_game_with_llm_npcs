@@ -30,4 +30,18 @@ bool setKvValue(const std::filesystem::path& path, const std::string& key,
 // defaults for any missing key.
 LlmConfig loadLlmConfig(const std::filesystem::path& configDir);
 
+// Visual switches from <configDir>/graphics.cfg. Both default on; a missing
+// file or unrecognized value keeps the default.
+struct GraphicsConfig {
+    bool noirNight = true;  // noir_night: the Neo-Noir night look
+    bool rain = true;       // rain: falling rain at night (needs noir_night)
+};
+
+// Parses an on/off style flag ("on"/"off", "true"/"false", "yes"/"no",
+// "1"/"0", case-insensitive); returns `fallback` for anything else.
+bool parseOnOff(const std::string& value, bool fallback);
+
+// Load graphics switches from <configDir>/graphics.cfg.
+GraphicsConfig loadGraphicsConfig(const std::filesystem::path& configDir);
+
 }  // namespace llm_npc
