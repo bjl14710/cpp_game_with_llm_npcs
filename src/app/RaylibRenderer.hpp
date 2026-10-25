@@ -87,9 +87,13 @@ class RaylibRenderer {
     // `face` billboards the same emote pack characters use; `dead` lays the
     // figure flat instead (the dead don't emote). Defaults keep the creator
     // preview call sites unchanged.
+    // `highlighted` marks the NPC the talk prompt targets: at night its
+    // outline turns into a thin unlit red rim (one of the few colors the
+    // noir grade lets through); by day it changes nothing.
     void drawCompositeCharacter(const CharacterLook& look, const Vec3& position,
                                 float facingDeg, bool walking, float phase,
-                                NpcFace face = NpcFace::Neutral, bool dead = false);
+                                NpcFace face = NpcFace::Neutral, bool dead = false,
+                                bool highlighted = false);
 
     // The player avatar's palette (issue #106): the punch arm/fist and the
     // pistol hand tint from it, so the avatar choice is visible in first
@@ -170,6 +174,11 @@ class RaylibRenderer {
     // Feeds the nearest lamp heads (cap noir::kMaxLamps) to the fog shader,
     // or zero lamps in daylight so the shader takes its day path.
     void uploadLamps(const City& city);
+
+    // Night-only red accents that survive the grade: a flashing light bar
+    // on the police car and a neon strip over two storefronts (bakery,
+    // coffee), placed from City's building boxes and drawn unlit.
+    void drawRedAccents(const City& city);
 
     // Night-only glowing bulbs at every lamp head, drawn unlit (outside the
     // fog shader) so they read as light sources rather than lit surfaces.

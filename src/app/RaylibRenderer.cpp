@@ -17,6 +17,18 @@ namespace {
 constexpr float kStreetCenter = 32.f;
 constexpr float kStreetWidth = 16.f;
 
+// The one hue the noir grade keeps saturated (reference accent #ff1f3d).
+constexpr Color kNoirRed{255, 31, 61, 255};
+
+// Linear blend between two colors, t in [0, 1].
+Color lerpColor(Color a, Color b, float t) {
+    const auto mix = [t](unsigned char x, unsigned char y) {
+        return static_cast<unsigned char>(static_cast<float>(x) +
+                                          (static_cast<float>(y) - static_cast<float>(x)) * t);
+    };
+    return Color{mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
+}
+
 // Ground/asphalt/sidewalk palette — warm, low-poly-friendly flats.
 constexpr Color kGrass{116, 153, 86, 255};
 constexpr Color kAsphalt{68, 70, 78, 255};
@@ -117,8 +129,9 @@ void drawFountain(const Building& b, float worldHeight) {
 // Noir post-process grade, run over the finished 3D pass (2D overlay draws
 // afterwards and is never graded). Uses raylib's default vertex shader.
 //   - luminance with a slight cool tint, mixed in by `desaturation`;
-//   - pixels where red clearly dominates AND is bright (lit accents, not
-//     dim brick facades) keep full saturation — the one surviving hue;
+//   - pixels where red clearly dominates AND is bright AND is a true red
+//     (green/blue under ~a third of red — not orange, not lit brick) keep
+//     full saturation: the one surviving hue, reserved for the accents;
 //   - bright warm highlights (sodium lamp pools and bulbs) keep a trace of
 //     their warmth so the light still reads as sodium, not fluorescent;
 //   - S-curve contrast, aspect-correct vignette, animated film grain.
@@ -143,8 +156,10 @@ void main() {
     float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
     vec3 cool = lum * vec3(0.93, 0.98, 1.07);
     float redness = c.r - max(c.g, c.b);
-    float keep = smoothstep(0.10, 0.20, redness) * smoothstep(0.35, 0.55, c.r);
-    float warmth = smoothstep(0.3, 0.75, lum) * step(c.b, c.r) * 0.45;
+    float ratio = max(c.g, c.b) / max(c.r, 1e-3);
+    float keep = smoothstep(0.10, 0.20, redness) * smoothstep(0.35, 0.55, c.r) *
+                 smoothstep(0.38, 0.28, ratio);
+    float warmth = smoothstep(0.45, 0.85, lum) * step(c.b, c.r) * 0.3;
     vec3 g = mix(c, cool, desaturation * (1.0 - max(keep, warmth)));
     vec3 sc = clamp(g, 0.0, 1.0);
     g = mix(g, sc * sc * (3.0 - 2.0 * sc), contrast);
@@ -464,6 +479,39 @@ void RaylibRenderer::drawCity(const City& city) {
         }
     }
     drawLampGlows(city);
+    drawRedAccents(city);
+}
+
+void RaylibRenderer::drawRedAccents(const City& city) {
+    if (noir_.night <= 0.f) return;
+    const Shader* fog = assets_.fogShader();
+    if (fog) EndShaderMode();
+    const auto alpha = static_cast<unsigned char>(255.f * noir_.night);
+    const Color red{kNoirRed.r, kNoirRed.g, kNoirRed.b, alpha};
+    // Police bar flashes red / cold white-blue (the grade turns the blue
+    // grey, so it reads as a white strobe against the surviving red).
+    const bool phase = std::fmod(GetTime(), 0.9) < 0.45;
+    const Color dimRed{90, 12, 22, alpha};
+    const Color blue{80, 120, 255, alpha};
+    const Color dimBlue{20, 26, 60, alpha};
+    for (const Building& b : city.buildings()) {
+        const std::string baseId = b.id.substr(0, b.id.find('#'));
+        const float cx = (b.minX + b.maxX) * 0.5f;
+        const float cz = (b.minZ + b.maxZ) * 0.5f;
+        if (baseId == "police_car") {
+            const float top = assets_.sizeSpecFor(b).worldHeight;
+            DrawCube({cx - 0.22f, top - 0.04f, cz}, 0.36f, 0.12f, 0.24f,
+                     phase ? red : dimRed);
+            DrawCube({cx + 0.22f, top - 0.04f, cz}, 0.36f, 0.12f, 0.24f,
+                     phase ? dimBlue : blue);
+        } else if (baseId == "bakery" || baseId == "coffee") {
+            // A thin strip just proud of the street-facing (+Z) front,
+            // above the ground-floor awnings.
+            const float width = (b.maxX - b.minX) * 0.55f;
+            DrawCube({cx, b.height * 0.3f, b.maxZ + 0.08f}, width, 0.14f, 0.06f, red);
+        }
+    }
+    if (fog) BeginShaderMode(*fog);
 }
 
 void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
@@ -725,7 +773,7 @@ void drawPartRecipe(const PartDef& part, const Vec3& at, const Vec3& dim,
 void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
                                             bool walking, float phase, NpcFace face,
-                                            bool dead) {
+                                            bool dead, bool highlighted) {
     const AssembledLook assembled = assembleLook(look);
     if (!assembled.ok) {
         // Invalid/stale look: the same marker cylinder the pack path uses.
@@ -765,10 +813,16 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // around the real geometry), then normally. The passes are grouped —
     // not interleaved per part — because the cull-face switch must drain
     // the rlgl batch; two drains per character instead of two per part.
-    constexpr float kHullScale = 1.06f;
-    const RecipeColors outlineColors{kOutlineColor, kOutlineColor,
-                                     kOutlineColor, kOutlineColor};
+    // The talk target's rim turns noir red at night, drawn unlit so the
+    // grade keeps it; daytime takes the unchanged ink-outline path.
+    const bool rim = highlighted && noir_.night > 0.f;
+    const float hullScale = rim ? 1.075f : 1.06f;
+    const Color outline =
+        rim ? lerpColor(kOutlineColor, kNoirRed, noir_.night) : kOutlineColor;
+    const RecipeColors outlineColors{outline, outline, outline, outline};
+    const Shader* fog = assets_.fogShader();
     rlDrawRenderBatchActive();
+    if (rim && fog) EndShaderMode();
     rlSetCullFace(RL_CULL_FACE_FRONT);
     for (const PlacedPart& placed : assembled.parts) {
         const Vec3 at = placed.position * s;
@@ -776,13 +830,14 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         const float cy = at.y + dim.y * 0.5f;
         rlPushMatrix();  // inflate about the part's center, not the feet
         rlTranslatef(at.x, cy, at.z);
-        rlScalef(kHullScale, kHullScale, kHullScale);
+        rlScalef(hullScale, hullScale, hullScale);
         rlTranslatef(-at.x, -cy, -at.z);
         drawPartRecipe(*placed.part, at, dim, outlineColors);
         rlPopMatrix();
     }
     rlDrawRenderBatchActive();
     rlSetCullFace(RL_CULL_FACE_BACK);
+    if (rim && fog) BeginShaderMode(*fog);
 
     for (const PlacedPart& placed : assembled.parts) {
         // Anchor and size in world units — the contract scale is applied

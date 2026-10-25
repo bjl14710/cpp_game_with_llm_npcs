@@ -1804,7 +1804,8 @@ int main(int argc, char** argv) {
                     renderer.drawCompositeCharacter(
                         npcLooks[static_cast<std::size_t>(netNpc.npcIndex)],
                         netNpc.position, netNpc.facingDeg, false,
-                        static_cast<float>(GetTime()), face);
+                        static_cast<float>(GetTime()), face, false,
+                        mode == AppMode::Playing && nearbyNpc == netNpc.npcIndex);
                 } else {
                     CharacterVisual visual;
                     visual.position = netNpc.position;
@@ -1826,11 +1827,14 @@ int main(int argc, char** argv) {
                 // the creator picks from (plan: shared-character-library).
                 // A gesture drives the bob so a talking NPC still reads as
                 // animated (composites have no gesture clip).
+                // The talk prompt's target gets the noir red rim at night.
+                const bool talkTarget = mode == AppMode::Playing &&
+                                        nearbyNpc == static_cast<int>(i);
                 renderer.drawCompositeCharacter(
                     npcLooks[i], npc.position(), npc.facingDeg(),
                     walking || npc.pose() != NpcAction::None,
                     static_cast<float>(GetTime()), face,
-                    npc.combatState() == NpcState::Dead);
+                    npc.combatState() == NpcState::Dead, talkTarget);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a
