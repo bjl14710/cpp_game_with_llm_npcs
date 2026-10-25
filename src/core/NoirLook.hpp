@@ -17,7 +17,7 @@ namespace llm_npc {
 struct NoirLook {
     float night = 0.f;            // the 0..1 factor everything below scales by
     float desaturation = 0.f;     // 0 = full color .. 0.92 = near-monochrome
-    float contrast = 0.f;         // S-curve mix: 0 = identity .. 0.55 = punchy
+    float contrast = 0.f;         // S-curve mix: 0 = identity .. 0.35 = punchy
     float vignette = 0.f;         // corner darkening strength
     float grain = 0.f;            // animated film-grain amplitude
     float fogDensityScale = 1.f;  // multiplies the base fog density
@@ -34,11 +34,11 @@ namespace noir {
 
 // Full-night targets. Daytime values are the struct defaults above.
 constexpr float kDesaturation = 0.92f;
-constexpr float kContrast = 0.55f;
-constexpr float kVignette = 0.55f;
+constexpr float kContrast = 0.35f;
+constexpr float kVignette = 0.45f;
 constexpr float kGrain = 0.06f;
 constexpr float kFogDensityScale = 1.8f;
-constexpr float kAmbientScale = 0.6f;
+constexpr float kAmbientScale = 0.7f;
 constexpr float kLampIntensity = 1.6f;
 constexpr float kLampRadius = 11.f;
 constexpr float kWetSpecular = 0.9f;
