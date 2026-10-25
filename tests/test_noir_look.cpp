@@ -15,6 +15,7 @@ TEST_CASE("noir look: noon is the identity look") {
     CHECK(noon.vignette == 0.f);
     CHECK(noon.grain == 0.f);
     CHECK(noon.fogDensityScale == doctest::Approx(1.f));
+    CHECK(noon.ambientScale == 1.f);
     CHECK(noon.lampIntensity == 0.f);
     CHECK(noon.wetSpecular == 0.f);
     CHECK(noon.rain == 0.f);
@@ -36,6 +37,10 @@ TEST_CASE("noir look: mid-dusk is half-way, midnight is full noir") {
     CHECK(midnight.night == doctest::Approx(1.f));
     CHECK(midnight.desaturation == doctest::Approx(0.92f));
     CHECK(midnight.fogDensityScale == doctest::Approx(1.8f));
+    // Ambient dims between the pools so the lamps carry the scene, but the
+    // city never goes fully black (lightLevelAt's 0.35 floor still applies).
+    CHECK(midnight.ambientScale < dusk.ambientScale);
+    CHECK(midnight.ambientScale >= 0.5f);
     CHECK(midnight.vignette > dusk.vignette);
     CHECK(midnight.grain > dusk.grain);
     CHECK(midnight.wetSpecular > dusk.wetSpecular);
@@ -56,6 +61,7 @@ TEST_CASE("noir look: disabled is today's night exactly") {
         CHECK(off.night == 0.f);
         CHECK(off.desaturation == 0.f);
         CHECK(off.fogDensityScale == doctest::Approx(1.f));
+        CHECK(off.ambientScale == 1.f);
         CHECK(off.lampIntensity == 0.f);
         CHECK(off.rain == 0.f);
         const SkyColor plain = skyColorAt(h);

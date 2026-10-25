@@ -21,6 +21,7 @@ struct NoirLook {
     float vignette = 0.f;         // corner darkening strength
     float grain = 0.f;            // animated film-grain amplitude
     float fogDensityScale = 1.f;  // multiplies the base fog density
+    float ambientScale = 1.f;     // multiplies lightLevelAt: darker between lamps
     SkyColor sky{};               // sky clear + fog color (noir near-black at night)
     SkyColor lampColor{};         // sodium lamp tint (constant hue)
     float lampIntensity = 0.f;    // lamp pool brightness; 0 = lamps off
@@ -37,6 +38,7 @@ constexpr float kContrast = 0.55f;
 constexpr float kVignette = 0.55f;
 constexpr float kGrain = 0.06f;
 constexpr float kFogDensityScale = 1.8f;
+constexpr float kAmbientScale = 0.6f;
 constexpr float kLampIntensity = 1.6f;
 constexpr float kLampRadius = 11.f;
 constexpr float kWetSpecular = 0.9f;
@@ -64,6 +66,7 @@ inline NoirLook noirLookAt(float hours, bool enabled = true) {
     look.vignette = noir::kVignette * n;
     look.grain = noir::kGrain * n;
     look.fogDensityScale = 1.f + (noir::kFogDensityScale - 1.f) * n;
+    look.ambientScale = 1.f + (noir::kAmbientScale - 1.f) * n;
     look.sky = daynight::lerp(skyColorAt(hours), noir::kSky, n);
     look.lampColor = noir::kLamp;
     look.lampIntensity = noir::kLampIntensity * n;
