@@ -100,9 +100,10 @@ class RaylibRenderer {
     // Call inside the 3D pass, after the world is drawn.
     void drawViewmodel(int weaponKind, float attackFraction);
 
-    // Ends the 3D pass (EndMode3D). 2D overlay (DialogUI/Menu/nameplates)
-    // draws after this, before EndDrawing.
-    // TODO(implement): step 3.
+    // Ends the 3D pass (EndMode3D). At night the pass was rendered into an
+    // offscreen target; this draws it to the screen through the noir grade.
+    // The 2D overlay (DialogUI/Menu/nameplates) draws after this, before
+    // EndDrawing, so it is never graded.
     void endFrame();
 
     // Editor support (issue #112): unprojects a screen point onto the
@@ -130,6 +131,25 @@ class RaylibRenderer {
     Color skyColor_{135, 190, 235, 255};  // daylight until the clock speaks
     float lightLevel_ = 1.f;              // scene brightness multiplier
     Texture2D glowTexture_{};             // radial falloff for lamp halos
+
+    // Noir post-process: the 3D pass renders into sceneTarget_ whenever the
+    // night factor is above 0, then endFrame draws it through gradeShader_.
+    RenderTexture2D sceneTarget_{};
+    Shader gradeShader_{};
+    bool gradeLoaded_ = false;
+    bool grading_ = false;  // this frame's 3D pass targets sceneTarget_
+    struct GradeLocs {
+        int desaturation = -1, contrast = -1, vignette = -1, grain = -1;
+        int time = -1, resolution = -1;
+    };
+    GradeLocs gradeLocs_;
+
+    // (Re)creates sceneTarget_ at the current framebuffer size; false when
+    // it can't be created (the frame then draws ungraded).
+    bool ensureSceneTarget();
+
+    // Draws sceneTarget_ fullscreen through the grade shader.
+    void drawGradedScene();
     NoirLook noir_{};                     // night look for the current hour
     bool noirEnabled_ = true;             // config: noir_night
     bool rainEnabled_ = true;             // config: rain

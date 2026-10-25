@@ -114,9 +114,67 @@ void drawFountain(const Building& b, float worldHeight) {
                  10, kStoneDark);
 }
 
+// Noir post-process grade, run over the finished 3D pass (2D overlay draws
+// afterwards and is never graded). Uses raylib's default vertex shader.
+//   - luminance with a slight cool tint, mixed in by `desaturation`;
+//   - pixels where red clearly dominates AND is bright (lit accents, not
+//     dim brick facades) keep full saturation — the one surviving hue;
+//   - bright warm highlights (sodium lamp pools and bulbs) keep a trace of
+//     their warmth so the light still reads as sodium, not fluorescent;
+//   - S-curve contrast, aspect-correct vignette, animated film grain.
+// Every term is scaled by uniforms that are 0 at night factor 0.
+constexpr const char* kGradeFragmentShader = R"(
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0;
+uniform float desaturation;
+uniform float contrast;
+uniform float vignette;
+uniform float grain;
+uniform float time;
+uniform vec2 resolution;
+out vec4 finalColor;
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+void main() {
+    vec3 c = texture(texture0, fragTexCoord).rgb;
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    vec3 cool = lum * vec3(0.93, 0.98, 1.07);
+    float redness = c.r - max(c.g, c.b);
+    float keep = smoothstep(0.10, 0.20, redness) * smoothstep(0.35, 0.55, c.r);
+    float warmth = smoothstep(0.3, 0.75, lum) * step(c.b, c.r) * 0.45;
+    vec3 g = mix(c, cool, desaturation * (1.0 - max(keep, warmth)));
+    vec3 sc = clamp(g, 0.0, 1.0);
+    g = mix(g, sc * sc * (3.0 - 2.0 * sc), contrast);
+    vec2 uv = fragTexCoord - 0.5;
+    uv.x *= resolution.x / max(resolution.y, 1.0);
+    g *= 1.0 - vignette * smoothstep(0.3, 0.95, length(uv));
+    vec2 px = floor(fragTexCoord * resolution);
+    g += (hash(px + floor(time * 24.0) * vec2(17.0, 31.0)) - 0.5) * grain;
+    finalColor = vec4(clamp(g, 0.0, 1.0), 1.0);
+}
+)";
+
 }  // namespace
 
 RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {
+    // The grade shader is optional: failure (GLSL mismatch) just means the
+    // 3D pass draws straight to the screen with no grade, as by day.
+    gradeShader_ = LoadShaderFromMemory(nullptr, kGradeFragmentShader);
+    gradeLoaded_ = IsShaderValid(gradeShader_);
+    if (gradeLoaded_) {
+        gradeLocs_.desaturation = GetShaderLocation(gradeShader_, "desaturation");
+        gradeLocs_.contrast = GetShaderLocation(gradeShader_, "contrast");
+        gradeLocs_.vignette = GetShaderLocation(gradeShader_, "vignette");
+        gradeLocs_.grain = GetShaderLocation(gradeShader_, "grain");
+        gradeLocs_.time = GetShaderLocation(gradeShader_, "time");
+        gradeLocs_.resolution = GetShaderLocation(gradeShader_, "resolution");
+    } else {
+        TraceLog(LOG_WARNING, "noir grade shader failed to compile - no grade");
+    }
+
     // Soft radial falloff for the lamp-bulb glow billboards (white core
     // fading to transparent; tinted per lamp at draw time).
     Image glow = GenImageGradientRadial(64, 64, 0.f, WHITE, BLANK);
@@ -126,6 +184,44 @@ RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {
 
 RaylibRenderer::~RaylibRenderer() {
     if (IsTextureValid(glowTexture_)) UnloadTexture(glowTexture_);
+    if (IsRenderTextureValid(sceneTarget_)) UnloadRenderTexture(sceneTarget_);
+    if (gradeLoaded_) UnloadShader(gradeShader_);
+}
+
+bool RaylibRenderer::ensureSceneTarget() {
+    // Sized to the real framebuffer (HiDPI-aware) and rebuilt whenever the
+    // window size changes; failure falls back to ungraded direct drawing.
+    const int w = GetRenderWidth();
+    const int h = GetRenderHeight();
+    if (w <= 0 || h <= 0) return false;
+    if (IsRenderTextureValid(sceneTarget_) && sceneTarget_.texture.width == w &&
+        sceneTarget_.texture.height == h) {
+        return true;
+    }
+    if (IsRenderTextureValid(sceneTarget_)) UnloadRenderTexture(sceneTarget_);
+    sceneTarget_ = LoadRenderTexture(w, h);
+    return IsRenderTextureValid(sceneTarget_);
+}
+
+void RaylibRenderer::drawGradedScene() {
+    BeginShaderMode(gradeShader_);
+    const float resolution[2] = {static_cast<float>(sceneTarget_.texture.width),
+                                 static_cast<float>(sceneTarget_.texture.height)};
+    const float time = static_cast<float>(GetTime());
+    SetShaderValue(gradeShader_, gradeLocs_.desaturation, &noir_.desaturation,
+                   SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.contrast, &noir_.contrast, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.vignette, &noir_.vignette, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.grain, &noir_.grain, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.time, &time, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.resolution, resolution, SHADER_UNIFORM_VEC2);
+    // Render textures are stored bottom-up: flip the source rectangle.
+    DrawTexturePro(sceneTarget_.texture,
+                   Rectangle{0.f, 0.f, resolution[0], -resolution[1]},
+                   Rectangle{0.f, 0.f, static_cast<float>(GetScreenWidth()),
+                             static_cast<float>(GetScreenHeight())},
+                   Vector2{0.f, 0.f}, 0.f, WHITE);
+    EndShaderMode();
 }
 
 void RaylibRenderer::setNoirOptions(bool noirNight, bool rain) {
@@ -223,6 +319,14 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
     camera_.up = {0.f, 1.f, 0.f};
     camera_.fovy = 70.f;
     camera_.projection = CAMERA_PERSPECTIVE;
+
+    // Any night at all routes the 3D pass through the grade; full daylight
+    // keeps drawing straight to the (multisampled) screen exactly as before.
+    grading_ = gradeLoaded_ && noir_.night > 0.f && ensureSceneTarget();
+    if (grading_) {
+        BeginTextureMode(sceneTarget_);
+        ClearBackground(skyColor_);
+    }
 
     // Atmosphere: models carry the fog shader on their materials; wrapping
     // the whole 3D pass in BeginShaderMode routes the primitive batch
@@ -802,6 +906,11 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
 void RaylibRenderer::endFrame() {
     if (assets_.fogShader()) EndShaderMode();
     EndMode3D();
+    if (grading_) {
+        EndTextureMode();
+        drawGradedScene();
+        grading_ = false;
+    }
 }
 
 bool RaylibRenderer::worldToScreen(const Vec3& world, Vector2& out) const {
