@@ -378,6 +378,11 @@ int main(int argc, char** argv) {
     }
     renderer.setAvatarPalette(avatarLook.paletteId);
 
+    // Noir night switches (config/graphics.cfg; pause-menu toggles below).
+    const fs::path graphicsPath = configDir / "graphics.cfg";
+    GraphicsConfig graphics = loadGraphicsConfig(configDir);
+    renderer.setNoirOptions(graphics.noirNight, graphics.rain);
+
     DialogUI dialog;
     DialogueSession session;
     Menu menu(bindings, bindingsPath);
@@ -805,6 +810,16 @@ int main(int argc, char** argv) {
         return "";
     };
     menu.setModels(modelHooks);
+
+    Menu::GraphicsHooks graphicsHooks;
+    graphicsHooks.current = [&graphics] { return graphics; };
+    graphicsHooks.onChange = [&](const GraphicsConfig& next) {
+        graphics = next;
+        renderer.setNoirOptions(graphics.noirNight, graphics.rain);
+        setKvValue(graphicsPath, "noir_night", graphics.noirNight ? "on" : "off");
+        setKvValue(graphicsPath, "rain", graphics.rain ? "on" : "off");
+    };
+    menu.setGraphics(graphicsHooks);
 
     menu.setSandbox(sandboxHooks);
     {
