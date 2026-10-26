@@ -3,8 +3,9 @@
 Project-specific knowledge for the shared routines (routine-guardrails §2). This is a
 C++20 + raylib game.
 
-**Work branch: `dev`.** Active development happens on `dev` (164 commits ahead of `main` as of 2026-10-26); `main` only receives periodic merges. Scout, bug-hunt and design-scout must analyze `dev`: `git fetch origin dev && git checkout --detach origin/dev -- src tests external tools CMakeLists.txt config personas traits` (or a worktree). Never read `dev`'s `.claude/projects/`, `.claude/file-history/` or `.claude/.claude/` (a home directory committed by mistake; personal transcripts). It is NOT the Godot NPC game, so ignore the kit's built-in
-"LLM-NPC game (Godot 4)" focus and lens blocks for this repo.
+**Work branch: `dev`.** Active development happens on `dev` (164 commits ahead of `main` as of 2026-10-26); `main` only receives periodic merges. Scout, bug-hunt and design-scout must analyze `dev`: `git fetch origin dev && git checkout --detach origin/dev -- src tests external tools CMakeLists.txt config personas traits` (or a worktree). Never read `dev`'s `.claude/projects/`, `.claude/file-history/` or `.claude/.claude/` (a home directory committed by mistake; personal transcripts).
+
+This is NOT the Godot NPC game, so ignore the kit's built-in "LLM-NPC game (Godot 4)" focus and lens blocks for this repo.
 
 ## Scout checks
 - Tests: `make -C tests test` (doctest, headless, C++20). Baseline on `dev` 2026-10-26: 553 cases; 541 pass in a code-only checkout (the rest need the shipped roles/, storylines/, cutscenes/ data). Also run the ASan/UBSan and TSan builds: baseline is 1 ASan report (`zoneName` returns a reference to a temporary, tests/test_cutscene.cpp:561) and 1 TSan race (`NetServer::listenSocket_`).
@@ -15,7 +16,7 @@ C++20 + raylib game.
 - Secrets: no API key in code, `config/*.cfg`, or history; `config/secrets.cfg` stays gitignored.
 - Prompt context: memory/fact/gossip injection gated in code (`FactStore`, `Gossip`, `ConversationStore`), not only by prompt wording.
 - Dependencies: vendored `external/` headers (httplib, json.hpp, doctest, sqlite3) and the raylib FetchContent tag (5.5) vs. latest upstream.
-- `src/app/main.cpp` (~2,000 lines, largest file): size and churn; propose extractions only with a test seam.
+- `src/app/main.cpp` (~3,000 lines on dev, largest and most-churned file): size and churn; propose extractions only with a test seam.
 
 ## Bug-hunt hot spots
 - `NetServer`, `NetClient`, `NetFraming`, `HostChatRouter`: threads, queues, framing limits, reconnects.
