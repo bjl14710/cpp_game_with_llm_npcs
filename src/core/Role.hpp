@@ -100,16 +100,28 @@ std::string renderRoleBlock(const RoleDef* role, const std::string& secret);
 inline constexpr const char* kRoleLeakDeflection = "I'd rather not get into that.";
 
 // Role names shorter than this never trigger revealsRole. Matching is already
-// whole-word, so the risk is not "ex" inside "next" but a two- or three-letter
-// name being an everyday word in its own right; every shipped name is longer.
+// whole-word inside an identity phrase, so the risk is not "ex" inside "next"
+// but a two- or three-letter name being an everyday word in its own right
+// ("I am a spy" said as a joke); every shipped name is longer.
 inline constexpr std::size_t kMinRoleNameMatchLength = 4;
 
-// True when `text` (a reply, already folded by toRenderableAscii and stripped
-// of directive tags) would put what renderRoleBlock wrote into a transcript:
-// the `secret`, or `role`'s display name. Case-insensitive. The secret is
-// matched as a substring with surrounding whitespace and trailing sentence
-// punctuation ignored, so "you were at the mill" still matches the authored
-// "You were at the mill."; the name is matched as a whole word or phrase.
+// True when `text` (a reply, stripped of directive tags) would put what
+// renderRoleBlock wrote into a transcript. Case-insensitive, and folded with
+// toRenderableAscii so a curly apostrophe matches a straight one. Two
+// triggers:
+//
+//   - The `secret`, as a substring with surrounding whitespace and trailing
+//     sentence punctuation ignored, so "you were at the mill" still matches
+//     the authored "You were at the mill.".
+//   - `role`'s display name, ONLY inside an identity phrase: "you are",
+//     "I am" or "I'm", optionally followed by "the", "a" or "an", then the
+//     name as a whole word or phrase. That covers the block's own header
+//     ("In this story you are Killer") and a first-person slip ("I'm the
+//     killer"). A plain mention ("I hope they catch the killer", "was there a
+//     witness?") does NOT trigger: shipped names are ordinary words, and an
+//     NPC that deflected every line containing its role's name would be
+//     identified by the deflections alone.
+//
 // An empty secret, a null role and a name shorter than kMinRoleNameMatchLength
 // each contribute nothing.
 bool revealsRole(const std::string& text, const RoleDef* role, const std::string& secret);

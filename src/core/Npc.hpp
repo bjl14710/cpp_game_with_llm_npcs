@@ -41,7 +41,8 @@ class Npc {
     // Notify this NPC of a reply. Returns the assistant text if the id matches
     // a pending request from this NPC; nullopt otherwise. On success, the turn
     // is appended to history (capped to maxHistoryTurns_). A reply that would
-    // reveal this NPC's secret or role name (revealsRole) is replaced whole by
+    // reveal this NPC's secret or claim its role by name (revealsRole: "I'm
+    // the killer", not "they'll catch the killer") is replaced whole by
     // kRoleLeakDeflection, its action dropped and its mood kept; the
     // deflection, never the original, is what is returned and remembered.
     std::optional<std::string> onReplyArrived(const ChatReply& reply);

@@ -849,6 +849,75 @@ TEST_CASE("redactRoleLeak applies the same check to text outside onReplyArrived"
     CHECK(npc.redactRoleLeak("I'm the witness, then.") == kRoleLeakDeflection);
     CHECK(npc.redactRoleLeak("Nobody witnessed a thing.") ==
           "Nobody witnessed a thing.");
+    CHECK(npc.redactRoleLeak("Was there a witness?") == "Was there a witness?");
+}
+
+TEST_CASE("a plain mention of the role's name leaves a cast NPC's reply alone") {
+    // The names are ordinary words in a murder mystery. If the killer alone
+    // deflected "I hope they catch the killer", asking everybody about the
+    // killer would find them; text, mood and action all have to come through
+    // exactly as they would for anyone else.
+    const std::vector<RoleDef> roles = shippedRoles();
+    struct Case {
+        const char* roleId;
+        const char* reply;
+        const char* spoken;
+        NpcMood mood;
+        NpcAction action;
+    };
+    const Case cases[] = {
+        {"killer", "I hope they catch the killer. [[MOOD: sad]]\n[[ACTION: wave]]",
+         "I hope they catch the killer.", NpcMood::Sad, NpcAction::Wave},
+        {"witness", "Was there a witness? [[MOOD: surprised]]\n[[ACTION: raise_hand]]",
+         "Was there a witness?", NpcMood::Surprised, NpcAction::RaiseHand},
+    };
+    for (const Case& c : cases) {
+        CAPTURE(c.reply);
+        FakeOllama fake;
+        fake.setReply(c.reply);
+        LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+        Npc npc(rolePersona(), client);
+        npc.setRoleRegistry(&roles);
+        npc.setRole(c.roleId, kSecret);
+
+        const std::optional<std::string> text = exchange(npc, client, "Any news?");
+        REQUIRE(text.has_value());
+        CHECK(*text == c.spoken);
+        REQUIRE(npc.history().size() == 2);
+        CHECK(npc.history()[1].content == c.spoken);
+        CHECK(npc.mood() == c.mood);
+        CHECK(npc.lastAction() == c.action);
+    }
+}
+
+TEST_CASE("claiming the role by name is redacted") {
+    const std::vector<RoleDef> roles = shippedRoles();
+    struct Case {
+        const char* roleId;
+        const char* reply;
+    };
+    const Case cases[] = {
+        {"killer", "Fine. I'm the killer. [[MOOD: angry]]\n[[ACTION: follow]]"},
+        {"witness", "So you are the Witness, they told me. [[MOOD: angry]]\n[[ACTION: follow]]"},
+        {"killer", "In this story you are the Killer. [[MOOD: angry]]\n[[ACTION: follow]]"},
+    };
+    for (const Case& c : cases) {
+        CAPTURE(c.reply);
+        FakeOllama fake;
+        fake.setReply(c.reply);
+        LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+        Npc npc(rolePersona(), client);
+        npc.setRoleRegistry(&roles);
+        npc.setRole(c.roleId, kSecret);
+
+        const std::optional<std::string> text = exchange(npc, client, "Who are you?");
+        REQUIRE(text.has_value());
+        CHECK(*text == kRoleLeakDeflection);
+        checkNothingLeaked(npc, *text, kSecret, c.roleId);
+        CHECK(npc.mood() == NpcMood::Angry);
+        CHECK(npc.lastAction() == NpcAction::None);
+        CHECK(npc.behavior() == NpcAction::None);
+    }
 }
 
 TEST_CASE("revealsRole matches whole names, ignores empty and short ones") {
@@ -859,8 +928,11 @@ TEST_CASE("revealsRole matches whole names, ignores empty and short ones") {
     RoleDef blank;
 
     CHECK(revealsRole("I am the secret keeper here.", &keeper, ""));
+    CHECK(revealsRole("i AM a  Secret\nKeeper", &keeper, ""));  // whitespace runs fold
     CHECK_FALSE(revealsRole("A secret keepers' club? Never heard of it.", &keeper, ""));
-    CHECK_FALSE(revealsRole("I spy a muffin.", &spy, ""));
+    CHECK_FALSE(revealsRole("I'm the secret keepers' friend.", &keeper, ""));  // whole word
+    CHECK_FALSE(revealsRole("Ask the secret keeper.", &keeper, ""));  // no identity phrase
+    CHECK_FALSE(revealsRole("Then I am the spy, ha.", &spy, ""));
     CHECK_FALSE(revealsRole("Anything at all.", &blank, ""));
     CHECK_FALSE(revealsRole("Anything at all.", nullptr, ""));
     CHECK_FALSE(revealsRole("Anything at all.", nullptr, "   "));
@@ -868,4 +940,11 @@ TEST_CASE("revealsRole matches whole names, ignores empty and short ones") {
     // An authored curly apostrophe is folded like the reply was.
     CHECK(revealsRole("I wasn't home that night.", nullptr,
                       "I wasn\u2019t home that night."));
+    // ...and so is one in the claim itself.
+    RoleDef killer;
+    killer.name = "Killer";
+    CHECK(revealsRole("Fine, I\u2019m the killer.", &killer, ""));
+    // The subject must start a word: "you are" inside "bayou are" is no claim.
+    CHECK_FALSE(revealsRole("The bayou are the killer's hiding place.", &killer, ""));
+    CHECK(revealsRole("So you are the killer's... no, you ARE the killer.", &killer, ""));
 }

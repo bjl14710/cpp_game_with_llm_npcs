@@ -113,15 +113,49 @@ std::string lowered(std::string s) {
 
 bool isWordChar(char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; }
 
-// True when `needle` occurs in `haystack` with no letter or digit touching
-// either end, so "witness" matches "a witness." but not "witnessed".
-bool containsWholeWord(const std::string& haystack, const std::string& needle) {
-    for (auto at = haystack.find(needle); at != std::string::npos;
-         at = haystack.find(needle, at + 1)) {
-        const auto end = at + needle.size();
-        const bool startsWord = at == 0 || !isWordChar(haystack[at - 1]);
-        const bool endsWord = end == haystack.size() || !isWordChar(haystack[end]);
-        if (startsWord && endsWord) return true;
+// Lowercase, with every whitespace run collapsed to one space, so "I'm  the\n
+// killer" and "i'm the killer" compare equal.
+std::string normalised(const std::string& s) {
+    std::string out;
+    bool pendingSpace = false;
+    for (char c : lowered(s)) {
+        if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+            pendingSpace = !out.empty();
+            continue;
+        }
+        if (pendingSpace) out += ' ';
+        pendingSpace = false;
+        out += c;
+    }
+    return out;
+}
+
+// True when `text` has `word` starting at `at` with no letter or digit
+// touching its end, so "witness" matches "witness." but not "witnessed".
+bool wordAt(const std::string& text, std::size_t at, const std::string& word) {
+    if (text.compare(at, word.size(), word) != 0) return false;
+    const auto end = at + word.size();
+    return end == text.size() || !isWordChar(text[end]);
+}
+
+// True when `name` appears as the complement of an identity phrase — "you
+// are", "I am" or "I'm", then an optional article, then the name.
+bool claimsName(const std::string& text, const std::string& name) {
+    static const char* const kSubjects[] = {"you are ", "i am ", "i'm "};
+    static const char* const kArticles[] = {"", "the ", "a ", "an "};
+    for (const char* subject : kSubjects) {
+        const std::string phrase = subject;
+        for (auto at = text.find(phrase); at != std::string::npos;
+             at = text.find(phrase, at + 1)) {
+            if (at != 0 && isWordChar(text[at - 1])) continue;  // "hi am", "bayou are"
+            const auto rest = at + phrase.size();
+            for (const char* article : kArticles) {
+                const std::string a = article;
+                if (text.compare(rest, a.size(), a) == 0 && wordAt(text, rest + a.size(), name)) {
+                    return true;
+                }
+            }
+        }
     }
     return false;
 }
@@ -198,7 +232,10 @@ std::string renderRoleBlock(const RoleDef* role, const std::string& secret) {
 }
 
 bool revealsRole(const std::string& text, const RoleDef* role, const std::string& secret) {
-    const std::string haystack = lowered(text);
+    // Folded here as well as by the caller, so this check never depends on
+    // which path the text took: a curly-apostrophe "I'm the killer" and a
+    // straight one are the same claim.
+    const std::string haystack = lowered(toRenderableAscii(text));
 
     // Folded the same way the reply was, or an authored curly apostrophe in
     // the secret could never match the straight one the reply now carries.
@@ -211,9 +248,9 @@ bool revealsRole(const std::string& text, const RoleDef* role, const std::string
     if (!needle.empty() && haystack.find(needle) != std::string::npos) return true;
 
     if (role == nullptr) return false;
-    const std::string name = lowered(trim(role->name));
+    const std::string name = normalised(toRenderableAscii(trim(role->name)));
     if (name.size() < kMinRoleNameMatchLength) return false;
-    return containsWholeWord(haystack, name);
+    return claimsName(normalised(haystack), name);
 }
 
 const RoleDef* findRole(const std::vector<RoleDef>& roles, const std::string& id) {
