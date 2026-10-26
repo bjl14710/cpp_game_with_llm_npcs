@@ -111,3 +111,54 @@ TEST_CASE("ConversationStore survives a corrupt transcript row") {
     CHECK(memory.transcript.empty());                    // corrupt part dropped
     CHECK(memory.summary == "Met at the fountain.");     // intact part kept
 }
+
+TEST_CASE("ConversationStore skips malformed transcript entries instead of throwing") {
+    for (const char* json : {"[1,2]", "[\"x\"]", "[{\"role\":5}]", "[null]",
+                             "[{\"role\":\"user\",\"content\":7}]", "[{}]"}) {
+        CAPTURE(json);
+        TempDb tmp;
+        {
+            ConversationStore store(tmp.path);
+            REQUIRE(store.ok());
+            REQUIRE(store.save("Yuki Tanaka", "Summary kept.", {{"user", "hey"}}));
+        }
+        {
+            sqlite3* db = nullptr;
+            REQUIRE(sqlite3_open(tmp.path.string().c_str(), &db) == SQLITE_OK);
+            const std::string sql =
+                std::string("UPDATE conversations SET transcript_json = '") + json +
+                "' WHERE npc_id = 'Yuki Tanaka'";
+            REQUIRE(sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr) == SQLITE_OK);
+            sqlite3_close(db);
+        }
+        ConversationStore store(tmp.path);
+        NpcMemory memory;
+        CHECK_NOTHROW(memory = store.load("Yuki Tanaka"));
+        CHECK(memory.transcript.empty());
+        CHECK(memory.summary == "Summary kept.");
+    }
+}
+
+TEST_CASE("ConversationStore keeps the well-formed rows around a malformed one") {
+    TempDb tmp;
+    {
+        ConversationStore store(tmp.path);
+        REQUIRE(store.ok());
+        REQUIRE(store.save("Yuki Tanaka", "s", {{"user", "hey"}}));
+    }
+    {
+        sqlite3* db = nullptr;
+        REQUIRE(sqlite3_open(tmp.path.string().c_str(), &db) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(db,
+                             "UPDATE conversations SET transcript_json = "
+                             "'[1,{\"role\":\"user\",\"content\":\"hi\"},{\"role\":5}]' "
+                             "WHERE npc_id = 'Yuki Tanaka'",
+                             nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(db);
+    }
+    ConversationStore store(tmp.path);
+    const NpcMemory memory = store.load("Yuki Tanaka");
+    REQUIRE(memory.transcript.size() == 1);
+    CHECK(memory.transcript[0].role == "user");
+    CHECK(memory.transcript[0].content == "hi");
+}

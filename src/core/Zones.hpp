@@ -60,7 +60,10 @@ const std::string& zoneAt(float x, float z);
 // The player-facing name for a zone id, or the id itself when unknown —
 // captions and journal entries read better as "Bakery Corner" than
 // "bakery_block".
-const std::string& zoneName(const std::string& zoneId);
+//
+// Returned by value: the fallback is the caller's own argument, and a
+// reference to it dangles when the caller passes a temporary.
+std::string zoneName(const std::string& zoneId);
 
 // The centre of a zone on the XZ plane, y = 0. Returns the origin for an
 // unknown id, including the streets, which have no bounds to average.
