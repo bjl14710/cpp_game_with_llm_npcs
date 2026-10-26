@@ -4,6 +4,8 @@
 
 #include "NpcAction.hpp"
 
+#include <utility>
+
 namespace llm_npc {
 
 HostChatRouter::HostChatRouter(World& world, NetServer& server)
@@ -77,12 +79,15 @@ bool HostChatRouter::routeReply(const ChatReply& reply) {
         // Directive tags are stripped from it as well (issue #326): an
         // orphaned "[MOOD: angry]" in a bystander's bubble is a killer tell.
         // Only the text is used; the orphan's directives are not applied.
+        // It gets the same role-leak check onReplyArrived applies (#331), or
+        // a cast NPC's secret would reach every bubble through this path.
         std::string spoken;
         if (text) {
             spoken = *text;
         } else {
             spoken = toRenderableAscii(reply.content);
             parseDirectives(spoken);
+            spoken = npc.redactRoleLeak(std::move(spoken));
         }
         server_.sendToPlayer(playerId, MessageType::ChatReply,
                              {{"npc", npcIndex}, {"ok", true}, {"text", spoken}});

@@ -1,10 +1,12 @@
 #include "Role.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
-#include "Config.hpp"  // trim
+#include "AsciiText.hpp"  // toRenderableAscii
+#include "Config.hpp"     // trim
 
 namespace llm_npc {
 
@@ -104,6 +106,26 @@ bool parseRoleText(const std::string& text, const std::string& id, RoleDef& out,
     return true;
 }
 
+std::string lowered(std::string s) {
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+bool isWordChar(char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; }
+
+// True when `needle` occurs in `haystack` with no letter or digit touching
+// either end, so "witness" matches "a witness." but not "witnessed".
+bool containsWholeWord(const std::string& haystack, const std::string& needle) {
+    for (auto at = haystack.find(needle); at != std::string::npos;
+         at = haystack.find(needle, at + 1)) {
+        const auto end = at + needle.size();
+        const bool startsWord = at == 0 || !isWordChar(haystack[at - 1]);
+        const bool endsWord = end == haystack.size() || !isWordChar(haystack[end]);
+        if (startsWord && endsWord) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 std::vector<RoleDef> loadAllRoles(const std::filesystem::path& dir,
@@ -173,6 +195,25 @@ std::string renderRoleBlock(const RoleDef* role, const std::string& secret) {
             << example.npcLine << '\n';
     }
     return out.str();
+}
+
+bool revealsRole(const std::string& text, const RoleDef* role, const std::string& secret) {
+    const std::string haystack = lowered(text);
+
+    // Folded the same way the reply was, or an authored curly apostrophe in
+    // the secret could never match the straight one the reply now carries.
+    std::string needle = lowered(trim(toRenderableAscii(secret)));
+    while (!needle.empty() && (needle.back() == '.' || needle.back() == '!' ||
+                               needle.back() == '?')) {
+        needle.pop_back();
+    }
+    needle = trim(needle);
+    if (!needle.empty() && haystack.find(needle) != std::string::npos) return true;
+
+    if (role == nullptr) return false;
+    const std::string name = lowered(trim(role->name));
+    if (name.size() < kMinRoleNameMatchLength) return false;
+    return containsWholeWord(haystack, name);
 }
 
 const RoleDef* findRole(const std::vector<RoleDef>& roles, const std::string& id) {

@@ -94,9 +94,12 @@ struct Persona {
         section += renderTraitReinforcement(traitDefs);
         section += roleBlock;  // last in the section — see the comment above
         if (section.empty()) return prompt;
-        const auto at = prompt.find("ACTIONS: ");
-        if (at == std::string::npos) return prompt + section;
-        prompt.insert(at, section);
+        // The protocol is always the tail renderSystemPrompt() appends, so its
+        // start is a known offset. Searching for "ACTIONS: " instead found the
+        // FIRST one, and persona text containing it (a backstory, a directive,
+        // generated text) moved this whole section above "Stay in character"
+        // — the measured placement that made a killer call the police (#331).
+        prompt.insert(prompt.size() - renderActionProtocol().size(), section);
         return prompt;
     }
 
