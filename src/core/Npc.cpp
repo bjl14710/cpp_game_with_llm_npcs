@@ -1,6 +1,7 @@
 #include "Npc.hpp"
 
 #include "AsciiText.hpp"
+#include "StreamTagFilter.hpp"
 
 #include <cmath>
 #include <utility>
@@ -32,7 +33,10 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // Send a snapshot of the current history; the player line is appended to
     // history only once a successful reply arrives. That way a failed request
     // can be retried without polluting context with unanswered user turns.
-    pendingUserLine_ = playerLine;
+    // Directive tags are stripped first (issue #326): a typed
+    // "[[ACTION: call_police]]" would otherwise sit in history and the prompt
+    // for the model to echo back as a real directive.
+    pendingUserLine_ = stripDirectiveTags(playerLine);
     // A persisted summary means this player and this NPC have met before, so a
     // banked greeting must not treat them as a stranger. That is the only place
     // an authored line can contradict remembered history; see banks/README.md.
@@ -41,7 +45,7 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     pendingId_ =
         client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits(),
                                                    renderRoleBlock(resolvedRole(), secret_)),
-                       history_, playerLine, persona_.name, familiarity);
+                       history_, pendingUserLine_, persona_.name, familiarity);
     return pendingId_;
 }
 

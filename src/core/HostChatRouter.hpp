@@ -8,6 +8,7 @@
 
 #include "LlmClient.hpp"
 #include "NetServer.hpp"
+#include "StreamTagFilter.hpp"
 #include "World.hpp"
 
 namespace llm_npc {
@@ -72,6 +73,10 @@ class HostChatRouter {
 
     // In-flight LLM request -> (remote player, NPC) it belongs to.
     std::unordered_map<std::uint64_t, std::pair<int, int>> inflight_;
+
+    // Per in-flight request: strips directive tags from its streamed deltas
+    // before they go over the network. Erased with the request's route.
+    std::unordered_map<std::uint64_t, StreamTagFilter> streamFilters_;
 
     // Lines waiting for a busy NPC, per NPC index, in arrival order.
     std::unordered_map<int, std::deque<PendingLine>> queued_;

@@ -32,7 +32,8 @@ class GroupSession {
 
     // The labeled transcript, and its rendering for per-speaker prompts
     // ("Name: line\n" per entry — the last other-speaker line is the
-    // user-turn input for whoever speaks next).
+    // user-turn input for whoever speaks next). addLine strips directive
+    // tags from `text` before storing it.
     const std::vector<GroupLine>& transcript() const;
     void addLine(const std::string& speaker, const std::string& text);
     std::string renderTranscript() const;

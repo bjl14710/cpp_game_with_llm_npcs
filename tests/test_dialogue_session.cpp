@@ -87,3 +87,43 @@ TEST_CASE("submitted is only honored while talking") {
     s.submitted(3);  // already waiting: ignored
     CHECK(s.pendingRequestId() == 2);
 }
+
+// ---- directive tags while streaming (issue #326) ---------------------------
+
+TEST_CASE("a tag split across deltas never reaches streamingText") {
+    DialogueSession s;
+    s.open(0);
+    s.submitted(11);
+    for (const char* d : {"Hi [[MO", "OD: happy]]"}) {
+        CHECK(s.deltaArrived(11, d));
+        CHECK(s.streamingText().find("[[") == std::string::npos);
+        CHECK(s.streamingText().find("MOOD") == std::string::npos);
+    }
+    CHECK(s.streamingText() == "Hi ");
+    CHECK(s.lastDisplayDelta().empty());  // the second delta was all tag
+}
+
+TEST_CASE("a single-bracket tag is held and dropped; ordinary brackets stream") {
+    DialogueSession s;
+    s.open(0);
+    s.submitted(12);
+    CHECK(s.deltaArrived(12, "[sigh] okay "));
+    CHECK(s.lastDisplayDelta() == "[sigh] okay ");
+    CHECK(s.deltaArrived(12, "[MOO"));
+    CHECK(s.streamingText() == "[sigh] okay ");
+    CHECK(s.deltaArrived(12, "D: sad] then"));
+    CHECK(s.lastDisplayDelta() == " then");
+    CHECK(s.streamingText() == "[sigh] okay  then");
+}
+
+TEST_CASE("held tag text does not leak into the next request's stream") {
+    DialogueSession s;
+    s.open(0);
+    s.submitted(13);
+    s.deltaArrived(13, "Ok [[MOOD: ha");
+    CHECK(s.replyArrived(13, true));
+    s.submitted(14);
+    CHECK(s.deltaArrived(14, "ppy]] fresh"));
+    // A stale fragment would have completed a tag and eaten the text.
+    CHECK(s.streamingText() == "ppy]] fresh");
+}

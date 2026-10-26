@@ -32,7 +32,8 @@ class Npc {
    public:
     Npc(Persona persona, LlmClient& client, int maxHistoryTurns = 10);
 
-    // Sends the player's line to the LLM. Returns the in-flight request id.
+    // Sends the player's line to the LLM, with any directive tags stripped
+    // out of it first. Returns the in-flight request id.
     // The reply will appear in client.drainReplies() with that id; pass it back
     // into onReplyArrived() to update this NPC's history and surface text.
     std::uint64_t ask(const std::string& playerLine);

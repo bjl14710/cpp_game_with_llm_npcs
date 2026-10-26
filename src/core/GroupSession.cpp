@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "StreamTagFilter.hpp"
+
 namespace llm_npc {
 
 namespace {
@@ -73,7 +75,9 @@ void GroupSession::removeParticipant(int npcIndex) {
 const std::vector<GroupLine>& GroupSession::transcript() const { return transcript_; }
 
 void GroupSession::addLine(const std::string& speaker, const std::string& text) {
-    transcript_.push_back({speaker, text});
+    // Tags are stripped on the way in: this transcript is replayed into every
+    // participant's prompt, where a player-typed directive could be echoed.
+    transcript_.push_back({speaker, stripDirectiveTags(text)});
 }
 
 std::string GroupSession::renderTranscript() const {

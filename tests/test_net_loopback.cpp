@@ -396,6 +396,55 @@ TEST_CASE("two clients messaging the same NPC both get answered in order") {
     CHECK(history[2].content == "line from second");
 }
 
+TEST_CASE("orphaned and streamed replies reach players without directive tags") {
+    // Issue #326: a reply whose id no longer matches the NPC's pending one
+    // takes the fallback path, which used to send raw "[MOOD: angry]".
+    ChatLoopback net;
+    net.fake.setReply("Nothing to see here. [MOOD: angry] [[ACTION: wave]]");
+
+    llm_npc::Persona p;
+    p.name = "Suspect";
+    net.world.addNpc(llm_npc::Npc(p, net.llm));
+
+    REQUIRE(net.join("asker"));
+    REQUIRE(net.join("bystander"));
+
+    net.clients[0]->sendChatLine(0, "where were you?");
+    CHECK(eventually([&] {
+        net.hostFrame();
+        return net.world.npcs()[0].waiting();
+    }));
+    // The host's own ask overwrites the NPC's single pending id, orphaning
+    // the remote request (the submitGroupTurn race the issue describes).
+    net.world.npcs()[0].ask("host line");
+
+    CHECK(eventually(
+        [&] {
+            return !net.chatMessages(0, MessageType::ChatReply).empty() &&
+                   !net.chatMessages(1, MessageType::NpcSpeechBubble).empty();
+        },
+        [&] {
+            net.hostFrame();
+            net.pump();
+        }));
+    const auto replies = net.chatMessages(0, MessageType::ChatReply);
+    REQUIRE_FALSE(replies.empty());
+    CHECK(replies[0]->payload.value("text", std::string{}) == "Nothing to see here.");
+    for (const auto* bubble : net.chatMessages(1, MessageType::NpcSpeechBubble)) {
+        const std::string text = bubble->payload.value("text", std::string{});
+        CHECK(text.find('[') == std::string::npos);
+        CHECK(text.find("MOOD") == std::string::npos);
+    }
+    // Streamed deltas went through the per-request filter as well.
+    std::string streamed;
+    for (const auto* d : net.chatMessages(0, MessageType::ChatDelta)) {
+        streamed += d->payload.value("text", std::string{});
+    }
+    CHECK(streamed.find("Nothing to see here.") != std::string::npos);
+    CHECK(streamed.find('[') == std::string::npos);
+    CHECK(streamed.find("MOOD") == std::string::npos);
+}
+
 TEST_CASE("client disconnect mid-conversation leaves the server healthy") {
     ChatLoopback net;
     net.fake.setReply("Anyone there?");
