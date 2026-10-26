@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,10 @@ class GroupSession {
 
     // The labeled transcript, and its rendering for per-speaker prompts
     // ("Name: line\n" per entry — the last other-speaker line is the
-    // user-turn input for whoever speaks next).
+    // user-turn input for whoever speaks next). The stored transcript keeps
+    // every line (cleared on open/close, a few bytes per turn); the RENDERED
+    // text covers only the newest kMaxRenderedLines so prompts stay bounded.
+    static constexpr std::size_t kMaxRenderedLines = 12;
     const std::vector<GroupLine>& transcript() const;
     void addLine(const std::string& speaker, const std::string& text);
     std::string renderTranscript() const;

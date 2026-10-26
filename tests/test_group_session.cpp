@@ -142,3 +142,23 @@ TEST_CASE("per-participant memories and attributed facts") {
     CHECK(record.source == "Dana");
     REQUIRE_FALSE(state.factsKnownBy("Dana").empty());
 }
+
+TEST_CASE("renderTranscript renders only the newest lines (issue #327)") {
+    GroupSession group = makeGroup();
+    for (int i = 0; i < 100; ++i) {
+        group.addLine("Player", "line-" + std::to_string(i) + "-end");
+    }
+
+    // The stored transcript is untouched; only the rendering is bounded.
+    CHECK(group.transcript().size() == 100);
+    const std::string rendered = group.renderTranscript();
+    std::size_t lines = 0;
+    for (const char c : rendered) {
+        if (c == '\n') ++lines;
+    }
+    CHECK(lines == GroupSession::kMaxRenderedLines);
+    CHECK(rendered.find("line-99-end") != std::string::npos);
+    CHECK(rendered.find("line-0-end") == std::string::npos);
+    CHECK(rendered.find("line-87-end") == std::string::npos);  // just outside the window
+    CHECK(rendered.find("line-88-end") != std::string::npos);  // oldest rendered line
+}

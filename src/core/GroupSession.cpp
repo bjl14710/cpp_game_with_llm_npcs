@@ -78,8 +78,10 @@ void GroupSession::addLine(const std::string& speaker, const std::string& text) 
 
 std::string GroupSession::renderTranscript() const {
     std::string out;
-    for (const GroupLine& line : transcript_) {
-        out += line.speaker + ": " + line.text + "\n";
+    const std::size_t first =
+        transcript_.size() > kMaxRenderedLines ? transcript_.size() - kMaxRenderedLines : 0;
+    for (std::size_t i = first; i < transcript_.size(); ++i) {
+        out += transcript_[i].speaker + ": " + transcript_[i].text + "\n";
     }
     return out;
 }
