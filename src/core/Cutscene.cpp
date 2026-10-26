@@ -1,6 +1,7 @@
 #include "Cutscene.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -62,6 +63,7 @@ bool parseVec3(const std::string& text, Vec3& out) {
                                         : comma - start));
         if (piece.empty()) return false;
         parts[i] = static_cast<float>(std::atof(piece.c_str()));
+        if (!std::isfinite(parts[i])) return false;
         if (comma == std::string::npos) {
             // Ran out of commas before filling all three.
             if (i != 2) return false;
@@ -71,6 +73,17 @@ bool parseVec3(const std::string& text, Vec3& out) {
         }
     }
     out = Vec3{parts[0], parts[1], parts[2]};
+    return true;
+}
+
+// Reads a float field (atof semantics: unparseable text is 0). Returns false
+// for nan, inf, or a value too large for float; the caller reports it and
+// keeps the field's default. NaN would otherwise survive the `hold` clamp
+// (every comparison with it is false) and make a beat that never ends.
+bool parseFiniteFloat(const std::string& text, float& out) {
+    const float v = static_cast<float>(std::atof(text.c_str()));
+    if (!std::isfinite(v)) return false;
+    out = v;
     return true;
 }
 
@@ -133,6 +146,7 @@ std::optional<CutsceneDef> parseCutsceneFile(const std::filesystem::path& path,
 
     std::ifstream in(path);
     if (!in) return fail("cannot open");
+    skipUtf8Bom(in);
 
     CutsceneDef scene;
     scene.id = path.stem().string();
@@ -218,14 +232,26 @@ std::optional<CutsceneDef> parseCutsceneFile(const std::filesystem::path& path,
                 localErrors.push_back(name + ": beat `" + beat.id +
                                       "` camera needs `x, y, z`, got `" + value + "`");
             }
-        } else if (key == "yaw") {
-            beat.pose.yawDeg = static_cast<float>(std::atof(value.c_str()));
-            beat.hasYaw = true;
-        } else if (key == "pitch") {
-            beat.pose.pitchDeg = static_cast<float>(std::atof(value.c_str()));
-            beat.hasPitch = true;
-        } else if (key == "hold") {
-            beat.hold = static_cast<float>(std::atof(value.c_str()));
+        } else if (key == "yaw" || key == "pitch" || key == "hold" ||
+                   key == "fade_in" || key == "fade_out") {
+            float parsed = 0.f;
+            if (!parseFiniteFloat(value, parsed)) {
+                localErrors.push_back(name + ": beat `" + beat.id + "` " + key +
+                                      " must be a finite number, got `" + value +
+                                      "`");
+            } else if (key == "yaw") {
+                beat.pose.yawDeg = parsed;
+                beat.hasYaw = true;
+            } else if (key == "pitch") {
+                beat.pose.pitchDeg = parsed;
+                beat.hasPitch = true;
+            } else if (key == "hold") {
+                beat.hold = parsed;
+            } else if (key == "fade_in") {
+                beat.fadeIn = parsed;
+            } else {
+                beat.fadeOut = parsed;
+            }
         } else if (key == "ease") {
             if (!parseEase(value, beat.ease)) {
                 localErrors.push_back(name + ": beat `" + beat.id +
@@ -248,10 +274,6 @@ std::optional<CutsceneDef> parseCutsceneFile(const std::filesystem::path& path,
             } else {
                 beat.headline = value;
             }
-        } else if (key == "fade_in") {
-            beat.fadeIn = static_cast<float>(std::atof(value.c_str()));
-        } else if (key == "fade_out") {
-            beat.fadeOut = static_cast<float>(std::atof(value.c_str()));
         } else if (key == "fade_colour" || key == "fade_color") {
             beat.fadeColour = value;
         } else {

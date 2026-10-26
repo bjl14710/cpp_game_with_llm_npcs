@@ -1,6 +1,7 @@
 #include "PersonaLoader.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
@@ -45,6 +46,12 @@ bool parseScheduleEntry(const std::string& s, ScheduleEntry& out) {
     } catch (const std::exception&) {
         return false;
     }
+    // isfinite first: stof accepts "nan" and "inf", and NaN passes every
+    // range comparison below.
+    if (!std::isfinite(out.startHour) || !std::isfinite(out.endHour) ||
+        !std::isfinite(out.position.x) || !std::isfinite(out.position.z)) {
+        return false;
+    }
     if (out.startHour < 0.f || out.startHour >= 24.f || out.endHour < 0.f ||
         out.endHour >= 24.f) {
         return false;
@@ -64,7 +71,7 @@ bool parsePosition(const std::string& s, Vec3& out) {
     } catch (const std::exception&) {
         return false;
     }
-    return true;
+    return std::isfinite(out.x) && std::isfinite(out.z);
 }
 
 }  // namespace
@@ -114,6 +121,10 @@ PersonaParseResult parsePersonaText(const std::string& text, const std::string& 
                 try {
                     result.value.facingDeg = std::stof(val);
                 } catch (const std::exception&) {
+                    result.error = id + ": bad facing '" + val + "'";
+                    return result;
+                }
+                if (!std::isfinite(result.value.facingDeg)) {
                     result.error = id + ": bad facing '" + val + "'";
                     return result;
                 }
@@ -197,6 +208,7 @@ PersonaParseResult parsePersonaFile(const std::filesystem::path& path) {
         result.error = id + ": cannot open " + path.string();
         return result;
     }
+    skipUtf8Bom(in);
     std::ostringstream buf;
     buf << in.rdbuf();
     return parsePersonaText(buf.str(), id);

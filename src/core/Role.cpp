@@ -126,6 +126,7 @@ std::vector<RoleDef> loadAllRoles(const std::filesystem::path& dir,
             if (errors) errors->push_back(file.stem().string() + ": cannot open");
             continue;
         }
+        skipUtf8Bom(in);
         std::ostringstream buf;
         buf << in.rdbuf();
         RoleDef role;
