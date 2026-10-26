@@ -3,7 +3,16 @@
 Project-specific knowledge for the shared routines (routine-guardrails §2). This is a
 C++20 + raylib game.
 
-**Work branch: `dev`.** Active development happens on `dev` (164 commits ahead of `main` as of 2026-10-26); `main` only receives periodic merges. Scout, bug-hunt and design-scout must analyze `dev`: `git fetch origin dev && git checkout --detach origin/dev -- src tests external tools CMakeLists.txt config personas traits` (or a worktree). Never read `dev`'s `.claude/projects/`, `.claude/file-history/` or `.claude/.claude/` (a home directory committed by mistake; personal transcripts).
+**Work branch: `dev`.** Active development happens on `dev` (164 commits ahead of `main` as of 2026-10-26); `main` only receives periodic merges. Scout, bug-hunt and design-scout must analyze `dev`: check out only its code and data:
+
+```sh
+git fetch origin dev
+git worktree add --no-checkout --detach ../dev-src origin/dev && cd ../dev-src
+git sparse-checkout set --no-cone /src/ /tests/ /external/ /tools/ /CMakeLists.txt /CLAUDE.md /config/ /personas/ /traits/ /roles/ /storylines/ /cutscenes/ /banks/ /docs/ /bench/
+git checkout
+```
+
+Read `dev`'s own `CLAUDE.md` for its conventions. Never read `dev`'s `.claude/projects/`, `.claude/file-history/` or `.claude/.claude/` (a home directory committed by mistake; personal transcripts).
 
 This is NOT the Godot NPC game, so ignore the kit's built-in "LLM-NPC game (Godot 4)" focus and lens blocks for this repo.
 
