@@ -1,5 +1,7 @@
 #include "OllamaBackend.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <string_view>
 #include <utility>
 
@@ -78,7 +80,13 @@ BackendResult OllamaBackend::chat(const BackendRequest& req, const DeltaCallback
     // Re-added when this body moved out of LlmClient — dev grew `think`
     // AFTER the pluggable branch diverged (the port's one audit finding).
     if (!config_.think.empty()) body["think"] = (config_.think == "true");
+    if (config_.maxReplyTokens > 0) body["options"]["num_predict"] = config_.maxReplyTokens;
 
+    // The read timeout only bounds silence between bytes; the deadline bounds
+    // the whole request, so a server trickling keep-alive bytes cannot hold
+    // the single worker thread (and every other NPC) indefinitely.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(config_.requestTimeoutSeconds);
     httplib::Client cli(config_.host, config_.port);
     cli.set_read_timeout(config_.requestTimeoutSeconds, 0);
     cli.set_write_timeout(config_.requestTimeoutSeconds, 0);
@@ -88,22 +96,31 @@ BackendResult OllamaBackend::chat(const BackendRequest& req, const DeltaCallback
     std::string errorBody;    // body bytes of a non-200 response
     std::string content;      // accumulated assistant text
     std::string streamError;  // first error found inside the stream
+    std::string abortReason;  // why the receiver cut the request short
+    std::size_t received = 0;
     bool sawDone = false;
     StreamAssembler assembler;
 
     // Parses one NDJSON line: append text, surface deltas, note completion.
     const auto handleLine = [&](const std::string& line) {
+        if (!abortReason.empty()) return;
         const OllamaChunk chunk = parseOllamaChunk(line);
         if (!chunk.error.empty()) {
             if (streamError.empty()) streamError = chunk.error;
             return;
         }
         if (!chunk.delta.empty()) {
+            if (content.size() + chunk.delta.size() > kMaxReplyBytes) {
+                abortReason = "Ollama reply exceeded " + std::to_string(kMaxReplyBytes) + " bytes";
+                return;
+            }
             content += chunk.delta;
             onDelta(chunk.delta);
         }
         if (chunk.done) sawDone = true;
     };
+    const std::string timeoutError =
+        "Ollama request timed out after " + std::to_string(config_.requestTimeoutSeconds) + " s";
 
     // httplib v0.15 has no streaming Post() overload, so drive a raw Request
     // through Client::send with a content receiver.
@@ -114,18 +131,43 @@ BackendResult OllamaBackend::chat(const BackendRequest& req, const DeltaCallback
     hreq.body = body.dump();
     hreq.response_handler = [&](const httplib::Response& response) {
         status = response.status;
-        return true;
+        if (std::chrono::steady_clock::now() >= deadline) abortReason = timeoutError;
+        return abortReason.empty();
     };
+    // Returning false aborts the transfer; abortReason says why.
     hreq.content_receiver = [&](const char* data, size_t length, uint64_t, uint64_t) {
-        if (status != 200) {
-            errorBody.append(data, length);
+        received += length;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            abortReason = timeoutError;
+        } else if (received > kMaxStreamBytes) {
+            abortReason = "Ollama response exceeded " + std::to_string(kMaxStreamBytes) + " bytes";
+        } else if (status != 200) {
+            errorBody.append(data, std::min(length, kMaxReplyBytes - errorBody.size()));
+            if (errorBody.size() >= kMaxReplyBytes) {
+                abortReason = "Ollama returned HTTP " + std::to_string(status) +
+                              " with an oversized error body";
+            }
         } else {
             assembler.feed(std::string_view(data, length), handleLine);
         }
-        return true;
+        return abortReason.empty();
     };
 
     const httplib::Result result = cli.send(hreq);
+    // A final line without a trailing newline still counts.
+    if (result) {
+        const std::string tail = assembler.takeRemainder();
+        if (!tail.empty()) handleLine(tail);
+    }
+    // A read timeout that lands past the deadline (a stall after partial
+    // output) is the same failure as the receiver noticing it.
+    if (!result && abortReason.empty() && std::chrono::steady_clock::now() >= deadline) {
+        abortReason = timeoutError;
+    }
+    if (!abortReason.empty()) {
+        reply.error = abortReason;
+        return reply;
+    }
     if (!result) {
         const std::string detail = result.error() == httplib::Error::Success
                                        ? "request aborted"
@@ -134,10 +176,6 @@ BackendResult OllamaBackend::chat(const BackendRequest& req, const DeltaCallback
                       std::to_string(config_.port) + " (" + detail + ")";
         return reply;
     }
-
-    // A final line without a trailing newline still counts.
-    const std::string tail = assembler.takeRemainder();
-    if (!tail.empty()) handleLine(tail);
 
     if (status != 200) {
         reply.error = "Ollama returned HTTP " + std::to_string(status) +

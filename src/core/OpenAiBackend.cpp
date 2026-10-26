@@ -1,5 +1,7 @@
 #include "OpenAiBackend.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <string_view>
 #include <utility>
 
@@ -103,7 +105,13 @@ BackendResult OpenAiBackend::chat(const BackendRequest& req, const DeltaCallback
         {"stream", true},
         {"temperature", config_.temperature},
     };
+    if (config_.maxReplyTokens > 0) body["max_tokens"] = config_.maxReplyTokens;
 
+    // The read timeout only bounds silence between bytes; the deadline bounds
+    // the whole request. OpenRouter sends ": OPENROUTER PROCESSING" comments
+    // every ~0.7 s while queued, which alone would never trip a read timeout.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(config_.requestTimeoutSeconds);
     httplib::Client cli(url.origin);
     cli.set_read_timeout(config_.requestTimeoutSeconds, 0);
     cli.set_write_timeout(config_.requestTimeoutSeconds, 0);
@@ -113,21 +121,31 @@ BackendResult OpenAiBackend::chat(const BackendRequest& req, const DeltaCallback
     std::string errorBody;    // body bytes of a non-200 response
     std::string content;      // accumulated assistant text
     std::string streamError;  // first error found inside the stream
+    std::string abortReason;  // why the receiver cut the request short
+    std::size_t received = 0;
     bool sawDone = false;
     StreamAssembler assembler;
 
     const auto handleLine = [&](const std::string& line) {
+        if (!abortReason.empty()) return;
         const OpenAiChunk chunk = parseOpenAiChunk(line);
         if (!chunk.error.empty()) {
             if (streamError.empty()) streamError = chunk.error;
             return;
         }
         if (!chunk.delta.empty()) {
+            if (content.size() + chunk.delta.size() > kMaxReplyBytes) {
+                abortReason =
+                    "provider reply exceeded " + std::to_string(kMaxReplyBytes) + " bytes";
+                return;
+            }
             content += chunk.delta;
             onDelta(chunk.delta);
         }
         if (chunk.done) sawDone = true;
     };
+    const std::string timeoutError = "LLM provider request timed out after " +
+                                     std::to_string(config_.requestTimeoutSeconds) + " s";
 
     httplib::Request hreq;
     hreq.method = "POST";
@@ -138,18 +156,43 @@ BackendResult OpenAiBackend::chat(const BackendRequest& req, const DeltaCallback
     hreq.body = body.dump();
     hreq.response_handler = [&](const httplib::Response& response) {
         status = response.status;
-        return true;
+        if (std::chrono::steady_clock::now() >= deadline) abortReason = timeoutError;
+        return abortReason.empty();
     };
+    // Returning false aborts the transfer; abortReason says why.
     hreq.content_receiver = [&](const char* data, size_t length, uint64_t, uint64_t) {
-        if (status != 200) {
-            errorBody.append(data, length);
+        received += length;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            abortReason = timeoutError;
+        } else if (received > kMaxStreamBytes) {
+            abortReason =
+                "provider response exceeded " + std::to_string(kMaxStreamBytes) + " bytes";
+        } else if (status != 200) {
+            errorBody.append(data, std::min(length, kMaxReplyBytes - errorBody.size()));
+            if (errorBody.size() >= kMaxReplyBytes) {
+                abortReason = "provider returned HTTP " + std::to_string(status) +
+                              " with an oversized error body";
+            }
         } else {
             assembler.feed(std::string_view(data, length), handleLine);
         }
-        return true;
+        return abortReason.empty();
     };
 
     const httplib::Result result = cli.send(hreq);
+    if (result) {
+        const std::string tail = assembler.takeRemainder();
+        if (!tail.empty()) handleLine(tail);
+    }
+    // A read timeout that lands past the deadline (a stall after partial
+    // output) is the same failure as the receiver noticing it.
+    if (!result && abortReason.empty() && std::chrono::steady_clock::now() >= deadline) {
+        abortReason = timeoutError;
+    }
+    if (!abortReason.empty()) {
+        reply.error = abortReason;
+        return reply;
+    }
     if (!result) {
         const std::string detail = result.error() == httplib::Error::Success
                                        ? "request aborted"
@@ -157,9 +200,6 @@ BackendResult OpenAiBackend::chat(const BackendRequest& req, const DeltaCallback
         reply.error = "could not reach LLM provider at " + config_.baseUrl + " (" + detail + ")";
         return reply;
     }
-
-    const std::string tail = assembler.takeRemainder();
-    if (!tail.empty()) handleLine(tail);
 
     if (status != 200) {
         reply.error = "provider returned HTTP " + std::to_string(status) +
@@ -170,10 +210,10 @@ BackendResult OpenAiBackend::chat(const BackendRequest& req, const DeltaCallback
         reply.error = streamError;
         return reply;
     }
-    // Some providers omit a [DONE]/finish_reason on the final chunk; accept any
-    // content that actually streamed.
-    if (!sawDone && content.empty()) {
-        reply.error = "provider stream ended before any content";
+    // Without [DONE] or a finish_reason the connection was cut mid-reply, and
+    // the text may end inside a tag ("[[ACTION: follow") that must not run.
+    if (!sawDone) {
+        reply.error = "provider stream ended before completion";
         return reply;
     }
     reply.ok = true;

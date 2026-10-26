@@ -1,6 +1,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -8,6 +9,7 @@
 
 #include "FakeOllama.hpp"
 #include "LineBank.hpp"
+#include "LlmBackend.hpp"  // kMaxReplyBytes
 #include "LlmClient.hpp"
 #include "doctest.h"
 #include "json.hpp"
@@ -314,4 +316,223 @@ TEST_CASE("with no line bank installed every request reaches the backend") {
     waitForReply(client, client.submit("sys", {}, "hello", "Marge Holloway",
                                        Familiarity::First));
     CHECK_FALSE(fake.requestBodies().empty());
+}
+
+// --- Deadlines, output caps and shutdown (issue #328) -----------------------
+//
+// Timing bounds here are deliberately generous: each asserts "about one
+// deadline", against a pre-fix behaviour that was unbounded or several times
+// longer, so scheduler jitter cannot flip the result.
+
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+// Seconds elapsed since `start`.
+double secondsSince(Clock::time_point start) {
+    return std::chrono::duration<double>(Clock::now() - start).count();
+}
+
+// Blocks until the fake has received at least `n` requests (or 10 s pass).
+void waitForRequests(FakeOllama& fake, std::size_t n) {
+    const auto deadline = Clock::now() + std::chrono::seconds(10);
+    while (fake.requestBodies().size() < n && Clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+// A reply plus when it landed, in seconds after the caller's start time.
+struct TimedReply {
+    ChatReply reply;
+    double seconds = 0.0;
+};
+
+// Like waitForReply, but for several ids at once, so a reply that lands in the
+// same drain as another one is kept rather than discarded.
+std::map<std::uint64_t, TimedReply> waitForReplies(LlmClient& client, std::size_t count,
+                                                   Clock::time_point start) {
+    std::map<std::uint64_t, TimedReply> got;
+    const auto deadline = Clock::now() + std::chrono::seconds(10);
+    while (got.size() < count && Clock::now() < deadline) {
+        for (auto& reply : client.drainReplies()) {
+            const std::uint64_t id = reply.id;
+            got[id] = TimedReply{std::move(reply), secondsSince(start)};
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return got;
+}
+
+// testConfig, routed through the OpenAI-compatible backend when `openAi` is
+// set; the fake serves /v1/chat/completions for exactly this.
+LlmConfig backendConfig(int port, bool openAi) {
+    LlmConfig config = testConfig(port);
+    if (openAi) {
+        config.provider = "openai";
+        config.baseUrl = "http://127.0.0.1:" + std::to_string(port) + "/v1";
+    }
+    return config;
+}
+
+}  // namespace
+
+TEST_CASE("keep-alive bytes cannot outlast the deadline, and the next request is served") {
+    // Pre-fix the read timeout reset on every keep-alive byte, so the first
+    // request never ended and the second waited behind it forever.
+    for (const bool openAi : {false, true}) {
+        CAPTURE(openAi);
+        FakeOllama fake;
+        fake.setMode(FakeOllama::Mode::KeepAliveForever);
+        LlmConfig config = backendConfig(fake.port(), openAi);
+        config.requestTimeoutSeconds = 1;
+        LlmClient client(config);
+
+        const auto start = Clock::now();
+        const auto stuck = client.submit("sys", {}, "first");
+        const auto next = client.submit("sys", {}, "second");
+        waitForRequests(fake, 1);
+        fake.setMode(FakeOllama::Mode::StreamWords);  // only the first request trickles
+
+        auto replies = waitForReplies(client, 2, start);
+        REQUIRE(replies.size() == 2);
+        const TimedReply& stuckReply = replies[stuck];
+        CHECK_FALSE(stuckReply.reply.ok);
+        CHECK(stuckReply.reply.errorMessage.find("timed out") != std::string::npos);
+        CHECK(stuckReply.seconds > 0.8);
+        CHECK(stuckReply.seconds < 2.5);
+
+        const TimedReply& nextReply = replies[next];
+        CHECK_MESSAGE(nextReply.reply.ok, nextReply.reply.errorMessage);
+        CHECK(nextReply.reply.content == "Hello there, traveler!");
+        CHECK(nextReply.seconds < 3.0);
+    }
+}
+
+TEST_CASE("a reply that is silent past the deadline reports a timeout") {
+    FakeOllama fake;
+    fake.setResponseDelay(std::chrono::milliseconds(1500));
+    LlmConfig config = testConfig(fake.port());
+    config.requestTimeoutSeconds = 1;
+    LlmClient client(config);
+
+    const ChatReply reply = waitForReply(client, client.submit("sys", {}, "hi"));
+    CHECK_FALSE(reply.ok);
+    CHECK(reply.errorMessage.find("timed out") != std::string::npos);
+}
+
+TEST_CASE("an OpenAI-compatible stream with [DONE] succeeds") {
+    FakeOllama fake;
+    LlmClient client(backendConfig(fake.port(), /*openAi=*/true));
+
+    std::vector<ChatDelta> deltas;
+    const ChatReply reply = waitForReply(client, client.submit("sys", {}, "hi"), &deltas);
+    REQUIRE(reply.ok);
+    CHECK(reply.content == "Hello there, traveler!");
+    CHECK(deltas.size() > 1);
+}
+
+TEST_CASE("an OpenAI-compatible stream cut before [DONE] fails") {
+    // Pre-fix any streamed content counted as success, so a cut connection
+    // could hand the game half a tag ("[[ACTION: follow") to execute.
+    FakeOllama fake;
+    fake.setMode(FakeOllama::Mode::TruncatedStream);
+    LlmClient client(backendConfig(fake.port(), /*openAi=*/true));
+
+    std::vector<ChatDelta> deltas;
+    const ChatReply reply = waitForReply(client, client.submit("sys", {}, "hi"), &deltas);
+    CHECK_FALSE(deltas.empty());  // content did arrive before the cut
+    CHECK_FALSE(reply.ok);
+    CHECK(reply.errorMessage.find("ended before completion") != std::string::npos);
+}
+
+TEST_CASE("request bodies cap output at max_reply_tokens") {
+    for (const bool openAi : {false, true}) {
+        CAPTURE(openAi);
+        FakeOllama fake;
+        LlmConfig config = backendConfig(fake.port(), openAi);
+        config.maxReplyTokens = 77;
+        LlmClient client(config);
+        waitForReply(client, client.submit("sys", {}, "hi"));
+
+        const auto bodies = fake.requestBodies();
+        REQUIRE(bodies.size() == 1);
+        const json body = json::parse(bodies[0]);
+        if (openAi) {
+            CHECK(body.value("max_tokens", 0) == 77);
+        } else {
+            CHECK(body.value("options", json::object()).value("num_predict", 0) == 77);
+        }
+    }
+}
+
+TEST_CASE("max_reply_tokens of 0 omits the output cap") {
+    for (const bool openAi : {false, true}) {
+        CAPTURE(openAi);
+        FakeOllama fake;
+        LlmConfig config = backendConfig(fake.port(), openAi);
+        config.maxReplyTokens = 0;
+        LlmClient client(config);
+        waitForReply(client, client.submit("sys", {}, "hi"));
+
+        const auto bodies = fake.requestBodies();
+        REQUIRE(bodies.size() == 1);
+        const json body = json::parse(bodies[0]);
+        CHECK_FALSE(body.contains("max_tokens"));
+        CHECK_FALSE(body.value("options", json::object()).contains("num_predict"));
+    }
+}
+
+TEST_CASE("a reply longer than kMaxReplyBytes fails instead of growing") {
+    for (const bool openAi : {false, true}) {
+        CAPTURE(openAi);
+        FakeOllama fake;
+        fake.setReply(std::string(kMaxReplyBytes + 1, 'x'));  // one oversized delta
+        LlmClient client(backendConfig(fake.port(), openAi));
+
+        const ChatReply reply = waitForReply(client, client.submit("sys", {}, "hi"));
+        CHECK_FALSE(reply.ok);
+        CHECK(reply.errorMessage.find("reply exceeded") != std::string::npos);
+    }
+}
+
+TEST_CASE("an endless response line is cut off at kMaxStreamBytes") {
+    for (const bool openAi : {false, true}) {
+        CAPTURE(openAi);
+        FakeOllama fake;
+        fake.setMode(FakeOllama::Mode::Flood);
+        LlmClient client(backendConfig(fake.port(), openAi));
+
+        const ChatReply reply = waitForReply(client, client.submit("sys", {}, "hi"));
+        CHECK_FALSE(reply.ok);
+        CHECK(reply.errorMessage.find("response exceeded") != std::string::npos);
+    }
+}
+
+TEST_CASE("an endless error body is cut off at kMaxReplyBytes") {
+    for (const bool openAi : {false, true}) {
+        CAPTURE(openAi);
+        FakeOllama fake;
+        fake.setMode(FakeOllama::Mode::FloodError);
+        LlmClient client(backendConfig(fake.port(), openAi));
+
+        const ChatReply reply = waitForReply(client, client.submit("sys", {}, "hi"));
+        CHECK_FALSE(reply.ok);
+        CHECK(reply.errorMessage.find("HTTP 500") != std::string::npos);
+        CHECK(reply.errorMessage.find("oversized error body") != std::string::npos);
+    }
+}
+
+TEST_CASE("destroying LlmClient drops queued requests instead of serving them") {
+    // Pre-fix the worker drained the whole queue over the network before the
+    // destructor's join() returned: 4 x 1.5 s = 6 s to quit.
+    FakeOllama fake;
+    fake.setResponseDelay(std::chrono::milliseconds(1500));
+    auto client = std::make_unique<LlmClient>(testConfig(fake.port()));
+    for (int i = 0; i < 4; ++i) client->submit("sys", {}, "hi " + std::to_string(i));
+    waitForRequests(fake, 1);  // the first is now in flight
+
+    const auto start = Clock::now();
+    client.reset();
+    CHECK(secondsSince(start) < 2.5);
+    CHECK(fake.requestBodies().size() == 1);  // the queued three never went out
 }

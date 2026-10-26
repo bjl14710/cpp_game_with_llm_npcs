@@ -126,6 +126,15 @@ TEST_CASE("loadLlmConfig reads the think toggle and defaults to omitted") {
     CHECK(llm_npc::loadLlmConfig(empty.path).think.empty());
 }
 
+TEST_CASE("loadLlmConfig reads max_reply_tokens and defaults to 256") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "max_reply_tokens = 96\n");
+    CHECK(llm_npc::loadLlmConfig(tmp.path).maxReplyTokens == 96);
+
+    TempDir empty;
+    CHECK(llm_npc::loadLlmConfig(empty.path).maxReplyTokens == 256);
+}
+
 TEST_CASE("setKvValue rewrites the matching line and preserves the rest") {
     TempDir tmp;
     tmp.write("llm.cfg",

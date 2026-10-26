@@ -27,6 +27,8 @@ struct LlmConfig {
     int port = 11434;
     std::string model = "qwen2.5:3b-instruct";
     double temperature = 0.8;
+    // Total wall-clock budget for one request, from send to last byte. A server
+    // that keeps the socket alive with keep-alive bytes still hits it.
     int requestTimeoutSeconds = 60;
     // Passed to Ollama as keep_alive so the model stays loaded between
     // conversations instead of paying the cold-start cost every time.
@@ -63,6 +65,12 @@ struct LlmConfig {
     // a generated one; delivering it in a single frame reads as a different
     // system, which is the one thing the bank must not feel like.
     int lineBankCps = 220;
+
+    // Upper bound on generated tokens per reply, sent as Ollama's
+    // options.num_predict / OpenAI's max_tokens. 0 or less omits the field.
+    // Last in the struct so positional LlmConfig{...} initialisers keep their
+    // meaning.
+    int maxReplyTokens = 256;
 };
 
 // One request submitted to the LLM.
@@ -101,6 +109,8 @@ struct ChatReply {
 class LlmClient {
    public:
     explicit LlmClient(LlmConfig config);
+    // Drops queued requests that have not started, then waits for the one in
+    // flight, which the backend's requestTimeoutSeconds deadline bounds.
     ~LlmClient();
 
     LlmClient(const LlmClient&) = delete;
