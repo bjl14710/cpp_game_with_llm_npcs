@@ -1,12 +1,14 @@
 # Project focus: LLM NPC City (bjl14710/cpp_game_with_llm_npcs)
 
 Project-specific knowledge for the shared routines (routine-guardrails §2). This is a
-C++17 + raylib game. It is NOT the Godot NPC game, so ignore the kit's built-in
+C++20 + raylib game.
+
+**Work branch: `dev`.** Active development happens on `dev` (164 commits ahead of `main` as of 2026-10-26); `main` only receives periodic merges. Scout, bug-hunt and design-scout must analyze `dev`: `git fetch origin dev && git checkout --detach origin/dev -- src tests external tools CMakeLists.txt config personas traits` (or a worktree). Never read `dev`'s `.claude/projects/`, `.claude/file-history/` or `.claude/.claude/` (a home directory committed by mistake; personal transcripts). It is NOT the Godot NPC game, so ignore the kit's built-in
 "LLM-NPC game (Godot 4)" focus and lens blocks for this repo.
 
 ## Scout checks
-- Tests: `make -C tests test` (doctest, headless; builds all of `src/core/` + `tests/`, ~80 s). Baseline 2026-10-25: 218 cases passed, 1 skipped. Record pass/fail counts.
-- Static analysis: clang-tidy over `src/core/*.cpp` with `-std=c++17 -Isrc/core -Iexternal`; report counts by check and the top files.
+- Tests: `make -C tests test` (doctest, headless, C++20). Baseline on `dev` 2026-10-26: 553 cases; 541 pass in a code-only checkout (the rest need the shipped roles/, storylines/, cutscenes/ data). Also run the ASan/UBSan and TSan builds: baseline is 1 ASan report (`zoneName` returns a reference to a temporary, tests/test_cutscene.cpp:561) and 1 TSan race (`NetServer::listenSocket_`).
+- Static analysis: clang-tidy over `src/core/*.cpp` with `-std=c++20 -Isrc/core -Iexternal`; report counts by check and the top files.
 - Core/app split: `grep -rn "raylib\|rlgl\|raymath" src/core/` must be empty.
 - Model output as contract: trace every path from an LLM reply (`LlmClient` drain → `DialogueSession`/`GroupSession` → `NpcAction` directive tags, `PersonaLoader`, `WorldGen`/`WorldGenValidate`) to world state. Flag anything that reaches state unparsed or unvalidated, and any validation failure without a deterministic fallback.
 - Host authority and threading: NetServer/NetClient threads never touch `World`, `Npc`, or `LlmClient` (docs/DEVELOPER.md thread rule). Flag nondeterminism in replicated state (unseeded RNG, wall-clock time, unordered-map iteration feeding snapshots) and wire changes without a `kNetProtocolVersion` bump.

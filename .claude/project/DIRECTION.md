@@ -1,8 +1,8 @@
-# Direction: LLM NPC City (C++17 + raylib)
+# Direction: LLM NPC City (C++20 + raylib)
 Last reviewed: 2026-10-25 — DRAFT seeded from README, docs/VISION.md, docs/DEVELOPER.md and the last ~60 commits. Lines marked (confirm) are inferred; fix them, then run /direction refresh.
 
 ## North star
-A C++ game, by choice: the engine, game logic, networking, and LLM plumbing are hand-written C++17 on raylib, and staying in C++ is part of the point (learning and portfolio), not an accident to be optimized away.
+A C++ game, by choice: the engine, game logic, networking, and LLM plumbing are hand-written C++ (C++20) on raylib, and staying in C++ is part of the point (learning and portfolio), not an accident to be optimized away.
 
 A walkable first-person 3D town where every inhabitant is a live LLM character, heading toward "Character.ai in a 3D world": players describe a character in a sentence, a creation model turns it into a validated `.persona`, and a conversation model plays it in role. NPCs remember, gossip, keep to schedules, and act in the world through validated directive tags. Local Ollama stays the free, offline default; cloud models are BYO-key via OpenRouter. (confirm: portfolio piece first, sellable BYO-key game second?)
 
@@ -35,7 +35,7 @@ VISION.md Phase B, "Cloud live + creator". Exit criteria:
 - Model output is parsed and validated (directive tags, persona format, worldgen schema) before it changes anything; failures fall back deterministically
 - Cloud replies aren't reproducible: tests use FakeOllama and fakes, never live models
 - Dependencies are pinned (raylib FetchContent tag, vendored single headers, checksummed CC0 asset packs); licenses checked for anything new (assets must stay CC0 or similarly permissive)
-- Language: the game is C++ (C++17 today; moving to C++20 is fair game to propose). Python is allowed only for offline tools and benchmarks in `tools/`.
+- Language: the game is C++ (C++20 on `dev`). Python is allowed only for offline tools and benchmarks in `tools/`.
 - Any suggested library must be C++ (or C with a C++-friendly API), license-checked, and pullable as a vendored single header or a pinned CMake FetchContent dependency, like raylib and the headers in `external/`.
 - Builds on Windows (MSYS2 UCRT64), macOS, and Linux
 
