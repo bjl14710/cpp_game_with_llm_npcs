@@ -35,6 +35,20 @@ These always work regardless of bindings:
 4. Press `Escape` to walk away (mid-reply is fine — the NPC still finishes
    the thought and remembers it next time you talk).
 
+## Graphics toggles
+
+The pause menu's main page has a **Noir / Rain** row just above Quit:
+
+- **Noir: on/off** — the Neo-Noir night look. As the world clock moves
+  into dusk (18:00-21:00) the city blends into rain-slick noir: warm lamp
+  pools, wet reflective streets, a near-colorless grade where only red
+  survives, vignette and film grain. Dawn (05:00-07:00) blends it back
+  out. Daytime is never affected; off restores the original night.
+- **Rain: on/off** — falling rain during the noir night.
+
+Both are saved to `config/graphics.cfg` (`noir_night`, `rain`) as soon as
+they're clicked and can be edited there by hand.
+
 ## Rebinding rules
 
 - Binding a key that another action already uses **swaps** the two keys; a

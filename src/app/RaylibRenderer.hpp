@@ -5,6 +5,8 @@
 // Plan: .claude/plans/raylib-visual-overhaul.md, steps 1-3.
 #include "raylib.h"
 
+#include <array>
+#include <random>
 #include <unordered_map>
 
 #include "Assets.hpp"
@@ -12,6 +14,7 @@
 #include "City.hpp"
 #include "FaceTexture.hpp"
 #include "Math.hpp"
+#include "NoirLook.hpp"
 
 namespace llm_npc {
 
@@ -42,6 +45,10 @@ class RaylibRenderer {
    public:
     // `assets` outlives the renderer (loaded once at startup by main).
     explicit RaylibRenderer(Assets& assets);
+    ~RaylibRenderer();
+
+    RaylibRenderer(const RaylibRenderer&) = delete;
+    RaylibRenderer& operator=(const RaylibRenderer&) = delete;
 
     // Begins the 3D pass: BeginMode3D with a Camera3D derived from `pose`
     // (position + yaw/pitch → target vector), sky clear color, fog shader.
@@ -56,6 +63,10 @@ class RaylibRenderer {
     // The sky clear color for the current time of day (main passes it to
     // ClearBackground so sky and fog always agree).
     Color skyColor() const { return skyColor_; }
+
+    // Noir night switches (config noir_night / rain). Off restores today's
+    // night exactly; takes effect at the next setTimeOfDay.
+    void setNoirOptions(bool noirNight, bool rain);
 
     // Draws ground, roads, and one asset-pack model per City building
     // (facadeKind/spotId → model via Assets), plus street props.
@@ -76,9 +87,13 @@ class RaylibRenderer {
     // `face` billboards the same emote pack characters use; `dead` lays the
     // figure flat instead (the dead don't emote). Defaults keep the creator
     // preview call sites unchanged.
+    // `highlighted` marks the NPC the talk prompt targets: at night its
+    // outline turns into a thin unlit red rim (one of the few colors the
+    // noir grade lets through); by day it changes nothing.
     void drawCompositeCharacter(const CharacterLook& look, const Vec3& position,
                                 float facingDeg, bool walking, float phase,
-                                NpcFace face = NpcFace::Neutral, bool dead = false);
+                                NpcFace face = NpcFace::Neutral, bool dead = false,
+                                bool highlighted = false);
 
     // The player avatar's palette (issue #106): the punch arm/fist and the
     // pistol hand tint from it, so the avatar choice is visible in first
@@ -91,9 +106,10 @@ class RaylibRenderer {
     // Call inside the 3D pass, after the world is drawn.
     void drawViewmodel(int weaponKind, float attackFraction);
 
-    // Ends the 3D pass (EndMode3D). 2D overlay (DialogUI/Menu/nameplates)
-    // draws after this, before EndDrawing.
-    // TODO(implement): step 3.
+    // Ends the 3D pass (EndMode3D). At night the pass was rendered into an
+    // offscreen target; this draws it to the screen through the noir grade.
+    // The 2D overlay (DialogUI/Menu/nameplates) draws after this, before
+    // EndDrawing, so it is never graded.
     void endFrame();
 
     // Editor support (issue #112): unprojects a screen point onto the
@@ -120,6 +136,53 @@ class RaylibRenderer {
     Camera3D camera_{};  // rebuilt each beginFrame; kept for worldToScreen
     Color skyColor_{135, 190, 235, 255};  // daylight until the clock speaks
     float lightLevel_ = 1.f;              // scene brightness multiplier
+    Texture2D glowTexture_{};             // radial falloff for lamp halos
+
+    // Noir post-process: the 3D pass renders into sceneTarget_ whenever the
+    // night factor is above 0, then endFrame draws it through gradeShader_.
+    RenderTexture2D sceneTarget_{};
+    Shader gradeShader_{};
+    bool gradeLoaded_ = false;
+    bool grading_ = false;  // this frame's 3D pass targets sceneTarget_
+    struct GradeLocs {
+        int desaturation = -1, contrast = -1, vignette = -1, grain = -1;
+        int time = -1, resolution = -1;
+    };
+    GradeLocs gradeLocs_;
+
+    // (Re)creates sceneTarget_ at the current framebuffer size; false when
+    // it can't be created (the frame then draws ungraded).
+    bool ensureSceneTarget();
+
+    // Draws sceneTarget_ fullscreen through the grade shader.
+    void drawGradedScene();
+
+    // Rain: a fixed pool of drops in a camera-relative box, advanced and
+    // recycled in place each frame (never reallocated). The first
+    // rain-intensity share of the pool is drawn as short slanted streaks
+    // through the fog shader, so drops fade into the haze with distance and
+    // catch the lamp pools; drawn inside the 3D pass, before the grade.
+    static constexpr std::size_t kRainDrops = 900;
+    std::array<Vector3, kRainDrops> rainDrops_{};
+    bool rainSeeded_ = false;
+    std::minstd_rand rainRng_{1234567u};
+    void drawRain();
+    NoirLook noir_{};                     // night look for the current hour
+    bool noirEnabled_ = true;             // config: noir_night
+    bool rainEnabled_ = true;             // config: rain
+
+    // Feeds the nearest lamp heads (cap noir::kMaxLamps) to the fog shader,
+    // or zero lamps in daylight so the shader takes its day path.
+    void uploadLamps(const City& city);
+
+    // Night-only red accents that survive the grade: a flashing light bar
+    // on the police car and a neon strip over two storefronts (bakery,
+    // coffee), placed from City's building boxes and drawn unlit.
+    void drawRedAccents(const City& city);
+
+    // Night-only glowing bulbs at every lamp head, drawn unlit (outside the
+    // fog shader) so they read as light sources rather than lit surfaces.
+    void drawLampGlows(const City& city);
 
     // Per-entity animation playback (keyed by variantSeed, which is unique
     // per entity): which clip is playing and the running frame clock. The

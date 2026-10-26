@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <string>
 
 #include "FaceTexture.hpp"
 
@@ -25,9 +26,9 @@ std::size_t stableHash(const std::string& s) {
 // vertex stage passes world-space position (matModel is identity for rlgl
 // batch primitives, whose vertices are already world-space, so the same
 // shader serves models AND primitives). GLSL 330 — the core profile raylib
-// uses on desktop.
+// uses on desktop. The version line is prepended at load time (see
+// shaderSource) so the fragment stage can be built with or without NOIR.
 constexpr const char* kFogVertexShader = R"(
-#version 330
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
 in vec4 vertexColor;
@@ -44,8 +45,14 @@ void main() {
 }
 )";
 
+// Without NOIR this is exactly the original fog shader. With NOIR it adds
+// the night terms, every one gated on uniforms the renderer zeroes in
+// daylight (lampCount = 0), so the day path computes the same expression:
+//   - lamp pools: warm point lights with a smooth windowed falloff, using a
+//     flat normal from screen-space derivatives (works for models and the
+//     normal-less primitive batch alike), plus warm glow mixed into the fog
+//     around each lamp so light reads through the haze.
 constexpr const char* kFogFragmentShader = R"(
-#version 330
 in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragPosition;
@@ -55,15 +62,75 @@ uniform vec3 cameraPos;
 uniform vec4 fogColor;
 uniform float fogDensity;
 uniform float lightLevel;
+#ifdef NOIR
+#define MAX_LAMPS 16
+uniform vec3 lampPos[MAX_LAMPS];
+uniform int lampCount;
+uniform vec3 lampColor;
+uniform float lampRadius;
+uniform float wetness;
+#endif
 out vec4 finalColor;
 void main() {
     vec4 texel = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
     vec3 warm = texel.rgb * vec3(1.06, 1.0, 0.92) * lightLevel;
     float d = length(cameraPos - fragPosition) * fogDensity;
     float fog = 1.0 - exp(-d * d);
-    finalColor = vec4(mix(warm, fogColor.rgb, fog), texel.a);
+    vec3 fogRgb = fogColor.rgb;
+#ifdef NOIR
+    if (lampCount > 0) {
+        vec3 v = normalize(cameraPos - fragPosition);
+        // Lines (rain) have no area: their derivative normal can vanish,
+        // so fall back to facing the viewer instead of normalizing zero.
+        vec3 nRaw = cross(dFdx(fragPosition), dFdy(fragPosition));
+        vec3 n = dot(nRaw, nRaw) > 1e-12 ? normalize(nRaw) : v;
+        if (dot(n, v) < 0.0) n = -n;
+        bool ground = abs(n.y) > 0.9 && fragPosition.y < 0.15;
+        bool grass = texel.g > texel.r * 1.12 && texel.g > texel.b;
+        float wet = (ground && !grass) ? wetness : 0.0;
+        vec3 fwd = vec3(v.x, 0.0, v.z);
+        fwd = dot(fwd, fwd) > 1e-6 ? normalize(fwd) : vec3(0.0, 0.0, 1.0);
+        vec3 side = vec3(fwd.z, 0.0, -fwd.x);
+        vec3 pool = vec3(0.0);
+        vec3 haze = vec3(0.0);
+        vec3 spec = vec3(0.0);
+        float reach = lampRadius * (wet > 0.0 ? 2.5 : 1.0);
+        for (int i = 0; i < lampCount; ++i) {
+            vec3 toLamp = lampPos[i] - fragPosition;
+            float dist2 = dot(toLamp, toLamp);
+            if (dist2 > reach * reach) continue;  // out of this lamp's reach
+            float dist = sqrt(dist2);
+            vec3 l = toLamp / max(dist, 1e-3);
+            float k = clamp(1.0 - dist2 / (lampRadius * lampRadius), 0.0, 1.0);
+            float atten = k * k;
+            float ndl = max(dot(n, l), 0.0);
+            pool += lampColor * atten * (0.25 + 0.75 * ndl);
+            haze += lampColor * atten;
+            if (wet > 0.0) {
+                vec3 h = normalize(l + v);
+                float hs = dot(h, side);
+                float hf = dot(h, fwd);
+                float streak = exp(-(hs * hs) / 0.0016 - (hf * hf) / 0.035);
+                float fade = clamp(1.0 - dist / (lampRadius * 2.5), 0.0, 1.0);
+                spec += lampColor * streak * fade;
+            }
+        }
+        warm += texel.rgb * pool;
+        fogRgb += haze * 0.35;
+        if (wet > 0.0) {
+            float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+            warm = warm * (1.0 - 0.3 * wet) + (spec + fogRgb * fres * 0.25) * wet;
+        }
+    }
+#endif
+    finalColor = vec4(mix(warm, fogRgb, fog), texel.a);
 }
 )";
+
+// Prepends the GLSL version (and the NOIR switch) to a shader body.
+std::string shaderSource(const char* body, bool noir) {
+    return std::string("#version 330\n") + (noir ? "#define NOIR\n" : "") + body;
+}
 
 }  // namespace
 
@@ -74,26 +141,45 @@ Assets::Assets(const std::string& assetsDir) {
     }
 
     // Atmosphere shader first, so every model loaded below can adopt it.
-    // Failure (no GL context, GLSL mismatch) degrades to the plain look.
-    fogShader_ = LoadShaderFromMemory(kFogVertexShader, kFogFragmentShader);
-    fogLoaded_ = IsShaderValid(fogShader_);
+    // The noir build is tried first; if it fails to compile the original
+    // fog shader is used (today's look, no night extras), and if that
+    // fails too (no GL context, GLSL mismatch) the plain look.
+    const std::string vs = shaderSource(kFogVertexShader, false);
+    for (const bool noir : {true, false}) {
+        const std::string fs = shaderSource(kFogFragmentShader, noir);
+        fogShader_ = LoadShaderFromMemory(vs.c_str(), fs.c_str());
+        fogLoaded_ = IsShaderValid(fogShader_);
+        if (fogLoaded_) {
+            noirLoaded_ = noir;
+            break;
+        }
+        std::cerr << "[llm_npc] " << (noir ? "noir" : "fog")
+                  << " shader failed to compile — falling back\n";
+    }
     if (fogLoaded_) {
         fogCameraLoc_ = GetShaderLocation(fogShader_, "cameraPos");
         fogColorLoc_ = GetShaderLocation(fogShader_, "fogColor");
         fogLightLoc_ = GetShaderLocation(fogShader_, "lightLevel");
-        // Daylight defaults; the renderer re-drives fogColor and lightLevel
-        // each frame from the shared world clock's day/night curves. The
-        // density is tuned so the plaza (~40 units) stays crisp and the far
-        // city edge (~150+) visibly hazes.
+        noirLocs_.fogDensity = GetShaderLocation(fogShader_, "fogDensity");
+        if (noirLoaded_) {
+            noirLocs_.lampPos = GetShaderLocation(fogShader_, "lampPos");
+            noirLocs_.lampCount = GetShaderLocation(fogShader_, "lampCount");
+            noirLocs_.lampColor = GetShaderLocation(fogShader_, "lampColor");
+            noirLocs_.lampRadius = GetShaderLocation(fogShader_, "lampRadius");
+            noirLocs_.wetness = GetShaderLocation(fogShader_, "wetness");
+            const int noLamps = 0;
+            SetShaderValue(fogShader_, noirLocs_.lampCount, &noLamps, SHADER_UNIFORM_INT);
+        }
+        // Daylight defaults; the renderer re-drives fogColor, lightLevel and
+        // fogDensity each frame from the shared world clock's day/night
+        // curves. The density is tuned so the plaza (~40 units) stays crisp
+        // and the far city edge (~150+) visibly hazes.
         const float skyColor[4] = {135.f / 255.f, 190.f / 255.f, 235.f / 255.f, 1.f};
-        const float density = 0.006f;
         const float light = 1.f;
         SetShaderValue(fogShader_, fogColorLoc_, skyColor, SHADER_UNIFORM_VEC4);
-        SetShaderValue(fogShader_, GetShaderLocation(fogShader_, "fogDensity"),
-                       &density, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(fogShader_, noirLocs_.fogDensity, &kFogDensity,
+                       SHADER_UNIFORM_FLOAT);
         SetShaderValue(fogShader_, fogLightLoc_, &light, SHADER_UNIFORM_FLOAT);
-    } else {
-        std::cerr << "[llm_npc] fog shader failed to compile — plain look\n";
     }
 
     cityDir_ = assetsDir + "/models/city";
@@ -163,6 +249,7 @@ Assets::Assets(const std::string& assetsDir) {
         "car_police", "car_sedan", "car_hatchback", "box_B", "base", "bush",
         "watertower", "trafficlight_A", "dumpster", "trash_A", "trash_B",
         "road_straight", "road_straight_crossing", "road_junction",
+        "streetlight",
     };
     bool any = false;
     for (const char* stem : stems) any = loadCityModel(stem) || any;

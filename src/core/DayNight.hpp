@@ -64,4 +64,22 @@ inline float lightLevelAt(float hours) {
     return kNight;
 }
 
+// How "night" the scene is for a time of day in hours [0, 24): 0 through
+// the whole day band, 1 through the night band, blending linearly across
+// the same dawn (05-07, 1 -> 0) and dusk (18-21, 0 -> 1) windows as the sky
+// and light curves. This is the ONE dial every night-only effect (noir
+// grade, lamp pools, wet streets, rain) scales by, so daytime is untouched
+// by construction.
+inline float nightFactorAt(float hours) {
+    using namespace daynight;
+    if (hours >= kDawnStart && hours < kDawnEnd) {
+        return 1.f - (hours - kDawnStart) / (kDawnEnd - kDawnStart);
+    }
+    if (hours >= kDawnEnd && hours < kDuskStart) return 0.f;
+    if (hours >= kDuskStart && hours < kDuskEnd) {
+        return (hours - kDuskStart) / (kDuskEnd - kDuskStart);
+    }
+    return 1.f;
+}
+
 }  // namespace llm_npc

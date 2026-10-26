@@ -1,5 +1,7 @@
 #include "Config.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -97,6 +99,25 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
         auto secrets = readKv(configDir / "secrets.cfg");
         if (auto it = secrets.find("api_key"); it != secrets.end()) cfg.apiKey = it->second;
     }
+    return cfg;
+}
+
+bool parseOnOff(const std::string& value, bool fallback) {
+    std::string v = trim(value);
+    std::transform(v.begin(), v.end(), v.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (v == "on" || v == "true" || v == "yes" || v == "1") return true;
+    if (v == "off" || v == "false" || v == "no" || v == "0") return false;
+    return fallback;
+}
+
+GraphicsConfig loadGraphicsConfig(const std::filesystem::path& configDir) {
+    GraphicsConfig cfg;
+    auto kv = readKv(configDir / "graphics.cfg");
+    if (auto it = kv.find("noir_night"); it != kv.end()) {
+        cfg.noirNight = parseOnOff(it->second, cfg.noirNight);
+    }
+    if (auto it = kv.find("rain"); it != kv.end()) cfg.rain = parseOnOff(it->second, cfg.rain);
     return cfg;
 }
 

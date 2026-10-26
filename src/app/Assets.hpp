@@ -96,6 +96,26 @@ class Assets {
     int fogColorLoc() const { return fogColorLoc_; }
     int fogLightLoc() const { return fogLightLoc_; }
 
+    // Base fog density (daylight); the noir look scales it at night.
+    static constexpr float kFogDensity = 0.006f;
+
+    // True when the fog shader was built with the noir night terms (lamp
+    // pools, wet streets). False means the original fog shader is active —
+    // night renders exactly as before the noir work.
+    bool noirShader() const { return noirLoaded_; }
+
+    // Locations of the fog shader's per-frame noir uniforms; -1 when the
+    // shader lacks them (GL ignores sets to -1). lampPos is a vec3 array.
+    struct NoirLocs {
+        int fogDensity = -1;
+        int lampPos = -1;
+        int lampCount = -1;
+        int lampColor = -1;
+        int lampRadius = -1;
+        int wetness = -1;
+    };
+    const NoirLocs& noirLocs() const { return noirLocs_; }
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -137,6 +157,8 @@ class Assets {
     int fogCameraLoc_ = -1;
     int fogColorLoc_ = -1;
     int fogLightLoc_ = -1;
+    bool noirLoaded_ = false;
+    NoirLocs noirLocs_;
 };
 
 }  // namespace llm_npc
