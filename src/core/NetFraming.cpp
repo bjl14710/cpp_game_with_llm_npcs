@@ -16,6 +16,7 @@ std::uint32_t readPrefix(const std::string& bytes) {
 }  // namespace
 
 std::string FrameAssembler::encode(std::string_view payload) {
+    if (payload.size() > kMaxFrameBytes) return {};  // see the header: refused
     const std::uint32_t len = static_cast<std::uint32_t>(payload.size());
     std::string frame;
     frame.reserve(4 + payload.size());

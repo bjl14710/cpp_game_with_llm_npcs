@@ -349,3 +349,46 @@ TEST_CASE("every message type survives a hostile payload of every shape") {
         }
     }
 }
+
+// ---- issue #329 -------------------------------------------------------------
+
+TEST_CASE("the protocol version was bumped for the appended vote types") {
+    // #222 appended six message types a v1 build cannot decode; v1 and v2
+    // peers must be refused at the handshake, not desync mid-match.
+    CHECK(kNetProtocolVersion == 2);
+}
+
+TEST_CASE("isValidPlayerName admits short printable ASCII only") {
+    using llm_npc::isValidPlayerName;
+    using llm_npc::kMaxPlayerNameChars;
+    CHECK(isValidPlayerName(""));  // empty means "use the default name"
+    CHECK(isValidPlayerName("guest"));
+    CHECK(isValidPlayerName("Sam O'Neil ~ #1"));
+    CHECK(isValidPlayerName(std::string(kMaxPlayerNameChars, 'a')));
+
+    CHECK_FALSE(isValidPlayerName(std::string(kMaxPlayerNameChars + 1, 'a')));
+    CHECK_FALSE(isValidPlayerName(std::string(600 * 1024, 'a')));
+    CHECK_FALSE(isValidPlayerName("tab\there"));
+    CHECK_FALSE(isValidPlayerName("new\nline"));
+    CHECK_FALSE(isValidPlayerName(std::string("nul\0byte", 8)));
+    CHECK_FALSE(isValidPlayerName("del\x7F"));
+    CHECK_FALSE(isValidPlayerName("caf\xC3\xA9"));  // UTF-8 é: the font can't draw it
+}
+
+TEST_CASE("readArray hands back an iterable array whatever the host sent") {
+    nlohmann::json j;
+    j["players"] = nlohmann::json::array({1, 2});
+    j["npcs"] = "everyone";
+    j["moods"] = nullptr;
+
+    CHECK(llm_npc::readArray(j, "players").size() == 2);
+    // Wrong type, null, missing and non-object all come back empty — and
+    // range-for over them runs zero times rather than throwing.
+    for (const char* key : {"npcs", "moods", "missing"}) {
+        CAPTURE(key);
+        const auto& arr = llm_npc::readArray(j, key);
+        CHECK(arr.is_array());
+        CHECK(arr.empty());
+    }
+    CHECK(llm_npc::readArray(nlohmann::json(3), "players").empty());
+}

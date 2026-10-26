@@ -76,3 +76,17 @@ TEST_CASE("FrameAssembler handles an empty payload frame") {
     REQUIRE(c.frames.size() == 1);
     CHECK(c.frames[0].empty());
 }
+
+TEST_CASE("FrameAssembler::encode refuses a payload over kMaxFrameBytes") {
+    // Every receiver drops the connection on such a frame, so the encoder
+    // must refuse to build one; empty is never a valid frame (#329).
+    CHECK(FrameAssembler::encode(std::string(kMaxFrameBytes + 1, 'x')).empty());
+
+    // Exactly at the cap is still legal on both sides of the wire.
+    const std::string atCap = FrameAssembler::encode(std::string(kMaxFrameBytes, 'x'));
+    CHECK(atCap.size() == 4 + static_cast<std::size_t>(kMaxFrameBytes));
+    Collector c;
+    CHECK(c.feed(atCap));
+    REQUIRE(c.frames.size() == 1);
+    CHECK(c.frames[0].size() == kMaxFrameBytes);
+}
