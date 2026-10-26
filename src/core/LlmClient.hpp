@@ -33,6 +33,11 @@ struct LlmConfig {
     // Passed to Ollama as keep_alive so the model stays loaded between
     // conversations instead of paying the cold-start cost every time.
     std::string keepAlive = "10m";
+    // Context window sent to Ollama as options.num_ctx. Without it Ollama
+    // uses 4096 tokens and silently drops a longer prompt from the FRONT —
+    // the system prompt goes first. Ollama only; OpenAI-compatible APIs have
+    // no equivalent request field.
+    int contextTokens = 8192;
     // Reasoning-model thinking: "" omits the field entirely (models without
     // the capability never see it); "false"/"true" is sent as Ollama's
     // `think`. qwen3-class models need "false" for chat-speed replies —

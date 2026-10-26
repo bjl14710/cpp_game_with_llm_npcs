@@ -55,7 +55,9 @@ BackendResult OllamaBackend::chat(const BackendRequest& req, const DeltaCallback
     // Build Ollama /api/chat body. Streaming NDJSON keeps perceived latency low
     // (first words appear immediately); keep_alive holds the model in memory
     // between conversations. Warm-up requests send no messages, which makes
-    // Ollama load the model and return at once.
+    // Ollama load the model and return at once. num_ctx rides on every
+    // request, warm-up included: Ollama reloads the model when it changes, so
+    // a warm-up at a different size would be wasted.
     json messages = json::array();
     if (!req.internal) {
         if (!req.systemPrompt.empty()) {
@@ -72,7 +74,7 @@ BackendResult OllamaBackend::chat(const BackendRequest& req, const DeltaCallback
         {"messages", messages},
         {"stream", true},
         {"keep_alive", config_.keepAlive},
-        {"options", {{"temperature", config_.temperature}}},
+        {"options", {{"temperature", config_.temperature}, {"num_ctx", config_.contextTokens}}},
     };
     // Only reasoning models understand `think`; omit unless configured so
     // ordinary models never see an unknown field. qwen3-class models need
