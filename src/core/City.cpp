@@ -72,6 +72,27 @@ City City::makeDowntown() {
         {"apts_c", "", -88.f, 44.f, -44.f, 84.f, 24.f, 9},
         {"tower", "", -24.f, 48.f, 24.f, 88.f, 30.f, 10},
     };
+
+    // Street lamps on the sidewalk curbs (1 unit inside a block edge), arms
+    // reaching over the street. Placed clear of shop fronts, parked cars,
+    // crossings, persona homes, and the straight lines NPC schedules walk.
+    city.lamps_ = {
+        {23.f, -12.f, 90.f},  {-23.f, 12.f, 270.f}, {12.f, -23.f, 180.f},
+        {12.f, 23.f, 0.f},    {41.f, -52.f, 270.f}, {-41.f, 52.f, 90.f},
+        {52.f, 41.f, 180.f},  {-52.f, -41.f, 0.f},  {-23.f, -50.f, 270.f},
+        {-23.f, 44.f, 270.f}, {64.f, -23.f, 180.f}, {-64.f, 23.f, 0.f},
+        {41.f, 72.f, 270.f},  {-41.f, -62.f, 90.f},
+    };
+    // Every pole is solid, generated from the lamp list itself so the
+    // visual and the collider share one source.
+    constexpr float kPoleHalf = 0.2f;
+    for (std::size_t i = 0; i < city.lamps_.size(); ++i) {
+        const StreetLamp& lamp = city.lamps_[i];
+        city.buildings_.push_back({"streetlamp#" + std::to_string(i), "",
+                                   lamp.x - kPoleHalf, lamp.z - kPoleHalf,
+                                   lamp.x + kPoleHalf, lamp.z + kPoleHalf,
+                                   lamp.height, 15});
+    }
     return city;
 }
 
@@ -81,6 +102,13 @@ City City::fromBuildings(std::vector<Building> buildings, float halfSize) {
     city.halfSize_ = halfSize;
     city.hasStreets_ = false;
     return city;
+}
+
+std::vector<Vec3> City::lampHeads() const {
+    std::vector<Vec3> heads;
+    heads.reserve(lamps_.size());
+    for (const StreetLamp& lamp : lamps_) heads.push_back(lampHead(lamp));
+    return heads;
 }
 
 const Building* City::findBuilding(const std::string& id) const {

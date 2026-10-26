@@ -46,6 +46,8 @@ constexpr int kDayLimitMin = 1;
 constexpr int kDayLimitMax = 7;
 constexpr int kDayMinutesMin = 2;
 constexpr int kDayMinutesMax = 20;
+constexpr int kIdNoirToggle = 11;
+constexpr int kIdRainToggle = 12;
 constexpr int kIdModelBase = 700;
 constexpr int kMaxModelRows = 8;
 // Sandbox page: New button + one row per saved map (capped by layout).
@@ -161,6 +163,7 @@ void Menu::nudgeMatchSetting(int id) {
         showToast("Saved - applies to the next mystery, not this one.");
     }
 }
+void Menu::setGraphics(GraphicsHooks hooks) { graphics_ = std::move(hooks); }
 
 void Menu::setTraitChoices(std::vector<std::string> ids) {
     traitChoices_ = std::move(ids);
@@ -195,7 +198,9 @@ std::vector<Menu::Hit> Menu::layout() const {
         // added an eleventh row, and the arithmetic gave no hint of it. Fitting
         // the list to the space available means adding a row can crowd the
         // buttons but can never push one out of the window.
-        const int rows = static_cast<int>(std::size(ids));
+        // The Noir/Rain toggles take one extra row above Quit when installed.
+        const bool toggles = graphics_.current && graphics_.onChange;
+        const int rows = static_cast<int>(std::size(ids)) + (toggles ? 1 : 0);
         // Below the page title, which render() draws at h * 0.12 in size 40.
         // The first attempt at this started at h * 0.10 and put "Resume"
         // straight through the word "Paused" -- the list has to start under
@@ -207,6 +212,12 @@ std::vector<Menu::Hit> Menu::layout() const {
         const float x = (w - 320.f) * 0.5f;
         float y = top + ((bottom - top) - step * static_cast<float>(rows)) * 0.5f;
         for (const int id : ids) {
+            if (id == kIdQuit && toggles) {
+                // Graphics switches share one row just above Quit.
+                hits.push_back({Rectangle{x, y, 156.f, height}, kIdNoirToggle});
+                hits.push_back({Rectangle{x + 164.f, y, 156.f, height}, kIdRainToggle});
+                y += step;
+            }
             hits.push_back({Rectangle{x, y, 320.f, height}, id});
             y += step;
         }
@@ -448,6 +459,13 @@ MenuResult Menu::update(float dt) {
             } else if (hit.id == kIdDaysDown || hit.id == kIdDaysUp ||
                        hit.id == kIdLengthDown || hit.id == kIdLengthUp) {
                 nudgeMatchSetting(hit.id);
+            } else if (hit.id == kIdNoirToggle || hit.id == kIdRainToggle) {
+                if (graphics_.current && graphics_.onChange) {
+                    GraphicsConfig cfg = graphics_.current();
+                    if (hit.id == kIdNoirToggle) cfg.noirNight = !cfg.noirNight;
+                    else cfg.rain = !cfg.rain;
+                    graphics_.onChange(cfg);
+                }
             } else if (hit.id == kIdModels) {
                 page_ = Page::Model;
                 modelList_ = models_.listModels ? models_.listModels()
@@ -774,6 +792,13 @@ void Menu::render() const {
         else if (hit.id == kIdMatchSettings) label = "Match Settings";
         else if (hit.id == kIdDaysDown || hit.id == kIdLengthDown) label = "-";
         else if (hit.id == kIdDaysUp || hit.id == kIdLengthUp) label = "+";
+        else if (hit.id == kIdNoirToggle || hit.id == kIdRainToggle) {
+            const GraphicsConfig cfg =
+                graphics_.current ? graphics_.current() : GraphicsConfig{};
+            label = hit.id == kIdNoirToggle
+                        ? std::string("Noir: ") + (cfg.noirNight ? "on" : "off")
+                        : std::string("Rain: ") + (cfg.rain ? "on" : "off");
+        }
         else if (hit.id >= kIdModelBase && hit.id < kIdModelBase + kMaxModelRows) {
             const std::size_t index = static_cast<std::size_t>(hit.id - kIdModelBase);
             label = index < modelList_.size() ? modelList_[index] : "?";
