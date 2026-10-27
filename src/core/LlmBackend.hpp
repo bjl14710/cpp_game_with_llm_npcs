@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -25,6 +26,17 @@ struct BackendResult {
     std::string content;
     std::string error;
 };
+
+// Most assistant text (or non-200 error body) a backend accumulates before it
+// fails the request. A chat line is a few hundred bytes; this is far past any
+// legitimate reply and only stops a runaway stream from growing without bound.
+inline constexpr std::size_t kMaxReplyBytes = 64 * 1024;
+
+// Most raw response bytes a backend reads for one request. Wider than
+// kMaxReplyBytes because wire framing (Ollama repeats model and timestamp on
+// every token line) outweighs the text; it also bounds a single line that
+// never ends, which the line assembler would otherwise buffer forever.
+inline constexpr std::size_t kMaxStreamBytes = 1024 * 1024;
 
 // Invoked with each streamed text fragment as it arrives, in order.
 using DeltaCallback = std::function<void(const std::string&)>;

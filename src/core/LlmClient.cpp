@@ -97,7 +97,10 @@ void LlmClient::workerLoop() {
         {
             std::unique_lock<std::mutex> lock(requestMutex_);
             requestCv_.wait(lock, [this] { return stop_.load() || !requests_.empty(); });
-            if (stop_.load() && requests_.empty()) return;
+            // Shutdown drops whatever is still queued: those requests never
+            // touched the network, and serving them would hold the
+            // destructor's join() for a full round trip each.
+            if (stop_.load()) return;
             req = std::move(requests_.front());
             requests_.pop();
         }
