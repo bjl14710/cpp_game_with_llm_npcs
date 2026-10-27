@@ -38,7 +38,19 @@ class NetServer {
         std::string joinCode;     // empty = no code required
         float snapshotHz = 12.f;  // WorldSnapshot broadcast rate
         std::string hostName = "host";  // shown as player 0's name
+        // A joiner must finish the JoinRequest/Welcome exchange within this
+        // TOTAL time (not per read), or it is dropped.
+        int handshakeTimeoutMs = 5000;
+        // A send blocked this long (peer stopped reading, buffers full) marks
+        // the connection dead, so one stuck client cannot freeze the host.
+        int sendTimeoutMs = 2000;
     };
+
+    // Most sockets held at once, admitted or still handshaking. Accepts past
+    // this are closed immediately, so idle half-open joiners cannot exhaust
+    // threads or file descriptors. The +4 leaves room for joiners still
+    // handshaking alongside a full session.
+    static constexpr int kMaxConnections = kMaxPlayers + 4;
 
     explicit NetServer(Settings settings);
     ~NetServer();
@@ -96,12 +108,18 @@ class NetServer {
 
    private:
     // One connected remote player. Owned by connections_; the reader thread
-    // marks itself dead and the tick thread reaps.
+    // marks itself dead and reapDeadConnections() reaps. Shared so senders can
+    // write without holding connectionsMutex_; the socket closes with the
+    // last owner, so a recycled fd is never written to by mistake.
     struct Connection;
 
     void acceptLoop();
     void readerLoop(Connection& conn);
     void tickLoop();
+
+    // Removes dead connections and joins their reader threads. Run by the
+    // tick thread every tick, and by the accept thread when at the cap.
+    void reapDeadConnections();
 
     // Reads the JoinRequest and answers Welcome (or a refusal). True when
     // the player was admitted and conn is fully initialized.
@@ -112,18 +130,28 @@ class NetServer {
 
     void handleMessage(Connection& conn, const NetMessage& msg);
 
-    // Frames + sends on one connection; marks it dead on failure.
+    // Frames + sends on one connection; marks it dead on failure. False
+    // (connection left alive) when the message is too large to frame.
     bool sendOn(Connection& conn, MessageType type, nlohmann::json payload);
+
+    // Writes one already-framed message; marks the connection dead when the
+    // send fails or times out.
+    bool sendWire(Connection& conn, const std::string& wire);
+
+    // Live connections that have been sent their Welcome — the only ones
+    // that may receive snapshots or broadcasts. Copied under the lock so the
+    // caller can send without holding it.
+    std::vector<std::shared_ptr<Connection>> admittedConnections() const;
 
     Settings settings_;
 
-    socket_t listenSocket_;  // see NetSocket.hpp
+    std::atomic<socket_t> listenSocket_;  // read by acceptLoop, cleared by stop()
     int port_ = 0;
     std::string lastError_;
     std::atomic<bool> running_{false};
 
     mutable std::mutex connectionsMutex_;
-    std::vector<std::unique_ptr<Connection>> connections_;
+    std::vector<std::shared_ptr<Connection>> connections_;
 
     std::mutex stateMutex_;  // host pose + published NPC poses + tick counter
     PlayerPose hostPose_;

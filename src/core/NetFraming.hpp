@@ -20,7 +20,10 @@ inline constexpr std::uint32_t kMaxFrameBytes = 1 << 20;  // 1 MiB
 class FrameAssembler {
    public:
     // Wraps a payload in the 4-byte length prefix, ready to send().
-    // TODO(implement): big-endian encode; callers check size < kMaxFrameBytes.
+    // Returns an EMPTY string — never a valid frame, which is at least 4
+    // bytes — when the payload exceeds kMaxFrameBytes: every receiver would
+    // drop the connection on such a frame, so it must never be sent. Callers
+    // check empty() and drop the message instead.
     static std::string encode(std::string_view payload);
 
     // Appends received bytes; invokes onFrame once per completed payload
@@ -28,7 +31,6 @@ class FrameAssembler {
     // mid-prefix. Returns false — and stops consuming — when a declared
     // length exceeds kMaxFrameBytes, signalling the caller to drop the
     // connection; the stream cannot be resynchronized after a bad prefix.
-    // TODO(implement): accumulate, peel frames in a loop.
     bool feed(std::string_view bytes, const std::function<void(const std::string&)>& onFrame);
 
    private:

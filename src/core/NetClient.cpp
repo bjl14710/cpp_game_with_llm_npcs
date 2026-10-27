@@ -60,7 +60,9 @@ NetClient::~NetClient() { disconnect(); }
 
 bool NetClient::connect(const std::string& host, int port,
                         const std::string& playerName, const std::string& joinCode) {
-    if (connected_) disconnect();
+    // Unconditional: when the HOST dropped us, the reader thread already
+    // cleared connected_ but is still joinable and the socket still open.
+    disconnect();
     ensureSocketsInit();
 
     sockaddr_in addr{};
@@ -93,6 +95,12 @@ bool NetClient::connect(const std::string& host, int port,
             encodeMessage(MessageType::JoinRequest, {{"version", kNetProtocolVersion},
                                                      {"name", playerName},
                                                      {"code", joinCode}}));
+        if (wire.empty()) {
+            setError("player name or join code is too long");
+            closeSocket(socket_);
+            socket_ = kInvalidSocket;
+            return false;
+        }
         if (!sendAll(socket_, wire)) {
             setError("connection dropped during handshake");
             closeSocket(socket_);
@@ -161,6 +169,12 @@ void NetClient::disconnect() {
         socket_ = kInvalidSocket;
     }
     playerId_ = -1;
+    // Safe only now that the reader (the other user of framing_) is joined.
+    // Leftover bytes of a half-received frame would otherwise be glued onto
+    // the next session's Welcome.
+    framing_ = FrameAssembler{};
+    std::lock_guard<std::mutex> lock(inboxMutex_);
+    inbox_.clear();
 }
 
 void NetClient::sendInput(const Vec3& position, float facingDeg) {
@@ -191,6 +205,7 @@ void NetClient::send(MessageType type, nlohmann::json payload) {
     if (!connected_ && type != MessageType::Disconnect) return;
     if (socket_ == kInvalidSocket) return;
     const std::string wire = FrameAssembler::encode(encodeMessage(type, std::move(payload)));
+    if (wire.empty()) return;  // too large to frame; the host would drop us for it
     std::lock_guard<std::mutex> lock(sendMutex_);
     if (!sendAll(socket_, wire)) {
         connected_ = false;

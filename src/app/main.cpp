@@ -2131,33 +2131,33 @@ int main(int argc, char** argv) {
                 switch (msg.type) {
                     case MessageType::WorldSnapshot: {
                         remotePlayers.clear();
-                        for (const auto& p : msg.payload["players"]) {
+                        for (const auto& p : readArray(msg.payload, "players")) {
                             PlayerPose pose = playerPoseFromJson(p);
                             if (pose.playerId != netClient->playerId()) {
                                 remotePlayers.push_back(std::move(pose));
                             }
                         }
                         netNpcs.clear();
-                        for (const auto& n : msg.payload["npcs"]) {
+                        for (const auto& n : readArray(msg.payload, "npcs")) {
                             netNpcs.push_back(netNpcPoseFromJson(n));
                         }
                         break;
                     }
                     case MessageType::ChatDelta:
                         if (session.isOpen() &&
-                            msg.payload.value("npc", -1) == session.npcIndex()) {
-                            dialog.appendStreamingDelta(msg.payload.value("text", std::string{}));
+                            readInt(msg.payload, "npc", -1) == session.npcIndex()) {
+                            dialog.appendStreamingDelta(readString(msg.payload, "text"));
                         }
                         break;
                     case MessageType::ChatReply:
                         if (session.isOpen() &&
-                            msg.payload.value("npc", -1) == session.npcIndex()) {
+                            readInt(msg.payload, "npc", -1) == session.npcIndex()) {
                             dialog.endStreaming();
                             const std::string name =
                                 world.npcs()[static_cast<std::size_t>(session.npcIndex())]
                                     .persona().name;
-                            if (msg.payload.value("ok", false)) {
-                                const std::string text = msg.payload.value("text", std::string{});
+                            if (readBool(msg.payload, "ok", false)) {
+                                const std::string text = readString(msg.payload, "text");
                                 if (!text.empty()) {
                                     dialog.appendLine({TranscriptLine::Kind::Npc, name, text});
                                 } else {
@@ -2168,16 +2168,17 @@ int main(int argc, char** argv) {
                                 dialog.appendLine(
                                     {TranscriptLine::Kind::System, "",
                                      "[They seem distracted: " +
-                                         msg.payload.value("error", std::string{}) + "]"});
+                                         readString(msg.payload, "error") + "]"});
                             }
                             dialog.setInputEnabled(true);
                             netChatWaiting = false;
                         }
                         break;
                     case MessageType::NpcMoodUpdate: {
-                        const int idx = msg.payload.value("npc", -1);
+                        const int idx = readInt(msg.payload, "npc", -1);
                         if (idx >= 0 && idx < static_cast<int>(netMoods.size())) {
-                            netMoods[static_cast<std::size_t>(idx)] = msg.payload.value("mood", 0);
+                            netMoods[static_cast<std::size_t>(idx)] =
+                                readInt(msg.payload, "mood", 0);
                         }
                         break;
                     }

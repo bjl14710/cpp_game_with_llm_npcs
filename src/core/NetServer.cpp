@@ -2,19 +2,31 @@
 
 #include <chrono>
 #include <cstring>
+#include <iostream>
 
 #include "NetFraming.hpp"
 
 namespace llm_npc {
 
 namespace {
-// A joiner gets this long to send its JoinRequest before we give up on it.
-constexpr int kHandshakeTimeoutMs = 5000;
+// Pause after a failed accept(). EMFILE/ENFILE fail instantly and keep
+// failing while the connection waits in the backlog; without a pause the
+// accept loop spins a core until a descriptor frees up.
+constexpr auto kAcceptBackoff = std::chrono::milliseconds(50);
+
+// listen() backlog: enough for a burst of joiners plus a few strays.
+constexpr int kListenBacklog = 2 * NetServer::kMaxConnections;
+
+// The refusal a joiner sees when its name fails isValidPlayerName().
+const std::string kBadNameReason =
+    "name must be at most " + std::to_string(kMaxPlayerNameChars) +
+    " printable ASCII characters";
 }  // namespace
 
 struct NetServer::Connection {
     socket_t socket = kInvalidSocket;
-    int playerId = -1;
+    int playerId = -1;      // reserved id; written under connectionsMutex_
+    bool admitted = false;  // Welcome sent; guarded by connectionsMutex_
     std::string name;
     std::atomic<bool> alive{true};
 
@@ -24,6 +36,12 @@ struct NetServer::Connection {
 
     FrameAssembler framing;
     std::thread reader;
+
+    // Every owner that drops a Connection joins `reader` first (reaper,
+    // stop()), so only the socket is left to release here.
+    ~Connection() {
+        if (socket != kInvalidSocket) closeSocket(socket);
+    }
 };
 
 NetServer::NetServer(Settings settings)
@@ -37,42 +55,43 @@ NetServer::~NetServer() { stop(); }
 bool NetServer::start() {
     ensureSocketsInit();
 
-    listenSocket_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (listenSocket_ == kInvalidSocket) {
+    // Built in a local and published once ready: acceptLoop and stop() only
+    // ever see a fully set-up listener (or none).
+    const socket_t listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (listener == kInvalidSocket) {
         lastError_ = "could not create listen socket";
         return false;
     }
-    configureSocket(listenSocket_);
+    configureSocket(listener);
     int one = 1;
-    setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one),
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one),
                sizeof(one));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(static_cast<std::uint16_t>(settings_.port));
-    if (::bind(listenSocket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    if (::bind(listener, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
         lastError_ = "could not bind port " + std::to_string(settings_.port);
-        closeSocket(listenSocket_);
-        listenSocket_ = kInvalidSocket;
+        closeSocket(listener);
         return false;
     }
-    if (::listen(listenSocket_, kMaxPlayers) != 0) {
+    if (::listen(listener, kListenBacklog) != 0) {
         lastError_ = "could not listen on port " + std::to_string(settings_.port);
-        closeSocket(listenSocket_);
-        listenSocket_ = kInvalidSocket;
+        closeSocket(listener);
         return false;
     }
 
     // Learn the real port when 0 asked the OS to pick one.
     sockaddr_in bound{};
     socklen_t len = sizeof(bound);
-    if (::getsockname(listenSocket_, reinterpret_cast<sockaddr*>(&bound), &len) == 0) {
+    if (::getsockname(listener, reinterpret_cast<sockaddr*>(&bound), &len) == 0) {
         port_ = static_cast<int>(ntohs(bound.sin_port));
     } else {
         port_ = settings_.port;
     }
 
+    listenSocket_ = listener;
     running_ = true;
     acceptThread_ = std::thread([this] { acceptLoop(); });
     tickThread_ = std::thread([this] { tickLoop(); });
@@ -80,19 +99,12 @@ bool NetServer::start() {
 }
 
 void NetServer::stop() {
-    if (!running_.exchange(false)) {
-        // start() may have failed after creating the socket; still close it.
-        if (listenSocket_ != kInvalidSocket) {
-            closeSocket(listenSocket_);
-            listenSocket_ = kInvalidSocket;
-        }
-        return;
-    }
+    if (!running_.exchange(false)) return;  // never started, or already stopped
 
     // Unblock accept(), then the tick sleeper.
-    shutdownSocket(listenSocket_);
-    closeSocket(listenSocket_);
-    listenSocket_ = kInvalidSocket;
+    const socket_t listener = listenSocket_.exchange(kInvalidSocket);
+    shutdownSocket(listener);
+    closeSocket(listener);
     tickCv_.notify_all();
 
     if (acceptThread_.joinable()) acceptThread_.join();
@@ -100,25 +112,27 @@ void NetServer::stop() {
 
     // Now no thread is creating connections; tell everyone goodbye and
     // unblock their readers.
-    std::vector<std::unique_ptr<Connection>> doomed;
+    std::vector<std::shared_ptr<Connection>> doomed;
     {
         std::lock_guard<std::mutex> lock(connectionsMutex_);
         doomed.swap(connections_);
     }
     for (auto& conn : doomed) {
+        // sendWire skips connections already dead, so a client that stopped
+        // reading costs nothing more here.
         sendOn(*conn, MessageType::Disconnect, {{"reason", "server closed"}});
         conn->alive = false;
         shutdownSocket(conn->socket);
         if (conn->reader.joinable()) conn->reader.join();
-        closeSocket(conn->socket);
     }
+    // Dropping `doomed` closes the sockets (Connection's destructor).
 }
 
 int NetServer::playerCount() const {
     std::lock_guard<std::mutex> lock(connectionsMutex_);
     int count = 0;
     for (const auto& conn : connections_) {
-        if (conn->alive && conn->playerId >= 0) ++count;
+        if (conn->alive && conn->admitted) ++count;
     }
     return count;
 }
@@ -138,7 +152,7 @@ std::vector<PlayerPose> NetServer::remotePlayerPoses() const {
     std::vector<PlayerPose> out;
     std::lock_guard<std::mutex> lock(connectionsMutex_);
     for (const auto& conn : connections_) {
-        if (!conn->alive || conn->playerId < 0) continue;
+        if (!conn->alive || !conn->admitted) continue;
         std::lock_guard<std::mutex> poseLock(conn->poseMutex);
         out.push_back(conn->pose);
     }
@@ -153,30 +167,56 @@ std::vector<NetServer::ChatEvent> NetServer::drainChatEvents() {
 }
 
 bool NetServer::sendToPlayer(int playerId, MessageType type, nlohmann::json payload) {
-    std::lock_guard<std::mutex> lock(connectionsMutex_);
-    for (auto& conn : connections_) {
-        if (conn->playerId == playerId && conn->alive) {
-            return sendOn(*conn, type, std::move(payload));
+    std::shared_ptr<Connection> target;
+    {
+        std::lock_guard<std::mutex> lock(connectionsMutex_);
+        for (const auto& conn : connections_) {
+            if (conn->playerId == playerId && conn->alive && conn->admitted) {
+                target = conn;
+                break;
+            }
         }
     }
-    return false;
+    // Sent outside connectionsMutex_: a slow peer must not stall playerCount()
+    // and every other caller for up to the send timeout.
+    return target && sendOn(*target, type, std::move(payload));
 }
 
 void NetServer::broadcast(MessageType type, nlohmann::json payload) {
     const std::string wire = FrameAssembler::encode(encodeMessage(type, std::move(payload)));
-    std::lock_guard<std::mutex> lock(connectionsMutex_);
-    for (auto& conn : connections_) {
-        if (!conn->alive || conn->playerId < 0) continue;
-        std::lock_guard<std::mutex> sendLock(conn->sendMutex);
-        if (!sendAll(conn->socket, wire)) conn->alive = false;
+    if (wire.empty()) {
+        std::cerr << "[llm_npc] net: dropped an oversized " << messageTypeToString(type)
+                  << " broadcast (over the " << kMaxFrameBytes << "-byte frame cap)\n";
+        return;
     }
+    for (const auto& conn : admittedConnections()) sendWire(*conn, wire);
+}
+
+std::vector<std::shared_ptr<NetServer::Connection>> NetServer::admittedConnections() const {
+    std::vector<std::shared_ptr<Connection>> out;
+    std::lock_guard<std::mutex> lock(connectionsMutex_);
+    for (const auto& conn : connections_) {
+        if (conn->alive && conn->admitted) out.push_back(conn);
+    }
+    return out;
 }
 
 bool NetServer::sendOn(Connection& conn, MessageType type, nlohmann::json payload) {
     const std::string wire = FrameAssembler::encode(encodeMessage(type, std::move(payload)));
+    if (wire.empty()) {
+        // The message is the problem, not the link: drop it, keep the player.
+        std::cerr << "[llm_npc] net: dropped an oversized " << messageTypeToString(type)
+                  << " message (over the " << kMaxFrameBytes << "-byte frame cap)\n";
+        return false;
+    }
+    return sendWire(conn, wire);
+}
+
+bool NetServer::sendWire(Connection& conn, const std::string& wire) {
     std::lock_guard<std::mutex> lock(conn.sendMutex);
+    if (!conn.alive) return false;  // already failed once; don't wait out another timeout
     if (!sendAll(conn.socket, wire)) {
-        conn.alive = false;
+        conn.alive = false;  // error or SO_SNDTIMEO expiry; the reaper closes it
         return false;
     }
     return true;
@@ -187,32 +227,55 @@ void NetServer::acceptLoop() {
         sockaddr_in peer{};
         socklen_t len = sizeof(peer);
         const socket_t accepted =
-            ::accept(listenSocket_, reinterpret_cast<sockaddr*>(&peer), &len);
+            ::accept(listenSocket_.load(), reinterpret_cast<sockaddr*>(&peer), &len);
         if (accepted == kInvalidSocket) {
             if (!running_) return;  // stop() closed the listen socket
-            continue;               // transient error; keep serving
+            std::this_thread::sleep_for(kAcceptBackoff);  // e.g. out of fds
+            continue;
         }
         configureSocket(accepted);
+        setSendTimeoutMs(accepted, settings_.sendTimeoutMs);
 
-        auto conn = std::make_unique<Connection>();
+        auto conn = std::make_shared<Connection>();
         conn->socket = accepted;
-        Connection* raw = conn.get();
+        bool atCap = false;
         {
             std::lock_guard<std::mutex> lock(connectionsMutex_);
-            connections_.push_back(std::move(conn));
+            atCap = static_cast<int>(connections_.size()) >= kMaxConnections;
+        }
+        // Players who just left may still hold slots until the next tick;
+        // reap them now rather than refuse a real joiner on their account.
+        if (atCap) reapDeadConnections();
+
+        std::lock_guard<std::mutex> lock(connectionsMutex_);
+        if (static_cast<int>(connections_.size()) >= kMaxConnections) {
+            continue;  // over the cap: `conn` goes out of scope and closes the socket
         }
         // Handshake runs on the connection's own reader thread so a slow
-        // joiner can't stall the accept loop.
+        // joiner can't stall the accept loop. The thread is started while
+        // holding connectionsMutex_, which the reaper also takes, so the
+        // reaper can never see — and free — a connection whose reader does
+        // not exist yet.
+        Connection* raw = conn.get();
         raw->reader = std::thread([this, raw] { readerLoop(*raw); });
+        connections_.push_back(std::move(conn));
     }
 }
 
 bool NetServer::handshake(Connection& conn) {
-    setRecvTimeoutMs(conn.socket, kHandshakeTimeoutMs);
+    // One deadline for the whole JoinRequest, not one per recv(): a peer
+    // trickling a byte at a time must not hold a connection slot forever.
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(settings_.handshakeTimeoutMs);
 
     // Collect frames until the first complete message (or timeout/violation).
     std::string joinPayload;
     while (joinPayload.empty()) {
+        const auto remainingMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     deadline - std::chrono::steady_clock::now())
+                                     .count();
+        if (remainingMs <= 0) return false;
+        setRecvTimeoutMs(conn.socket, static_cast<int>(remainingMs));
         char buf[1024];
         const auto n = ::recv(conn.socket, buf, sizeof(buf), 0);
         if (n <= 0) return false;  // timeout, closed, or error
@@ -244,8 +307,15 @@ bool NetServer::handshake(Connection& conn) {
                {{"accepted", false}, {"reason", "wrong join code"}});
         return false;
     }
+    // Missing, wrong-typed and empty names all get the "player<id>" default
+    // below; anything else must pass isValidPlayerName or is refused.
+    const std::string requestedName = readString(msg->payload, "name");
+    if (!isValidPlayerName(requestedName)) {
+        sendOn(conn, MessageType::Welcome, {{"accepted", false}, {"reason", kBadNameReason}});
+        return false;
+    }
 
-    // Assign the lowest free remote player id (1..kMaxPlayers-1); the host
+    // Reserve the lowest free remote player id (1..kMaxPlayers-1); the host
     // is always player 0. Full when none is free.
     int assigned = -1;
     {
@@ -261,9 +331,9 @@ bool NetServer::handshake(Connection& conn) {
             }
         }
         if (assigned != -1) {
-            conn.name = readString(msg->payload, "name",
-                                   "player" + std::to_string(assigned));
-            conn.playerId = assigned;  // set under the lock; playerCount sees it
+            conn.name = requestedName.empty() ? "player" + std::to_string(assigned)
+                                              : requestedName;
+            conn.playerId = assigned;  // reserved, but not yet admitted
             std::lock_guard<std::mutex> poseLock(conn.poseMutex);
             conn.pose.playerId = assigned;
             conn.pose.name = conn.name;
@@ -276,17 +346,23 @@ bool NetServer::handshake(Connection& conn) {
     }
 
     setRecvTimeoutMs(conn.socket, 0);  // back to blocking reads
-    return sendOn(conn, MessageType::Welcome,
-                  {{"accepted", true}, {"playerId", assigned}});
+    // Welcome goes out BEFORE the connection is admitted: snapshots only go
+    // to admitted connections, so the joiner's first frame is always its
+    // Welcome rather than a WorldSnapshot it would reject.
+    if (!sendOn(conn, MessageType::Welcome, {{"accepted", true}, {"playerId", assigned}})) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(connectionsMutex_);
+    conn.admitted = true;
+    return true;
 }
 
 void NetServer::readerLoop(Connection& conn) {
     if (!handshake(conn)) {
-        // Only mark dead — the tick thread's reaper owns closing the socket
-        // (after joining this thread), so a recycled fd can never be
-        // shut down by mistake.
+        // Only mark dead — reapDeadConnections() owns the teardown (after
+        // joining this thread). Dead connections never count as holding
+        // their reserved player id, so it frees up immediately.
         conn.alive = false;
-        conn.playerId = -1;
         return;
     }
 
@@ -353,7 +429,7 @@ nlohmann::json NetServer::buildSnapshot() {
     {
         std::lock_guard<std::mutex> lock(connectionsMutex_);
         for (auto& conn : connections_) {
-            if (!conn->alive || conn->playerId < 0) continue;
+            if (!conn->alive || !conn->admitted) continue;
             std::lock_guard<std::mutex> poseLock(conn->poseMutex);
             players.push_back(playerPoseToJson(conn->pose));
         }
@@ -371,26 +447,30 @@ void NetServer::tickLoop() {
         if (!running_) return;
 
         broadcast(MessageType::WorldSnapshot, buildSnapshot());
+        reapDeadConnections();
+    }
+}
 
-        // Reap connections whose reader has finished (failed handshake or
-        // disconnect) so their player id frees up and threads get joined.
-        std::vector<std::unique_ptr<Connection>> dead;
-        {
-            std::lock_guard<std::mutex> lock(connectionsMutex_);
-            for (auto it = connections_.begin(); it != connections_.end();) {
-                if (!(*it)->alive) {
-                    dead.push_back(std::move(*it));
-                    it = connections_.erase(it);
-                } else {
-                    ++it;
-                }
+void NetServer::reapDeadConnections() {
+    // Connections whose reader has finished (failed handshake or
+    // disconnect): their player id frees up and their threads get joined.
+    std::vector<std::shared_ptr<Connection>> dead;
+    {
+        std::lock_guard<std::mutex> lock(connectionsMutex_);
+        for (auto it = connections_.begin(); it != connections_.end();) {
+            if (!(*it)->alive) {
+                dead.push_back(std::move(*it));
+                it = connections_.erase(it);
+            } else {
+                ++it;
             }
         }
-        for (auto& conn : dead) {
-            if (conn->socket != kInvalidSocket) shutdownSocket(conn->socket);
-            if (conn->reader.joinable()) conn->reader.join();
-            if (conn->socket != kInvalidSocket) closeSocket(conn->socket);
-        }
+    }
+    // Shut down + join here; the socket itself closes when the last owner
+    // (possibly an in-flight broadcast on the host thread) drops it.
+    for (auto& conn : dead) {
+        if (conn->socket != kInvalidSocket) shutdownSocket(conn->socket);
+        if (conn->reader.joinable()) conn->reader.join();
     }
 }
 

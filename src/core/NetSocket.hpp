@@ -61,19 +61,30 @@ inline void shutdownSocket(socket_t s) {
 #endif
 }
 
-// Sets a receive timeout so a stalled peer cannot hang a reader forever
-// (used for handshakes; 0 restores blocking reads).
-inline void setRecvTimeoutMs(socket_t s, int ms) {
+// Sets SO_RCVTIMEO or SO_SNDTIMEO. Winsock takes a DWORD of milliseconds,
+// POSIX a timeval; on both, 0 means "block forever".
+inline void setSocketTimeoutMs(socket_t s, int option, int ms) {
 #ifdef _WIN32
     DWORD tv = static_cast<DWORD>(ms);
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+    setsockopt(s, SOL_SOCKET, option, reinterpret_cast<const char*>(&tv), sizeof(tv));
 #else
     timeval tv{};
     tv.tv_sec = ms / 1000;
     tv.tv_usec = (ms % 1000) * 1000;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(s, SOL_SOCKET, option, &tv, sizeof(tv));
 #endif
 }
+
+// Sets a receive timeout so a stalled peer cannot hang a reader forever
+// (used for handshakes; 0 restores blocking reads).
+inline void setRecvTimeoutMs(socket_t s, int ms) { setSocketTimeoutMs(s, SO_RCVTIMEO, ms); }
+
+// Sets a send timeout so a peer that stops reading cannot block a writer
+// forever once the kernel buffers fill: send() then fails (EAGAIN on POSIX,
+// WSAETIMEDOUT on Windows) and sendAll() reports the connection dead. After a
+// timed-out send the stream is in an unknown state, so the only safe follow-up
+// is to close the socket (0 restores blocking sends).
+inline void setSendTimeoutMs(socket_t s, int ms) { setSocketTimeoutMs(s, SO_SNDTIMEO, ms); }
 
 // Keeps a write to a dead peer from killing the process with SIGPIPE:
 // Linux flags it per send, macOS flags it per socket, Windows never signals.
