@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -155,6 +156,12 @@ class Npc {
     const std::vector<ChatTurn>& history() const { return history_; }
     bool waiting() const { return pendingId_ != 0; }
 
+    // Monotonic count of exchanges successfully recorded in history. Unlike
+    // history().size() it keeps rising after trimHistory() has capped the
+    // list, so "did anything new happen since I last saved/rated?" stays
+    // answerable. Failed or unmatched replies do not advance it.
+    std::size_t turnsCompleted() const { return turnsCompleted_; }
+
     // Persisted memory from earlier sessions, injected into every system
     // prompt this NPC sends (Persona::renderSystemPrompt(memory)). Loaded
     // from the ConversationStore at startup and refreshed after each
@@ -287,6 +294,7 @@ class Npc {
     LlmClient& client_;
     int maxHistoryTurns_;
     std::vector<ChatTurn> history_;
+    std::size_t turnsCompleted_ = 0;  // never trimmed; see turnsCompleted()
     std::uint64_t pendingId_ = 0;
     std::string pendingUserLine_;
     std::string memory_;  // persisted cross-session summary (may be empty)

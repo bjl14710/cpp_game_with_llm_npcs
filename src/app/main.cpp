@@ -463,7 +463,7 @@ int main(int argc, char** argv) {
     CharacterStore characterStore(projectRoot / "saves" / "characters.sqlite3");
     // Cross-session NPC memory store (summaries injected during spawning).
     ConversationStore memoryStore(projectRoot / "saves" / "conversations.sqlite3");
-    // History length at the last save, per NPC — sized by
+    // Npc::turnsCompleted() at the last save, per NPC — sized by
     // resetNpcSideArrays below.
     std::vector<std::size_t> savedTurns;
     // In-flight summary request id → NPC index it belongs to.
@@ -516,7 +516,7 @@ int main(int argc, char** argv) {
     const auto requestSummary = [&](int npcIndex) {
         if (npcIndex < 0 || npcIndex >= static_cast<int>(world.npcs().size())) return;
         Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
-        if (npc.history().size() <= savedTurns[static_cast<std::size_t>(npcIndex)]) return;
+        if (npc.turnsCompleted() <= savedTurns[static_cast<std::size_t>(npcIndex)]) return;
         std::string transcript;
         for (const auto& turn : npc.history()) {
             transcript += (turn.role == "user" ? "Player: " : npc.persona().name + ": ");
@@ -1022,7 +1022,7 @@ int main(int argc, char** argv) {
     // rating a reply provably never changes a live prompt.
     RatingLog ratingLog(projectRoot / "saves" / "ratings");
     int ratedNpc = -1;                 // one rating per (npc, reply)
-    std::size_t ratedHistorySize = 0;
+    std::size_t ratedTurnCount = 0;
 
     // ---- Sandbox editor state (issue #112) ----------------------------
     SandboxMap sandboxDoc;
@@ -1558,7 +1558,7 @@ int main(int argc, char** argv) {
                     !client.busy() && history.size() >= 2 &&
                     history.back().role == "assistant" &&
                     !(ratedNpc == session.npcIndex() &&
-                      ratedHistorySize == history.size());
+                      ratedTurnCount == ratedTarget.turnsCompleted());
                 if (ratable &&
                     (IsKeyPressed(KEY_F1) || IsKeyPressed(KEY_F2))) {
                     const std::string playerLine =
@@ -1576,7 +1576,7 @@ int main(int argc, char** argv) {
                                    npcLine);
                     if (wrote) {
                         ratedNpc = session.npcIndex();
-                        ratedHistorySize = history.size();
+                        ratedTurnCount = ratedTarget.turnsCompleted();
                     }
                 }
             }
@@ -2299,7 +2299,7 @@ int main(int argc, char** argv) {
                     Npc& npc = world.npcs()[static_cast<std::size_t>(npcIndex)];
                     npc.setMemory(reply.content);
                     if (memoryStore.save(npc.persona().name, npc.memory(), npc.history())) {
-                        savedTurns[static_cast<std::size_t>(npcIndex)] = npc.history().size();
+                        savedTurns[static_cast<std::size_t>(npcIndex)] = npc.turnsCompleted();
                     }
                 }  // failure: keep the old note; retry at the next close
                 continue;
@@ -2611,12 +2611,13 @@ int main(int argc, char** argv) {
         }
         if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
             session.npcIndex() < static_cast<int>(world.npcs().size())) {
-            const auto& ratedHistory =
-                world.npcs()[static_cast<std::size_t>(session.npcIndex())].history();
+            const Npc& ratedHud =
+                world.npcs()[static_cast<std::size_t>(session.npcIndex())];
+            const auto& ratedHistory = ratedHud.history();
             if (!client.busy() && ratedHistory.size() >= 2 &&
                 ratedHistory.back().role == "assistant" &&
                 !(ratedNpc == session.npcIndex() &&
-                  ratedHistorySize == ratedHistory.size())) {
+                  ratedTurnCount == ratedHud.turnsCompleted())) {
                 drawCenteredHudText("[F1] like reply    [F2] flag reply", 16, 12.f);
             }
         }
@@ -3010,7 +3011,7 @@ shutdown:
     // shutdown on the LLM).
     for (std::size_t i = 0; i < world.npcs().size(); ++i) {
         const Npc& npc = world.npcs()[i];
-        if (npc.history().size() > savedTurns[i]) {
+        if (npc.turnsCompleted() > savedTurns[i]) {
             memoryStore.save(npc.persona().name, npc.memory(), npc.history());
         }
     }

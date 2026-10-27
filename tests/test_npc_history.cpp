@@ -84,6 +84,46 @@ TEST_CASE("Npc trims history to the configured turn budget") {
     CHECK(npc.history()[2].content == "third");
 }
 
+TEST_CASE("Npc turn counter keeps advancing once history is at the cap (issue #327)") {
+    FakeOllama fake;
+    fake.setReply("Sure thing!");
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(testPersona(), client);  // default cap: 10 turns = 20 entries
+
+    for (int i = 0; i < 11; ++i) exchange(npc, client, "line " + std::to_string(i));
+    REQUIRE(npc.history().size() == 20);
+    const std::size_t recorded = npc.turnsCompleted();
+    CHECK(recorded == 11);
+
+    // One more exchange: history cannot grow, but progress must be visible.
+    exchange(npc, client, "one more");
+    CHECK(npc.history().size() == 20);
+    CHECK(npc.turnsCompleted() > recorded);
+}
+
+TEST_CASE("Npc turn counter ignores failed replies (issue #327)") {
+    FakeOllama fake;
+    fake.setReply("Fine.");
+    LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});
+    Npc npc(testPersona(), client);
+
+    exchange(npc, client, "first");
+    REQUIRE(npc.turnsCompleted() == 1);
+
+    fake.setMode(FakeOllama::Mode::Http500);
+    CHECK(exchange(npc, client, "second").empty());
+    CHECK(npc.turnsCompleted() == 1);
+
+    // A stray reply for another request is not a completed turn either.
+    npc.ask("third");
+    ChatReply stray;
+    stray.id = 9999;
+    stray.ok = true;
+    stray.content = "wrong number";
+    npc.onReplyArrived(stray);
+    CHECK(npc.turnsCompleted() == 1);
+}
+
 TEST_CASE("Npc ignores replies meant for other requests") {
     FakeOllama fake;
     LlmClient client({/*host=*/"127.0.0.1", /*port=*/fake.port()});

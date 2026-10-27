@@ -91,6 +91,7 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
 
     history_.push_back({"user", std::move(pendingUserLine_)});
     history_.push_back({"assistant", content});
+    ++turnsCompleted_;
     pendingUserLine_.clear();
     trimHistory();
     return content;
