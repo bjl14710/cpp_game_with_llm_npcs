@@ -9,6 +9,7 @@
 #include "raylib.h"
 
 #include "CharacterParts.hpp"
+#include "Config.hpp"
 #include "KeyBindings.hpp"
 
 namespace llm_npc {
@@ -110,6 +111,15 @@ class Menu {
     };
     void setModels(ModelHooks hooks);
 
+    // Installs the main page's graphics toggles (Noir night / Rain):
+    // `current` reads the live switches, `onChange` applies and persists a
+    // flipped set. Without hooks the toggles are not shown.
+    struct GraphicsHooks {
+        std::function<GraphicsConfig()> current;
+        std::function<void(const GraphicsConfig&)> onChange;
+    };
+    void setGraphics(GraphicsHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -187,6 +197,7 @@ class Menu {
     AvatarHooks avatar_;
     SandboxHooks sandbox_;
     ModelHooks models_;
+    GraphicsHooks graphics_;
     std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC

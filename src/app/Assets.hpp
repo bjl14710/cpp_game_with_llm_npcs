@@ -40,7 +40,9 @@ class Assets {
     // fogOpaqueDistance(), so tuning the haze automatically moves the cull
     // and the two cannot drift apart and cause visible popping. It used to
     // be three identical locals in Assets.cpp, which is exactly the drift
-    // waiting to happen.
+    // waiting to happen. This is the DAYLIGHT value: the noir look scales it
+    // up at night, never down, so a cull derived from it stays beyond full
+    // haze at every hour.
     static constexpr float kFogDensity = 0.006f;
 
     // How an entity's model maps into world space — the size CONTRACT that
@@ -125,6 +127,7 @@ class Assets {
     int celCameraLoc() const { return celCameraLoc_; }
     int celColorLoc() const { return celColorLoc_; }
     int celLightLoc() const { return celLightLoc_; }
+    int celDensityLoc() const { return celDensityLoc_; }
 
     // Inverted-hull outline shader for MESH characters (the model-space
     // counterpart of the #103 primitive hull): inflates along vertex
@@ -134,6 +137,7 @@ class Assets {
     }
     int outlineCameraLoc() const { return outlineCameraLoc_; }
     int outlineColorLoc() const { return outlineColorLoc_; }
+    int outlineDensityLoc() const { return outlineDensityLoc_; }
 
     // Ready-to-use material carrying the outline shader, so the renderer's
     // rim pass can DrawMesh directly without mutating a model's own
@@ -163,6 +167,23 @@ class Assets {
     // every file shares one animation library, so a mixed head/body pose
     // in agreement. Unknown stem or missing clip is a safe no-op.
     void poseModular(const std::string& stem, bool walking, float timeSec);
+
+    // True when the fog shader was built with the noir night terms (lamp
+    // pools, wet streets). False means the original fog shader is active —
+    // night renders exactly as before the noir work.
+    bool noirShader() const { return noirLoaded_; }
+
+    // Locations of the fog shader's per-frame noir uniforms; -1 when the
+    // shader lacks them (GL ignores sets to -1). lampPos is a vec3 array.
+    struct NoirLocs {
+        int fogDensity = -1;
+        int lampPos = -1;
+        int lampCount = -1;
+        int lampColor = -1;
+        int lampRadius = -1;
+        int wetness = -1;
+    };
+    const NoirLocs& noirLocs() const { return noirLocs_; }
 
    private:
     // Loads one city model by file stem; records it in models_ and returns
@@ -240,11 +261,15 @@ class Assets {
     int celCameraLoc_ = -1;
     int celColorLoc_ = -1;
     int celLightLoc_ = -1;
+    int celDensityLoc_ = -1;
     Shader outlineShader_{};
     bool outlineLoaded_ = false;
     int outlineCameraLoc_ = -1;
     int outlineColorLoc_ = -1;
+    int outlineDensityLoc_ = -1;
     Material outlineMaterial_{};  // default maps + outlineShader_
+    bool noirLoaded_ = false;
+    NoirLocs noirLocs_;
 };
 
 }  // namespace llm_npc

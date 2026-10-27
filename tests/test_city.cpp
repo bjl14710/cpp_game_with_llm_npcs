@@ -191,3 +191,71 @@ TEST_CASE("supportHeightAt reports what the feet can stand on") {
     // ...but from below it is a wall, not a floor.
     CHECK(city.supportHeightAt(cx, cz, 0.45f, 0.2f) == 0.f);
 }
+
+// --- Street lamps (noir night: the light sources for the lamp pools) ---
+
+TEST_CASE("every street lamp has a solid pole and a bulb over its arm") {
+    const City city = City::makeDowntown();
+    REQUIRE_FALSE(city.streetLamps().empty());
+    const std::vector<Vec3> heads = city.lampHeads();
+    REQUIRE(heads.size() == city.streetLamps().size());
+    for (std::size_t i = 0; i < city.streetLamps().size(); ++i) {
+        const llm_npc::StreetLamp& lamp = city.streetLamps()[i];
+        CAPTURE(i);
+        // The pole collider is generated from the lamp itself.
+        const Building* pole = city.findBuilding("streetlamp#" + std::to_string(i));
+        REQUIRE(pole != nullptr);
+        CHECK(city.circleIntersectsAny(lamp.x, lamp.z, 0.1f));
+        // The bulb hangs under the pole top, one arm's reach out.
+        CHECK(heads[i].y < lamp.height);
+        CHECK(heads[i].y > lamp.height - 1.f);
+        CHECK(llm_npc::distanceXZ(heads[i], Vec3{lamp.x, 0.f, lamp.z}) ==
+              doctest::Approx(llm_npc::kLampArmReach));
+    }
+}
+
+TEST_CASE("street lamps stand clear of other buildings") {
+    // A pole inside a shop or a parked car would read as clipping art.
+    const City city = City::makeDowntown();
+    for (const llm_npc::StreetLamp& lamp : city.streetLamps()) {
+        CAPTURE(lamp.x);
+        CAPTURE(lamp.z);
+        for (const Building& b : city.buildings()) {
+            if (b.id.rfind("streetlamp#", 0) == 0) continue;
+            const bool inside = lamp.x > b.minX - 0.3f && lamp.x < b.maxX + 0.3f &&
+                                lamp.z > b.minZ - 0.3f && lamp.z < b.maxZ + 0.3f;
+            CHECK_MESSAGE(!inside, b.id);
+        }
+    }
+}
+
+TEST_CASE("street lamps never block a persona home or a schedule walk") {
+    // NPC schedules walk straight lines between these points (personas/),
+    // sliding on collisions; a pole on one of those lines could snag them.
+    const City city = City::makeDowntown();
+    const struct { float ax, az, bx, bz; } routes[] = {
+        {-70.f, -36.f, -8.f, -6.f},  // baker: bakery <-> plaza lunch
+        {58.f, -36.f, 60.f, 70.f},   // barista: cafe <-> park break
+        {10.f, -10.f, 52.f, 52.f},   // musician: plaza <-> park
+        {-36.f, 8.f, 68.f, 73.f},    // librarian: library <-> park bench
+    };
+    for (const auto& r : routes) {
+        for (int step = 0; step <= 200; ++step) {
+            const float t = static_cast<float>(step) / 200.f;
+            const float x = r.ax + (r.bx - r.ax) * t;
+            const float z = r.az + (r.bz - r.az) * t;
+            for (const llm_npc::StreetLamp& lamp : city.streetLamps()) {
+                CAPTURE(lamp.x);
+                CAPTURE(lamp.z);
+                CHECK(llm_npc::distanceXZ(Vec3{x, 0.f, z}, Vec3{lamp.x, 0.f, lamp.z}) >
+                      1.5f);
+            }
+        }
+    }
+}
+
+TEST_CASE("sandbox cities have no authored street lamps") {
+    const City city = City::fromBuildings({}, 50.f);
+    CHECK(city.streetLamps().empty());
+    CHECK(city.lampHeads().empty());
+}

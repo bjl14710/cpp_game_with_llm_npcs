@@ -31,6 +31,8 @@ constexpr int kIdJournal = 5;
 constexpr int kIdAvatar = 6;
 constexpr int kIdSandbox = 7;
 constexpr int kIdModels = 8;
+constexpr int kIdNoirToggle = 9;
+constexpr int kIdRainToggle = 10;
 constexpr int kIdModelBase = 700;
 constexpr int kMaxModelRows = 8;
 // Sandbox page: New button + one row per saved map (capped by layout).
@@ -118,6 +120,8 @@ void Menu::setSandbox(SandboxHooks hooks) { sandbox_ = std::move(hooks); }
 
 void Menu::setModels(ModelHooks hooks) { models_ = std::move(hooks); }
 
+void Menu::setGraphics(GraphicsHooks hooks) { graphics_ = std::move(hooks); }
+
 void Menu::setTraitChoices(std::vector<std::string> ids) {
     traitChoices_ = std::move(ids);
     creatorTraitIndex_ = 0;
@@ -141,11 +145,20 @@ std::vector<Menu::Hit> Menu::layout() const {
 
     if (page_ == Page::Main) {
         const float x = (w - 320.f) * 0.5f;
-        float y = h * 0.5f - 326.f;
+        const bool toggles = graphics_.current && graphics_.onChange;
+        // Ten rows only fit a 720p window at a slightly tighter pitch.
+        const float pitch = toggles ? 64.f : 72.f;
+        float y = h * 0.5f - (toggles ? 314.f : 326.f);
         for (int id : {kIdResume, kIdControls, kIdMultiplayer, kIdCreator,
                        kIdAvatar, kIdJournal, kIdSandbox, kIdModels, kIdQuit}) {
+            if (id == kIdQuit && toggles) {
+                // Graphics switches share one row just above Quit.
+                hits.push_back({Rectangle{x, y, 156.f, 52.f}, kIdNoirToggle});
+                hits.push_back({Rectangle{x + 164.f, y, 156.f, 52.f}, kIdRainToggle});
+                y += pitch;
+            }
             hits.push_back({Rectangle{x, y, 320.f, 52.f}, id});
-            y += 72.f;
+            y += pitch;
         }
     } else if (page_ == Page::Journal) {
         // Rows draw in render(); only paging + back are clickable.
@@ -357,6 +370,13 @@ MenuResult Menu::update(float dt) {
                 page_ = Page::Sandbox;
                 sandboxMaps_ = sandbox_.listMaps ? sandbox_.listMaps()
                                                  : std::vector<std::string>{};
+            } else if (hit.id == kIdNoirToggle || hit.id == kIdRainToggle) {
+                if (graphics_.current && graphics_.onChange) {
+                    GraphicsConfig cfg = graphics_.current();
+                    if (hit.id == kIdNoirToggle) cfg.noirNight = !cfg.noirNight;
+                    else cfg.rain = !cfg.rain;
+                    graphics_.onChange(cfg);
+                }
             } else if (hit.id == kIdModels) {
                 page_ = Page::Model;
                 modelList_ = models_.listModels ? models_.listModels()
@@ -647,6 +667,13 @@ void Menu::render() const {
         else if (hit.id == kIdAvatar) label = "Edit My Avatar";
         else if (hit.id == kIdSandbox) label = "Sandbox Maps";
         else if (hit.id == kIdModels) label = "LLM Model";
+        else if (hit.id == kIdNoirToggle || hit.id == kIdRainToggle) {
+            const GraphicsConfig cfg =
+                graphics_.current ? graphics_.current() : GraphicsConfig{};
+            label = hit.id == kIdNoirToggle
+                        ? std::string("Noir: ") + (cfg.noirNight ? "on" : "off")
+                        : std::string("Rain: ") + (cfg.rain ? "on" : "off");
+        }
         else if (hit.id >= kIdModelBase && hit.id < kIdModelBase + kMaxModelRows) {
             const std::size_t index = static_cast<std::size_t>(hit.id - kIdModelBase);
             label = index < modelList_.size() ? modelList_[index] : "?";

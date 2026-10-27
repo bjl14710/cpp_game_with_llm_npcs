@@ -1,0 +1,4 @@
+# One repo per line:  owner/repo   [/absolute/local/path]
+# The FIRST repo is the "home" repo: the weekly digest issue is posted there.
+# Cloud runs only need owner/repo, and can only reach repos selected on this repo's routine.
+bjl14710/cpp_game_with_llm_npcs
