@@ -71,8 +71,17 @@ NpcMemory ConversationStore::load(const std::string& npcId) const {
             /*allow_exceptions=*/false);
         if (turns.is_array()) {
             for (const auto& turn : turns) {
-                memory.transcript.push_back(ChatTurn{turn.value("role", "user"),
-                                                     turn.value("content", "")});
+                // A hand-edited or damaged row may hold anything; keep only
+                // well-formed {role, content} string pairs.
+                if (!turn.is_object()) continue;
+                const auto role = turn.find("role");
+                const auto content = turn.find("content");
+                if (role == turn.end() || content == turn.end() ||
+                    !role->is_string() || !content->is_string()) {
+                    continue;
+                }
+                memory.transcript.push_back(
+                    ChatTurn{role->get<std::string>(), content->get<std::string>()});
             }
         } else {
             std::cerr << "[llm_npc] corrupt transcript for \"" << npcId

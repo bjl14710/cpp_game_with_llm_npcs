@@ -5,6 +5,7 @@
 // works if a beat renders identically every run. A cutscene driven by real
 // frame time produces a different image on every machine and the captures are
 // then worthless as a regression signal.
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -968,4 +969,49 @@ beat = a
     CHECK(scene.journalLine.empty());
     REQUIRE(errors.size() == 1);
     CHECK(errors[0].find("both be set or both omitted") != std::string::npos);
+}
+
+TEST_CASE("non-finite beat numbers are reported and fall back to the defaults") {
+    for (const char* key : {"hold", "yaw", "pitch", "fade_in", "fade_out"}) {
+        for (const char* bad : {"nan", "inf", "-inf", "1e99"}) {
+            CAPTURE(key);
+            CAPTURE(bad);
+            std::vector<std::string> errors;
+            const CutsceneDef scene = parsed(
+                std::string("beat = a\n  ") + key + " = " + bad + "\n", "nonfinite", &errors);
+            REQUIRE(errors.size() == 1);
+            CHECK(errors[0].find("finite") != std::string::npos);
+            REQUIRE(scene.beats.size() == 1);
+            CHECK(std::isfinite(scene.beats[0].hold));
+            CHECK(std::isfinite(scene.beats[0].fadeIn));
+            CHECK(std::isfinite(scene.beats[0].fadeOut));
+            CHECK(std::isfinite(scene.beats[0].pose.yawDeg));
+            CHECK(std::isfinite(scene.beats[0].pose.pitchDeg));
+        }
+    }
+}
+
+TEST_CASE("a non-finite camera component is reported") {
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed("beat = a\n  camera = 1, nan, 3\n", "nancam", &errors);
+    REQUIRE(errors.size() == 1);
+    CHECK_FALSE(scene.beats[0].hasPosition);
+}
+
+TEST_CASE("hold = nan cannot make a cutscene that never ends") {
+    const CutsceneDef scene = parsed("skippable = always\nbeat = a\n  hold = nan\n", "nanhold");
+    CutscenePlayer player;
+    player.play(scene, CameraPose{});
+    REQUIRE(player.active());
+    // The beat falls back to its default hold, so advancing past it finishes.
+    CHECK_FALSE(player.advance(scene.duration() + 1.f));
+    CHECK_FALSE(player.active());
+}
+
+TEST_CASE("a cutscene file with a UTF-8 BOM keeps its first key") {
+    std::vector<std::string> errors;
+    const CutsceneDef scene = parsed(
+        "\xEF\xBB\xBF" "name = Bom Scene\nbeat = a\n  hold = 1\n", "bom", &errors);
+    CHECK(errors.empty());
+    CHECK(scene.name == "Bom Scene");
 }

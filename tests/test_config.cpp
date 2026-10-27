@@ -126,6 +126,24 @@ TEST_CASE("loadLlmConfig reads the think toggle and defaults to omitted") {
     CHECK(llm_npc::loadLlmConfig(empty.path).think.empty());
 }
 
+TEST_CASE("loadLlmConfig reads max_reply_tokens and defaults to 256") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "max_reply_tokens = 96\n");
+    CHECK(llm_npc::loadLlmConfig(tmp.path).maxReplyTokens == 96);
+
+    TempDir empty;
+    CHECK(llm_npc::loadLlmConfig(empty.path).maxReplyTokens == 256);
+}
+
+TEST_CASE("loadLlmConfig reads context_tokens and defaults to 8192") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "context_tokens = 16384\n");
+    CHECK(llm_npc::loadLlmConfig(tmp.path).contextTokens == 16384);
+
+    TempDir empty;
+    CHECK(llm_npc::loadLlmConfig(empty.path).contextTokens == 8192);
+}
+
 TEST_CASE("setKvValue rewrites the matching line and preserves the rest") {
     TempDir tmp;
     tmp.write("llm.cfg",
@@ -204,4 +222,82 @@ TEST_CASE("loadGraphicsConfig reads noir_night and rain") {
     // Garbage keeps the default rather than silently disabling the look.
     tmp.write("graphics.cfg", "noir_night = sometimes\n");
     CHECK(llm_npc::loadGraphicsConfig(tmp.path).noirNight);
+}
+
+TEST_CASE("loadLlmConfig keeps the default for a non-numeric value instead of throwing") {
+    const llm_npc::LlmConfig defaults;
+    for (const char* bad : {"port = abc", "port =", "port = 12x", "port = 99999999999"}) {
+        CAPTURE(bad);
+        TempDir tmp;
+        tmp.write("llm.cfg", std::string(bad) + "\n");
+        llm_npc::LlmConfig cfg;
+        CHECK_NOTHROW(cfg = llm_npc::loadLlmConfig(tmp.path));
+        CHECK(cfg.port == defaults.port);
+    }
+
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "line_bank_threshold = high\n"
+              "line_bank_cps = fast\n"
+              "request_timeout_s = nan\n"
+              "temperature = nan\n"
+              "port = 8080\n");
+    llm_npc::LlmConfig cfg;
+    REQUIRE_NOTHROW(cfg = llm_npc::loadLlmConfig(tmp.path));
+    CHECK(cfg.lineBankThreshold == doctest::Approx(defaults.lineBankThreshold));
+    CHECK(cfg.lineBankCps == defaults.lineBankCps);
+    CHECK(cfg.requestTimeoutSeconds == defaults.requestTimeoutSeconds);
+    CHECK(cfg.temperature == doctest::Approx(defaults.temperature));
+    CHECK(cfg.port == 8080);  // a good neighbour is still applied
+}
+
+TEST_CASE("readKv ignores a leading UTF-8 BOM") {
+    TempDir tmp;
+    tmp.write("a.cfg", "\xEF\xBB\xBF" "host = example\nport = 1\n");
+    auto kv = llm_npc::readKv(tmp.path / "a.cfg");
+    CHECK(kv.size() == 2);
+    CHECK(kv["host"] == "example");
+    CHECK(kv["port"] == "1");
+}
+
+TEST_CASE("readKv keeps a '#' inside a value but still strips comments") {
+    TempDir tmp;
+    tmp.write("a.cfg",
+              "api_key = sk-abc#def\n"
+              "x = 1 # note\n"
+              "y = 2\t# tabbed note\n"
+              "#z = 3\n");
+    auto kv = llm_npc::readKv(tmp.path / "a.cfg");
+    CHECK(kv["api_key"] == "sk-abc#def");
+    CHECK(kv["x"] == "1");
+    CHECK(kv["y"] == "2");
+    CHECK(kv.count("z") == 0);
+}
+
+TEST_CASE("setKvValue refuses values with line breaks and leaves the file alone") {
+    const std::string original = "host = localhost\nmodel = old\n";
+    for (const char* hostile : {"evil\nbase_url = http://attacker", "evil\rx", "a\r\nb"}) {
+        CAPTURE(hostile);
+        TempDir tmp;
+        tmp.write("llm.cfg", original);
+        CHECK_FALSE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", hostile));
+        CHECK(llm_npc::slurp(tmp.path / "llm.cfg") == original);
+        CHECK_FALSE(llm_npc::setKvValue(tmp.path / "llm.cfg", "mo\ndel", "ok"));
+        CHECK(llm_npc::slurp(tmp.path / "llm.cfg") == original);
+    }
+}
+
+TEST_CASE("setKvValue leaves no temp file behind and fails cleanly when it cannot write") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "model = old\n");
+    REQUIRE(llm_npc::setKvValue(tmp.path / "llm.cfg", "model", "new"));
+    int files = 0;
+    for (const auto& e : fs::directory_iterator(tmp.path)) {
+        (void)e;
+        ++files;
+    }
+    CHECK(files == 1);
+
+    // A directory that does not exist: the temp file cannot be created.
+    CHECK_FALSE(llm_npc::setKvValue(tmp.path / "missing_dir" / "llm.cfg", "model", "x"));
 }

@@ -56,6 +56,7 @@ std::optional<PersonaBank> parseBankFile(const std::filesystem::path& path,
 
     std::ifstream in(path);
     if (!in) return fail("cannot be read");
+    skipUtf8Bom(in);
 
     PersonaBank bank;
     std::vector<std::string> localErrors;

@@ -58,7 +58,7 @@ const std::string& zoneAt(float x, float z) {
     return kStreets;
 }
 
-const std::string& zoneName(const std::string& zoneId) {
+std::string zoneName(const std::string& zoneId) {
     for (const ZoneDef& zone : zonesForDowntown()) {
         if (zone.id == zoneId) return zone.name;
     }

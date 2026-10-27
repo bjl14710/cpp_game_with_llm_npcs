@@ -147,6 +147,16 @@ Findings applied from the sibling games and the original companion demo:
 4. **One worker thread, non-blocking drains**: the render loop never waits on
    the network; 60 FPS is independent of Ollama health.
 5. Small default model (`qwen2.5:3b-instruct`) — swap via `config/llm.cfg`.
+6. **Stable prompt prefix**: Ollama reuses its KV cache for a byte-identical
+   prompt prefix, so each NPC's system prompt leads with what never changes
+   (identity, style, traits) and memory/gossip come after it. `context_tokens`
+   (default 8192) is sent as `num_ctx`; at Ollama's 4096 default a long prompt
+   is cut from the front, system prompt first.
+
+Server-side, set on the Ollama process rather than in `llm.cfg`:
+`OLLAMA_NUM_PARALLEL=2`–`4` lets several NPCs stream at once (each slot costs
+its own context's VRAM), and `OLLAMA_KV_CACHE_TYPE=q8_0` roughly halves KV-cache
+memory with little quality loss (needs flash attention, `OLLAMA_FLASH_ATTENTION=1`).
 
 ## Adding an NPC
 

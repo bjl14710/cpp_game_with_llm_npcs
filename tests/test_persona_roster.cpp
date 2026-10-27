@@ -7,6 +7,7 @@
 // it compares the WHOLE look, so two residents differing only by palette pass
 // while reading as the same person across a plaza.
 #include <filesystem>
+#include <fstream>
 #include <set>
 #include <string>
 #include <vector>
@@ -306,4 +307,33 @@ TEST_CASE("the roster is the full twenty-one residents" * doctest::skip()) {
     // Flipped from 10 at the end of the plan, once the render budget holds and
     // the eleven new residents pass the gate.
     CHECK(shippedRoster().size() == 21);
+}
+
+TEST_CASE("non-finite numbers in a persona are rejected, not range-checked as NaN") {
+    for (const char* bad : {"schedule = nan-12, 1, 2, x", "schedule = 5-nan, 1, 2, x",
+                            "schedule = inf-12, 1, 2, x", "schedule = 5-12, nan, 2, x",
+                            "schedule = 5-12, 1, inf, x", "position = nan, 2",
+                            "position = 1, inf", "facing = nan", "facing = inf",
+                            "facing = -inf"}) {
+        CAPTURE(bad);
+        const auto parsed = llm_npc::parsePersonaText(
+            std::string("name = X\n") + bad + "\n", "x");
+        CHECK_FALSE(parsed.ok);
+        CHECK_FALSE(parsed.error.empty());
+    }
+}
+
+TEST_CASE("a persona file with a UTF-8 BOM parses") {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "llm_npc_persona_bom";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    {
+        std::ofstream out(dir / "bom.persona", std::ios::binary);
+        out << "\xEF\xBB\xBF" "name = Bom Person\nposition = 1, 2\n";
+    }
+    const auto parsed = llm_npc::parsePersonaFile(dir / "bom.persona");
+    CHECK_MESSAGE(parsed.ok, parsed.error);
+    CHECK(parsed.value.persona.name == "Bom Person");
+    fs::remove_all(dir);
 }

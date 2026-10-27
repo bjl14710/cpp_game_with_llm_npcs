@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <iosfwd>
 #include <string>
 #include <unordered_map>
 
@@ -11,8 +12,16 @@ namespace llm_npc {
 // Trim ASCII whitespace from both ends.
 std::string trim(const std::string& s);
 
+// Consume a leading UTF-8 byte-order mark (EF BB BF) from `in`, if present.
+// Call right after opening a text file: editors on Windows prepend one, and
+// left in place it becomes part of the first key. Otherwise rewinds to the
+// start so the stream is unchanged.
+void skipUtf8Bom(std::istream& in);
+
 // Tiny key=value config reader; same shape as cpp_racing_game/config/*.cfg.
-// Lines starting with '#' (or trailing '# ...' fragments) are comments.
+// Lines starting with '#' (or trailing ' # ...' fragments, where the '#' is
+// preceded by whitespace) are comments; a '#' inside a value, as in an API key
+// "sk-abc#def", is kept. A leading UTF-8 BOM is ignored.
 // Returns an empty map when the file cannot be opened.
 std::unordered_map<std::string, std::string> readKv(const std::filesystem::path& path);
 
@@ -21,8 +30,10 @@ std::string slurp(const std::filesystem::path& path);
 
 // Sets a single "key = value" entry in `path` in place, rewriting only the
 // matching line and leaving comments and other lines untouched. Appends a new
-// "key = value" line if the key isn't already present. Returns false if the
-// file cannot be written.
+// "key = value" line if the key isn't already present. Returns false, leaving
+// the file untouched, if the key or value contains a CR or LF (which would
+// inject extra config lines) or if the file cannot be written. The write goes
+// to a temp file renamed over `path`, so a failure never truncates the config.
 bool setKvValue(const std::filesystem::path& path, const std::string& key,
                 const std::string& value);
 
