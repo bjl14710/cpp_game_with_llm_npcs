@@ -252,3 +252,45 @@ TEST_CASE("provider ollama keeps the OpenRouter env var default") {
     const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
     CHECK(cfg.apiKeyEnv == "OPENROUTER_API_KEY");
 }
+
+TEST_CASE("parseOnOff accepts the usual spellings and falls back otherwise") {
+    using llm_npc::parseOnOff;
+    for (const char* yes : {"on", "ON", " true ", "Yes", "1"}) {
+        CAPTURE(yes);
+        CHECK(parseOnOff(yes, false));
+    }
+    for (const char* no : {"off", "Off", "false", "NO", "0"}) {
+        CAPTURE(no);
+        CHECK_FALSE(parseOnOff(no, true));
+    }
+    CHECK(parseOnOff("maybe", true));
+    CHECK_FALSE(parseOnOff("", false));
+}
+
+TEST_CASE("loadGraphicsConfig defaults both noir switches on") {
+    TempDir tmp;  // no graphics.cfg at all
+    const llm_npc::GraphicsConfig cfg = llm_npc::loadGraphicsConfig(tmp.path);
+    CHECK(cfg.noirNight);
+    CHECK(cfg.rain);
+}
+
+TEST_CASE("loadGraphicsConfig reads noir_night and rain") {
+    TempDir tmp;
+    tmp.write("graphics.cfg",
+              "# visuals\n"
+              "noir_night = off\n"
+              "rain = on  # drizzle\n");
+    llm_npc::GraphicsConfig cfg = llm_npc::loadGraphicsConfig(tmp.path);
+    CHECK_FALSE(cfg.noirNight);
+    CHECK(cfg.rain);
+
+    // A persisted menu toggle round-trips through setKvValue.
+    REQUIRE(llm_npc::setKvValue(tmp.path / "graphics.cfg", "rain", "off"));
+    cfg = llm_npc::loadGraphicsConfig(tmp.path);
+    CHECK_FALSE(cfg.rain);
+    CHECK_FALSE(cfg.noirNight);
+
+    // Garbage keeps the default rather than silently disabling the look.
+    tmp.write("graphics.cfg", "noir_night = sometimes\n");
+    CHECK(llm_npc::loadGraphicsConfig(tmp.path).noirNight);
+}

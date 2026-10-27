@@ -332,16 +332,21 @@ void drawCompass(float yawDeg, const std::vector<std::pair<float, bool>>& marker
 }  // namespace
 
 int main(int argc, char** argv) {
-    // --frames N [shot.png] [--camera x z yaw] [--hour H] [--map file]:
+    // --frames N [shot.png] [--camera x z yaw] [--pitch deg] [--eye h]
+    //           [--hour H] [--map file]:
     // render N frames
     // then exit 0, optionally saving a screenshot of the last frame
     // (scripted smoke runs + visual checks). --camera overrides the default
-    // plaza vantage; --hour pins the world clock so day/night-dependent
-    // screenshots stay deterministic.
+    // plaza vantage; --pitch tilts the view (negative looks down) and --eye
+    // raises the camera's feet height, so a whole map can be framed from an
+    // elevated 3/4 angle like the sandbox editor's; --hour pins the world
+    // clock so day/night-dependent screenshots stay deterministic.
     long maxFrames = -1;
     const char* screenshotPath = nullptr;
     bool cameraOverride = false;
     float cameraX = 0.f, cameraZ = 0.f, cameraYaw = 180.f;
+    float cameraPitch = 0.f;   // degrees; negative looks down
+    float cameraEye = -1.f;    // feet height override (<0 = leave at ground)
     float hourOverride = -1.f;
     const char* mapFile = nullptr;  // --map: boot into a sandbox fixture
     // --sandbox-edit: boot --map straight into the EDITOR rather than
@@ -389,6 +394,12 @@ int main(int argc, char** argv) {
                 cameraZ = std::strtof(argv[arg + 2], nullptr);
                 cameraYaw = std::strtof(argv[arg + 3], nullptr);
                 arg += 4;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--pitch") == 0) {
+                cameraPitch = std::strtof(argv[arg + 1], nullptr);
+                arg += 2;
+            } else if (arg + 1 < argc && std::strcmp(argv[arg], "--eye") == 0) {
+                cameraEye = std::strtof(argv[arg + 1], nullptr);
+                arg += 2;
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--hour") == 0) {
                 hourOverride = std::strtof(argv[arg + 1], nullptr);
                 arg += 2;
@@ -623,6 +634,13 @@ int main(int argc, char** argv) {
     SetTargetFPS(60);
     SetExitKey(KEY_NULL);  // Escape is a game key (menu/back), not app-quit
 
+    // GL-owning objects (Assets' shaders/models, the renderer) must be torn
+    // down while the GL context is still alive. Scope them so their
+    // destructors run at the closing brace below — before CloseWindow() —
+    // instead of after it at function return, which dereferenced an
+    // already-destroyed context and crashed on every exit (e.g. --frames
+    // smoke runs returning 139).
+    {
     // Models need the GL context, so Assets loads after InitWindow.
     Assets assets((projectRoot / "assets").string());
     // UI faces (Nocturne design): optional drop-in TTFs, raylib's font else.
@@ -648,6 +666,11 @@ int main(int argc, char** argv) {
         }
     }
     renderer.setAvatarPalette(avatarLook.paletteId);
+
+    // Noir night switches (config/graphics.cfg; pause-menu toggles below).
+    const fs::path graphicsPath = configDir / "graphics.cfg";
+    GraphicsConfig graphics = loadGraphicsConfig(configDir);
+    renderer.setNoirOptions(graphics.noirNight, graphics.rain);
 
     DialogUI dialog;
     DialogueSession session;
@@ -755,10 +778,12 @@ int main(int argc, char** argv) {
     const bool smokeRun = maxFrames >= 0;
     if (smokeRun) {
         player.yawDeg = cameraYaw;
+        player.pitchDeg = cameraPitch;
         if (cameraOverride) {
             player.position.x = cameraX;
             player.position.z = cameraZ;
         }
+        if (cameraEye >= 0.f) player.position.y = cameraEye;
     }
     DisableCursor();
 
@@ -1245,6 +1270,16 @@ int main(int argc, char** argv) {
     };
     menu.setMatchSettings(matchHooks);
 
+    Menu::GraphicsHooks graphicsHooks;
+    graphicsHooks.current = [&graphics] { return graphics; };
+    graphicsHooks.onChange = [&](const GraphicsConfig& next) {
+        graphics = next;
+        renderer.setNoirOptions(graphics.noirNight, graphics.rain);
+        setKvValue(graphicsPath, "noir_night", graphics.noirNight ? "on" : "off");
+        setKvValue(graphicsPath, "rain", graphics.rain ? "on" : "off");
+    };
+    menu.setGraphics(graphicsHooks);
+
     menu.setSandbox(sandboxHooks);
     {
         std::vector<std::string> traitIds;
@@ -1482,7 +1517,8 @@ int main(int argc, char** argv) {
                 EnableCursor();
             }
 
-            if (jailSecondsLeft <= 0.f) {  // no walking out of a sentence
+            if (!smokeRun && jailSecondsLeft <= 0.f) {  // no walking out of a sentence
+                                                         // (smoke runs hold the fixed vantage)
                 Vec3 wish{};
                 if (isActionPressed(bindings, Action::MoveForward)) wish += flatForward(player.yawDeg);
                 if (isActionPressed(bindings, Action::MoveBackward)) wish += flatForward(player.yawDeg) * -1.f;
@@ -2575,7 +2611,9 @@ int main(int argc, char** argv) {
                     advanceWalk(walk, netNpc.position, dt);
                     renderer.drawCompositeCharacter(
                         npcLooks[static_cast<std::size_t>(netNpc.npcIndex)],
-                        netNpc.position, netNpc.facingDeg, walkPose(walk), face);
+                        netNpc.position, netNpc.facingDeg, walkPose(walk), face,
+                        false,
+                        mode == AppMode::Playing && nearbyNpc == netNpc.npcIndex);
                 } else {
                     CharacterVisual visual;
                     visual.position = netNpc.position;
@@ -2603,9 +2641,12 @@ int main(int argc, char** argv) {
                 // Mesh figures have no gesture clip either: a talking one
                 // plays its Walk clip so it still reads as animated.
                 if (npc.pose() != NpcAction::None) pose.gait = 1.f;
+                // The talk prompt's target gets the noir red rim at night.
+                const bool talkTarget = mode == AppMode::Playing &&
+                                        nearbyNpc == static_cast<int>(i);
                 renderer.drawCompositeCharacter(
                     npcLooks[i], npc.position(), npc.facingDeg(), pose, face,
-                    npc.combatState() == NpcState::Dead);
+                    npc.combatState() == NpcState::Dead, talkTarget);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a
@@ -3171,6 +3212,8 @@ shutdown:
 
     leaveSession();
     ui::unloadFonts();
+    }  // end GL-resource scope: Assets/RaylibRenderer unload here, while the
+       // GL context is still alive.
     CloseWindow();
     return 0;
 }

@@ -9,6 +9,7 @@
 #include "raylib.h"
 
 #include "CharacterParts.hpp"
+#include "Config.hpp"
 #include "KeyBindings.hpp"
 
 namespace llm_npc {
@@ -25,7 +26,7 @@ enum class MenuResult {
 // main page with the entries in four groups, driven by mouse or Up/Down/Enter,
 // and full-window sub-pages — Controls (click a key chip to arm capture of the
 // next key press), Multiplayer (host or join), Creator, Journal, Sandbox,
-// Model and Match Settings. Rebinds use KeyBindings swap semantics and are
+// Model, Match Settings and Graphics. Rebinds use KeyBindings swap semantics and are
 // saved to disk immediately. raylib is polled, so update() handles input and
 // returns the result each frame; render() draws.
 class Menu {
@@ -140,6 +141,15 @@ class Menu {
     };
     void setMatchSettings(MatchHooks hooks);
 
+    // Graphics page toggles (Noir night / Rain): `current` reads the live
+    // switches, `onChange` applies and persists a flipped set. Without
+    // hooks the page shows both switches off and clicking does nothing.
+    struct GraphicsHooks {
+        std::function<GraphicsConfig()> current;
+        std::function<void(const GraphicsConfig&)> onChange;
+    };
+    void setGraphics(GraphicsHooks hooks);
+
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
@@ -186,7 +196,8 @@ class Menu {
     // full-screen menu shipped drawn over the map editor (#215) and how every
     // UI capture in this project's history turned out to be missing its UI
     // (#216).
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model, Match };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model, Match,
+                      Graphics };
 
     // Opens `page` directly. Intended for --menu; play reaches pages by
     // clicking, and nothing about that path changes.
@@ -241,6 +252,7 @@ class Menu {
     SandboxHooks sandbox_;
     ModelHooks models_;
     MatchHooks matchSettings_;
+    GraphicsHooks graphics_;
     std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC

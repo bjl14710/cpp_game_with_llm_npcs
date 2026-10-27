@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,29 @@ struct Building {
     float height = 0.f;
     int facadeKind = 0;  // texture/tint selector for the renderer
 };
+
+// One street lamp: a pole standing at (x, z) whose arm reaches toward the
+// street along `yawDeg` (game facing convention: 0 looks toward +Z). The
+// pole is solid — City adds a collider for every lamp — and the light hangs
+// at lampHead(), the point the renderer's lamp pools radiate from.
+struct StreetLamp {
+    float x = 0.f;
+    float z = 0.f;
+    float yawDeg = 0.f;
+    float height = 5.5f;  // pole height in world units
+};
+
+// Horizontal reach of a lamp's arm from its pole, and how far below the
+// pole top the bulb hangs (matches the pack's streetlight silhouette).
+constexpr float kLampArmReach = 1.2f;
+constexpr float kLampBulbDrop = 0.35f;
+
+// World position of a lamp's bulb: the arm's end, just under the pole top.
+inline Vec3 lampHead(const StreetLamp& lamp) {
+    const float yaw = degToRad(lamp.yawDeg);
+    return {lamp.x + std::sin(yaw) * kLampArmReach, lamp.height - kLampBulbDrop,
+            lamp.z + std::cos(yaw) * kLampArmReach};
+}
 
 // The walkable city: a square ground plane bounded at +-halfSize() with
 // solid axis-aligned buildings. Collision treats the player as a circle on
@@ -43,6 +67,15 @@ class City {
     float halfSize() const { return halfSize_; }
 
     const std::vector<Building>& buildings() const { return buildings_; }
+
+    // Street lamps authored with the map (empty for sandbox cities). Each
+    // also appears in buildings() as a pole collider with id
+    // "streetlamp#<index>", so lamps can never be walked through.
+    const std::vector<StreetLamp>& streetLamps() const { return lamps_; }
+
+    // Bulb positions of every street lamp — the light sources the renderer
+    // picks its nearest few from each frame.
+    std::vector<Vec3> lampHeads() const;
 
     // Find a building by id; nullptr when absent.
     const Building* findBuilding(const std::string& id) const;
@@ -71,6 +104,7 @@ class City {
    private:
     float halfSize_ = 110.f;
     std::vector<Building> buildings_;
+    std::vector<StreetLamp> lamps_;
     bool hasStreets_ = true;
 };
 

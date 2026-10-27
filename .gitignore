@@ -42,3 +42,6 @@ config/secrets.cfg
 
 # Frame-budget reports (issue #257) — generated per run, machine-specific
 docs/reports/
+# Routine kit: scratch reports and preview worktrees (never committed)
+.claude/reports/
+.claude/worktrees/

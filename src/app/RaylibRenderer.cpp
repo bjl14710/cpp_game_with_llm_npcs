@@ -20,6 +20,18 @@ namespace {
 constexpr float kStreetCenter = 32.f;
 constexpr float kStreetWidth = 16.f;
 
+// The one hue the noir grade keeps saturated (reference accent #ff1f3d).
+constexpr Color kNoirRed{255, 31, 61, 255};
+
+// Linear blend between two colors, t in [0, 1].
+Color lerpColor(Color a, Color b, float t) {
+    const auto mix = [t](unsigned char x, unsigned char y) {
+        return static_cast<unsigned char>(static_cast<float>(x) +
+                                          (static_cast<float>(y) - static_cast<float>(x)) * t);
+    };
+    return Color{mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
+}
+
 // Ground/asphalt/sidewalk palette — warm, low-poly-friendly flats.
 constexpr Color kGrass{116, 153, 86, 255};
 constexpr Color kAsphalt{68, 70, 78, 255};
@@ -199,22 +211,143 @@ bool outlineWithinRange(const Camera3D& camera, const Vec3& at) {
     return distanceSquared(eye, at) < kOutlineMaxDistance * kOutlineMaxDistance;
 }
 
+// Noir post-process grade, run over the finished 3D pass (2D overlay draws
+// afterwards and is never graded). Uses raylib's default vertex shader.
+//   - luminance with a slight cool tint, mixed in by `desaturation`;
+//   - pixels where red clearly dominates AND is bright AND is a true red
+//     (green/blue under ~a third of red — not orange, not lit brick) keep
+//     full saturation: the one surviving hue, reserved for the accents;
+//   - bright warm highlights (sodium lamp pools and bulbs) keep a trace of
+//     their warmth so the light still reads as sodium, not fluorescent;
+//   - S-curve contrast, aspect-correct vignette, animated film grain.
+// Every term is scaled by uniforms that are 0 at night factor 0.
+constexpr const char* kGradeFragmentShader = R"(
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0;
+uniform float desaturation;
+uniform float contrast;
+uniform float vignette;
+uniform float grain;
+uniform float time;
+uniform vec2 resolution;
+out vec4 finalColor;
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+void main() {
+    vec3 c = texture(texture0, fragTexCoord).rgb;
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    vec3 cool = lum * vec3(0.93, 0.98, 1.07);
+    float redness = c.r - max(c.g, c.b);
+    float ratio = max(c.g, c.b) / max(c.r, 1e-3);
+    float keep = smoothstep(0.10, 0.20, redness) * smoothstep(0.35, 0.55, c.r) *
+                 smoothstep(0.38, 0.28, ratio);
+    float warmth = smoothstep(0.45, 0.85, lum) * step(c.b, c.r) * 0.3;
+    vec3 g = mix(c, cool, desaturation * (1.0 - max(keep, warmth)));
+    vec3 sc = clamp(g, 0.0, 1.0);
+    g = mix(g, sc * sc * (3.0 - 2.0 * sc), contrast);
+    vec2 uv = fragTexCoord - 0.5;
+    uv.x *= resolution.x / max(resolution.y, 1.0);
+    g *= 1.0 - vignette * smoothstep(0.3, 0.95, length(uv));
+    vec2 px = floor(fragTexCoord * resolution);
+    g += (hash(px + floor(time * 24.0) * vec2(17.0, 31.0)) - 0.5) * grain;
+    finalColor = vec4(clamp(g, 0.0, 1.0), 1.0);
+}
+)";
+
 }  // namespace
 
-RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {}
+RaylibRenderer::RaylibRenderer(Assets& assets) : assets_(assets) {
+    // The grade shader is optional: failure (GLSL mismatch) just means the
+    // 3D pass draws straight to the screen with no grade, as by day.
+    gradeShader_ = LoadShaderFromMemory(nullptr, kGradeFragmentShader);
+    gradeLoaded_ = IsShaderValid(gradeShader_);
+    if (gradeLoaded_) {
+        gradeLocs_.desaturation = GetShaderLocation(gradeShader_, "desaturation");
+        gradeLocs_.contrast = GetShaderLocation(gradeShader_, "contrast");
+        gradeLocs_.vignette = GetShaderLocation(gradeShader_, "vignette");
+        gradeLocs_.grain = GetShaderLocation(gradeShader_, "grain");
+        gradeLocs_.time = GetShaderLocation(gradeShader_, "time");
+        gradeLocs_.resolution = GetShaderLocation(gradeShader_, "resolution");
+    } else {
+        TraceLog(LOG_WARNING, "noir grade shader failed to compile - no grade");
+    }
+
+    // Soft radial falloff for the lamp-bulb glow billboards (white core
+    // fading to transparent; tinted per lamp at draw time).
+    Image glow = GenImageGradientRadial(64, 64, 0.f, WHITE, BLANK);
+    glowTexture_ = LoadTextureFromImage(glow);
+    UnloadImage(glow);
+}
+
+RaylibRenderer::~RaylibRenderer() {
+    if (IsTextureValid(glowTexture_)) UnloadTexture(glowTexture_);
+    if (IsRenderTextureValid(sceneTarget_)) UnloadRenderTexture(sceneTarget_);
+    if (gradeLoaded_) UnloadShader(gradeShader_);
+}
+
+bool RaylibRenderer::ensureSceneTarget() {
+    // Sized to the real framebuffer (HiDPI-aware) and rebuilt whenever the
+    // window size changes; failure falls back to ungraded direct drawing.
+    const int w = GetRenderWidth();
+    const int h = GetRenderHeight();
+    if (w <= 0 || h <= 0) return false;
+    if (IsRenderTextureValid(sceneTarget_) && sceneTarget_.texture.width == w &&
+        sceneTarget_.texture.height == h) {
+        return true;
+    }
+    if (IsRenderTextureValid(sceneTarget_)) UnloadRenderTexture(sceneTarget_);
+    sceneTarget_ = LoadRenderTexture(w, h);
+    return IsRenderTextureValid(sceneTarget_);
+}
+
+void RaylibRenderer::drawGradedScene() {
+    BeginShaderMode(gradeShader_);
+    const float resolution[2] = {static_cast<float>(sceneTarget_.texture.width),
+                                 static_cast<float>(sceneTarget_.texture.height)};
+    const float time = static_cast<float>(GetTime());
+    SetShaderValue(gradeShader_, gradeLocs_.desaturation, &noir_.desaturation,
+                   SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.contrast, &noir_.contrast, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.vignette, &noir_.vignette, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.grain, &noir_.grain, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.time, &time, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(gradeShader_, gradeLocs_.resolution, resolution, SHADER_UNIFORM_VEC2);
+    // Render textures are stored bottom-up: flip the source rectangle.
+    DrawTexturePro(sceneTarget_.texture,
+                   Rectangle{0.f, 0.f, resolution[0], -resolution[1]},
+                   Rectangle{0.f, 0.f, static_cast<float>(GetScreenWidth()),
+                             static_cast<float>(GetScreenHeight())},
+                   Vector2{0.f, 0.f}, 0.f, WHITE);
+    EndShaderMode();
+}
+
+void RaylibRenderer::setNoirOptions(bool noirNight, bool rain) {
+    noirEnabled_ = noirNight;
+    rainEnabled_ = rain;
+}
 
 void RaylibRenderer::setTimeOfDay(float hours) {
     // Sky, fog, and light all read the same curves from the same clock —
-    // fog keeps melting distant geometry into the horizon at any hour.
-    const SkyColor sky = skyColorAt(hours);
+    // fog keeps melting distant geometry into the horizon at any hour. The
+    // noir look blends in by the night factor (0 all day, so daylight is
+    // untouched); without the noir shader it stays off entirely.
+    noir_ = noirLookAt(hours, noirEnabled_ && assets_.noirShader());
+    if (!rainEnabled_) noir_.rain = 0.f;
+    const SkyColor sky = noir_.sky;
     skyColor_ = Color{static_cast<unsigned char>(sky.r * 255.f),
                       static_cast<unsigned char>(sky.g * 255.f),
                       static_cast<unsigned char>(sky.b * 255.f), 255};
-    lightLevel_ = lightLevelAt(hours);
+    lightLevel_ = lightLevelAt(hours) * noir_.ambientScale;
     const float fogColor[4] = {sky.r, sky.g, sky.b, 1.f};
+    const float density = Assets::kFogDensity * noir_.fogDensityScale;
     if (const Shader* fog = assets_.fogShader()) {
         SetShaderValue(*fog, assets_.fogColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(*fog, assets_.fogLightLoc(), &lightLevel_,
+                       SHADER_UNIFORM_FLOAT);
+        SetShaderValue(*fog, assets_.noirLocs().fogDensity, &density,
                        SHADER_UNIFORM_FLOAT);
     }
     // The character cel and outline programs fog with the same curves —
@@ -223,11 +356,71 @@ void RaylibRenderer::setTimeOfDay(float hours) {
         SetShaderValue(*cel, assets_.celColorLoc(), fogColor, SHADER_UNIFORM_VEC4);
         SetShaderValue(*cel, assets_.celLightLoc(), &lightLevel_,
                        SHADER_UNIFORM_FLOAT);
+        SetShaderValue(*cel, assets_.celDensityLoc(), &density, SHADER_UNIFORM_FLOAT);
     }
     if (const Shader* outline = assets_.outlineShader()) {
         SetShaderValue(*outline, assets_.outlineColorLoc(), fogColor,
                        SHADER_UNIFORM_VEC4);
+        SetShaderValue(*outline, assets_.outlineDensityLoc(), &density,
+                       SHADER_UNIFORM_FLOAT);
     }
+}
+
+void RaylibRenderer::uploadLamps(const City& city) {
+    const Shader* fog = assets_.fogShader();
+    if (!fog || !assets_.noirShader()) return;
+    const Assets::NoirLocs& locs = assets_.noirLocs();
+    int count = 0;
+    if (noir_.lampIntensity > 0.f) {
+        const std::vector<Vec3> lamps =
+            nearestLamps(city.lampHeads(), Vec3{camera_.position.x, camera_.position.y,
+                                                camera_.position.z});
+        float packed[noir::kMaxLamps * 3];
+        for (const Vec3& head : lamps) {
+            packed[count * 3 + 0] = head.x;
+            packed[count * 3 + 1] = head.y;
+            packed[count * 3 + 2] = head.z;
+            ++count;
+        }
+        if (count > 0) {
+            SetShaderValueV(*fog, locs.lampPos, packed, SHADER_UNIFORM_VEC3, count);
+        }
+        const float color[3] = {noir_.lampColor.r * noir_.lampIntensity,
+                                noir_.lampColor.g * noir_.lampIntensity,
+                                noir_.lampColor.b * noir_.lampIntensity};
+        SetShaderValue(*fog, locs.lampColor, color, SHADER_UNIFORM_VEC3);
+        SetShaderValue(*fog, locs.lampRadius, &noir_.lampRadius, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(*fog, locs.wetness, &noir_.wetSpecular, SHADER_UNIFORM_FLOAT);
+    }
+    SetShaderValue(*fog, locs.lampCount, &count, SHADER_UNIFORM_INT);
+}
+
+void RaylibRenderer::drawLampGlows(const City& city) {
+    if (noir_.lampIntensity <= 0.f) return;
+    const Shader* fog = assets_.fogShader();
+    if (fog) EndShaderMode();
+    const float n = noir_.night;
+    const auto channel = [n](float lamp) {
+        return static_cast<unsigned char>(std::min(255.f, lamp * 255.f));
+    };
+    const Color bulb{channel(noir_.lampColor.r), channel(noir_.lampColor.g),
+                     channel(noir_.lampColor.b), static_cast<unsigned char>(255.f * n)};
+    for (const Vec3& head : city.lampHeads()) {
+        DrawSphere({head.x, head.y, head.z}, 0.2f, bulb);
+    }
+    // Additive halos: brighten whatever is behind the bulb, never darken.
+    if (IsTextureValid(glowTexture_)) {
+        rlDrawRenderBatchActive();
+        rlDisableDepthMask();
+        BeginBlendMode(BLEND_ADDITIVE);
+        const Color halo{bulb.r, bulb.g, bulb.b, static_cast<unsigned char>(150.f * n)};
+        for (const Vec3& head : city.lampHeads()) {
+            DrawBillboard(camera_, glowTexture_, {head.x, head.y, head.z}, 1.6f, halo);
+        }
+        EndBlendMode();
+        rlEnableDepthMask();
+    }
+    if (fog) BeginShaderMode(*fog);
 }
 
 void RaylibRenderer::beginFrame(const CameraPose& pose) {
@@ -240,6 +433,14 @@ void RaylibRenderer::beginFrame(const CameraPose& pose) {
     camera_.up = {0.f, 1.f, 0.f};
     camera_.fovy = 70.f;
     camera_.projection = CAMERA_PERSPECTIVE;
+
+    // Any night at all routes the 3D pass through the grade; full daylight
+    // keeps drawing straight to the (multisampled) screen exactly as before.
+    grading_ = gradeLoaded_ && noir_.night > 0.f && ensureSceneTarget();
+    if (grading_) {
+        BeginTextureMode(sceneTarget_);
+        ClearBackground(skyColor_);
+    }
 
     // Atmosphere: models carry the fog shader on their materials; wrapping
     // the whole 3D pass in BeginShaderMode routes the primitive batch
@@ -279,6 +480,7 @@ void RaylibRenderer::endCharacterShader() {
 
 void RaylibRenderer::drawCity(const City& city) {
     const float half = city.halfSize();
+    uploadLamps(city);
 
     // Ground: grass base with the street grid and block slabs on top.
     DrawPlane({0.f, 0.f, 0.f}, {half * 2.f, half * 2.f}, kGrass);
@@ -339,6 +541,9 @@ void RaylibRenderer::drawCity(const City& city) {
     // Buildings and street props from the collision AABBs — the models scale
     // to fit the authoritative footprints, never the other way around.
     for (const Building& b : city.buildings()) {
+        // Lamp poles draw from City::streetLamps below (they need the arm's
+        // yaw, which the collider box doesn't carry).
+        if (b.id.rfind("streetlamp#", 0) == 0) continue;
         // The fountain is composed from primitives (no pack model). Must be
         // dispatched by id BEFORE the model lookup: modelForBuilding falls
         // back to a hashed generic building for uncurated ids.
@@ -369,6 +574,63 @@ void RaylibRenderer::drawCity(const City& city) {
                           Color{40, 45, 60, 255});
         }
     }
+
+    // Street lamps: the pack's streetlight, pole on the lamp's collider and
+    // arm (the model's -X) turned to the lamp's yaw so the bulb hangs over
+    // lampHead(). Missing model: a primitive pole and arm.
+    const Model* streetlight = assets_.prop("streetlight");
+    for (const StreetLamp& lamp : city.streetLamps()) {
+        if (streetlight) {
+            const BoundingBox bb = GetModelBoundingBox(*streetlight);
+            const float h = bb.max.y - bb.min.y;
+            if (h <= 0.f) continue;
+            const float s = lamp.height / h;
+            DrawModelEx(*streetlight, {lamp.x, -bb.min.y * s, lamp.z},
+                        Vector3{0.f, 1.f, 0.f}, lamp.yawDeg + 90.f, Vector3{s, s, s},
+                        WHITE);
+        } else {
+            const Vec3 head = lampHead(lamp);
+            DrawCylinder({lamp.x, 0.f, lamp.z}, 0.08f, 0.1f, lamp.height, 8,
+                         Color{52, 56, 62, 255});
+            DrawCylinderEx({lamp.x, lamp.height, lamp.z},
+                           {head.x, lamp.height, head.z}, 0.06f, 0.06f, 6,
+                           Color{52, 56, 62, 255});
+        }
+    }
+    drawLampGlows(city);
+    drawRedAccents(city);
+}
+
+void RaylibRenderer::drawRedAccents(const City& city) {
+    if (noir_.night <= 0.f) return;
+    const Shader* fog = assets_.fogShader();
+    if (fog) EndShaderMode();
+    const auto alpha = static_cast<unsigned char>(255.f * noir_.night);
+    const Color red{kNoirRed.r, kNoirRed.g, kNoirRed.b, alpha};
+    // Police bar flashes red / cold white-blue (the grade turns the blue
+    // grey, so it reads as a white strobe against the surviving red).
+    const bool phase = std::fmod(GetTime(), 0.9) < 0.45;
+    const Color dimRed{90, 12, 22, alpha};
+    const Color blue{80, 120, 255, alpha};
+    const Color dimBlue{20, 26, 60, alpha};
+    for (const Building& b : city.buildings()) {
+        const std::string baseId = b.id.substr(0, b.id.find('#'));
+        const float cx = (b.minX + b.maxX) * 0.5f;
+        const float cz = (b.minZ + b.maxZ) * 0.5f;
+        if (baseId == "police_car") {
+            const float top = assets_.sizeSpecFor(b).worldHeight;
+            DrawCube({cx - 0.22f, top - 0.04f, cz}, 0.36f, 0.12f, 0.24f,
+                     phase ? red : dimRed);
+            DrawCube({cx + 0.22f, top - 0.04f, cz}, 0.36f, 0.12f, 0.24f,
+                     phase ? dimBlue : blue);
+        } else if (baseId == "bakery" || baseId == "coffee") {
+            // A thin strip just proud of the street-facing (+Z) front,
+            // above the ground-floor awnings.
+            const float width = (b.maxX - b.minX) * 0.55f;
+            DrawCube({cx, b.height * 0.3f, b.maxZ + 0.08f}, width, 0.14f, 0.06f, red);
+        }
+    }
+    if (fog) BeginShaderMode(*fog);
 }
 
 void RaylibRenderer::drawCharacter(const CharacterVisual& visual) {
@@ -1072,7 +1334,7 @@ void drawPartMeshes(const Assets::PartMeshes& pm, const Vec3& at, float s,
 void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                                             const Vec3& position, float facingDeg,
                                             const WalkPose& pose, NpcFace face,
-                                            bool dead) {
+                                            bool dead, bool highlighted) {
     // Fully fogged (issue #170) or behind the camera (issue #272) -> not
     // drawn. Before assembleLook so a culled figure also skips assembly,
     // palette lookups and the modular CPU pose — all of it is render-only
@@ -1253,15 +1515,31 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
     // so the state is left exactly as found (RL_CULL_FACE_BACK). The PROF
     // scope sits inside the braces so it times the hull pass alone — not,
     // as before, everything from here to the end of the function.
+    //
+    // The talk target's rim turns noir red at night, drawn unlit so the
+    // grade keeps it; daytime takes the unchanged ink-outline path. The
+    // talk target is within kTalkRadius, far inside kOutlineMaxDistance,
+    // so the range gate never drops its red rim. The red hull is 0.015
+    // larger than the ink one, the same margin noir gave it over the old
+    // 1.06 hull.
+    const bool rim = highlighted && noir_.night > 0.f;
     if (outlineWithinRange(camera_, position)) {
         PROF_SCOPE_N("render.char.outline_pass");
         constexpr float kHullScale = 1.035f;
-        const RecipeColors outlineColors = flatColors(kOutlineColor);
+        const float hullScale = rim ? kHullScale + 0.015f : kHullScale;
+        const Color outline =
+            rim ? lerpColor(kOutlineColor, kNoirRed, noir_.night) : kOutlineColor;
+        const RecipeColors outlineColors = flatColors(outline);
+        // The pass runs inside beginCharacterShader(), so the program to
+        // unbind for the unlit red rim, and to restore after it, is the cel
+        // shader when it compiled and the frame's fog shader otherwise.
+        const Shader* lit =
+            assets_.celShader() ? assets_.celShader() : assets_.fogShader();
         rlDrawRenderBatchActive();
+        if (rim && lit) EndShaderMode();
         rlSetCullFace(RL_CULL_FACE_FRONT);
         if (walkingLegs) {
-            drawLegs(legLayout.legR * (kHullScale - 1.f), kOutlineColor,
-                     kOutlineColor);
+            drawLegs(legLayout.legR * (hullScale - 1.f), outline, outline);
         }
         beginUpperBody();
         for (const PlacedPart& placed : assembled.parts) {
@@ -1281,8 +1559,8 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
             if (!placed.part->meshName.empty()) {
                 if (const Assets::PartMeshes* pm =
                         assets_.partMeshes(placed.part->meshName)) {
-                    if (const Material* rim = assets_.outlineMaterial()) {
-                        drawPartMeshes(*pm, at, s, rim);
+                    if (const Material* rimMaterial = assets_.outlineMaterial()) {
+                        drawPartMeshes(*pm, at, s, rimMaterial);
                     }
                     drawn = true;
                 }
@@ -1293,7 +1571,7 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
                 const float cy = at.y + dim.y * 0.5f;
                 // Inflate about the part's center, not the feet.
                 rlTranslatef(at.x, cy, at.z);
-                rlScalef(kHullScale, kHullScale, kHullScale);
+                rlScalef(hullScale, hullScale, hullScale);
                 rlTranslatef(-at.x, -cy, -at.z);
                 drawPartRecipe(*placed.part, at, dim, outlineColors, walk.hairDeg,
                                !walkingLegs);
@@ -1303,6 +1581,7 @@ void RaylibRenderer::drawCompositeCharacter(const CharacterLook& look,
         rlPopMatrix();
         rlDrawRenderBatchActive();
         rlSetCullFace(RL_CULL_FACE_BACK);
+        if (rim && lit) BeginShaderMode(*lit);
     }
 
     if (walkingLegs) drawLegs(0.f, colors.pants, colors.shoe);
@@ -1511,9 +1790,66 @@ void RaylibRenderer::drawViewmodel(int weaponKind, float attackFraction) {
     endCharacterShader();
 }
 
+void RaylibRenderer::drawRain() {
+    // Box around the eye: drops spawn up to kAbove overhead, recycle once
+    // they fall kBelow under the eye, and wrap horizontally to stay within
+    // +-kHalf so walking never outruns the shower.
+    constexpr float kHalf = 18.f;
+    constexpr float kAbove = 10.f;
+    constexpr float kBelow = 4.f;
+    constexpr float kFallSpeed = 22.f;
+    constexpr float kStreak = 0.9f;
+    const Vector3 wind{2.6f, 0.f, 1.1f};
+    const Vector3 eye = camera_.position;
+    std::uniform_real_distribution<float> unit(0.f, 1.f);
+    const auto respawn = [&](Vector3& p, float y) {
+        p = {eye.x + (unit(rainRng_) * 2.f - 1.f) * kHalf, y,
+             eye.z + (unit(rainRng_) * 2.f - 1.f) * kHalf};
+    };
+    if (!rainSeeded_) {
+        for (Vector3& p : rainDrops_) {
+            respawn(p, eye.y - kBelow + unit(rainRng_) * (kAbove + kBelow));
+        }
+        rainSeeded_ = true;
+    }
+
+    const float dt = std::min(GetFrameTime(), 0.05f);
+    const float fall = kFallSpeed * dt;
+    for (Vector3& p : rainDrops_) {
+        p.y -= fall;
+        p.x += wind.x * dt;
+        p.z += wind.z * dt;
+        if (p.y < eye.y - kBelow || p.y < 0.f) {
+            respawn(p, eye.y + kAbove - unit(rainRng_) * 2.f);
+            continue;
+        }
+        if (p.x - eye.x > kHalf) p.x -= 2.f * kHalf;
+        if (eye.x - p.x > kHalf) p.x += 2.f * kHalf;
+        if (p.z - eye.z > kHalf) p.z -= 2.f * kHalf;
+        if (eye.z - p.z > kHalf) p.z += 2.f * kHalf;
+    }
+
+    const auto count = static_cast<std::size_t>(
+        static_cast<float>(kRainDrops) * std::clamp(noir_.rain, 0.f, 1.f));
+    const Color streak{220, 228, 240, static_cast<unsigned char>(210.f * noir_.rain)};
+    // Each streak trails up-wind of its head, so the slant matches the drift.
+    const float wx = wind.x / kFallSpeed * kStreak;
+    const float wz = wind.z / kFallSpeed * kStreak;
+    for (std::size_t i = 0; i < count; ++i) {
+        const Vector3& p = rainDrops_[i];
+        DrawLine3D(p, {p.x - wx, p.y + kStreak, p.z - wz}, streak);
+    }
+}
+
 void RaylibRenderer::endFrame() {
+    if (noir_.rain > 0.f) drawRain();
     if (assets_.fogShader()) EndShaderMode();
     EndMode3D();
+    if (grading_) {
+        EndTextureMode();
+        drawGradedScene();
+        grading_ = false;
+    }
 }
 
 bool RaylibRenderer::worldToScreen(const Vec3& world, Vector2& out) const {

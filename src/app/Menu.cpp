@@ -24,6 +24,7 @@ constexpr int kIdSandbox = 7;
 constexpr int kIdModels = 8;
 constexpr int kIdNewMystery = 9;
 constexpr int kIdMatchSettings = 10;
+constexpr int kIdGraphics = 11;
 constexpr int kIdBack = 100;
 // Controls-page chips use ids [kIdChipBase, kIdChipBase + kActionCount).
 constexpr int kIdChipBase = 200;
@@ -62,6 +63,9 @@ constexpr int kIdDaysDown = 800;
 constexpr int kIdDaysUp = 801;
 constexpr int kIdLengthDown = 802;
 constexpr int kIdLengthUp = 803;
+// Graphics page: one on/off switch per row.
+constexpr int kIdNoirToggle = 900;
+constexpr int kIdRainToggle = 901;
 // Bounds for the two settings. A day limit of 1 is a legitimate one-day
 // mystery; 7 is where a session stops being one sitting. Day length is
 // bounded below by "long enough to walk across downtown and hold two
@@ -100,6 +104,7 @@ constexpr MainEntry kMainEntries[] = {
     {kIdMultiplayer, "Multiplayer", "World"},
     {kIdSandbox, "Sandbox Maps", nullptr},
     {kIdControls, "Controls", "System"},
+    {kIdGraphics, "Graphics", nullptr},
     {kIdModels, "LLM Model", nullptr},
     {kIdQuit, "Quit", nullptr},
 };
@@ -313,6 +318,8 @@ void Menu::setModels(ModelHooks hooks) { models_ = std::move(hooks); }
 
 void Menu::setMatchSettings(MatchHooks hooks) { matchSettings_ = std::move(hooks); }
 
+void Menu::setGraphics(GraphicsHooks hooks) { graphics_ = std::move(hooks); }
+
 void Menu::setHeader(std::string kicker, std::string sub) {
     headerKicker_ = std::move(kicker);
     headerSub_ = std::move(sub);
@@ -429,6 +436,14 @@ std::vector<Menu::Hit> Menu::layout() const {
                             pair.first});
             hits.push_back({Rectangle{kPad + 480.f - 24.f - 36.f, y + 18.f, 36.f, 36.f},
                             pair.second});
+            y += 88.f;
+        }
+    } else if (page_ == Page::Graphics) {
+        // Two rows, each "label ... [on/off]": the switch is the clickable
+        // part, sat where the Match page puts its -/+ pair.
+        float y = kContentTop + 8.f;
+        for (const int id : {kIdNoirToggle, kIdRainToggle}) {
+            hits.push_back({Rectangle{kPad + 480.f - 24.f - 96.f, y + 18.f, 96.f, 36.f}, id});
             y += 88.f;
         }
     } else if (page_ == Page::Model) {
@@ -604,6 +619,15 @@ MenuResult Menu::activate(int id) {
     } else if (id == kIdDaysDown || id == kIdDaysUp || id == kIdLengthDown ||
                id == kIdLengthUp) {
         nudgeMatchSetting(id);
+    } else if (id == kIdGraphics) {
+        page_ = Page::Graphics;
+    } else if (id == kIdNoirToggle || id == kIdRainToggle) {
+        if (graphics_.current && graphics_.onChange) {
+            GraphicsConfig cfg = graphics_.current();
+            if (id == kIdNoirToggle) cfg.noirNight = !cfg.noirNight;
+            else cfg.rain = !cfg.rain;
+            graphics_.onChange(cfg);
+        }
     } else if (id == kIdModels) {
         page_ = Page::Model;
         modelList_ = models_.listModels ? models_.listModels() : std::vector<std::string>{};
@@ -1135,6 +1159,27 @@ void Menu::render() const {
         }
         ui::text(Face::Ui, "Dusk falls as the day runs out - the sky is the timer.", kPad,
                  y + 8.f, 13.f, ui::kNeutral500);
+    } else if (page_ == Page::Graphics) {
+        renderPageHeader("System", "Graphics",
+                         "Applies immediately and is saved to graphics.cfg.");
+        const GraphicsConfig cfg = graphics_.current ? graphics_.current() : GraphicsConfig{};
+        const char* labels[2] = {"Noir night", "Rain"};
+        float y = kContentTop + 8.f;
+        for (int i = 0; i < 2; ++i) {
+            const Rectangle c{kPad, y, 480.f, 72.f};
+            ui::card(c);
+            ui::text(Face::Display, labels[i], c.x + 24.f, c.y + 22.f, 22.f, ui::kText);
+            y += 88.f;
+        }
+        for (const Hit& hit : layout()) {
+            if (hit.id != kIdNoirToggle && hit.id != kIdRainToggle) continue;
+            const bool on = hit.id == kIdNoirToggle ? cfg.noirNight : cfg.rain;
+            ui::button(hit.rect, on ? "On" : "Off",
+                       on ? ui::ButtonKind::Primary : ui::ButtonKind::Secondary,
+                       hovered(hit.rect));
+        }
+        ui::text(Face::Ui, "Rain only falls while noir night is on.", kPad, y + 8.f, 13.f,
+                 ui::kNeutral500);
     }
 
     if (!toast_.empty()) ui::toast(toast_, h - 84.f);
@@ -1152,6 +1197,7 @@ std::optional<Menu::Page> Menu::pageFromName(const std::string& name) {
     if (name == "sandbox") return Page::Sandbox;
     if (name == "model") return Page::Model;
     if (name == "match") return Page::Match;
+    if (name == "graphics") return Page::Graphics;
     return std::nullopt;
 }
 
