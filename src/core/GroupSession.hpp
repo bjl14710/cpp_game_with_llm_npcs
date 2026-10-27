@@ -33,9 +33,10 @@ class GroupSession {
 
     // The labeled transcript, and its rendering for per-speaker prompts
     // ("Name: line\n" per entry — the last other-speaker line is the
-    // user-turn input for whoever speaks next). The stored transcript keeps
-    // every line (cleared on open/close, a few bytes per turn); the RENDERED
-    // text covers only the newest kMaxRenderedLines so prompts stay bounded.
+    // user-turn input for whoever speaks next). addLine strips directive
+    // tags from `text` before storing it. The stored transcript keeps every
+    // line (cleared on open/close, a few bytes per turn); the RENDERED text
+    // covers only the newest kMaxRenderedLines so prompts stay bounded.
     static constexpr std::size_t kMaxRenderedLines = 12;
     const std::vector<GroupLine>& transcript() const;
     void addLine(const std::string& speaker, const std::string& text);

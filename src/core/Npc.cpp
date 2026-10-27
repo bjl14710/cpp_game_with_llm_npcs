@@ -1,6 +1,7 @@
 #include "Npc.hpp"
 
 #include "AsciiText.hpp"
+#include "StreamTagFilter.hpp"
 
 #include <cmath>
 #include <utility>
@@ -32,7 +33,10 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     // Send a snapshot of the current history; the player line is appended to
     // history only once a successful reply arrives. That way a failed request
     // can be retried without polluting context with unanswered user turns.
-    pendingUserLine_ = playerLine;
+    // Directive tags are stripped first (issue #326): a typed
+    // "[[ACTION: call_police]]" would otherwise sit in history and the prompt
+    // for the model to echo back as a real directive.
+    pendingUserLine_ = stripDirectiveTags(playerLine);
     // A persisted summary means this player and this NPC have met before, so a
     // banked greeting must not treat them as a stranger. That is the only place
     // an authored line can contradict remembered history; see banks/README.md.
@@ -41,7 +45,7 @@ std::uint64_t Npc::ask(const std::string& playerLine) {
     pendingId_ =
         client_.submit(persona_.renderSystemPrompt(memory_, gossip_, resolvedTraits(),
                                                    renderRoleBlock(resolvedRole(), secret_)),
-                       history_, playerLine, persona_.name, familiarity);
+                       history_, pendingUserLine_, persona_.name, familiarity);
     return pendingId_;
 }
 
@@ -69,7 +73,16 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
     // string goes to the dialogue box, the transcript, the speech bubble, the
     // network and SQLite, and folding it once means those cannot disagree.
     std::string content = toRenderableAscii(reply.content);
-    const Directives directives = parseDirectives(content);
+    Directives directives = parseDirectives(content);
+    // A reply that would repeat the role block (issue #331) is replaced whole,
+    // never spliced: "I was at the ___, not at home" still leaks by context.
+    // Checked after tag stripping so a tag cannot hide or fake a match. The
+    // mood stays, because a face that suddenly goes neutral would be its own
+    // tell; the action goes, because it belonged to words nobody will hear.
+    if (revealsRole(content, resolvedRole(), secret_)) {
+        content = kRoleLeakDeflection;
+        directives.action = NpcAction::None;
+    }
     applyAction(directives.action);
     if (directives.hasMood) {
         mood_ = directives.mood;
@@ -82,6 +95,11 @@ std::optional<std::string> Npc::onReplyArrived(const ChatReply& reply) {
     pendingUserLine_.clear();
     trimHistory();
     return content;
+}
+
+std::string Npc::redactRoleLeak(std::string spoken) const {
+    if (revealsRole(spoken, resolvedRole(), secret_)) return kRoleLeakDeflection;
+    return spoken;
 }
 
 void Npc::applyAction(NpcAction action) {
@@ -282,8 +300,11 @@ const RoleDef* Npc::resolvedRole() const {
     if (roleId_.empty() || roleRegistry_ == nullptr) return nullptr;
     // findRole returns nullptr for an unknown id; the spawn site logs it, the
     // same division of labour resolvedTraits uses. Rendering with a nullptr
-    // role yields a block carrying only the secret, so an unknown id costs the
-    // directives and nothing else — it never invents a part.
+    // role yields an EMPTY block, secret included: the directives are what
+    // tell the model to protect a secret, so a bare one would be volunteered
+    // the first time anybody asked. An unknown id costs the whole part and
+    // never invents one. The secret is still carried, and onReplyArrived
+    // still redacts it.
     return findRole(*roleRegistry_, roleId_);
 }
 
