@@ -42,6 +42,9 @@ class Assets {
     // be three identical locals in Assets.cpp, which is exactly the drift
     // waiting to happen.
     static constexpr float kFogDensity = 0.006f;
+    // Rim color the mesh outline shader is loaded with; the renderer tints
+    // it for the noir talk-target rim and restores it afterwards.
+    static constexpr Color kMeshOutlineColor{32, 30, 38, 255};
 
     // How an entity's model maps into world space — the size CONTRACT that
     // makes relative scale independent of any specific asset's native
@@ -164,6 +167,23 @@ class Assets {
     // in agreement. Unknown stem or missing clip is a safe no-op.
     void poseModular(const std::string& stem, bool walking, float timeSec);
 
+    // True when the fog shader was built with the noir night terms (lamp
+    // pools, wet streets). False means the original fog shader is active —
+    // night renders exactly as before the noir work.
+    bool noirShader() const { return noirLoaded_; }
+
+    // Locations of the fog shader's per-frame noir uniforms; -1 when the
+    // shader lacks them (GL ignores sets to -1). lampPos is a vec3 array.
+    struct NoirLocs {
+        int fogDensity = -1;
+        int lampPos = -1;
+        int lampCount = -1;
+        int lampColor = -1;
+        int lampRadius = -1;
+        int wetness = -1;
+    };
+    const NoirLocs& noirLocs() const { return noirLocs_; }
+
    private:
     // Loads one city model by file stem; records it in models_ and returns
     // success. Missing files are logged once and tolerated.
@@ -245,6 +265,8 @@ class Assets {
     int outlineCameraLoc_ = -1;
     int outlineColorLoc_ = -1;
     Material outlineMaterial_{};  // default maps + outlineShader_
+    bool noirLoaded_ = false;
+    NoirLocs noirLocs_;
 };
 
 }  // namespace llm_npc

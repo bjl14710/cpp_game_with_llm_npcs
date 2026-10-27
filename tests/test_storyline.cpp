@@ -3,8 +3,10 @@
 // Files are written into a temp directory rather than checked in as fixtures,
 // so a case reads as "this text produces this result" without a reader having
 // to open a second file.
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -724,4 +726,37 @@ TEST_CASE("residentFor returns empty for a slot that was never declared") {
     const StorylineCast cast =
         castStoryline(validStoryline(), castRoster(), setup, 4u);
     CHECK(cast.residentFor("the_butler").empty());
+}
+
+TEST_CASE("a non-finite witness hour fails validation") {
+    for (const double bad : {std::nan(""), std::numeric_limits<double>::infinity(),
+                             -std::numeric_limits<double>::infinity()}) {
+        StorylineDef story = validStoryline();
+        story.witnesses[0].atHour = bad;
+        CHECK(hasError(validateStoryline(story, 21), "witnesses[0]", "hour must be in [0, 24)"));
+    }
+}
+
+TEST_CASE("a witness hour of nan in a file is caught by validation") {
+    const auto dir = tempDir("nan_hour");
+    const std::string text = std::string(kGoodStoryline);
+    const auto at = text.find("hour = 21.5");
+    REQUIRE(at != std::string::npos);
+    writeFile(dir / "n.storyline",
+              text.substr(0, at) + "hour = nan" + text.substr(at + 11));
+    const auto story = parseStorylineFile(dir / "n.storyline", nullptr);
+    REQUIRE(story.has_value());
+    bool flagged = false;
+    for (const auto& e : validateStoryline(*story, 0)) {
+        if (e.reason.find("hour must be in") != std::string::npos) flagged = true;
+    }
+    CHECK(flagged);
+}
+
+TEST_CASE("a storyline file with a UTF-8 BOM keeps its first key") {
+    const auto dir = tempDir("bom");
+    writeFile(dir / "s.storyline", "\xEF\xBB\xBF" + std::string(kGoodStoryline));
+    const auto story = parseStorylineFile(dir / "s.storyline", nullptr);
+    REQUIRE(story.has_value());
+    CHECK(story->id == "the_late_delivery");
 }

@@ -104,6 +104,9 @@ the hardware store may have opinions.
   openssl@3`). The same code path also works against Ollama's OpenAI shim
   (`base_url = http://localhost:11434/v1`) with no key and no TLS.
 - `config/keybindings.cfg` — key bindings (also editable in-game).
+- `config/graphics.cfg` — `noir_night = on|off` (the Neo-Noir night look:
+  lamp pools, wet streets, a red-only grade; daytime is never affected) and
+  `rain = on|off`. Both default on; also toggled from the pause menu.
 - `personas/*.persona` — the characters themselves. Edit freely; the file
   format is documented in [docs/DEVELOPER.md](docs/DEVELOPER.md).
 

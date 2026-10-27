@@ -141,3 +141,10 @@ TEST_CASE("zoneName resolves a display label and falls back to the id") {
     CHECK(zoneName("plaza") == "The Plaza");
     CHECK(zoneName("no_such_zone") == "no_such_zone");
 }
+
+TEST_CASE("zoneName returns an owned string, safe to hold for a temporary id") {
+    // Bound to a const reference, a by-reference fallback would point at the
+    // temporary below after the full expression ended (ASan: stack-use-after-scope).
+    const std::string& label = zoneName(std::string("no_such_") + "zone");
+    CHECK(label == "no_such_zone");
+}

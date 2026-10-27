@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -13,10 +14,22 @@ namespace llm_npc {
 
 // Bumped whenever the wire format changes incompatibly. The join handshake
 // compares versions and rejects mismatched builds instead of desyncing.
-inline constexpr int kNetProtocolVersion = 1;
+// 2: the vote message types (#222) were appended; a v1 peer cannot decode them.
+inline constexpr int kNetProtocolVersion = 2;
 
 // Hard cap on players in one session (host counts as player 0).
 inline constexpr int kMaxPlayers = 4;
+
+// Longest player name the host admits. Names ride in every WorldSnapshot, so
+// an unbounded one could push a snapshot past kMaxFrameBytes and disconnect
+// every client at once.
+inline constexpr std::size_t kMaxPlayerNameChars = 32;
+
+// True when `name` is at most kMaxPlayerNameChars printable ASCII characters
+// (0x20-0x7E, what the renderer's font can draw). The host REJECTS other
+// names at the handshake rather than truncating them, so the joiner is told
+// why instead of silently appearing under a different name.
+bool isValidPlayerName(const std::string& name);
 
 // Every message on the wire is one JSON object: {"type": <MessageType as
 // string>, ...fields}. Types cover the v1 feature set from
@@ -117,6 +130,9 @@ int readInt(const nlohmann::json& j, const char* key, int fallback);
 float readFloat(const nlohmann::json& j, const char* key, float fallback);
 std::string readString(const nlohmann::json& j, const char* key,
                        const std::string& fallback = {});
+// The array at `key`, or a shared empty array when it is missing or not an
+// array — safe to range-for over directly.
+const nlohmann::json& readArray(const nlohmann::json& j, const char* key);
 
 // Vec3 <-> JSON helpers shared by snapshot encoding: {"x":..,"y":..,"z":..}.
 nlohmann::json vec3ToJson(const Vec3& v);

@@ -34,7 +34,9 @@ class NetClient {
     bool connect(const std::string& host, int port,
                  const std::string& playerName, const std::string& joinCode);
 
-    // Sends Disconnect (best effort) and closes. Safe to call twice.
+    // Sends Disconnect (best effort), closes, joins the reader and resets
+    // all per-session state (framing, inbox, player id) so the same client
+    // can connect() again. Safe to call twice, and after the host dropped us.
     void disconnect();
 
     // True after a successful handshake until the socket drops.
@@ -62,7 +64,8 @@ class NetClient {
     // inbox_; drops the link on a framing violation or socket error.
     void readerLoop();
 
-    // Frames + writes one message; marks the link dead on failure.
+    // Frames + writes one message; marks the link dead on failure. A message
+    // too large to frame is dropped.
     void send(MessageType type, nlohmann::json payload);
 
     void setError(std::string message);

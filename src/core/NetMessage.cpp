@@ -54,6 +54,21 @@ std::string readString(const nlohmann::json& j, const char* key,
     return (it != j.end() && it->is_string()) ? it->get<std::string>() : fallback;
 }
 
+const nlohmann::json& readArray(const nlohmann::json& j, const char* key) {
+    static const nlohmann::json kEmpty = nlohmann::json::array();
+    if (!j.is_object()) return kEmpty;
+    const auto it = j.find(key);
+    return (it != j.end() && it->is_array()) ? *it : kEmpty;
+}
+
+bool isValidPlayerName(const std::string& name) {
+    if (name.size() > kMaxPlayerNameChars) return false;
+    for (const char c : name) {
+        if (c < 0x20 || c > 0x7E) return false;  // control bytes and non-ASCII
+    }
+    return true;
+}
+
 const char* messageTypeToString(MessageType type) {
     return kTypeNames[static_cast<int>(type)];
 }

@@ -77,6 +77,12 @@ struct Persona {
     // It must NOT go after "ACTIONS: ". Those contracts are pinned by
     // test_npc_action.cpp and stay last; this extends the assembly order with
     // one more position and relaxes nothing.
+    //
+    // CACHE PREFIX (issue #333): Ollama reuses its KV cache for a byte-identical
+    // prompt prefix, so everything up to the memory block must not vary turn to
+    // turn for a given NPC. Memory and gossip are the first changing bytes; never
+    // put per-turn text (clock, weather, mood) in renderSystemPrompt() or the
+    // trait block. Pinned by test_persona.cpp.
     std::string renderSystemPrompt(const std::string& memory,
                                    const std::string& gossip,
                                    const std::vector<const TraitDef*>& traitDefs,
@@ -94,9 +100,12 @@ struct Persona {
         section += renderTraitReinforcement(traitDefs);
         section += roleBlock;  // last in the section — see the comment above
         if (section.empty()) return prompt;
-        const auto at = prompt.find("ACTIONS: ");
-        if (at == std::string::npos) return prompt + section;
-        prompt.insert(at, section);
+        // The protocol is always the tail renderSystemPrompt() appends, so its
+        // start is a known offset. Searching for "ACTIONS: " instead found the
+        // FIRST one, and persona text containing it (a backstory, a directive,
+        // generated text) moved this whole section above "Stay in character"
+        // — the measured placement that made a killer call the police (#331).
+        prompt.insert(prompt.size() - renderActionProtocol().size(), section);
         return prompt;
     }
 

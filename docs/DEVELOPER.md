@@ -32,11 +32,12 @@ clone builds with no graphics packages installed. Keep the split absolute:
 | `Persona`         | Static NPC identity, rendered into the system prompt. |
 | `PersonaLoader`   | Parses `personas/*.persona` (key=value header, `---`, free-form directives) including world placement. |
 | `Npc`             | Per-NPC chat history (bounded), pending-request tracking, world placement. History only grows on successful replies. |
-| `City`            | Building AABBs + circle collision with axis-separated slide (`resolveMovement`). |
+| `City`            | Building AABBs + circle collision with axis-separated slide (`resolveMovement`). Authors the street lamps (`streetLamps`/`lampHeads`), each with a generated pole collider. |
 | `World`           | City + NPC roster; `nearestNpcWithin` drives the talk prompt. |
 | `DialogueSession` | Roaming → Talking → WaitingReply → Streaming state machine; routes streamed deltas by request id. |
 | `KeyBindings`     | Action → key-name map with swap-on-conflict rebinding and file persistence. Names are translated to SFML codes only in `src/app/InputMap`. |
-| `Config`          | Tiny key=value reader/writer: `loadLlmConfig` (incl. provider/base_url and env-or-`secrets.cfg` API-key resolution) and `setKvValue` (in-place single-key edit, used to persist the picked model). |
+| `DayNight` / `NoirLook` | Pure time-of-day curves: sky, light level, and `nightFactorAt` (0 by day, 1 by night, linear across dawn/dusk) — the one dial every noir effect scales by. `noirLookAt(hours, enabled)` blends grade, fog, lamp, wet-street and rain tunables; `nearestLamps` picks the shader's 16 lights. |
+| `Config`          | Tiny key=value reader/writer: `loadLlmConfig` (incl. provider/base_url and env-or-`secrets.cfg` API-key resolution) and `setKvValue` (in-place single-key edit, used to persist the picked model and graphics toggles), plus `loadGraphicsConfig` (`graphics.cfg`: `noir_night`, `rain`). |
 | `NetMessage`      | Multiplayer wire protocol: type-tagged JSON envelope (`encodeMessage`/`decodeMessage`, nullopt on garbage), `kNetProtocolVersion` handshake constant, pose serialization helpers. |
 | `NetFraming`      | `FrameAssembler`: 4-byte big-endian length prefix + payload over TCP; rejects prefixes over 1 MiB (drop the connection — the stream can't resync). The TCP sibling of `StreamAssembler`. |
 | `NetSocket`       | Header-only winsock/POSIX shims: `sendAll`, recv timeouts, `SO_NOSIGPIPE` on macOS. |
@@ -48,7 +49,11 @@ clone builds with no graphics packages installed. Keep the split absolute:
 
 - `RaylibRenderer` — the 3D pass: asset-pack city fitted to the collision
   AABBs, animated glTF characters with per-entity clip clocks, mood emote
-  billboards, and `worldToScreen` for nameplates.
+  billboards, and `worldToScreen` for nameplates. At night (night factor
+  above 0) the pass renders into a `RenderTexture2D` and `endFrame` draws it
+  through the noir grade shader before the 2D overlay; it also owns the
+  rain pool, emissive lamp bulbs, and the red accents. By day it draws
+  straight to the screen exactly as before.
 - `Assets` — loads every model/animation once at startup; maps building ids
   and character variant seeds to models; bakes the six mood faces. Missing
   packs degrade to primitives with an on-screen fetch_assets.sh hint.
@@ -142,6 +147,16 @@ Findings applied from the sibling games and the original companion demo:
 4. **One worker thread, non-blocking drains**: the render loop never waits on
    the network; 60 FPS is independent of Ollama health.
 5. Small default model (`qwen2.5:3b-instruct`) — swap via `config/llm.cfg`.
+6. **Stable prompt prefix**: Ollama reuses its KV cache for a byte-identical
+   prompt prefix, so each NPC's system prompt leads with what never changes
+   (identity, style, traits) and memory/gossip come after it. `context_tokens`
+   (default 8192) is sent as `num_ctx`; at Ollama's 4096 default a long prompt
+   is cut from the front, system prompt first.
+
+Server-side, set on the Ollama process rather than in `llm.cfg`:
+`OLLAMA_NUM_PARALLEL=2`–`4` lets several NPCs stream at once (each slot costs
+its own context's VRAM), and `OLLAMA_KV_CACHE_TYPE=q8_0` roughly halves KV-cache
+memory with little quality loss (needs flash attention, `OLLAMA_FLASH_ATTENTION=1`).
 
 ## Adding an NPC
 

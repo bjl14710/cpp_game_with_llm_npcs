@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -92,6 +93,38 @@ std::vector<RoleDef> loadAllRoles(const std::filesystem::path& dir,
 // secret renders an empty string, so a persona with no role must render
 // BYTE-IDENTICALLY to today.
 std::string renderRoleBlock(const RoleDef* role, const std::string& secret);
+
+// What a cast NPC says INSTEAD of a reply that would reveal its role (issue
+// #331). Short, neutral and in character for any persona, so a deflection
+// reads as someone changing the subject rather than as a system message.
+inline constexpr const char* kRoleLeakDeflection = "I'd rather not get into that.";
+
+// Role names shorter than this never trigger revealsRole. Matching is already
+// whole-word inside an identity phrase, so the risk is not "ex" inside "next"
+// but a two- or three-letter name being an everyday word in its own right
+// ("I am a spy" said as a joke); every shipped name is longer.
+inline constexpr std::size_t kMinRoleNameMatchLength = 4;
+
+// True when `text` (a reply, stripped of directive tags) would put what
+// renderRoleBlock wrote into a transcript. Case-insensitive, and folded with
+// toRenderableAscii so a curly apostrophe matches a straight one. Two
+// triggers:
+//
+//   - The `secret`, as a substring with surrounding whitespace and trailing
+//     sentence punctuation ignored, so "you were at the mill" still matches
+//     the authored "You were at the mill.".
+//   - `role`'s display name, ONLY inside an identity phrase: "you are",
+//     "I am" or "I'm", optionally followed by "the", "a" or "an", then the
+//     name as a whole word or phrase. That covers the block's own header
+//     ("In this story you are Killer") and a first-person slip ("I'm the
+//     killer"). A plain mention ("I hope they catch the killer", "was there a
+//     witness?") does NOT trigger: shipped names are ordinary words, and an
+//     NPC that deflected every line containing its role's name would be
+//     identified by the deflections alone.
+//
+// An empty secret, a null role and a name shorter than kMinRoleNameMatchLength
+// each contribute nothing.
+bool revealsRole(const std::string& text, const RoleDef* role, const std::string& secret);
 
 // Role by id; nullptr when unknown. Unknown ids are demoted with a log at
 // spawn, exactly as unknown traitIds already are.

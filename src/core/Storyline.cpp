@@ -1,6 +1,7 @@
 #include "Storyline.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -98,6 +99,7 @@ std::optional<StorylineDef> parseStorylineFile(const std::filesystem::path& path
 
     std::ifstream in(path);
     if (!in) return fail("cannot be read");
+    skipUtf8Bom(in);
 
     StorylineDef story;
     std::vector<std::string> localErrors;
@@ -301,7 +303,10 @@ std::vector<StorylineError> validateStoryline(const StorylineDef& story,
         if (!zoneExists(witness.zoneId)) {
             add(where, "unknown zone `" + witness.zoneId + "`");
         }
-        if (witness.atHour < 0.0 || witness.atHour >= 24.0) {
+        // isfinite first: every comparison with NaN is false, so "nan" would
+        // otherwise slip through the range test below.
+        if (!std::isfinite(witness.atHour) || witness.atHour < 0.0 ||
+            witness.atHour >= 24.0) {
             add(where, "hour must be in [0, 24)");
         }
         // `about` is optional, but an unresolvable one is always an author

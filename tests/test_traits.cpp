@@ -162,3 +162,20 @@ TEST_CASE("rating capture appends JSONL and never touches live prompts") {
     CHECK(persona.renderSystemPrompt("memory", "", {&grumpy}) == before);
     fs::remove_all(dir);
 }
+
+TEST_CASE("a trait file with a UTF-8 BOM parses") {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "llm_npc_traits_bom";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    {
+        std::ofstream out(dir / "bom.trait", std::ios::binary);
+        out << "\xEF\xBB\xBF" "name = Bom\nrule = Be brief.\n";
+    }
+    std::vector<std::string> errors;
+    const auto traits = loadAllTraits(dir, &errors);
+    CHECK(errors.empty());
+    REQUIRE(traits.size() == 1);
+    CHECK(traits[0].name == "Bom");
+    fs::remove_all(dir);
+}

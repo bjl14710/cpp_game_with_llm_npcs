@@ -7,6 +7,8 @@ void DialogueSession::open(int npcIndex) {
     npcIndex_ = npcIndex;
     pendingId_ = 0;
     streamingText_.clear();
+    lastDisplayDelta_.clear();
+    tagFilter_.reset();
 }
 
 void DialogueSession::close() {
@@ -14,19 +16,24 @@ void DialogueSession::close() {
     npcIndex_ = -1;
     pendingId_ = 0;
     streamingText_.clear();
+    lastDisplayDelta_.clear();
+    tagFilter_.reset();
 }
 
 void DialogueSession::submitted(std::uint64_t requestId) {
     if (state_ != State::Talking) return;
     pendingId_ = requestId;
     streamingText_.clear();
+    lastDisplayDelta_.clear();
+    tagFilter_.reset();
     state_ = State::WaitingReply;
 }
 
 bool DialogueSession::deltaArrived(std::uint64_t id, const std::string& text) {
     if (state_ != State::WaitingReply && state_ != State::Streaming) return false;
     if (id == 0 || id != pendingId_) return false;
-    streamingText_ += text;
+    lastDisplayDelta_ = tagFilter_.feed(text);
+    streamingText_ += lastDisplayDelta_;
     state_ = State::Streaming;
     return true;
 }
@@ -36,6 +43,8 @@ bool DialogueSession::replyArrived(std::uint64_t id, bool /*ok*/) {
     if (id == 0 || id != pendingId_) return false;
     pendingId_ = 0;
     streamingText_.clear();
+    lastDisplayDelta_.clear();
+    tagFilter_.reset();
     state_ = State::Talking;
     return true;
 }

@@ -1,7 +1,9 @@
 // Tests for Persona prompt rendering and the .persona file parser.
 #include <string>
+#include <vector>
 
 #include "PersonaLoader.hpp"
+#include "Trait.hpp"
 #include "doctest.h"
 
 using llm_npc::parsePersonaText;
@@ -156,4 +158,67 @@ TEST_CASE("gossip block injects before the action protocol; empty is identity") 
     const std::string both = p.renderSystemPrompt("We met yesterday.", "Rumor.");
     CHECK(both.find("We met yesterday.") < both.find("Rumor."));
     CHECK(both.find("Rumor.") < both.find("ACTIONS: "));
+}
+
+TEST_CASE("an NPC's prompt keeps a byte-identical static prefix across turns") {
+    // Ollama reuses its KV cache for a byte-identical prompt PREFIX, so time to
+    // first token depends on how much leads the prompt before the first block
+    // that changes (issue #333). Memory changes between sessions; gossip can
+    // change mid-conversation (the 15 s propagation tick).
+    //
+    // What this pins: identity, free-text traits, style, knowledge, backstory,
+    // "Stay in character" and the trait rules + examples all sit before
+    // memory and gossip. What it cannot pin: the ACTIONS/MOOD tag protocol,
+    // trait reinforcement and the role block all render AFTER memory, by the
+    // ordering contracts in test_traits.cpp and test_role.cpp (measured model
+    // behaviour, not cache layout), so they are recomputed when memory or
+    // gossip changes.
+    llm_npc::TraitDef grumpy;
+    grumpy.id = "grumpy";
+    grumpy.name = "Grumpy";
+    grumpy.behaviorRules = {"Complain briefly before helping."};
+    grumpy.examples = {{"Good morning!", "It's a day. What do you want?"}};
+    const std::vector<const llm_npc::TraitDef*> traits{&grumpy};
+
+    Persona p;
+    p.name = "Marge Holloway";
+    p.role = "bakery owner";
+    p.traits = {"warm", "gossipy"};
+    p.speakingStyle = "short sentences";
+    p.knowledgeBoundary = "Knows bread.";
+    p.extraDirectives = "Mention sourdough when greeting.";
+    p.traitIds = {"grumpy"};
+    const std::string role = "In this story you are Witness:\n- You saw a cart.\n";
+
+    const std::string monday =
+        p.renderSystemPrompt("We met once.", "The mill burned. (heard from Gus). ", traits, role);
+    const std::string tuesday = p.renderSystemPrompt(
+        "We met twice; they like rye.", "A cart went missing. (heard from Dana). ", traits, role);
+
+    const auto staticEnd = monday.find("What you remember from earlier meetings");
+    REQUIRE(staticEnd != std::string::npos);
+    REQUIRE(tuesday.find("What you remember from earlier meetings") == staticEnd);
+    const std::string prefix = monday.substr(0, staticEnd);
+    CHECK(tuesday.compare(0, staticEnd, prefix) == 0);
+
+    CHECK(prefix.rfind("You are Marge Holloway, a bakery owner.\n", 0) == 0);
+    for (const char* part : {"Personality: warm, gossipy.", "Speaking style: short sentences",
+                             "Knowledge: Knows bread.", "Mention sourdough when greeting.",
+                             "Stay in character.", "Complain briefly before helping.",
+                             "It's a day. What do you want?"}) {
+        CAPTURE(part);
+        CHECK(prefix.find(part) != std::string::npos);
+    }
+
+    // A first meeting (no memory, no gossip yet) leads with the same bytes.
+    CHECK(p.renderSystemPrompt("", "", traits, role).compare(0, staticEnd, prefix) == 0);
+
+    // Within one session memory holds still, so a gossip change mid-chat keeps
+    // the memory block cached too: the first difference is inside the gossip.
+    const std::string later =
+        p.renderSystemPrompt("We met once.", "A cart went missing. (heard from Dana). ", traits,
+                             role);
+    const auto gossipAt = monday.find("Things you have heard around town");
+    REQUIRE(gossipAt != std::string::npos);
+    CHECK(later.compare(0, gossipAt, monday, 0, gossipAt) == 0);
 }
