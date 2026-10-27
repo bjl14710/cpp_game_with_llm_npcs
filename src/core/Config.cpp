@@ -186,6 +186,7 @@ LlmConfig loadLlmConfig(const std::filesystem::path& configDir) {
     readNumber(kv, "request_timeout_s", cfg.requestTimeoutSeconds);
     readNumber(kv, "max_reply_tokens", cfg.maxReplyTokens);
     if (auto it = kv.find("keep_alive"); it != kv.end()) cfg.keepAlive = it->second;
+    readNumber(kv, "context_tokens", cfg.contextTokens);
     if (auto it = kv.find("think"); it != kv.end()) cfg.think = it->second;
     if (auto it = kv.find("provider"); it != kv.end()) cfg.provider = it->second;
     if (auto it = kv.find("base_url"); it != kv.end()) cfg.baseUrl = it->second;

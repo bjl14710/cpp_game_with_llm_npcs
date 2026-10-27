@@ -199,6 +199,44 @@ TEST_CASE("LlmClient sends think:false only when configured") {
     CHECK(body["think"] == false);
 }
 
+TEST_CASE("LlmClient sends options.num_ctx from contextTokens, default 8192") {
+    // Without num_ctx Ollama runs at 4096 and truncates a longer prompt from
+    // the front, dropping the system prompt first (issue #333).
+    FakeOllama fake;
+    {
+        LlmClient client(testConfig(fake.port()));
+        waitForReply(client, client.submit("sys", {}, "hi"));
+    }
+    LlmConfig sized = testConfig(fake.port());
+    sized.contextTokens = 16384;
+    {
+        LlmClient client(sized);
+        waitForReply(client, client.submit("sys", {}, "hi"));
+    }
+    const auto bodies = fake.requestBodies();
+    REQUIRE(bodies.size() == 2);
+    const json byDefault = json::parse(bodies[0]);
+    REQUIRE(byDefault["options"].contains("num_ctx"));
+    CHECK(byDefault["options"]["num_ctx"] == 8192);
+    CHECK(json::parse(bodies[1])["options"]["num_ctx"] == 16384);
+}
+
+TEST_CASE("warmUp carries the same num_ctx as a chat request") {
+    // Ollama reloads the model when num_ctx changes, so a warm-up sized
+    // differently from real requests would load the model twice.
+    FakeOllama fake;
+    LlmConfig config = testConfig(fake.port());
+    config.contextTokens = 12288;
+    LlmClient client(config);
+    client.warmUp();
+    waitForReply(client, client.submit("sys", {}, "hi"));
+    const auto bodies = fake.requestBodies();
+    REQUIRE(bodies.size() == 2);
+    CHECK(json::parse(bodies[0])["messages"].empty());  // the warm-up
+    CHECK(json::parse(bodies[0])["options"]["num_ctx"] == 12288);
+    CHECK(json::parse(bodies[1])["options"]["num_ctx"] == 12288);
+}
+
 TEST_CASE("LlmClient omits think entirely by default") {
     FakeOllama fake;
     LlmClient client(testConfig(fake.port()));
