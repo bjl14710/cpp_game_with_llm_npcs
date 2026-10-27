@@ -40,8 +40,18 @@ class Npc {
 
     // Notify this NPC of a reply. Returns the assistant text if the id matches
     // a pending request from this NPC; nullopt otherwise. On success, the turn
-    // is appended to history (capped to maxHistoryTurns_).
+    // is appended to history (capped to maxHistoryTurns_). A reply that would
+    // reveal this NPC's secret or claim its role by name (revealsRole: "I'm
+    // the killer", not "they'll catch the killer") is replaced whole by
+    // kRoleLeakDeflection, its action dropped and its mood kept; the
+    // deflection, never the original, is what is returned and remembered.
     std::optional<std::string> onReplyArrived(const ChatReply& reply);
+
+    // The same leak check onReplyArrived applies, for text that reaches a
+    // player without going through it (HostChatRouter's orphaned-reply
+    // fallback). `spoken` must already be folded and tag-stripped. Returns it
+    // unchanged, or kRoleLeakDeflection.
+    std::string redactRoleLeak(std::string spoken) const;
 
     // Places the NPC in the world: feet position, facing in degrees (0 looks
     // toward +Z), and the id of the building/prop they belong to. The spot is
@@ -177,8 +187,8 @@ class Npc {
     //
     // NEVER SHOWN TO A PLAYER. No UI, no journal line, no debug overlay reads
     // these — the whole mechanic is that the town looks the same whoever did
-    // it. The secret reaches the model inside the system prompt; keeping it
-    // out of the transcript is the prompt's job, and test coverage says so.
+    // it. The secret reaches the model inside the system prompt; the prompt
+    // asks the model to keep it, and onReplyArrived enforces it (#331).
     void setRole(std::string roleId, std::string secret) {
         roleId_ = std::move(roleId);
         secret_ = std::move(secret);
