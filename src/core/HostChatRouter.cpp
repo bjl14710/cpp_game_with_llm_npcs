@@ -4,6 +4,8 @@
 
 #include "NpcAction.hpp"
 
+#include <utility>
+
 namespace llm_npc {
 
 HostChatRouter::HostChatRouter(World& world, NetServer& server)
@@ -41,9 +43,14 @@ void HostChatRouter::pumpNpc(int npcIndex) {
 bool HostChatRouter::routeDelta(const ChatDelta& delta) {
     const auto it = inflight_.find(delta.id);
     if (it == inflight_.end()) return false;
-    // A dead player's stream just drops on the floor (sendToPlayer false).
-    server_.sendToPlayer(it->second.first, MessageType::ChatDelta,
-                         {{"npc", it->second.second}, {"text", delta.text}});
+    // Tags never go over the wire; a delta that is all held-back tag text
+    // sends nothing. A dead player's stream just drops on the floor
+    // (sendToPlayer false).
+    const std::string text = streamFilters_[delta.id].feed(delta.text);
+    if (!text.empty()) {
+        server_.sendToPlayer(it->second.first, MessageType::ChatDelta,
+                             {{"npc", it->second.second}, {"text", text}});
+    }
     return true;
 }
 
@@ -53,6 +60,9 @@ bool HostChatRouter::routeReply(const ChatReply& reply) {
     const int playerId = it->second.first;
     const int npcIndex = it->second.second;
     inflight_.erase(it);
+    // The final ChatReply carries the whole stripped line, so anything the
+    // filter still holds is superseded rather than flushed.
+    streamFilters_.erase(reply.id);
 
     Npc& npc = world_.npcs()[static_cast<std::size_t>(npcIndex)];
     // Updates history/behavior/mood exactly as a host-local reply would and
@@ -66,8 +76,19 @@ bool HostChatRouter::routeReply(const ChatReply& reply) {
         // askers. Folding here too, or the "don?t" this release fixes comes
         // straight back for every bystander in exactly the concurrent-dialogue
         // case the report was about. Found by behaviour QA, not by a test.
-        const std::string spoken =
-            text ? *text : toRenderableAscii(reply.content);
+        // Directive tags are stripped from it as well (issue #326): an
+        // orphaned "[MOOD: angry]" in a bystander's bubble is a killer tell.
+        // Only the text is used; the orphan's directives are not applied.
+        // It gets the same role-leak check onReplyArrived applies (#331), or
+        // a cast NPC's secret would reach every bubble through this path.
+        std::string spoken;
+        if (text) {
+            spoken = *text;
+        } else {
+            spoken = toRenderableAscii(reply.content);
+            parseDirectives(spoken);
+            spoken = npc.redactRoleLeak(std::move(spoken));
+        }
         server_.sendToPlayer(playerId, MessageType::ChatReply,
                              {{"npc", npcIndex}, {"ok", true}, {"text", spoken}});
         // Bystanders see the NPC speak and feel it — the requester included,

@@ -56,6 +56,7 @@
 #include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
+#include "StreamTagFilter.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
 #include "Zones.hpp"
@@ -991,6 +992,7 @@ int main(int argc, char** argv) {
     // DialogueSession; active() discriminates. One streamed turn at a time.
     GroupSession group;
     std::uint64_t groupPendingId = 0;  // request id of the streaming turn
+    StreamTagFilter groupStreamFilter; // keeps directive tags off the screen
     double groupTurnStart = 0.0;       // for the latency log (issue #124)
     // One group turn (issue #122): the speaker gets THEIR OWN persona
     // prompt plus the labeled transcript, through the same ask/route/
@@ -1010,6 +1012,7 @@ int main(int argc, char** argv) {
         const std::uint64_t id = npc.ask(context);
         pendingRoutes[id] = npcIndex;
         groupPendingId = id;
+        groupStreamFilter.reset();
         groupTurnStart = GetTime();
         dialog.beginStreaming(npc.persona().name);
         dialog.setInputEnabled(false);
@@ -2203,9 +2206,9 @@ int main(int argc, char** argv) {
         for (const auto& delta : client.drainDeltas()) {
             if (chatRouter && chatRouter->routeDelta(delta)) continue;
             if (session.deltaArrived(delta.id, delta.text)) {
-                dialog.appendStreamingDelta(delta.text);
+                dialog.appendStreamingDelta(session.lastDisplayDelta());
             } else if (group.active() && delta.id == groupPendingId) {
-                dialog.appendStreamingDelta(delta.text);
+                dialog.appendStreamingDelta(groupStreamFilter.feed(delta.text));
             }
         }
         for (const auto& reply : client.drainReplies()) {
