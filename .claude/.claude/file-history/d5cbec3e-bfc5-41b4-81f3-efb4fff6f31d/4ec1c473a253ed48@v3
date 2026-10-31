@@ -1,0 +1,62 @@
+# Learning Progress
+
+> Stateful tracker for `/teach`. Read this before teaching anything new.
+> The "map" of what the user has learned, what landed, what to teach next.
+
+## How to use this file
+
+- One row per lesson under **Lessons taught**.
+- Status reflects the user's chat-time grasp, not just whether they opened
+  the HTML.
+- **Suggested next** is the single most useful concept to teach in this
+  project, given the user's current level and the code they're writing.
+
+## Lessons taught
+
+| #     | Topic                                | File                                                                 | Status     | Notes |
+| ----- | ------------------------------------ | -------------------------------------------------------------------- | ---------- | ----- |
+| 0001  | Embedded LLMs in game applications   | [lessons/0001-embedded-llm-in-games.html](lessons/0001-embedded-llm-in-games.html) | In progress | First /teach lesson. Covers sidecar vs in-process, persona+history, async drain pattern. Real code walkthrough uses LlmClient.cpp / Npc.cpp from cpp_game_with_llm_npcs. |
+| 0002  | std::vector vs. array                | [lessons/0002-vector-vs-array.html](lessons/0002-vector-vs-array.html) | In progress | Grounds the decision rule in real code from all three games: std::array for quads/matrix/font-candidates (shooter+racing), std::vector for projectiles/enemies/chat history (shooter+npcs), and the one C-style array still hiding in cpp_game_with_llm_npcs/src/main.cpp:72. Covers decay-to-pointer, reserve(), and the vector-vs-list trap. |
+
+## Concepts demonstrated in the project but not yet formally taught
+
+These are concepts the user has *seen* in the code I wrote but hasn't yet
+had a lesson on. Each is a candidate for a follow-up `/teach`.
+
+- **Producer/consumer with `condition_variable`** — `LlmClient::workerLoop`.
+  Why a CV beats spinning; how `notify_one` vs `notify_all` differ.
+- **RAII for thread lifetime** — `LlmClient` ctor starts the thread, dtor
+  joins it. What goes wrong if you forget either.
+- **Header-only vendored deps** — `external/httplib.h`, `external/json.hpp`.
+  When this beats a package manager and when it doesn't.
+- **CMake `find_package` vs `target_include_directories`** — the difference
+  between a real find module (SFML) and just adding `external/` to the
+  include path.
+- **System fonts on Linux vs Windows** — the path-probing in
+  `findSystemFont()`. Why bundling a font is the alternative.
+- **Filesystem path walking with `std::filesystem`** — how `main.cpp`
+  locates `config/llm.cfg` whether launched from project root or `build/`.
+
+## Suggested next topic
+
+**`reserve()` and capacity vs size in `std::vector`.** Lesson 0002 named
+this briefly (shooter game spawn loop). It's the single most common
+performance bug in their codebase pattern and the natural next step after
+"vector vs array." A short focused lesson grounded in
+`cpp_shooter_game/src/main.cpp:320-323` would seal it.
+
+After that, two strong candidates:
+
+1. **Producer/consumer with `std::condition_variable`.** They have working
+   code (`LlmClient::workerLoop`) but haven't been taught *why*: CV vs a
+   `sleep()` poll loop, predicate inside `wait()`, two mutexes vs one.
+2. **Prompt engineering for persona consistency.** Once they actually run
+   the game and Wren goes off-script, this becomes immediate.
+
+## Things the user has *struggled* with
+
+(empty — fill in as we go)
+
+## Things the user has *grasped firmly*
+
+(empty — fill in as we go)

@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "Implements the overnight /idea project end to end (decision log: "
+    "`.claude/plans/npc-memory-and-model.md`, closes #49 and #50, milestone 4).\n\n"
+    "**Memory (#49):** vendored SQLite 3.50.2 amalgamation; `ConversationStore` "
+    "(one `conversations` table, JSON transcript payload); the NPC's own model "
+    "writes a first-person summary when a conversation closes; "
+    "`renderSystemPrompt(memory)` injects it before the action protocol so "
+    "directives stay last. Failures degrade to a memoryless session. 7 new tests "
+    "(round-trip, restart survival, upsert, corrupt row, unusable path, prompt "
+    "placement).\n\n"
+    "**Benchmark + swap (#50):** measured against the game's REAL directive "
+    "contract via a `persona_prompt` CLI (same code path as the game) — "
+    "baseline qwen2.5:3b = 70% tag compliance / 1.1s TTFT; **qwen3:8b = 100% "
+    "compliance but 24s TTFT with thinking on; 2.7s with `think:false`**. "
+    "Verdict per your rule: qwen3:8b + think=false, now in config/llm.cfg. "
+    "LlmClient gained the `think` passthrough (omitted by default). Full "
+    "numbers with N and skip reasons: `bench/REPORT.md`. gemma3:4b / "
+    "mistral:7b rerun with one command when their downloads survive.\n\n"
+    "**Brief corrections (logged):** the repo runs directive tags, not "
+    "Gemma/format:json — benchmarked accordingly; Mistral Small (24B) doesn't "
+    "fit 16 GB, substituted mistral:7b.\n\n"
+    "**Suite:** 106 cases / 739 assertions green.\n\n"
+    "**Stack note:** based on the raylib branch it forked from (#48's); expect a "
+    "trivial main.cpp merge against #52/#53 (distinct regions).\n\n"
+    "Closes #49\nCloses #50\n\n---\n"
+    "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(
+            title="feat(memory): cross-session NPC memory + measured model swap to qwen3:8b",
+            body=body, head="feature/npc-memory-and-model",
+            base="feature/issue-38-raylib-characters", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)
+
+for n in (49, 50):
+    issue = repo.get_issue(n)
+    labels = [l.name for l in issue.labels]
+    for l in ("ai-in-progress", "ready-for-ai"):
+        if l in labels:
+            issue.remove_from_labels(l)
+    if "ai-completed" not in labels:
+        issue.add_to_labels("ai-completed")
+    issue.create_comment(f"Implemented. Draft PR: #{pr.number} — closes on merge.")
+print("issues 49/50 ai-completed")

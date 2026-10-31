@@ -1,0 +1,99 @@
+"""Technical-indicator strategy: RSI + MACD + moving-average crossover.
+
+Indicators are computed inline with pandas — no new dependencies (repo rule).
+Note ``paper_trading_sim.build_features`` already contains an RSI(14)
+implementation; mirror its Wilder-style rolling-mean formula here so both
+paths agree, but do NOT import it (build_features drags in the ML target
+column and yfinance-shaped assumptions the rule strategies don't need).
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class TechnicalStrategy(DailyStrategy):
+    """Long when trend and momentum agree, short on the mirror condition.
+
+    Intended signal logic (see plan step 2):
+      - LONG  (+1): fast MA above slow MA, MACD line above its signal line,
+                    and RSI not overbought (< rsi_overbought).
+      - SHORT (-1): fast MA below slow MA, MACD line below its signal line,
+                    and RSI not oversold (> rsi_oversold).
+      - Otherwise HOLD. Confidence = normalized |MACD histogram| so stronger
+        momentum ranks higher in the arena's top_n selection.
+    """
+
+    name = "technical"
+    # MA/MACD confluence is a momentum bet — whipsaws in a mean-reverting market.
+    compatible_regimes = frozenset({"trending", "neutral"})
+
+    def __init__(
+        self,
+        rsi_period: int = 14,
+        rsi_overbought: float = 70.0,
+        rsi_oversold: float = 30.0,
+        macd_fast: int = 12,
+        macd_slow: int = 26,
+        macd_signal: int = 9,
+        ma_fast: int = 10,
+        ma_slow: int = 50,
+    ) -> None:
+        self.rsi_period = rsi_period
+        self.rsi_overbought = rsi_overbought
+        self.rsi_oversold = rsi_oversold
+        self.macd_fast = macd_fast
+        self.macd_slow = macd_slow
+        self.macd_signal = macd_signal
+        self.ma_fast = ma_fast
+        self.ma_slow = ma_slow
+
+    @property
+    def warmup_bars(self) -> int:
+        """Slowest lookback plus MACD signal smoothing."""
+        return max(self.ma_slow, self.macd_slow + self.macd_signal, self.rsi_period) + 1
+
+    def _rsi(self, close: pd.Series) -> pd.Series:
+        """RSI over self.rsi_period — same rolling-mean formula as
+        paper_trading_sim.build_features so both code paths agree."""
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(self.rsi_period).mean()
+        loss = (-delta.clip(upper=0)).rolling(self.rsi_period).mean()
+        rs = gain / loss
+        return 100.0 - 100.0 / (1.0 + rs)
+
+    def _macd(self, close: pd.Series) -> tuple[pd.Series, pd.Series]:
+        """(macd_line, signal_line) from fast/slow EMAs of close."""
+        macd_line = (
+            close.ewm(span=self.macd_fast, adjust=False).mean()
+            - close.ewm(span=self.macd_slow, adjust=False).mean()
+        )
+        signal_line = macd_line.ewm(span=self.macd_signal, adjust=False).mean()
+        return macd_line, signal_line
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Combine MA crossover, MACD, and RSI on the latest bar."""
+        if len(df) < self.warmup_bars:
+            return HOLD
+        close = df["Close"].astype(float)
+        ma_fast = float(close.rolling(self.ma_fast).mean().iloc[-1])
+        ma_slow = float(close.rolling(self.ma_slow).mean().iloc[-1])
+        macd_line, signal_line = self._macd(close)
+        macd, sig = float(macd_line.iloc[-1]), float(signal_line.iloc[-1])
+        rsi = float(self._rsi(close).iloc[-1])
+        if not all(pd.notna(v) for v in (ma_fast, ma_slow, macd, sig)):
+            return HOLD
+
+        # Scale-free momentum strength for cross-ticker top_n ranking.
+        confidence = abs(macd - sig) / float(close.iloc[-1])
+
+        # A NaN RSI (flat series: zero gains AND zero losses) blocks neither side.
+        if ma_fast > ma_slow and macd > sig and not rsi > self.rsi_overbought:
+            return DailySignal(position=1, confidence=confidence,
+                               reason=f"trend+momentum long (rsi={rsi:.0f})")
+        if ma_fast < ma_slow and macd < sig and not rsi < self.rsi_oversold:
+            return DailySignal(position=-1, confidence=confidence,
+                               reason=f"trend+momentum short (rsi={rsi:.0f})")
+        return HOLD
+
+
+__all__ = ["TechnicalStrategy"]

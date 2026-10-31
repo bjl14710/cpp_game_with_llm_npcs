@@ -1,0 +1,205 @@
+"""Pipeline orchestration: download -> clean -> lead-lag battery (paper Stages 1-3).
+
+``run_pipeline`` is a *generator* that yields progress events. Both the Streamlit
+dashboard and the headless CLI consume the same event stream, so the UI and the
+batch path never drift. The final event (stage ``"done"``) carries the full
+:class:`PipelineResult`.
+
+Run headless:  ``python -m oil_alpha.pipeline``
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Iterator
+
+import pandas as pd
+
+from oil_alpha import config
+from oil_alpha.analysis import cointegration, costs, leadlag
+from oil_alpha.analysis.costs import CostEstimate
+from oil_alpha.analysis.leadlag import GrangerResult, LeadLagResult
+from oil_alpha.config import LAG, LEAD, RunConfig
+from oil_alpha.data import sources
+from oil_alpha.data.budget import APIBudget
+from oil_alpha.metrics import ComputeMetrics, StageTimer
+
+
+@dataclass
+class ProgressEvent:
+    stage: str
+    status: str                 # "start" | "ok" | "warn" | "error" | "done"
+    pct: float                  # 0..1 overall progress
+    message: str = ""
+    payload: Any = None
+
+
+@dataclass
+class PipelineResult:
+    config: RunConfig
+    prices: pd.DataFrame | None = None
+    returns: pd.DataFrame | None = None
+    flags: pd.DataFrame | None = None
+    leadlag: LeadLagResult | None = None
+    granger: dict[str, GrangerResult] | None = None
+    eg_coint: cointegration.CointResult | None = None
+    johansen_coint: cointegration.CointResult | None = None
+    rolling_corr: pd.Series | None = None
+    rolling_beta: pd.Series | None = None
+    spot_check: dict[str, float] | None = None
+    cost_estimates: list[CostEstimate] = field(default_factory=list)
+    budget: APIBudget | None = None
+    metrics: ComputeMetrics | None = None
+    warnings: list[str] = field(default_factory=list)
+
+
+_STAGES = ["download", "spot-check", "clean", "lead-lag", "cointegration", "costs"]
+
+
+def run_pipeline(cfg: RunConfig | None = None) -> Iterator[ProgressEvent]:
+    """Yield :class:`ProgressEvent`s while running the full CL-vs-XLE study.
+
+    The last event has ``stage="done"`` and ``payload`` set to the
+    :class:`PipelineResult`.
+    """
+    cfg = cfg or RunConfig()
+    budget = APIBudget()
+    metrics = ComputeMetrics()
+    result = PipelineResult(config=cfg, budget=budget, metrics=metrics)
+    n = len(_STAGES)
+    keys = list(config.SYMBOLS.keys())
+
+    # --- Stage 1: download ---------------------------------------------------
+    yield ProgressEvent("download", "start", 0 / n, "Fetching daily closes from yfinance")
+    with StageTimer(metrics, "download") as t:
+        prices = sources.fetch_prices(keys, cfg.start, cfg.end, budget=budget, use_cache=cfg.use_cache)
+        t.rows = len(prices)
+    if prices.empty or LEAD not in prices or LAG not in prices:
+        yield ProgressEvent("download", "error", 1 / n, "No price data for CL=F/XLE -- check network")
+        result.warnings.append("download failed")
+        yield ProgressEvent("done", "done", 1.0, "aborted", result)
+        return
+    result.prices = prices
+    yield ProgressEvent("download", "ok", 1 / n, f"{len(prices)} rows x {prices.shape[1]} symbols")
+
+    # --- Stage 2: FRED spot cross-check (paper Stage-1 threshold) ------------
+    yield ProgressEvent("spot-check", "start", 1 / n, "Cross-checking CL=F vs FRED WTI spot")
+    with StageTimer(metrics, "spot-check"):
+        try:
+            spot = sources.fetch_wti_spot(cfg.start, cfg.end, budget=budget, use_cache=cfg.use_cache)
+            result.spot_check = _spot_check(prices[LEAD], spot)
+            msg = f"median |CL=F - spot| = {result.spot_check['median_abs_pct']:.1f}% on common dates"
+            status = "ok" if result.spot_check["median_abs_pct"] < 15 else "warn"
+        except Exception as exc:  # noqa: BLE001 - cross-check is best-effort
+            result.warnings.append(f"spot cross-check skipped: {exc}")
+            msg, status = f"skipped ({exc})", "warn"
+    yield ProgressEvent("spot-check", status, 2 / n, msg)
+
+    # --- Stage 3: clean ------------------------------------------------------
+    yield ProgressEvent("clean", "start", 2 / n, "Computing aligned returns; handling Apr-2020 + rolls")
+    from oil_alpha.clean import build_returns_frame
+
+    with StageTimer(metrics, "clean") as t:
+        returns, flags = build_returns_frame(
+            prices, kind=cfg.return_kind, drop_roll_days=cfg.drop_roll_days, roll_col=LEAD
+        )
+        t.rows = len(returns)
+    result.returns, result.flags = returns, flags
+    clean_msg = f"{len(returns)} aligned return rows"
+    if bool(flags.get("log_fallback_to_simple", pd.Series([False])).any()):
+        clean_msg += " (CL=F fell back to simple returns over the negative-price window)"
+        result.warnings.append("log returns fell back to simple for CL=F (Apr-2020)")
+    yield ProgressEvent("clean", "ok", 3 / n, clean_msg)
+
+    # --- Stage 4: lead-lag (CCF + Granger) -----------------------------------
+    yield ProgressEvent("lead-lag", "start", 3 / n, "CCF + Granger causality (both directions)")
+    with StageTimer(metrics, "lead-lag"):
+        ll = leadlag.ccf_leadlag(returns[LEAD], returns[LAG], max_lag=cfg.max_lag)
+        gr = leadlag.granger_both_directions(returns[LEAD], returns[LAG], maxlag=cfg.max_lag)
+        result.leadlag, result.granger = ll, gr
+        result.rolling_corr = leadlag.rolling_correlation(returns[LEAD], returns[LAG], cfg.rolling_window)
+        result.rolling_beta = leadlag.rolling_beta(returns[LAG], returns[LEAD], cfg.rolling_window)
+    lead_name = "CL (futures)" if ll.x_leads else ("XLE" if ll.peak_lag < 0 else "neither")
+    yield ProgressEvent(
+        "lead-lag", "ok", 4 / n,
+        f"peak lag {ll.peak_lag} (corr {ll.peak_corr:.2f}) -> leader: {lead_name}", ll,
+    )
+
+    # --- Stage 5: cointegration ----------------------------------------------
+    yield ProgressEvent("cointegration", "start", 4 / n, "Engle-Granger + Johansen on price levels")
+    with StageTimer(metrics, "cointegration"):
+        try:
+            result.eg_coint = cointegration.engle_granger(prices[LAG], prices[LEAD])
+            result.johansen_coint = cointegration.johansen(prices[[LEAD, LAG]].dropna())
+            coint_msg = result.eg_coint.verdict
+        except Exception as exc:  # noqa: BLE001
+            result.warnings.append(f"cointegration skipped: {exc}")
+            coint_msg = f"skipped ({exc})"
+    yield ProgressEvent("cointegration", "ok", 5 / n, coint_msg)
+
+    # --- Stage 6: transaction-cost estimate ----------------------------------
+    yield ProgressEvent("costs", "start", 5 / n, "Estimating hypothetical transaction costs")
+    with StageTimer(metrics, "costs"):
+        result.cost_estimates = costs.estimate_for_assets([LAG, LEAD], cfg.turnover_per_year)
+    cost_msg = ", ".join(f"{c.asset_key}: {c.round_trip_bp:.1f}bp RT" for c in result.cost_estimates)
+    yield ProgressEvent("costs", "ok", 6 / n, cost_msg)
+
+    yield ProgressEvent("done", "done", 1.0, "pipeline complete", result)
+
+
+def _spot_check(cl_close: pd.Series, spot: pd.Series) -> dict[str, float]:
+    """Median absolute % gap between CL=F close and FRED WTI spot on common dates.
+
+    They are different instruments (rolled future vs spot) so they won't match to
+    the basis point -- a few % is the expected Stage-1 threshold from the paper.
+    """
+    joined = pd.concat([cl_close.rename("cl"), spot.rename("spot")], axis=1, join="inner").dropna()
+    if joined.empty:
+        return {"common_days": 0, "median_abs_pct": float("nan")}
+    pct = ((joined["cl"] - joined["spot"]).abs() / joined["spot"].abs()) * 100
+    return {"common_days": int(len(joined)), "median_abs_pct": float(pct.median())}
+
+
+def run_to_completion(cfg: RunConfig | None = None) -> PipelineResult:
+    """Drain the generator and return the final :class:`PipelineResult`."""
+    result: PipelineResult | None = None
+    for event in run_pipeline(cfg):
+        if event.stage == "done":
+            result = event.payload
+    assert result is not None
+    return result
+
+
+def _main() -> None:
+    cfg = RunConfig()
+    print(f"Running CL-vs-XLE lead-lag pipeline {cfg.start} -> {cfg.end}\n")
+    result: PipelineResult | None = None
+    for event in run_pipeline(cfg):
+        bar = f"[{event.pct * 100:5.1f}%]"
+        print(f"{bar} {event.stage:<13} {event.status:<5} {event.message}")
+        if event.stage == "done":
+            result = event.payload
+
+    if result is None or result.leadlag is None:
+        print("\nPipeline did not complete.")
+        return
+
+    ll = result.leadlag
+    print("\n=== Summary ===")
+    print(f"Lead-lag: peak lag {ll.peak_lag} (corr {ll.peak_corr:.3f}); leader = {ll.leader}")
+    if result.granger:
+        for k, g in result.granger.items():
+            tag = "significant" if g.significant else "n.s."
+            print(f"Granger {g.direction}: best lag {g.best_lag}, p={g.p_value:.4f} ({tag})")
+    if result.eg_coint:
+        print(result.eg_coint.verdict)
+    if result.spot_check:
+        print(f"Spot check: {result.spot_check}")
+    print(f"Total API requests: {result.budget.total_requests()}")
+    print(f"Total compute time: {result.metrics.total_seconds:.2f}s")
+    if result.warnings:
+        print("Warnings:", "; ".join(result.warnings))
+
+
+if __name__ == "__main__":
+    _main()

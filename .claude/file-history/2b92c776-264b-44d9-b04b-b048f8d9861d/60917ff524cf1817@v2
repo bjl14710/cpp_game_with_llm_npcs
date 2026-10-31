@@ -1,0 +1,31 @@
+# Checkpoint
+Session started: 2026-07-05 00:05
+Goal: Work through the 7 planned multiplayer issues (plan: .claude/plans/multiplayer-and-aws-deploy.md)
+Status: IN PROGRESS
+
+## Environment notes (read this first on resume)
+- GH_TOKEN / gh CLI NOT available — GitHub API ops (issues, labels, PRs) are
+  DEFERRED to a morning-sync script. Issue numbers below are the plan's local
+  numbering, not GitHub numbers.
+- git push over HTTPS may work via keychain — verified only as dry-run so far.
+- PyGithub installed (user approved). Issue-creation script:
+  scratchpad/create_multiplayer_issues.py (extend into morning sync).
+- Branch structure is STACKED (each issue branch off the previous) because the
+  issues are sequential by nature: scaffold -> 1 -> 2 -> 3 -> 4 -> 5 -> 7.
+  Issue 6 (loopback fixture) is folded into 3 and 4.
+- Uncommitted files NOT part of this work (leave alone, do not commit):
+  docs/learning/* Silmulator content, CLAUDE.md, .claude/, docs/*.md guides,
+  GLOSSARY.md/PROGRESS.md preexisting modifications, docs/walkthroughs/.
+
+## Issues to process
+1. net protocol + framing        -> feature/issue-1-net-protocol-framing
+2. NetServer snapshots           -> feature/issue-2-netserver-snapshots
+3. NetClient connect/poll        -> feature/issue-3-netclient-connect-poll
+4. server NPC chat routing       -> feature/issue-4-server-npc-chat
+5. Menu host/join + main modes   -> feature/issue-5-menu-host-join
+6. loopback fixture              -> folded into 3 and 4
+7. docs                          -> feature/issue-7-docs-multiplayer
+
+Issues completed: []
+Issues failed: []
+Issues skipped: []

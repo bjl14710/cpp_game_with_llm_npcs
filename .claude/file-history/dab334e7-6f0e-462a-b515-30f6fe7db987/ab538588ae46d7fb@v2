@@ -1,0 +1,64 @@
+# Plan: Low-Volatility Selection (long-only betting-against-beta proxy)
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: S
+
+## The Idea (one paragraph)
+Rank the tradeable universe by trailing realized volatility and prefer
+long positions in the calmest names — the long-only half of the
+betting-against-beta premium, no shorting or margin required. In this
+codebase that's a small strategy: emit +1 for every ticker with
+confidence = 1/σ, and the arena's existing top_n ranking plus conf_vol
+sizing do the "prefer the lowest-vol names" work structurally.
+
+## Design Decisions
+- **Ranking IS the confidence.** `generate_signal` returns
+  `DailySignal(+1, confidence=1/σ_252d, "low-vol")` for any ticker with
+  enough history; the loop's confidence sort makes top_n = the N
+  lowest-vol names. No cross-sectional machinery needed inside the
+  strategy — the per-ticker contract holds.
+- **Realized vol, not beta** (my recommended option): beta needs a market
+  proxy regression per ticker; trailing 252-day realized σ captures the
+  same premium in the long-only setting with far less machinery, matching
+  the idea's own parenthetical. Beta variant listed as a future issue.
+- **A minimum-vol floor guards the degenerate case**: a near-zero-σ ticker
+  (halted, stale data) would otherwise hog the top slot with confidence
+  → ∞; σ floored at 1e-4 daily (same constant as sizing).
+- **compatible_regimes = all four** — it's a defensive allocation, and
+  high_vol days are arguably its whole point.
+- Registry name `lowvol`; param `vol_lookback` (default 252).
+
+## Out of Scope
+- Shorting the high-vol leg (needs margin — see pairs plan's gating);
+  explicit beta computation; sector neutralization; blending with TSMOM.
+
+## Affected Areas
+- New: `strategies/low_vol.py` — `LowVolatilityStrategy(DailyStrategy)`.
+- `strategies/registry.py` — register `lowvol`.
+- Tests in `tests/test_research_strategies.py` — calm ticker outranks wild
+  one for the top_n slot (integration through run_strategy_walkforward);
+  vol floor holds; warmup respected.
+
+## Implementation Order
+1. Strategy + tests. 2. Registry + arena smoke.
+
+## Acceptance Criteria
+- [ ] Two-ticker universe, top_n=1: the lower-vol ticker is always the pick
+- [ ] Confidence ordering equals ascending-σ ordering (property test)
+- [ ] σ floor prevents a flat ticker from taking infinite confidence
+- [ ] Selectable via `arena-run backtest --strategies lowvol`
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| History < vol_lookback | HOLD via warmup (lookback + 1) |
+| All tickers equally calm | Equal confidences — top_n picks arbitrary-but-stable order; fine |
+| Extreme calm from missing data (stale prices) | σ floor keeps confidence bounded; liquidity/cost model penalizes it downstream anyway |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(strategies): low-volatility long-only selection` — strategy + registry + tests
+2. `feat(strategies): beta-ranked variant of lowvol (future)` — placeholder, not this version

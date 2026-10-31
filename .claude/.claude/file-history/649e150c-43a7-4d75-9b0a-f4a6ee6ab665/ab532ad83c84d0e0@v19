@@ -1,0 +1,128 @@
+# Learning Progress — HFT_practice
+
+A running map of what's been taught, how well it landed, and what to teach next.
+The HTML lessons in `lessons/` are the durable artifact; this file is the index.
+
+## Lessons completed
+
+| # | Topic | File | Date | Grasp |
+|---|-------|------|------|-------|
+| 0001 | Basic HFT concepts: bid/ask/spread, LOB, market making, latency, FPGA vs CPU | [0001-basic-hft-concepts.html](lessons/0001-basic-hft-concepts.html) | 2026-06-09 | TBD — quiz pending |
+| 0002 | FPGAs in HFT: registered pipelines, valid handshakes, walkthrough of all three `fpga/*.vhd` modules, latency budget | [0002-fpgas-in-hft.html](lessons/0002-fpgas-in-hft.html) | 2026-06-09 | TBD — quiz pending |
+| 0003 | ML algorithms in trading: linear regression vs MA rule vs gradient boosting, step-by-step boosting, feature engineering in `build_features`, why regression beats classification for ranking | [0003-ml-algorithms-in-trading.html](lessons/0003-ml-algorithms-in-trading.html) | 2026-06-09 | TBD — quiz pending |
+| 0004 | Linux internal networking: kernel network stack layer-by-layer, sockets/ports, network namespaces, Docker bridge + veth + NAT, kernel bypass; ties web app stack to FPGA HFT roadmap | [0004-linux-internal-networking.html](lessons/0004-linux-internal-networking.html) | 2026-06-09 | TBD — quiz pending |
+| 0005 | Prediction models in trading: 5-axis design space (target, horizon, pooling, output shape, adaptivity), cross-sectional pooling deep dive, family tour, regime-as-filter via the repo's GaussianMixture overlay | [0005-prediction-models-in-trading.html](lessons/0005-prediction-models-in-trading.html) | 2026-06-09 | TBD — quiz pending |
+| 0006 | Statistics math in trading: simple vs log returns, annualization (√252 vs ×252), volatility, Sharpe, max drawdown, CAGR vs APR, covariance matrix, CUSUM — all grounded in `analyze_equity.py:compute_metrics` | [0006-statistics-math-in-trading.html](lessons/0006-statistics-math-in-trading.html) | 2026-06-09 | TBD — quiz pending |
+| 0007 | Neural networks in quant: forward-pass mechanics, 5 canonical applications (LOB, sequence, sentiment, deep RL, vol/options), Alpha Vantage sentiment as a hidden NN already in the pipeline, hls4ml as the bridge to the FPGA | [0007-neural-networks-in-quant.html](lessons/0007-neural-networks-in-quant.html) | 2026-06-10 | TBD — quiz pending |
+| 0008 | LLM use-cases in HFT/quant: 7 concrete uses (grounded by the repo's own Claude-merged PR), the latency wall keeping LLMs off the hot path, news_features.py extension as the highest-value next fit, RAG / fine-tuning / tool-use patterns | [0008-llms-in-hft-firms.html](lessons/0008-llms-in-hft-firms.html) | 2026-06-10 | TBD — quiz pending |
+| 0009 | Low-latency C++: hot-path rules (no alloc, no I/O, no syscalls), stack/heap/cache, branch prediction + inlining, full rewrite of `sample_with_gradient_boosting.cpp` from O(window) heap-backed to O(1) stack ring buffer with `[[unlikely]]` + `noexcept` + `constexpr` | [0009-low-latency-cpp.html](lessons/0009-low-latency-cpp.html) | 2026-06-10 | TBD — quiz pending |
+| 0010 | Low-latency C++ best practices: production 3-thread / 2-ring architecture, full SPSC ring with release/acquire ordering and cache-line padding, CPU isolation (`isolcpus`/`nohz_full`), thread pinning, busy-poll vs sleep, compiler flags + PGO/LTO | [0010-low-latency-cpp-best-practices.html](lessons/0010-low-latency-cpp-best-practices.html) | 2026-06-10 | TBD — quiz pending |
+| 0011 | Low-latency vs ultra-low-latency: 6-rung tier ladder (Tier 0 web → Tier 6 ASIC+microwave), the kernel-boundary discriminator, six techniques (colocation, kernel bypass, FPGA, CPU discipline, microwave, ASIC), measuring honestly (p50/p99/p99.99, jitter, hardware timestamps), the cost cliff | [0011-low-latency-vs-ultra-low-latency.html](lessons/0011-low-latency-vs-ultra-low-latency.html) | 2026-06-10 | TBD — quiz pending |
+| 0012 | RF engineering in HFT: physics of light through air vs glass, famous routes (CME↔NJ, LD4↔FR2), microwave frequency bands and Fresnel zones, the bandwidth-latency tradeoff and what 8-byte messages actually carry, common-carrier economics (McKay/Anova), hollow-core fiber as competitor | [0012-rf-engineering-in-hft.html](lessons/0012-rf-engineering-in-hft.html) | 2026-06-10 | TBD — quiz pending |
+| 0013 | DMA — both Direct Market Access (trading: DMA proper vs sponsored access vs membership, FIX, Rule 15c3-5) and Direct Memory Access (PCIe: descriptor rings, doorbells, zero-copy) — and where they collide in an HFT stack | [0013-dma-direct-market-and-memory-access.html](lessons/0013-dma-direct-market-and-memory-access.html) | 2026-06-10 | TBD |
+| 0014 | Hardware acceleration practices: 5-family taxonomy (CPU/FPGA/GPU/SmartNIC-DPU/ASIC-NPU), the decision framework, BlueField + Pensando, where each fits in HFT, ASIC don't | [0014-hardware-acceleration-practices.html](lessons/0014-hardware-acceleration-practices.html) | 2026-06-10 | TBD |
+| 0015 | Alternative data founding stories: Walmart parking lot (UBS 2010, Tiger Global 2014) and oil-tank inventory (Ursa Space SAR, 11k tanks), the three-property framework, alpha decay, vendor economics | [0015-alternative-data-oil-drums-and-walmart.html](lessons/0015-alternative-data-oil-drums-and-walmart.html) | 2026-06-10 | TBD |
+| 0016 | Order-book dynamics: price-time priority, 5 LOB events, the imbalance signal, queue position as half of why latency matters | [0016-order-book-dynamics.html](lessons/0016-order-book-dynamics.html) | 2026-06-10 | TBD |
+| 0017 | Market making: spread capture P&L, the two killers (adverse selection + inventory risk), Avellaneda-Stoikov framework, secondary income streams, gap analysis vs the repo's `market_maker.vhd` | [0017-market-making.html](lessons/0017-market-making.html) | 2026-06-10 | TBD |
+| 0018 | Statistical arbitrage: pairs trading, cointegration vs correlation, Engle-Granger ADF test, the broader stat-arb family, why the repo's GBM is cross-sectional stat-arb | [0018-statistical-arbitrage.html](lessons/0018-statistical-arbitrage.html) | 2026-06-10 | TBD |
+| 0019 | Order-to-Trade Ratio (OTR): the metric, MiFID II RTS 9 and Article 51(3), Eurex's ESU fee regime, MM exemptions, what OTR catches and doesn't | [0019-order-to-trade-ratio.html](lessons/0019-order-to-trade-ratio.html) | 2026-06-10 | TBD |
+| 0020 | More alt-data: cell-phone location (Foursquare/Chipotle 2016), modernized parking-lot CV, NDVI for crop yield, AIS+SAR for ship/cargo tracking, alpha decay across the four | [0020-alternative-data-more-examples.html](lessons/0020-alternative-data-more-examples.html) | 2026-06-10 | TBD |
+| 0021 | AI preprocessing: cleaning, normalization (4 flavors), encoding, augmentation, time-series splitting, the cardinal sin of fitting scalers on full datasets | [0021-ai-preprocessing.html](lessons/0021-ai-preprocessing.html) | 2026-06-10 | TBD |
+| 0022 | AI object detection: classification vs detection vs segmentation, YOLO family, DETR, Grounding DINO (open-vocabulary), NMS + IoU + mAP, illustrative Walmart car-count pipeline | [0022-ai-object-detection.html](lessons/0022-ai-object-detection.html) | 2026-06-10 | TBD |
+| 0023 | AI segmentation: semantic vs instance vs panoptic, U-Net, Mask R-CNN, SAM (foundation model for segmentation), illustrative oil-tank fill pipeline | [0023-ai-segmentation.html](lessons/0023-ai-segmentation.html) | 2026-06-10 | TBD |
+| 0024 | AI geometric calculus / geometric deep learning: Bronstein's 4 pillars (CNN/GNN/group-equivariant/manifold), equivariance vs invariance, Riemannian methods on the SPD covariance manifold, GNN for portfolio prediction | [0024-ai-geometric-deep-learning.html](lessons/0024-ai-geometric-deep-learning.html) | 2026-06-10 | TBD |
+| 0025 | Gradient boosting deep dive: function-space descent, hand-computed 3-round example, ν/M/depth tradeoffs, the repo's untuned defaults + rolling retrain, GBM vs RF | [0025-gradient-boosting-deep-dive.html](lessons/0025-gradient-boosting-deep-dive.html) | 2026-06-11 | TBD |
+| 0026 | Linear regression from first principles: normal equations, lstsq vs inv(XᵀX), R², standard errors; walks `pairs.py:_ols` (exercise 03 solution), the FPGA's 4-constant model, DF test as regression | [0026-linear-regression.html](lessons/0026-linear-regression.html) | 2026-06-11 | TBD |
+| 0027 | Logistic vs linear regression: sigmoid + log-loss, no closed form, the contrast table, why this repo deliberately has zero logistic regressions (magnitude vs label), GMM predict_proba ≠ logistic | [0027-logistic-vs-linear-regression.html](lessons/0027-logistic-vs-linear-regression.html) | 2026-06-11 | TBD |
+| 0028 | Alpha and beta: CAPM as OLS, Jensen's alpha, worked 20%/β=1.3 example, the missing alpha_beta() in analyze_equity.py, hedge ratio = beta bridge, Sharpe vs alpha | [0028-alpha-and-beta-in-finance.html](lessons/0028-alpha-and-beta-in-finance.html) | 2026-06-11 | TBD |
+| 0029 | The `volatile` keyword: two forms in bench.cpp (dead-store prevention vs compiler memory barrier), what `__asm__ volatile("" ::: "memory")` does, why volatile ≠ atomic for threading, memory-mapped I/O | [0029-volatile-keyword.html](lessons/0029-volatile-keyword.html) | 2026-06-14 | TBD |
+| 0030 | Walk-forward backtesting: look-ahead bias (layers 1+2), why k-fold CV fails on time series, train/embargo/test anatomy, rolling vs. expanding window, `walkforward_splits()` in risk.py, `f[f.index < dt]` in walkforward_sim.py, in-sample vs OOS R² | [0030-walkforward-backtesting.html](lessons/0030-walkforward-backtesting.html) | 2026-06-15 | TBD |
+
+## What the learner now knows
+(Update after each lesson based on quiz performance and chat questions.)
+
+- *Lessons 0001–0030 delivered; verify retention with post-lesson Q&A.*
+- The full user-supplied queue from 2026-06-10 is complete; the 2026-06-11
+  regression/alpha-beta queue (0025–0028) is also complete.
+- Lesson 0026 walks the *solution* code of exercise 03 (`pairs.py`). If the
+  learner hasn't attempted `exercises/03_stat_arb_risk/` yet, suggest doing
+  the exercise BEFORE reading lesson 0026's section 3 (peek policy).
+- Suggested next lesson topic: **walk-forward backtesting and look-ahead bias**
+  grounded in `walkforward_sim.py` — it closes the loop with the
+  `walkforward_splits` utility the learner builds in exercise 03, and lesson
+  0028's alpha t-stat discussion motivates honest out-of-sample evaluation.
+
+## New repo-side guidance (added 2026-06-10)
+
+- For Lesson 0011 onward, **code examples may be invented illustratively** when the
+  repo doesn't yet have the relevant code. Mark them with an "illustrative" tag in
+  the lesson HTML. Plan to retrofit real code into these lessons as the repo grows
+  into real HFT pieces.
+
+## What was hard
+- *Capture friction points here — they signal what to drill next.*
+
+## Active user-supplied queue (delivered 2026-06-10) — ✅ ALL COMPLETED
+
+All 12 queue items from the user's 2026-06-10 request have been delivered as
+Lessons 0013–0024. Items are tagged ✅ and linked above for navigation.
+
+1. ✅ DMA (Direct Market Access) → Lesson 0013
+2. ✅ Hardware Acceleration Practices → Lesson 0014
+3. ✅ Alternative data (oil drum + Walmart) → Lesson 0015
+4. ✅ Order-book dynamics → Lesson 0016
+5. ✅ Market Making → Lesson 0017
+6. ✅ Statistical Arbitrage → Lesson 0018
+7. ✅ Order-to-Trade Ratio → Lesson 0019
+8. ✅ Alternative data (more examples) → Lesson 0020
+9. ✅ AI concepts (preprocessing) → Lesson 0021
+10. ✅ AI concepts (object detection) → Lesson 0022
+11. ✅ AI concepts (segmentation) → Lesson 0023
+12. ✅ AI concepts (geometric calculus) → Lesson 0024
+
+## Drills completed
+
+| # | Topic | File | Date | MC score | WR self-rated |
+|---|-------|------|------|----------|---------------|
+| 0001 | Statistics in Trading (returns, Sharpe, MaxDD, CAGR, covariance, CUSUM, alpha/beta) | [0001-statistics-in-trading.html](drills/0001-statistics-in-trading.html) | 2026-06-15 | pending | pending |
+
+---
+
+## Learning roadmap (added 2026-06-11)
+
+The full leveled curriculum — daily-frequency Python (L0) up through ULL C++
+and FPGA (L4–L6), with complexity/theoretical-speed rankings and the proposed
+future exercise batches 06–10 — lives in [ROADMAP.md](ROADMAP.md).
+
+## Lessons ↔ exercises map (added 2026-06-11)
+
+Graded fill-in exercises now live in `exercises/` (stubs), `solutions/`
+(reference implementations), and `tests/exercises/` (grading suites). See
+`exercises/README.md` for the workflow. This is the first batch of the
+planned "real HFT code" — lessons 0009–0019 can be retrofitted to reference
+these implementations instead of their illustrative snippets.
+
+| Exercise | Lessons | Status |
+|----------|---------|--------|
+| 01 — Order book (Python) | 0016 | not started |
+| 02 — Inventory-aware market maker (Python) | 0017 | not started |
+| 03 — Stat-arb pairs + CUSUM + OTR + walk-forward (Python) | 0018, 0006, 0019 | not started |
+| 04 — O(1) MA + lock-free SPSC ring (C++20) | 0009, 0010 | not started |
+| 05 — VHDL testbenches for fpga/*.vhd (GHDL) | 0002 | not started |
+
+Update "Status" as the learner completes them (the pytest skip count is the
+live progress bar).
+
+## Older suggested-next list (still standing where not superseded)
+
+- Walk-forward backtesting and look-ahead bias — grounded in `walkforward_sim.py`.
+- Mean-variance portfolio optimization — `predict_next.py:meanvar_long_only`.
+- From model to silicon — ONNX + hls4ml + Vitis AI path.
+- Synthesis, place-and-route, and timing closure — Vivado HLS flow.
+- Kernel-bypass networking deep dive — DPDK/OpenOnload internals.
+
+## Notes for future-me (the teacher)
+
+- This repo is named "HFT_practice" but its Python is daily-frequency. Don't perpetuate the misnomer — be clear about which files are genuinely HFT-style (the VHDL + C++ ONNX path) and which are quant rebalancing.
+- Best teaching examples already in repo: `fpga/market_maker.vhd`, `gradient_boosting/main.cpp`, `paper_trading_sim.py` (`build_features`), `walkforward_sim.py` for risk overlay concepts.
+- User reads code; lean on real files over abstractions.

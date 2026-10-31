@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0020 — More Alternative Data Examples</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0020</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Alternative Data — Four More Concrete Examples</h1>
+<p class="lead">Why this matters: Lesson 0015 covered the framework with Walmart parking lots and oil tanks. This lesson walks through four more concrete alt-data flavors that fund managers actually buy in 2024–25: cell-phone location, satellite parking lots, crop color (NDVI), and cargo-port activity (AIS).</p>
+
+<h2>1. Cell-phone location data</h2>
+<p>Aggregated, anonymized location pings from smartphone apps. Foursquare's CEO Jeff Glueck famously predicted in March 2016 that Chipotle Q1 sales would fall ~30%, based on declining foot-traffic at restaurants observed via Foursquare check-ins (in the wake of the E. coli outbreak).<sup><a class="fn" href="#fn-1">[1]</a></sup> The prediction was almost exactly right; the actual decline was 29.7%. Funds with the data shorted Chipotle into earnings.</p>
+
+<p>Modern flavors:</p>
+<ul>
+<li><strong>Vendors</strong>: SafeGraph, Placer.ai, Veraset, Foursquare. Pricing: $50k–$500k/yr depending on coverage.</li>
+<li><strong>Signal</strong>: weekly per-store foot-traffic counts → daily/weekly retailer revenue estimates → quarterly print predictions.</li>
+<li><strong>Hot trades</strong>: retailers, restaurants, theme parks, gyms — anywhere foot-traffic correlates with revenue.</li>
+</ul>
+
+<div class="callout warn"><strong>Privacy &amp; legal:</strong> the data is aggregated and anonymized, but the supply chain (apps → data brokers → fund) has been under scrutiny since 2020. Multiple vendor shutdowns and FTC actions have happened. Future regulatory tightening is a real strategy-side risk.</div>
+
+<h2>2. Satellite parking-lot counts</h2>
+<p>The Lesson 0015 Walmart story refined for 2024–25. Modern vendors automate the CV pipeline with CNN-based car counting at scale, applied to hundreds of retail chains globally. Key providers include RS Metrics, Orbital Insight, SpaceKnow, and Planet Labs.<sup><a class="fn" href="#fn-2">[2]</a></sup></p>
+
+<p>Three improvements over the 2010-era version:</p>
+<div class="grid2">
+<div class="card"><h4>Sub-meter resolution</h4><p>Commercial satellites at Maxar/Planet level can now resolve individual car make/model in good lighting, opening up demographic segmentation (luxury vs economy cars in the lot → customer mix shift).</p></div>
+<div class="card"><h4>Multi-temporal stacks</h4><p>Same lot imaged daily; full time series of foot-traffic. Earlier vendors gave weekly snapshots; modern feeds are near-daily.</p></div>
+<div class="card"><h4>Cross-asset integration</h4><p>Fused with the cell-phone data above — when both signals agree, the conviction is higher. When they disagree, that itself can be a tradable signal (one source has structural bias).</p></div>
+<div class="card"><h4>Decay is fast</h4><p>The Walmart-style signal is now firmly textbook. Modern alpha is in newer angles: EV-charger usage as auto-industry leading indicator, drone footage of cattle herds, etc.</p></div>
+</div>
+
+<h2>3. Crop color from satellites (NDVI)</h2>
+<p>NDVI (Normalized Difference Vegetation Index) is calculated from satellite multispectral imagery:</p>
+<pre>NDVI = (NIR - RED) / (NIR + RED)        // values in [-1, +1]
+                                          // healthy vegetation → ~0.6-0.9
+                                          // stressed crops     → ~0.2-0.4
+                                          // bare soil          → ~0</pre>
+<p>By imaging crop fields throughout the growing season, hedge funds can estimate yields for corn, soy, wheat, and other commodities <em>weeks before</em> USDA crop reports. The trade is on agricultural commodity futures or related stocks (Bunge, ADM, fertilizer companies, ag-equipment makers).<sup><a class="fn" href="#fn-2">[2]</a></sup></p>
+
+<p>The data flow:</p>
+<ol>
+<li>Satellites (Sentinel-2 is free; Planet/Maxar provide higher cadence) image crop regions weekly.</li>
+<li>NDVI computed pixel-by-pixel; aggregated by USDA crop region.</li>
+<li>Compared to historical NDVI trajectories at the same point in the season.</li>
+<li>Yield estimate published; commodity trader acts before USDA's monthly WASDE report.</li>
+</ol>
+
+<h2>4. Cargo-port activity (AIS + SAR)</h2>
+<p>Every commercial ship over 300 GT is required to broadcast its position via AIS (Automatic Identification System). Companies (MarineTraffic, Spire, Orbital Insight) ingest AIS feeds plus SAR satellite imagery to track:<sup><a class="fn" href="#fn-3">[3]</a></sup></p>
+<ul>
+<li>Ship-by-ship cargo capacity and route.</li>
+<li>Port congestion (number of ships anchored vs berthed).</li>
+<li>Ship-to-ship transfers (offshore transfers of crude oil, LNG) which often indicate sanctions-evasion or arbitrage activity.</li>
+<li>Port-level inflows/outflows of specific cargo categories (containers, dry bulk, crude).</li>
+</ul>
+
+<p>Trades downstream of cargo-port data:</p>
+<ul>
+<li><strong>Shipping rates</strong> (Baltic Dry Index futures): port congestion → tighter capacity → higher rates.</li>
+<li><strong>Commodity inventories</strong>: ship-tracked crude unloading at Cushing → inventory delta vs EIA expectations.</li>
+<li><strong>Retailer earnings</strong>: container throughput at LA/Long Beach → US import flow → earnings of import-heavy retailers.</li>
+<li><strong>Geopolitical</strong>: ship-to-ship transfers near sanctioned countries → real-time monitoring of sanctions efficacy.</li>
+</ul>
+
+<h2>5. The pattern repeated, with sharper edges</h2>
+<table>
+<tr><th>Signal</th><th>Decay horizon</th><th>Capacity</th><th>Hot use</th></tr>
+<tr><td>Cell phone</td><td>Days–weeks</td><td>Medium (retailers limited)</td><td>Restaurant/retail earnings</td></tr>
+<tr><td>Parking lots</td><td>Now textbook</td><td>Small (alpha eroded)</td><td>Cross-validation with cell phone</td></tr>
+<tr><td>NDVI / crops</td><td>Weeks</td><td>Medium (commodities)</td><td>Pre-WASDE positioning</td></tr>
+<tr><td>AIS / cargo</td><td>Days</td><td>Large (multiple commodity classes)</td><td>Shipping rates + commodity flow</td></tr>
+</table>
+
+<h2>6. In this project</h2>
+<p>The repo doesn't currently ingest any of these. A realistic build-out would target one signal end-to-end (say cargo-port AIS for the Drewry container-rate index) and fit it as an additional column in <code>build_features</code> alongside the technical features. Backtesting honestly requires the signal to have realistic delivery delay (satellite imagery isn't real-time; an AIS-derived inventory estimate may have 24-48h vendor processing lag), or the backtested alpha will be optimistic.</p>
+
+<h2>7. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Cell-phone location vs Credit-card transactions</h4><p>Both are "consumer behavior" alt-data. Location data is foot-traffic (people walking in). Transaction data is actual purchases (people checking out). The two correlate but aren't identical; using both reduces noise.</p></div>
+<div class="card"><h4>NDVI vs Soil-moisture</h4><p><strong>NDVI</strong>: vegetation health from visible/near-IR. <strong>Soil-moisture</strong>: ground water content from microwave bands or in-situ sensors. Complementary; both feed yield estimates.</p></div>
+<div class="card"><h4>AIS vs SAR for ships</h4><p><strong>AIS</strong>: broadcast positions ships report themselves. Can be spoofed/turned off. <strong>SAR</strong>: radar imagery from satellites, independent of ship cooperation. Combining catches "dark fleet" behavior AIS alone misses.</p></div>
+<div class="card"><h4>Alt-data vs Web-scraped data</h4><p>Web scraping (Glassdoor reviews, Indeed job posts, eBay completed sales) is a subset of alt-data. The same framework applies — leads the official number, hard to replicate at scale, maps to a tradable.</p></div>
+</div>
+
+<h2>8. Practice</h2>
+<div class="question" data-question><p class="q">Q1. What did Foursquare's CEO predict about Chipotle in March 2016, and what was the signal?</p><ul class="options">
+<li data-correct="false" data-why="Foursquare deals in foot-traffic, not menu prices. The signal was check-in counts.">A menu price increase based on credit-card data.</li>
+<li data-correct="true" data-why="Right. In the aftermath of the E. coli outbreak, declining check-ins at Chipotle locations were a leading indicator of revenue. Glueck predicted a ~30% same-store sales decline; the actual was 29.7%.">A ~30% Q1 same-store sales decline, based on Foursquare check-in foot-traffic data.</li>
+<li data-correct="false" data-why="Foursquare didn't produce that level of forensic signal — they tracked aggregate foot-traffic, not health/safety variables.">A second E. coli outbreak based on health-app data.</li>
+<li data-correct="false" data-why="Glueck's prediction was based on foot-traffic counts, not earnings models.">A modest single-digit revenue beat based on earnings models.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. NDVI is computed as (NIR - RED) / (NIR + RED). Why does this single ratio map to crop health?</p><ul class="options">
+<li data-correct="true" data-why="Right. Chlorophyll in healthy plants strongly absorbs RED light and strongly reflects NIR. So high NIR / low RED = high NDVI = healthy vegetation. Stressed or dying plants reflect less NIR and absorb less RED, lowering NDVI.">Healthy chlorophyll absorbs red light and reflects near-infrared; NDVI captures that contrast as a single number that scales with photosynthetic activity.</li>
+<li data-correct="false" data-why="Temperature isn't directly measured by NDVI — that's done with thermal infrared bands, separately.">It measures crop temperature.</li>
+<li data-correct="false" data-why="Soil moisture is inferred from different sensors (microwave/SAR or in-situ). NDVI is about vegetation reflectance.">It measures the soil's water content directly.</li>
+<li data-correct="false" data-why="No — NDVI is a ratio of two wavelengths within the same image, not a comparison of separate images.">It compares this season's image to last season's at the same pixel.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Why do cargo-port analytics firms combine AIS and SAR data instead of using AIS alone?</p><ul class="options">
+<li data-correct="false" data-why="AIS is widely deployed and reliable from any compliant ship. The reason for combining isn't AIS unavailability.">Because AIS is only available in coastal waters.</li>
+<li data-correct="true" data-why="Right. AIS can be spoofed or simply switched off by ships that don't want to be tracked (sanctions evasion, illegal fishing, military). SAR satellites image the ocean regardless of cooperation, so combining catches the 'dark fleet' that AIS misses. This is how analysts track sanctions-evasion ship-to-ship transfers.">Because ships can spoof or switch off AIS; SAR imagery sees them anyway, catching the 'dark fleet' for sanctions / arbitrage tracking.</li>
+<li data-correct="false" data-why="The SAR cost premium is real but the load-bearing reason is independent verification of AIS, not pricing efficiency.">Because SAR is cheaper per ship-day than AIS.</li>
+<li data-correct="false" data-why="There's no SEC requirement for SAR validation of AIS in trading workflows. It's a commercial best practice driven by data integrity.">Because SEC rules require dual-source validation of marine data.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. You backtest an NDVI-based corn yield signal and get Sharpe 2.5 over 2015–2024. Going live in 2025 the Sharpe is 0.4. Most likely cause?</p><ul class="options">
+<li data-correct="false" data-why="USDA hasn't fundamentally changed its WASDE methodology. The signal decay is competitive, not regulatory.">The USDA changed its WASDE reporting schedule, making the signal late.</li>
+<li data-correct="true" data-why="Right. NDVI-based crop signals have been actively traded since the 2010s. By 2025 the signal is widely known, multiple vendors sell similar derived products, and the alpha gets priced into corn/soy futures faster than the model can act. Standard alt-data decay (Lesson 0015).">Standard alt-data alpha decay: more funds subscribed to similar NDVI signals between backtest end and live, so the alpha is now priced in faster than the model can react.</li>
+<li data-correct="false" data-why="Satellite quality has improved, not gotten worse. The decay is on the buy-side of the trade.">Satellite resolution has degraded since 2024.</li>
+<li data-correct="false" data-why="Climate-change effects shift the long-run growing pattern but don't crash a Sharpe from 2.5 to 0.4 in one year. The decay timing is too sharp.">A climate-driven shift in agronomy invalidating the historical model.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>9. Scenarios</h2>
+<details class="scenario"><summary>S1. A vendor pitches cell-phone foot-traffic data on 500 mid-cap retailers. Backtest looks great. What do you check before signing?</summary>
+<p>Three things. (1) <strong>Vendor exclusivity</strong>: ask how many other funds already subscribe. If the number is &gt;5, alpha is probably already decayed. If it's 0 or under exclusivity, you may have a real edge. (2) <strong>Survivorship bias in the backtest</strong>: were the 500 names selected because they happened to have signal, or were they predetermined? Re-run on a frozen 2015 universe. (3) <strong>Realistic delivery delay</strong>: the data has processing lag (typically 1-3 days). Was the backtest using next-day-available data or future-cheating perfect-information? Re-backtest with realistic lag before you trust the Sharpe.</p></details>
+
+<details class="scenario"><summary>S2. You build a port-congestion signal and start trading container-rate futures. After 6 months your Sharpe is 1.5. Should you scale up the position size?</summary>
+<p>Cautiously. The strategy works but you have only 6 months of live performance — barely enough to distinguish skill from luck at Sharpe 1.5 (need ~2 years for statistical significance). Three checks before scaling: (1) Does the live P&amp;L match the predicted-from-backtest P&amp;L? Big divergence = something is different in live. (2) Has any new vendor entered the same niche? Decay is real. (3) Position scaling needs market-impact analysis: doubling your size in a thin futures contract may make your own trades move the price against you. The right move is usually a 20-30% size increase plus a 6-month re-evaluation, not a doubling.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://www.datadriveninvestor.com/2018/10/17/your-mobile-phone-as-a-gold-mine-for-hedge-funds/">Your Mobile Phone as a Gold Mine (for hedge funds) — DataDrivenInvestor</a></li>
+<li id="fn-2"><a href="https://paragonintel.com/satellite-data-for-investors-top-alternative-data-providers/">Satellite Data For Investors: Top Alternative Data Providers — Paragon Intel</a></li>
+<li id="fn-3"><a href="https://piersight.space/blog/how-hedge-funds-can-use-sar-ais-data-to-make-better-investment-decisions">SAR + AIS Data for Hedge Funds — PierSight</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

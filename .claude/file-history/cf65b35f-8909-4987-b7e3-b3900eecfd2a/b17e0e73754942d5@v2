@@ -1,0 +1,143 @@
+# Study #3: Backtest vs Live — Measuring Look-Ahead Bias
+
+## Summary
+
+The repo has always *warned* about look-ahead bias; this study **measures**
+it. We run the flagship CCF lead-lag signal (CL=F vs XLE daily returns) two
+ways — a "backtest" path where the whole history is visible at once, and an
+"as-if-live" walk-forward path where each estimate may use only data strictly
+before its as-of date — and report the gap.
+
+The headline result on real daily data is a **null**, and that null is the
+finding: at daily resolution CL and XLE move **contemporaneously** (peak lag
+= 0 for the full sample *and* all 124 walk-forward windows), so there is no
+directional lead-lag conclusion for look-ahead bias to inflate. The measured
+divergence is exactly zero — which is precisely why the interesting lead-lag
+work lives at **intraday** resolution (see the Hayashi-Yoshida study).
+
+A synthetic regime-flip control confirms the instrument has teeth: when a real
+lead *does* exist and *does* change over time, the tool reports large
+divergence.
+
+## What "as-if-live" means here
+
+Information-set restriction only. yfinance history is retroactively adjusted
+for splits and dividends, so true vendor point-in-time data is impossible on
+the free tier. "As-if-live" therefore means **no bar dated at or after the
+as-of date is visible to an estimate** — not that we recovered the exact
+prices a trader saw that day. Every number below carries that caveat.
+
+## Real data: CL=F vs XLE, daily, 2015-01-01 → 2026-07-07
+
+Walk-forward: trailing 252-trading-day window, re-estimated every 21 trading
+days (monthly). 124 steps, 0 skipped.
+
+| Quantity | Value |
+|----------|:-----:|
+| Full-sample (backtest) leader | **contemporaneous** (peak lag = +0) |
+| Full-sample peak correlation | +0.580 |
+| Walk-forward steps | 124 (0 skipped) |
+| Distinct PIT leaders across steps | **{contemporaneous}** — only one |
+| `leader_agreement_rate` | **1.000** |
+| `mean_abs_lag_drift` | **0.000** trading days |
+| `mean_oos_gap` | **+0.0000** correlation |
+
+Every window agrees with the full sample because every window reaches the same
+verdict: same-day co-movement dominates, and the ±1-day cross-correlations are
+too small to ever win the `argmax`. With the peak lag pinned at 0 everywhere,
+the point-in-time and full-sample scoring lags coincide, so their
+out-of-sample correlations are identical row by row and the gap is zero by
+construction.
+
+**Interpretation.** There is no daily CL→XLE (or XLE→CL) lead to be
+over-fit. A backtest that claimed one would be reading noise; the walk-forward
+path would not reproduce it out of sample. The honest daily conclusion is
+"contemporaneous, correlation ≈ 0.58," and that conclusion is *stable* — it
+survives hiding the future. Directional precedence, if it exists at all, is a
+sub-daily phenomenon (the Epps effect suppresses it at coarse sampling), which
+is the entire motivation for the intraday Hayashi-Yoshida estimator.
+
+## Synthetic control: the instrument has teeth
+
+To show the zero above is a property of the *data*, not the *tool*, we feed it
+a series with a known, changing lead: `x` leads `y` by +2 days for the first
+half of the sample, then `y` leads `x` by +2 for the second half (same
+synthetic-lead construction as `tests/test_leadlag.py`, with a mid-sample
+flip). 1,200 business days, same window/step.
+
+| Quantity | Value | Reading |
+|----------|:-----:|---------|
+| Full-sample leader | **xle** (peak lag = −2) | one global verdict blurs the flip |
+| Walk-forward PIT leaders | **23 × cl, 22 × xle** | tracks *both* regimes |
+| `leader_agreement_rate` | **0.489** | ≈ half the windows disagree with the blur |
+| `mean_abs_lag_drift` | **2.044** days | PIT lag swings ±2 around the −2 blur |
+| `mean_oos_gap` | **−0.237** correlation | see note |
+
+The full-sample estimate collapses two opposite regimes into a single wrong
+verdict (it happened to land on the second regime, `xle` leads at −2). The
+walk-forward path instead flips its leader near the sample midpoint, matching
+the truth in each half.
+
+**The negative OOS gap is the subtle part.** `mean_oos_gap` =
+mean(OOS-corr-at-full-lag − OOS-corr-at-pit-lag). Here it is *negative*: the
+full-sample lag scores **worse** out-of-sample than the adaptive PIT lag,
+because a single global lag is the wrong lag for half the windows. Look-ahead
+bias does not always *flatter* a backtest — when the true relationship is
+non-stationary, freezing one lag from the whole sample can actively hurt
+out-of-sample, and only a walk-forward reveals it.
+
+## Why a walk-forward can differ from a backtest
+
+A backtest fits parameters (here: the peak lag and the implied leader) on the
+full sample and then, implicitly, "scores" itself on data it already saw
+during fitting. Three things can diverge once the future is hidden:
+
+1. **Leader identity** — which series leads can flip across regimes; the full
+   sample reports only the time-average.
+2. **Peak-lag drift** — the best lag is not constant; `mean_abs_lag_drift`
+   quantifies how far the point-in-time lag wanders from the global one.
+3. **Out-of-sample advantage** — scoring the full-sample lag on the same days
+   it was fit on is unfair; `mean_oos_gap` isolates that advantage (and, as
+   above, it can even be negative for non-stationary signals).
+
+For daily CL/XLE all three are ~0 because the signal is a stable
+contemporaneous correlation. For a genuine, drifting lead-lag they are large.
+
+## What This Teaches
+
+1. **A null result is a result.** "No daily lead to over-fit" is a real,
+   defensible finding — and it points directly at where to look next
+   (intraday), rather than inventing a daily edge that walk-forward would
+   demolish.
+
+2. **Look-ahead bias is only as big as the parameter instability.** If the
+   fitted parameter (peak lag) is stable across time, hiding the future
+   changes nothing. Bias lives in the *drift*, not in the mere act of using
+   full-sample data.
+
+3. **The bias can cut both ways.** A frozen full-sample parameter can score
+   *worse* out-of-sample than an adaptive one when the relationship is
+   non-stationary — the synthetic control's −0.237 gap makes this concrete.
+
+4. **Validate the instrument on a known signal.** The synthetic regime-flip is
+   to this study what the p50/p99 harness is to the flat-book optimization:
+   without a case where the answer is known, a clean "0.000" is
+   indistinguishable from a broken measurement.
+
+## Commands to Reproduce
+
+```bash
+# Real CL/XLE (uses the cached parquet path; no new API calls if cache warm)
+PYTHONPATH=src python -m oil_alpha.analysis.walkforward
+
+# Override the window/step or date range:
+PYTHONPATH=src python -m oil_alpha.analysis.walkforward \
+    --window 252 --step 21 --start 2015-01-01
+
+# Unit tests (synthetic regime-flip correctness + look-ahead guard):
+pytest tests/test_walkforward.py -q
+```
+
+*Numbers above were produced on 2026-07-07 from the warm yfinance cache; the
+daily contemporaneous result is robust to the exact end date, the synthetic
+control is fixed by its RNG seed.*

@@ -1,0 +1,32 @@
+## What to change
+Add the first real visual test: verify the Silmulator main window opens
+and renders correctly, both on Mac (development) and EC2 (overnight runs).
+
+## Specifically
+1. Create `tests/visual/test_gui_main_window.py` with:
+   - `test_main_window_opens()` — launches MainWindow, waits for it to be
+     exposed, calls compare_screenshot(window, "main_window")
+   - `test_main_window_title()` — asserts windowTitle() == "Silmulator"
+   - `test_main_window_minimum_size()` — asserts window is at least 800x600
+2. Generate the golden image on first run (auto-saved when golden absent)
+3. Add `tests/visual/golden/main_window.png` to git
+
+## How to verify it's done
+`pytest tests/visual/test_gui_main_window.py -v` passes.
+`tests/visual/golden/main_window.png` exists and is committed.
+Run twice — second run compares against golden and passes.
+
+## Constraints
+Use `qtbot.waitExposed(window, timeout=5000)` before screenshotting.
+Use `qapp.processEvents()` after waitExposed.
+Test must pass headlessly with pytest-xvfb (no DISPLAY env var needed).
+
+## Code economy note
+Three tests maximum in this file. Use the compare_screenshot helper from
+conftest — do not duplicate screenshot logic.
+
+## Branch name
+`feature/issue-N-visual-test-main-window`
+
+## Concept for learning materials
+"PyQt6 headless testing with pytest-qt and xvfb virtual display"

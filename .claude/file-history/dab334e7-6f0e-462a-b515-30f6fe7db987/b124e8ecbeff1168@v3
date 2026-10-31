@@ -1,0 +1,143 @@
+# Learning Progress
+
+## Session: 2026-07-07 (July 6 ideas batch)
+
+### Concepts covered
+
+| # | Lesson file | Concept | Drill |
+|---|-------------|---------|-------|
+| 0036 | lessons/0036-monitoring-live-strategies-statistically.html | Statistical monitoring of live strategies: input drift (PSI), output divergence (z-test), path control (drawdown breaker) — one framework, three checkpoints | drills/0007-monitoring-live-strategies-statistically.html |
+
+Grounded in: `drift.py` (PSI), `strategy_arena.divergence_stats` (z-test),
+the circuit breaker + resume-anchor design, and the regime classifier's
+calibration lesson (thresholds must respect estimator sampling noise —
+±0.05 → ±0.15 because SE of lag-1 autocorr at n=60 ≈ 0.13).
+
+Drill result: not yet taken. Take it, then log the score here.
+
+### Work implemented (branch feature/july6-batch, PR #63, stacked on #53→#52)
+
+All 9 milestone issues (#54–#62): conf/vol sizing, transaction costs,
+circuit breaker, divergence alert, regime gating, stress-test mode,
+ensemble, drift monitoring, SHAP explainability. 193 tests passing (67 new).
+
+### Suggested next lessons (priority order)
+
+1. **Square-root market impact and turnover-based cost models** — why doubling
+   size costs ~41% more, from `costs.py`; pairs with comparing gross vs net CAGR
+2. **Kelly sizing from trade history** — the deferred issue; blotter already
+   records everything an estimator needs
+3. **Ensemble weighting and why a floor beats exclusion** — `ensemble_weights`'
+   token-vote design vs winner-take-all
+
+## Session: 2026-07-05 (overnight)
+
+### Concepts covered
+
+| # | Lesson file | Concept | Drill |
+|---|-------------|---------|-------|
+| 0035 | lessons/0035-feature-contracts-at-inference.html | Feature contracts at inference: train/serve skew and the last-bar problem | drills/0006-feature-contracts-at-inference.html |
+
+Grounded in: `strategies/gbm_adapter.py` (padding trick, bundle feature-list
+indexing), `paper_trading_sim.build_features` (shift(-1) target + trailing
+dropna), `predict_next.py:136-144` (pre-existing one-day inference lag,
+documented in the lesson and OVERNIGHT_REPORT.md), `walkforward_sim.py`
+(rolling-retrain `f.index < dt` cutoff). Sources: project code only — no
+external claims needing web verification.
+
+Drill result: not yet taken (generated overnight; no user present). Take the
+drill, then log MC score + self-ratings here so the next session can target gaps.
+
+### Work implemented in this session (single branch, no PRs — GH_TOKEN was a placeholder)
+
+Branch `feature/arena-strategy-layer`: DailyStrategy interface + registry,
+DailyEngulfingStrategy adapter, TechnicalStrategy (RSI/MACD/MA),
+MeanReversionStrategy (z-score fade + breakout override), GBMStrategy bundle
+adapter. 15 new tests, full suite 85 passed.
+
+### Suggested next lessons (priority order)
+
+1. **Backtest-vs-live divergence as an overfitting detector** — builds directly
+   on lesson 0035's availability clause; becomes concrete when the arena's
+   comparison report lands (plan steps 4–7)
+2. **Adapter pattern vs strategy pattern** — DailyEngulfingStrategy wraps the
+   intraday EngulfingStrategy; contrasts with the already-covered "Strategy
+   pattern with ABC" (2026-06-28)
+3. **Indicator confluence and signal conflict resolution** — why TechnicalStrategy
+   requires MA + MACD + RSI agreement, and why MeanReversionStrategy lets
+   breakouts override fades
+
+## Session: 2026-06-28 (overnight)
+
+### Concepts covered
+
+| # | Lesson file | Concept | Drill |
+|---|-------------|---------|-------|
+| 0032 | lessons/0032-candlestick-pattern-detection.html | Candlestick pattern detection without lookahead bias | drills/0004-candlestick-pattern-detection.html |
+| 0033 | lessons/0033-bar-by-bar-simulation.html | Bar-by-bar simulation without lookahead | — |
+
+### Issues implemented in this session (all have draft PRs)
+
+| PR | Issue | Description |
+|----|-------|-------------|
+| #34 | #30 | strategies/ package — BaseStrategy ABC and Signal dataclass |
+| #35 | #4  | --loop mode for robinhood_executor (daily market-hours scheduling) |
+| #36 | #9  | NASDAQ-100 universe scraper + micro-cap filter |
+| #37 | #31 | EngulfingStrategy — bullish/bearish engulfing signal detector |
+| #38 | #26 | morning_runner.py — daily trade pipeline orchestration |
+| #39 | #6  | meanvar_long_short() — portfolio-level --allow_short flag |
+| #40 | #32 | PaperEngine — intraday bar-by-bar simulation with SL/TP/EOD |
+| #41 | #33 | intraday-sim CLI — yfinance + strategy registry + engine + CSV |
+
+### Key concepts introduced (for future lessons)
+
+- Strategy pattern with ABC (from #30)
+- CLI extensibility with registry dict (from #33)
+- Long-short mean-variance portfolio construction (from #6)
+- Pipeline orchestration in Python (from #26)
+- Market-hours scheduling with datetime arithmetic (from #4)
+- Web scraping for financial universe construction (from #9)
+
+### Suggested next lessons (priority order)
+
+1. **Long-short mean-variance portfolio construction** — how negative weights change the efficient frontier; follows directly from PR #39 which added meanvar_long_short()
+2. **Strategy pattern in Python** — ABC vs. Protocol, when to use each; core to the extensible strategies/ package
+3. **Pipeline orchestration** — scheduling, retrain logic, dry-run safety gates; follows morning_runner.py (PR #38)
+4. **Adding a second candlestick strategy** — now that the base ABC exists, add a Harami or Inside Bar pattern to solidify the extension pattern
+
+---
+
+## Session: 2026-06-30 (overnight)
+
+### Concepts covered
+
+| # | Lesson file | Concept | Drill |
+|---|-------------|---------|-------|
+| 0034 | lessons/0034-progressive-web-apps.html | Progressive Web Apps and iOS installation | drills/0005-progressive-web-apps.html |
+
+### Issues implemented in this session (all have draft PRs)
+
+| PR | Issue | Description |
+|----|-------|-------------|
+| #47 | #42 | scripts/generate_icons.py — PWA icons via matplotlib (180/192/512px) |
+| #48 | #43 | webapp/static/manifest.json + PWA meta tags in base.html |
+| #49 | #44 | Mobile-responsive CSS: hamburger nav, touch targets, 16px inputs |
+| #50 | #45 | mac-setup.sh — prereq checks, uvicorn + ngrok launch, SIGINT trap |
+| #51 | #46 | MAC_SETUP.md — step-by-step guide for Mac+ngrok+iPhone setup |
+
+### Key concepts introduced (for future lessons)
+
+- PWA secure context requirement (HTTPS vs http://, loopback exemption)
+- Web App Manifest fields: display, start_url, short_name, icons
+- iOS-specific PWA meta tags vs W3C standard manifest
+- ngrok reverse tunnel mechanics (outbound TCP, local management API)
+- CSS checkbox hack for JS-free hamburger nav
+- iOS font-size auto-zoom prevention (16px rule)
+- matplotlib icon generation: fig.add_axes([0,0,1,1]) for full-bleed art
+
+### Suggested next lessons (priority order)
+
+1. **Long-short mean-variance portfolio construction** — how negative weights change the efficient frontier; follows directly from PR #39
+2. **Shell script defensive programming** — prerequisite gating, background PID management, polling loops, SIGINT trap; directly from mac-setup.sh (PR #50)
+3. **Strategy pattern in Python** — ABC vs. Protocol; core to strategies/ package
+4. **Pipeline orchestration** — scheduling, retrain logic, dry-run safety gates; from morning_runner.py (PR #38)

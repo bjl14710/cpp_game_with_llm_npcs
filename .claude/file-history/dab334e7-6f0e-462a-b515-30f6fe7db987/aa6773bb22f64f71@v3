@@ -1,0 +1,119 @@
+"""Read-only data layer for the Streamlit dashboard.
+
+Every function here is pure and importable WITHOUT streamlit installed —
+the pytest suite tests this module only; presentation lives in
+dashboard.py. Spec: .claude/plans/streamlit-dashboard.md.
+
+Read-only invariant: the arena DB is opened with a SQLite ``mode=ro`` URI,
+so a dashboard bug can never mutate a ledger. Deliberately does NOT use
+ArenaState — its constructor runs in-place migrations (writes), which a
+viewer must never do.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3
+import time
+from typing import Callable, Dict, List
+
+import pandas as pd
+
+#: Status -> emoji badge (st.dataframe can't render HTML badges).
+STATUS_BADGES: Dict[str, str] = {
+    "PASS": "✅ PASS",
+    "PROBATION": "🟡 PROBATION",
+    "PAUSED": "⏸ PAUSED",
+    "EXCLUDED": "🚫 EXCLUDED",
+    "REFERENCE": "📚 REFERENCE",
+    "RESEARCH": "🔬 RESEARCH",
+}
+
+
+class FriendlyDashboardError(RuntimeError):
+    """Raised for conditions the UI should render as a notice, not a traceback."""
+
+
+def _readonly_conn(db_path: str) -> sqlite3.Connection:
+    """A connection that CANNOT write — sqlite enforces mode=ro at open."""
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+
+def arena_rows(db_path: str) -> List[dict]:
+    """Comparison rows from the arena DB, badge-decorated; [] when absent.
+
+    Missing file, or a DB without arena tables, is an empty state — not an
+    error. A locked DB (concurrent ``arena-run live``) gets one retry, then
+    surfaces as a FriendlyDashboardError the UI shows as a notice.
+    """
+    if not os.path.exists(db_path):
+        return []
+    from analyze_equity import compare_strategies  # local: pulls pandas/sql glue
+
+    for attempt in (0, 1):
+        try:
+            conn = _readonly_conn(db_path)
+            try:
+                table = compare_strategies(conn)
+            finally:
+                conn.close()
+            break
+        except (sqlite3.OperationalError, pd.errors.DatabaseError) as exc:
+            message = str(exc).lower()
+            if "no such table" in message:
+                return []  # a DB, but not an arena DB (or never screened)
+            if "locked" in message and attempt == 0:
+                time.sleep(0.2)
+                continue
+            raise FriendlyDashboardError(
+                f"could not read arena DB at {db_path}: {exc}") from exc
+    if table.empty:
+        return []
+    rows = table.where(table.notna(), None).to_dict(orient="records")
+    for row in rows:
+        row["badge"] = STATUS_BADGES.get(row.get("status"), str(row.get("status")))
+    return rows
+
+
+def arena_headline(rows: List[dict]) -> Dict[str, int]:
+    """{'tracked', 'live', 'diverged'} counts for the st.metric header row."""
+    return {
+        "tracked": len(rows),
+        "live": sum(1 for r in rows if r.get("status") == "PASS"),
+        "diverged": sum(1 for r in rows if r.get("diverged")),
+    }
+
+
+def equity_metrics(csv_path: str) -> Dict:
+    """{'metrics': compute_metrics dict, 'frame': equity (+gross) DataFrame}.
+
+    Error text matches analyze-equity's CLI so the two tools speak the same
+    language; raised as FriendlyDashboardError for st.error rendering.
+    """
+    from analyze_equity import compute_metrics
+
+    if not os.path.exists(csv_path):
+        raise FriendlyDashboardError(f"equity CSV not found: {csv_path}")
+    frame = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+    if "equity" not in frame.columns:
+        raise FriendlyDashboardError("CSV must contain an 'equity' column")
+    columns = ["equity"] + (["equity_gross"] if "equity_gross" in frame.columns else [])
+    return {"metrics": compute_metrics(frame["equity"]), "frame": frame[columns]}
+
+
+def live_tape(tickers: List[str], interval: str, strategy_name: str,
+              seen: Dict | None = None,
+              fetch: Callable | None = None) -> List[str]:
+    """One live_watch polling pass, returned as printable tape lines.
+
+    ``seen`` carries fresh-signal dedupe state between refreshes (the UI
+    keeps it in st.session_state); ``fetch`` is injectable for tests,
+    mirroring watch_once's own design — per-ticker failure isolation flows
+    through from watch_once unchanged.
+    """
+    from intraday_sim import STRATEGIES
+    from live_watch import _default_fetch, watch_once
+
+    strategy = STRATEGIES[strategy_name]()
+    return watch_once(tickers, strategy, interval,
+                      fetch or _default_fetch,
+                      seen if seen is not None else {})

@@ -1,0 +1,41 @@
+# MR: feat(arena): arena-run orchestrator — generic walk-forward, filter, live paper-trading, comparison report
+
+Branch: `feature/arena-orchestrator` → `feature/arena-strategy-layer` (stacked on PR #52)
+
+## Summary
+Completes the Strategy Arena (`.claude/plans/strategy-arena.md`, steps 4–7). Any `DailyStrategy` can now be backtested through one generic walk-forward, screened by a universal filter bar, paper-traded live day-over-day with SQLite-persisted independent ledgers, and compared side-by-side in one unranked report. The live loop is idempotent and self-backfilling: strategies are deterministic given data, so a missed week heals itself on the next run. Stacked on #52 (the strategy layer) — review that first.
+
+## Changes by File
+
+**`walkforward_sim.py`** — modified (additive)
+New `run_strategy_walkforward(strategy, data, ...)`: per date, each ticker's history goes to `generate_signal`; the top-N non-hold signals by confidence are held equal-weight for one bar, realizing the next close-to-close return signed by position. Data is injected rather than fetched so tests stay offline and the live loop reuses the exact same code path (backfill ≡ backtest — they can never drift). The GBM-specific `simulate_walkforward` and the existing CLI are untouched.
+
+**`strategy_arena.py`** — added (entry point `arena-run`)
+Three subcommands. `backtest`: runs every selected strategy over one window, applies the universal bar (`Sharpe > 0` and `MaxDD ≥ −30%`, both flags), persists PASS/EXCLUDED with metrics — exclusions are printed and stay in the report, never silently dropped. `live`: one tick per PASS strategy — fetch recent history, recompute, append only rows newer than the last stored date with multiplicatively-chained equity; `INSERT OR IGNORE` on `(strategy, date)` makes reruns no-ops. `report`: prints the comparison table. `ArenaState` wraps stdlib `sqlite3` (no new dependency; DB in `arena_state/`, gitignored): tables `strategies`, `equity`, `trades`, `gaps`. Data failures become gap rows for that strategy-day; other strategies keep running.
+
+**`analyze_equity.py`** — modified (additive)
+New `compare_strategies(conn)`: one row per strategy — live Sharpe/CAGR/MaxDD (via the existing `compute_metrics`), win rate and trade count from the trades table, backtest Sharpe, and `sharpe_divergence` (live − backtest), the overfitting canary the plan calls for. EXCLUDED strategies appear with their backtest metrics and empty live columns. Existing CLI unchanged.
+
+**`tests/test_strategy_walkforward.py`** — added
+6 tests: always-long reproduces buy-and-hold exactly; a short realizes the negative return; hold strategies get full-length flat equity series (comparability); top-N picks by confidence; warmup respected; empty data → empty frames.
+
+**`tests/test_strategy_arena.py`** — added
+9 tests: filter accept/reject/missing-metrics; upserted verdicts; idempotent ledger appends; deduped gap logging; the acceptance triple (seed → same-day rerun is a no-op → extended data backfills exactly the missed days with no return lost at the boundary); trades unique per (strategy, date, ticker); empty feed logs a gap; report shows EXCLUDED rows and computes divergence + win rate.
+
+**Minor / generated** — `pyproject.toml` (arena-run script + py-module), `tests/conftest.py` (shared `make_ohlcv` fixture — sibling test modules can't import each other under this repo's pytest config), `.gitignore` (`arena_state/`), `uv.lock`.
+
+## Why
+This is the half of the plan that turns the strategy layer into a decision tool: screen out clear losers cheaply, then let survivors accumulate real (paper) track records for a human to judge. The one subtle design point: **the window's final bar is provisional**. A bar's equity includes its own next-day return, which doesn't exist for the newest bar — storing it would permanently miss that day's return once the next bar arrived. `live_tick` therefore never stores the final recompute bar; the next run records it fully realized. The ledger consequently lags one bar, which is the honest trade-off (the alternative silently corrupts equity at every run boundary — the boundary-continuity test pins this). Deferred deliberately: `morning_runner.py` integration (the live tick is cron-able standalone) and the webapp view (plan's phase-2 stretch).
+
+## Testing
+`uv run pytest tests/ -m "not exercise"` → **100 passed** (15 new). End-to-end smoke: seeded a demo DB via `live_tick`, then ran the installed `arena-run report` CLI — table renders PASS and EXCLUDED rows with win rate and divergence. No network in any test.
+
+## Risk and Rollback
+Additive: two existing modules gain one function each; no existing code path changes. Nothing writes outside `arena_state/` (gitignored). Real-money execution untouched. Revert = drop the merge; stored arena DBs are disposable state.
+
+## Checklist
+- [x] Tests pass locally (100 passed)
+- [x] No new dependencies (sqlite3 is stdlib)
+- [x] Docstrings + type hints on all public functions
+- [x] Existing CLIs (`walkforward-sim`, `analyze-equity`) behave identically
+- [ ] Reviewer: check the provisional-final-bar reasoning in `live_tick`

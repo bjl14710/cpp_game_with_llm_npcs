@@ -1,0 +1,167 @@
+"""Tests for live-vs-backtest divergence: ArenaState.divergence_stats math,
+the transition-based alert in cmd_live, and the report columns."""
+import argparse
+import math
+
+import numpy as np
+import pandas as pd
+import pytest
+
+import paper_trading_sim
+from analyze_equity import compare_strategies
+from strategies.daily import DailySignal, DailyStrategy
+from strategy_arena import ArenaState, cmd_live
+
+
+class AlwaysLong(DailyStrategy):
+    name = "always-long"
+
+    def generate_signal(self, df):
+        return DailySignal(1, 1.0, "long")
+
+
+@pytest.fixture
+def state(tmp_path):
+    return ArenaState(str(tmp_path / "arena.db"))
+
+
+def _seed_equity(state, name, rows):
+    state.append_ledger(name, rows, [])
+
+
+# ---------------------------------------------------------------------------
+# divergence_stats: pure math
+# ---------------------------------------------------------------------------
+
+def test_divergence_stats_none_without_backtest_fingerprint(state):
+    """A strategy never screened under this feature has no fingerprint."""
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1})
+    # record_backtest with no bt_mean_daily/bt_std_daily leaves them NULL
+    _seed_equity(state, "s", [(f"2026-01-{i:02d}", 1000.0 * (1.01 ** i)) for i in range(1, 30)])
+    assert state.divergence_stats("s") is None
+
+
+def test_divergence_stats_none_below_min_live_days(state):
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1},
+                          bt_mean_daily=0.001, bt_std_daily=0.01, bt_n_days=100)
+    _seed_equity(state, "s", [("2026-01-01", 1000.0), ("2026-01-02", 1001.0)])  # 1 return only
+    assert state.divergence_stats("s", min_live_days=20) is None
+
+
+def test_divergence_stats_hand_computed_z_matches(state):
+    """z = (live_mean - bt_mean) / (bt_std / sqrt(n_live)), verified by hand."""
+    bt_mean, bt_std = 0.002, 0.01
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1},
+                          bt_mean_daily=bt_mean, bt_std_daily=bt_std, bt_n_days=200)
+
+    rng = np.random.RandomState(7)
+    live_daily_rets = rng.normal(-0.001, 0.008, 30)  # deliberately below bt_mean
+    equity = [1000.0]
+    for r in live_daily_rets:
+        equity.append(equity[-1] * (1 + r))
+    rows = [(f"2026-02-{i+1:02d}", v) for i, v in enumerate(equity)]
+    _seed_equity(state, "s", rows)
+
+    stats = state.divergence_stats("s", min_live_days=20)
+    assert stats is not None
+    live_ret = pd.Series(equity).pct_change().dropna()
+    expected_z = (live_ret.mean() - bt_mean) / (bt_std / math.sqrt(len(live_ret)))
+    assert stats["z"] == pytest.approx(expected_z, abs=1e-9)
+    assert stats["n_live"] == len(live_ret)
+
+
+def test_divergence_stats_degenerate_bt_std_is_none(state):
+    """bt_std_daily <= 0 (degenerate backtest) -> no test possible, not a crash."""
+    state.record_backtest("s", "PASS", {"Sharpe": 1.0, "CAGR": 0.1, "MaxDD": -0.1},
+                          bt_mean_daily=0.001, bt_std_daily=0.0, bt_n_days=100)
+    _seed_equity(state, "s", [(f"2026-01-{i:02d}", 1000.0 + i) for i in range(1, 25)])
+    assert state.divergence_stats("s") is None
+
+
+# ---------------------------------------------------------------------------
+# cmd_live: transition-based DIVERGED / RECOVERED events
+# ---------------------------------------------------------------------------
+
+def _live_args(**overrides):
+    base = dict(
+        db=None, strategies="always-long", tickers="AAA", tickers_file=None,
+        top_n=1, capital=1000.0, trade_cost_bps=0.0, gbm_bundle=None,
+        max_pos=0.30, vol_window=20, cost_model="none", commission_bps=0.0,
+        half_spread_bps=0.0, impact_coeff_bps=0.0, fallback_adv=1_000_000.0,
+        lookback_days=200, breaker_dd=0.99, no_breaker=True,  # breaker disabled: isolate divergence
+        divergence_z=2.0, min_live_days=5, no_regime_gate=True,
+        target_vol=0.15, atr_stop=None, cooldown_days=5, portfolio_dd=0.0,
+    )
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
+def test_cmd_live_flags_divergence_without_pausing(tmp_path, make_ohlcv, monkeypatch):
+    """A strategy whose live returns badly underperform its stated backtest
+    gets flagged DIVERGED but keeps trading (status stays PASS)."""
+    from strategies.registry import STRATEGY_REGISTRY
+    monkeypatch.setitem(STRATEGY_REGISTRY, "always-long", AlwaysLong)
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    # Backtest "claimed" a strong positive daily mean return.
+    state.record_backtest("always-long", "PASS", {"Sharpe": 1.0, "CAGR": 0.3, "MaxDD": -0.05},
+                          bt_mean_daily=0.01, bt_std_daily=0.005, bt_n_days=200)
+
+    # Live reality: a FLAT/declining series -> live mean far below bt_mean.
+    closes = [100.0]
+    for _ in range(30):
+        closes.append(closes[-1] * 0.999)
+    monkeypatch.setattr(paper_trading_sim, "fetch_history",
+                        lambda tickers, start, end: {"AAA": make_ohlcv(closes)})
+
+    cmd_live(_live_args(db=db))
+
+    assert state.statuses()["always-long"] == "PASS"  # never paused by divergence
+    assert state.diverged("always-long") is True
+    events = state.conn.execute(
+        "SELECT event FROM divergence_events WHERE strategy='always-long'"
+    ).fetchall()
+    assert ("DIVERGED",) in events
+
+    table = compare_strategies(state.conn).set_index("strategy")
+    assert table.loc["always-long", "diverged"] == True  # noqa: E712
+    assert table.loc["always-long", "diverged_since"] is not None
+    assert table.loc["always-long", "divergence_z"] < 0
+
+
+def test_divergence_does_not_evaluate_before_min_live_days(tmp_path, make_ohlcv, monkeypatch):
+    """Too little live history yet -> no flag, no event, regardless of how
+    bad the (short) live sample looks."""
+    from strategies.registry import STRATEGY_REGISTRY
+    monkeypatch.setitem(STRATEGY_REGISTRY, "always-long", AlwaysLong)
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("always-long", "PASS", {"Sharpe": 1.0, "CAGR": 0.3, "MaxDD": -0.05},
+                          bt_mean_daily=0.01, bt_std_daily=0.005, bt_n_days=200)
+    closes = [100.0, 99.0, 98.0]  # only ~1 return after warmup — far under min_live_days
+    monkeypatch.setattr(paper_trading_sim, "fetch_history",
+                        lambda tickers, start, end: {"AAA": make_ohlcv(closes)})
+
+    cmd_live(_live_args(db=db, min_live_days=20))
+
+    assert state.diverged("always-long") is False
+    n_events = state.conn.execute(
+        "SELECT COUNT(*) FROM divergence_events WHERE strategy='always-long'"
+    ).fetchone()[0]
+    assert n_events == 0
+
+
+# ---------------------------------------------------------------------------
+# Report: EXCLUDED strategies and never-screened strategies stay visible
+# ---------------------------------------------------------------------------
+
+def test_report_shows_blank_divergence_for_legacy_strategy(state, make_ohlcv):
+    """A strategy backtested before this feature (no fingerprint stored)
+    shows blank divergence columns, not a crash."""
+    state.record_backtest("old", "PASS", {"Sharpe": 0.5, "CAGR": 0.05, "MaxDD": -0.1})
+    _seed_equity(state, "old", [("2026-01-01", 1000.0), ("2026-01-02", 1010.0)])
+    table = compare_strategies(state.conn).set_index("strategy")
+    assert table.loc["old", "divergence_z"] is None
+    assert table.loc["old", "diverged"] == False  # noqa: E712

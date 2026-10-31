@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "Math.hpp"
+#include "Vote.hpp"
 #include "json.hpp"
 
 namespace llm_npc {
@@ -33,7 +34,27 @@ enum class MessageType {
     NpcMoodUpdate,   // server -> all: NPC i's mood changed (bystanders see expressions)
     NpcSpeechBubble, // server -> all: NPC i said something (bystanders see the bubble)
     Disconnect,      // either direction: goodbye with a reason
+
+    // The end-of-day vote (issue #222). APPENDED, never inserted: the enum
+    // value is the wire identity, so renumbering silently reinterprets every
+    // message a peer on the old build sends.
+    VoteOpen,        // server -> all: the vote phase has begun
+    VoteNominate,    // client -> server: I name this resident
+    VoteState,       // server -> all: the current nominee and who has confirmed
+    VoteConfirm,     // client -> server: I agree / I withdraw
+    VoteResolved,    // server -> all: the outcome, and who died for it
+    MatchOver,       // server -> all: THE ONLY message that carries the killer
 };
+
+// One past the last MessageType. Derived from the enum rather than from
+// kTypeNames, which is the whole point: NetMessage.cpp static_asserts the two
+// against each other.
+//
+// Without that, adding a type and forgetting its name leaves
+// messageTypeToString indexing one past the end of kTypeNames — an unchecked
+// read that corrupts the protocol quietly rather than failing.
+inline constexpr int kMessageTypeCount =
+    static_cast<int>(MessageType::MatchOver) + 1;
 
 // Wire name of a message type ("JoinRequest", "WorldSnapshot", ...).
 const char* messageTypeToString(MessageType type);
@@ -78,9 +99,65 @@ std::string encodeMessage(MessageType type, nlohmann::json payload);
 // the connection rather than guessing (see plan: malformed-frame edge case).
 std::optional<NetMessage> decodeMessage(const std::string& bytes);
 
+// TOTAL field reads for anything that crosses the trust boundary.
+//
+// nlohmann's j.value(key, default) returns the default only when the key is
+// MISSING. When the key is present with the WRONG TYPE it throws — and there
+// is no try/catch anywhere in NetServer.cpp or NetClient.cpp, so an uncaught
+// json::type_error out of a connection thread terminates the process.
+//
+//     {"type": "PlayerInput", "facing": "north"}
+//
+// was a one-message remote kill of the host from any connected client (#245).
+//
+// These check the type and fall back instead. Use them for EVERY field read
+// from a decoded payload; `value()` is only safe on JSON this process built.
+bool readBool(const nlohmann::json& j, const char* key, bool fallback);
+int readInt(const nlohmann::json& j, const char* key, int fallback);
+float readFloat(const nlohmann::json& j, const char* key, float fallback);
+std::string readString(const nlohmann::json& j, const char* key,
+                       const std::string& fallback = {});
+
 // Vec3 <-> JSON helpers shared by snapshot encoding: {"x":..,"y":..,"z":..}.
 nlohmann::json vec3ToJson(const Vec3& v);
 Vec3 vec3FromJson(const nlohmann::json& j);
+
+// The ballot as broadcast to every client: who is named, who proposed them,
+// and who has agreed so far.
+//
+// The confirmations are sent in FULL each time rather than as deltas. It is a
+// handful of booleans, and a client that missed one delta showing the wrong
+// consent state is worse than any bandwidth this saves.
+struct VoteStateMsg {
+    std::string nominee;   // empty when nobody is named
+    int nominator = -1;
+    std::vector<std::pair<int, bool>> confirmations;  // playerId -> agreed
+};
+
+// The outcome of one day's vote.
+//
+// NOTE WHAT IS ABSENT: no killer, and no "was the accused innocent" flag
+// beyond the outcome itself. Wrong already means innocent, and spelling it out
+// a second way is a second thing that can disagree with voteIsCorrect.
+struct VoteResolvedMsg {
+    VoteOutcome outcome = VoteOutcome::NoAccusation;
+    std::string accused;
+    int nominator = -1;
+    int playerKilled = -1;  // -1 unless Wrong AND multiplayer
+};
+
+// The end of a match, and the only place the answer is ever sent.
+struct MatchOverMsg {
+    std::string killer;      // revealed here and NOWHERE earlier
+    bool playersWon = false;
+};
+
+nlohmann::json voteStateToJson(const VoteStateMsg& v);
+VoteStateMsg voteStateFromJson(const nlohmann::json& j);
+nlohmann::json voteResolvedToJson(const VoteResolvedMsg& v);
+VoteResolvedMsg voteResolvedFromJson(const nlohmann::json& j);
+nlohmann::json matchOverToJson(const MatchOverMsg& m);
+MatchOverMsg matchOverFromJson(const nlohmann::json& j);
 
 // Pose <-> JSON helpers for WorldSnapshot's "players" and "npcs" arrays.
 nlohmann::json playerPoseToJson(const PlayerPose& p);

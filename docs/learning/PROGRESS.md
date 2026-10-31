@@ -1,14 +1,120 @@
----
-# Teaching Progress — LLM NPC City Game
+# Silmulator — Learning Progress
 
-## Student profile
-Building a C++ game with LLM-driven NPCs. Has shipped the codebase.
-Background unclear on depth — treat as intermediate C++ learner, new to game architecture patterns.
+## Learner Profile
+- Builder/developer of the Silmulator project itself
+- Experienced enough to be writing/fixing Python + Qt code
+- Learning goal: understand how to USE Silmulator as an end-user (the HIL/SIL workflow)
 
 ## Sessions
 
-### Session 1 (2026-06-12)
-- **Topic:** How to run and develop the game — lesson `0001-how-to-run-and-develop.html`
-- **Covers:** dual-environment model (Windows = game, Linux/container = tests), CMake + MSYS2 + run.bat Windows flow, make-based test workflow, core/app split rationale, development loop, adding an NPC.
-- **Mastery:** TBD (just delivered — no quiz results yet)
-- **Suggested next:** `0002-async-llm-client.html` — how LlmClient's worker thread and drain pattern keep the game loop at 60 fps while waiting on a 1–3 second HTTP call. This is a direct code concept in src/core/LlmClient.cpp and the most non-obvious part of the architecture.
+### Session 1 (2026-06-20)
+**Lesson:** [0001 — How to Use Silmulator](lessons/0001-how-to-use-silmulator.html)
+**Covered:**
+- What SIL/HIL/CIL means and why Silmulator exists
+- The three-step workflow: Place → Connect → Drive
+- Adding hardware blocks to the canvas
+- Drawing wires between ports
+- Sending SCPI commands via the console
+- Loading source code (snippet + project folder modes)
+- Saving and reloading layouts
+
+**Engagement:** First lesson — baseline not yet measured.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Session 2 (2026-06-20)
+**Lesson:** [0002 — Connections &amp; Documentation](lessons/0002-connections-and-documentation.html)
+**Covered:**
+- ConnectionPort internals: port_id, parent_block, connected_to, fractional x/y positioning
+- WireItem: ZValue=-1, update_position(), connect_ports() guards, remove_block() wire cleanup
+- disconnect() contract — both sides must be nulled or ghost state occurs
+- Reading real _setup_ports() patterns across Oscilloscope, MSP430
+- How to_dict()/from_dict() serialize and restore connections via port_map
+- hardware_docs/ folder purpose, layout, and workflow loop to custom blocks
+- Custom block JSON spec: ports, commands (literal / empty / template), discovery at startup
+- Contrasting Port vs Wire vs Qt Signal
+
+**Engagement:** Second lesson — quiz results pending.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Drill 1 (2026-06-20)
+**Drill:** [0001 — How to Use Silmulator](drills/0001-how-to-use-silmulator.html)
+**Channels drilled:** workflow · SCPI code path · SIL/HIL/CIL · real-code · bugs
+**Questions:** 20 (12 MC + 8 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+## Suggested Next Lessons
+1. **SCPI command structure** — the IEEE 488.2 tree syntax that every instrument in Silmulator uses; grounded in `silmulator/scpi/parser.py` and the device command handlers
+2. **Writing a complete SIL test** — paste real embedded C code into the Code Input block, wire it to simulated hardware, and interpret the responses
+3. **Custom blocks** — create a JSON spec for a device that isn't in the library yet (grounded in `silmulator/gui/blocks/custom_block.py`)
+4. **Reading the waveform** — inject a sine wave into the oscilloscope and interpret the CURVE? data transfer
+
+---
+
+## Session 5 (2026-07-07 → 07-08) — aim / styles / preview (#91–#93, PR #94)
+
+### Lesson 0023 — The Single Authoritative Source, and the Moonwalk Bug
+**Concept:** a value used in two places must be computed in exactly one place —
+a shared function (space) or a latched event (time). The moment a second
+reconstruction exists, the copies are only coincidentally equal and eventually
+drift (the "moonwalk" bug class, cf. #61).
+**Grounded in:** `lookDirection(yaw,pitch)` shared by camera + weapon (#91);
+the drag-vs-click latch at `IsMouseButtonPressed` (#93); `shortestAngleDelta`
+short-arc ease; derive-on-read `defaultYaw = player.yawDeg + 180`.
+**Artifacts (local-only):** lessons/0023, drills/0023, vocab/0022.
+**Engagement:** overnight autonomous — no interactive quiz run.
+
+## Session 6 (2026-07-08) — shared character library (#95–#98, PR #99) + live fixes (PR #100)
+
+### Lesson 0024 — One Shared Asset Pool: Collapsing Two Pipelines
+**Concept:** when two consumers need "the same" content, don't align two
+pools — make one pool and give every consumer an authored-or-derived
+resolver into it. Growth then reaches every consumer by construction.
+**Grounded in:** `drawCharacter` vs `drawCompositeCharacter` audit; the
+`customLooks` dispatch hook widened until the rigged branch was
+unreachable; `lookForPersona` (authored → FNV-1a-hashed deterministic
+fallback); roster test asserting authored/valid/pairwise-distinct.
+**Artifacts (local-only):** lessons/0024, drills/0024, vocab/0023.
+**Engagement:** overnight/live autonomous — no interactive quiz run.
+
+## Session 7 (2026-07-10) — Mii-style visual overhaul (#101–#107, PR #108)
+
+### Lesson 0025 — Inverted-Hull Outlines in an Immediate-Mode Renderer
+**Concept:** cartoon outlines via a second, inflated, front-culled draw of
+the SAME geometry — plus the batched-renderer discipline (drain before
+state changes, group passes) that makes it correct and cheap.
+**Grounded in:** drawCompositeCharacter's two-pass loop (1.06 hull,
+rlSetCullFace, rlDrawRenderBatchActive), the drawPartRecipe dispatch that
+let one function serve both passes, box corner-gap risk, the un-outlined
+emote billboard as the counterexample.
+**Artifacts (local-only):** lessons/0025, drills/0025, vocab/0024.
+**Engagement:** overnight autonomous — no interactive quiz run.
+
+## Session 8 (2026-07-13/14) — four milestones (#109–#129, PRs #131–#134)
+
+### Lesson 0026 — Generate, Validate, Retry: the Validator IS the Feature
+**Concept:** LLM content generation as schema-filling behind a single
+validated load path, with model-grade errors as retry feedback; the
+contract-fault-vs-model-fault diagnostic (identical cross-model failures
+indict YOUR format); closed-world vocabularies; model choice by measured
+validity. Grounded in WorldGenValidate/WorldGen/worldgen_cli and the live
+iteration that took qwen3:8b from 0% to first-attempt-valid by fixing the
+contract (object-per-character) and the vocabulary (style families).
+**Choice logged:** one lesson set for the 4-milestone session; the sandbox
+concept (compile-to-existing-systems) is documented in PR #131 and overlaps
+lessons 0016/0020.
+**Artifacts (local-only):** lessons/0026, drills/0026, vocab/0025.
+
+### Lesson 0027 — Bind Pose vs Rest Pose in glTF Skinning
+**Concept:** the two default skeleton configurations a skinned glTF
+carries (bind pose in inverseBindMatrices + vertices; rest pose in node
+TRS), the skinning equation and the IBM's role, the frozen-limb signature
+of an engine that assumes bind==rest (raylib never reads IBMs), and the
+one-time vertex re-bake (restGlobal x IBM per joint) that fixes both the
+static stance and rest-relative animation deltas. Grounded in the session-9
+detective story: T-posed Quaternius characters with moving fingers,
+ground-truthed from raw JSON (wrist rest position at hip height), fixed in
+Assets::rebakeVerticesToRestPose; the shared-rig insight that gave mixed
+head/body figures bone attachment for free.
+**Artifacts (local-only):** lessons/0027, drills/0027, vocab/0026.

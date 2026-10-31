@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""Strategy Arena orchestrator (entry point: arena-run).
+
+Runs multiple DailyStrategy implementations through one pipeline:
+
+  arena-run backtest  — walk-forward every selected strategy over the same
+                        window, apply the universal filter bar (lenient by
+                        design: it screens out clear losers only), persist
+                        PASS/EXCLUDED with metrics. Excluded strategies stay
+                        visible in the report — never silently dropped.
+  arena-run live      — one paper-trading tick per surviving strategy:
+                        recompute signals over recent history and append any
+                        equity/trade rows newer than the last recorded date.
+                        Deterministic strategies + INSERT OR IGNORE make this
+                        idempotent and self-backfilling after missed days.
+  arena-run report    — side-by-side comparison table, unranked.
+
+State lives in SQLite (stdlib sqlite3 — no new dependency) under
+arena_state/arena.db by default. Each strategy has its own independent
+paper ledger; there is no shared capital pool.
+
+See .claude/plans/strategy-arena.md for the full design.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import sqlite3
+from typing import Dict, List, Tuple
+
+import pandas as pd
+
+from analyze_equity import compute_metrics
+from strategies.daily import DailyStrategy
+from strategies.registry import available_strategies, get_strategy
+from walkforward_sim import parse_tickers, run_strategy_walkforward
+
+DEFAULT_DB = os.path.join("arena_state", "arena.db")
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS strategies (
+  name            TEXT PRIMARY KEY,
+  status          TEXT NOT NULL,            -- PASS | EXCLUDED
+  backtest_sharpe REAL,
+  backtest_cagr   REAL,
+  backtest_maxdd  REAL,
+  updated         TEXT
+);
+CREATE TABLE IF NOT EXISTS equity (
+  strategy TEXT NOT NULL,
+  date     TEXT NOT NULL,
+  equity   REAL NOT NULL,
+  PRIMARY KEY (strategy, date)
+);
+CREATE TABLE IF NOT EXISTS trades (
+  strategy   TEXT NOT NULL,
+  date       TEXT NOT NULL,
+  ticker     TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  confidence REAL,
+  weight     REAL,
+  fwd_ret    REAL,
+  reason     TEXT,
+  PRIMARY KEY (strategy, date, ticker)
+);
+CREATE TABLE IF NOT EXISTS gaps (
+  strategy TEXT NOT NULL,
+  date     TEXT NOT NULL,
+  cause    TEXT,
+  PRIMARY KEY (strategy, date)
+);
+"""
+
+
+def _iso(d) -> str:
+    """Normalize a pandas Timestamp / datetime / date to YYYY-MM-DD."""
+    return pd.Timestamp(d).date().isoformat()
+
+
+class ArenaState:
+    """SQLite persistence for the arena's backtest verdicts and live ledgers."""
+
+    def __init__(self, db_path: str) -> None:
+        parent = os.path.dirname(db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        self.conn = sqlite3.connect(db_path)
+        self.conn.executescript(_SCHEMA)
+        self.conn.commit()
+
+    def record_backtest(self, name: str, status: str, metrics: dict) -> None:
+        """Upsert a strategy's filter verdict and backtest metrics."""
+        self.conn.execute(
+            "INSERT INTO strategies(name,status,backtest_sharpe,backtest_cagr,backtest_maxdd,updated) "
+            "VALUES(?,?,?,?,?,date('now')) "
+            "ON CONFLICT(name) DO UPDATE SET status=excluded.status, "
+            "backtest_sharpe=excluded.backtest_sharpe, backtest_cagr=excluded.backtest_cagr, "
+            "backtest_maxdd=excluded.backtest_maxdd, updated=excluded.updated",
+            (name, status, metrics.get("Sharpe"), metrics.get("CAGR"), metrics.get("MaxDD")),
+        )
+        self.conn.commit()
+
+    def statuses(self) -> Dict[str, str]:
+        """{strategy name: PASS | EXCLUDED} for every strategy seen in backtest."""
+        return dict(self.conn.execute("SELECT name, status FROM strategies"))
+
+    def last_equity(self, name: str) -> Tuple[str, float] | None:
+        """(date, equity) of the newest recorded live bar, or None if fresh."""
+        row = self.conn.execute(
+            "SELECT date, equity FROM equity WHERE strategy=? ORDER BY date DESC LIMIT 1",
+            (name,),
+        ).fetchone()
+        return (row[0], float(row[1])) if row else None
+
+    def append_ledger(self, name: str, equity_rows: List[tuple],
+                      trade_rows: List[tuple]) -> int:
+        """Idempotently append (date, equity) and trade rows; returns rows added."""
+        cur = self.conn.executemany(
+            "INSERT OR IGNORE INTO equity(strategy,date,equity) VALUES(?,?,?)",
+            [(name, d, e) for d, e in equity_rows],
+        )
+        added = cur.rowcount
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO trades(strategy,date,ticker,position,confidence,weight,fwd_ret,reason) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            [(name, *t) for t in trade_rows],
+        )
+        self.conn.commit()
+        return added
+
+    def log_gap(self, name: str, date: str, cause: str) -> None:
+        """Record a skipped strategy-day (data failure etc.) without crashing the run."""
+        self.conn.execute("INSERT OR IGNORE INTO gaps(strategy,date,cause) VALUES(?,?,?)",
+                          (name, date, cause))
+        self.conn.commit()
+
+
+def passes_filter(metrics: dict, min_sharpe: float, max_dd: float) -> bool:
+    """Universal (strategy-agnostic) backtest bar.
+
+    Lenient by design — Sharpe must clear min_sharpe and max drawdown must
+    stay above max_dd (both defaults screen out only clear losers; the live
+    arena does the real comparison).
+    """
+    sharpe = metrics.get("Sharpe")
+    maxdd = metrics.get("MaxDD")
+    if sharpe is None or maxdd is None:
+        return False
+    return sharpe > min_sharpe and maxdd >= max_dd
+
+
+def build_strategy(name: str, gbm_bundle: str | None) -> DailyStrategy:
+    """Construct a registered strategy, wiring the GBM bundle path when needed."""
+    if name == "gbm":
+        if not gbm_bundle:
+            raise SystemExit("strategy 'gbm' requires --gbm_bundle <model_bundle.joblib>")
+        return get_strategy(name, bundle_path=gbm_bundle)
+    return get_strategy(name)
+
+
+def live_tick(state: ArenaState, name: str, strategy: DailyStrategy,
+              data: Dict[str, pd.DataFrame], top_n: int, capital: float,
+              trade_cost_bps: float) -> int:
+    """One live paper-trading step for one strategy over pre-fetched data.
+
+    Recomputes the walk-forward over the fetched window, then appends only
+    rows newer than the last recorded date, chaining equity multiplicatively
+    from the stored value. Because strategies are deterministic given data,
+    a missed week self-heals on the next run, and re-running the same day is
+    a no-op (PRIMARY KEY + INSERT OR IGNORE).
+
+    Returns the number of new equity rows appended.
+    """
+    eq, blotter = run_strategy_walkforward(strategy, data, top_n=top_n,
+                                           capital=capital,
+                                           trade_cost_bps=trade_cost_bps)
+    if eq.empty:
+        state.log_gap(name, _iso(dt.date.today()), "no data in fetched window")
+        return 0
+
+    # The window's final bar is provisional: its own forward return doesn't
+    # exist yet, so storing it now would permanently miss that return once
+    # the next bar arrives. Drop it — the next run records it fully realized.
+    eq = eq.iloc[:-1]
+    if eq.empty:
+        return 0
+
+    # Per-bar growth factors are scale-free, so they chain onto any stored
+    # equity regardless of what `capital` the recompute started from.
+    factors = eq["equity"] / eq["equity"].shift(1)
+    factors.iloc[0] = eq["equity"].iloc[0] / capital
+
+    last = state.last_equity(name)
+    if last is None:
+        new = eq
+        chained = eq["equity"]
+    else:
+        last_date, last_equity = last
+        mask = eq.index > pd.Timestamp(last_date)
+        new = eq[mask]
+        if new.empty:
+            return 0
+        chained = factors[mask].cumprod() * last_equity
+
+    equity_rows = [(_iso(d), float(v)) for d, v in chained.items()]
+    new_dates = {_iso(d) for d in new.index}
+    trade_rows = []
+    if not blotter.empty:
+        for _, r in blotter.iterrows():
+            if _iso(r["date"]) in new_dates:
+                trade_rows.append((_iso(r["date"]), r["ticker"], int(r["position"]),
+                                   float(r["confidence"]), float(r["weight"]),
+                                   float(r["fwd_ret"]), r["reason"]))
+    return state.append_ledger(name, equity_rows, trade_rows)
+
+
+def _parse_names(arg: str) -> List[str]:
+    """Split and validate a comma-separated strategy list."""
+    names = [s.strip() for s in arg.split(",") if s.strip()]
+    unknown = [n for n in names if n not in available_strategies()]
+    if unknown:
+        raise SystemExit(f"unknown strategies: {', '.join(unknown)} "
+                         f"(available: {', '.join(available_strategies())})")
+    return names
+
+
+def cmd_backtest(args: argparse.Namespace) -> None:
+    """Backtest all selected strategies over one window and apply the filter."""
+    from paper_trading_sim import fetch_history  # local: network-touching import
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    data = fetch_history(tickers, args.start, args.end)
+    state = ArenaState(args.db)
+    rows = []
+    for name in _parse_names(args.strategies):
+        strategy = build_strategy(name, args.gbm_bundle)
+        eq, _ = run_strategy_walkforward(strategy, data, top_n=args.top_n,
+                                         capital=args.capital,
+                                         trade_cost_bps=args.trade_cost_bps)
+        metrics = compute_metrics(eq["equity"]) if not eq.empty else {}
+        ok = passes_filter(metrics, args.min_sharpe, args.max_dd)
+        status = "PASS" if ok else "EXCLUDED"
+        state.record_backtest(name, status, metrics)
+        rows.append({"strategy": name, "status": status,
+                     "sharpe": metrics.get("Sharpe"), "cagr": metrics.get("CAGR"),
+                     "maxdd": metrics.get("MaxDD")})
+        print(f"{name:12s} {status:8s} sharpe={metrics.get('Sharpe', float('nan')):.2f} "
+              f"cagr={metrics.get('CAGR', float('nan')):.2%} "
+              f"maxdd={metrics.get('MaxDD', float('nan')):.2%}")
+    excluded = [r["strategy"] for r in rows if r["status"] == "EXCLUDED"]
+    if excluded:
+        print(f"\nExcluded from live trading (bar: sharpe>{args.min_sharpe}, "
+              f"maxdd>={args.max_dd:.0%}): {', '.join(excluded)}")
+
+
+def cmd_live(args: argparse.Namespace) -> None:
+    """Run one live paper-trading tick for every PASS strategy."""
+    from paper_trading_sim import fetch_history  # local: network-touching import
+
+    state = ArenaState(args.db)
+    statuses = state.statuses()
+    names = _parse_names(args.strategies) if args.strategies else \
+        [n for n, s in statuses.items() if s == "PASS"]
+    if not names:
+        raise SystemExit("no PASS strategies in the arena DB — run `arena-run backtest` first")
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    start = (dt.date.today() - dt.timedelta(days=args.lookback_days)).isoformat()
+    today = dt.date.today().isoformat()
+    for name in names:
+        if statuses.get(name) != "PASS":
+            print(f"{name}: skipped (status={statuses.get(name, 'never backtested')})")
+            continue
+        if name == "gbm" and not args.gbm_bundle:
+            print("gbm: skipped — pass --gbm_bundle to run it live")
+            continue
+        try:
+            data = fetch_history(tickers, start, None)
+            strategy = build_strategy(name, args.gbm_bundle)
+            added = live_tick(state, name, strategy, data, args.top_n,
+                              args.capital, args.trade_cost_bps)
+            print(f"{name}: {added} new day(s) recorded")
+        except Exception as exc:  # one strategy's failure must not kill the arena run
+            state.log_gap(name, today, repr(exc))
+            print(f"{name}: gap logged — {exc!r}")
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    """Print the side-by-side comparison table (unranked)."""
+    from analyze_equity import compare_strategies
+
+    state = ArenaState(args.db)
+    table = compare_strategies(state.conn)
+    if table.empty:
+        print("No strategies in the arena DB yet — run `arena-run backtest` first.")
+        return
+    with pd.option_context("display.width", 160, "display.max_columns", None):
+        print(table.to_string(index=False))
+
+
+def main() -> None:
+    """CLI entry point for arena-run."""
+    p = argparse.ArgumentParser(description="Multi-strategy paper-trading arena")
+    p.add_argument("--db", type=str, default=DEFAULT_DB, help="SQLite state path")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--strategies", type=str, default="",
+                        help=f"comma list of {', '.join(available_strategies())}")
+    common.add_argument("--tickers", type=str, default="AAPL,MSFT,GOOG,AMZN,NVDA")
+    common.add_argument("--tickers_file", type=str, default=None)
+    common.add_argument("--top_n", type=int, default=5)
+    common.add_argument("--capital", type=float, default=100000.0,
+                        help="starting paper capital per strategy (equal for all)")
+    common.add_argument("--trade_cost_bps", type=float, default=1.0)
+    common.add_argument("--gbm_bundle", type=str, default=None,
+                        help="model bundle path, required when 'gbm' is selected")
+
+    b = sub.add_parser("backtest", parents=[common],
+                       help="screen strategies through the walk-forward filter")
+    b.add_argument("--start", type=str, required=True)
+    b.add_argument("--end", type=str, required=True)
+    b.add_argument("--min_sharpe", type=float, default=0.0,
+                   help="universal filter: minimum backtest Sharpe")
+    b.add_argument("--max_dd", type=float, default=-0.30,
+                   help="universal filter: worst tolerated drawdown (negative)")
+    b.set_defaults(func=cmd_backtest)
+    # gbm is opt-in: it needs --gbm_bundle, so a bare backtest runs the rule-based three
+    b.set_defaults(strategies="engulfing,technical,meanrev")
+
+    l = sub.add_parser("live", parents=[common],
+                       help="one idempotent, self-backfilling paper-trading tick")
+    l.add_argument("--lookback_days", type=int, default=200,
+                   help="calendar days of history fetched for warmup + backfill")
+    l.set_defaults(func=cmd_live)
+
+    r = sub.add_parser("report", help="side-by-side comparison table")
+    r.set_defaults(func=cmd_report)
+
+    args = p.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

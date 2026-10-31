@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0023 — The Single Authoritative Source</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:.8rem; overflow-x:auto; margin:.6rem 0; }
+  pre code { border:none; padding:0; background:none; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0023 · pairs with lesson 0023</div>
+<h1>Drill: The Single Authoritative Source</h1>
+
+<div class="q"><h3>1. Name the bug class</h3>
+<p>A character's facing is computed in one system and its movement in another,
+so it slides backward while animating a forward walk. What is this class of
+bug called in this codebase, and what is the one-line root cause?</p>
+<details><summary>Answer</summary><div class="a">
+<p>The <strong>moonwalk</strong> (first fixed in #61). Root cause: two
+consumers each reconstruct "the same" quantity from raw inputs instead of
+deriving it from one shared source, so the copies drift apart.</p>
+</div></details></div>
+
+<div class="q"><h3>2. Why not just add pitch to the weapon?</h3>
+<p>In #91 the weapon aimed yaw-only from the feet while the camera used yaw,
+pitch, and eye height. Why is "add pitch and eye height to the weapon's own
+aim code" the wrong fix even though it would look correct immediately?</p>
+<details><summary>Answer</summary><div class="a">
+<p>It creates a second aim vector that merely <em>agrees today</em>. The next
+change to look math (or a new weapon) can desync it again. The real fix routes
+both camera and weapon through one <code>lookDirection(yaw, pitch)</code> so
+there is no second copy to drift — the bug is designed out, not patched.</p>
+</div></details></div>
+
+<div class="q"><h3>3. Space vs time</h3>
+<p>#91 and #93 are the same principle applied along different axes. State the
+principle, and say what plays the role of "the one source" in each.</p>
+<details><summary>Answer</summary><div class="a">
+<p>Principle: a value used in two places should be computed in exactly one
+place. #91 (space): the shared function <code>lookDirection</code> is the one
+source both camera and weapon read. #93 (time): the mouse-press event is the
+one moment the drag-vs-click decision is made; every later frame reads the
+latch instead of recomputing.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Spot the re-sampling bug</h3>
+<pre><code>float rotateInput = 0.f;
+if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) &&
+    !menu.pointOverInteractive(GetMousePosition()))
+    rotateInput += GetMouseDelta().x * kPreviewDragDegPerPx;</code></pre>
+<p>Why does this spin the preview on a control-click, and stall a legitimate
+drag? What single change fixes both?</p>
+<details><summary>Answer</summary><div class="a">
+<p>It re-evaluates "over a control?" every frame using the moving cursor. A
+click that slips off its button mid-press stops reading as a control and spins
+the figure; a drag that grazes a button momentarily stops rotating. Fix: latch
+<code>previewDragging</code> once at <code>IsMouseButtonPressed</code> and hold
+it until the button releases.</p>
+</div></details></div>
+
+<div class="q"><h3>5. Derive, don't cache</h3>
+<p>The idle ease targets <code>player.yawDeg + 180.f</code> recomputed every
+frame rather than stored once when idling begins. Give one concrete reason the
+derive-on-read version is safer.</p>
+<details><summary>Answer</summary><div class="a">
+<p>If the player turns during the idle ease, a cached target would aim the
+preview at a stale "front" and it would settle facing the wrong way. Deriving
+from the live <code>player.yawDeg</code> each frame keeps "face the camera"
+correct as the owner changes — no second copy to invalidate.</p>
+</div></details></div>
+
+<div class="q"><h3>6. Why <code>shortestAngleDelta</code>?</h3>
+<p>The ease uses <code>shortestAngleDelta(previewYaw, defaultYaw)</code> rather
+than <code>defaultYaw - previewYaw</code>. What goes wrong with the plain
+subtraction?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Plain subtraction can be up to ±360°, so the figure can unwind the long way
+round (e.g. spin 350° left instead of 10° right). <code>shortestAngleDelta</code>
+wraps the difference to [-180, 180] so the ease always takes the short arc.</p>
+</div></details></div>
+
+<div class="q"><h3>7. Generalise it</h3>
+<p>You review a PR fixing a totals-mismatch bug: the cart shows one total, the
+invoice another. The diff copies the cart's discount formula into the invoice.
+What do you comment?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Same moonwalk shape. Two independently-computed totals that now agree will
+drift the next time either formula changes. Ask for one shared
+<code>computeTotal()</code> that both the cart and invoice call, so the number
+has a single authoritative source.</p>
+</div></details></div>
+</div></body>
+</html>

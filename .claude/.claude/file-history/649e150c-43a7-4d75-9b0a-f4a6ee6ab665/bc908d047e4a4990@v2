@@ -1,0 +1,52 @@
+// Reference solution — Exercise 04 Part B: lock-free SPSC ring buffer.
+//
+// Single-producer / single-consumer queue with release/acquire ordering and
+// cache-line padding, per lessons 0009/0010. Usable capacity is N - 1 (one
+// slot stays empty to distinguish full from empty).
+//
+// Peek policy: attempt exercises/04_spsc_ring/spsc_ring.hpp first.
+#pragma once
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+
+template <typename T, std::size_t N>
+class SpscRing {
+    static_assert(N >= 2 && (N & (N - 1)) == 0, "N must be a power of two");
+
+public:
+    // Producer side only. Returns false when the ring is full.
+    bool try_push(const T& v) noexcept {
+        const std::size_t head = head_.load(std::memory_order_relaxed);
+        const std::size_t next = (head + 1) & (N - 1);
+        if (next == tail_.load(std::memory_order_acquire)) {
+            return false;  // full
+        }
+        buf_[head] = v;
+        // release: the consumer's acquire-load of head_ makes the write to
+        // buf_[head] visible before it reads the slot.
+        head_.store(next, std::memory_order_release);
+        return true;
+    }
+
+    // Consumer side only. Returns false when the ring is empty.
+    bool try_pop(T& out) noexcept {
+        const std::size_t tail = tail_.load(std::memory_order_relaxed);
+        if (tail == head_.load(std::memory_order_acquire)) {
+            return false;  // empty
+        }
+        out = buf_[tail];
+        tail_.store((tail + 1) & (N - 1), std::memory_order_release);
+        return true;
+    }
+
+    static constexpr std::size_t capacity() noexcept { return N - 1; }
+
+private:
+    std::array<T, N> buf_{};
+    // Separate cache lines so producer (head_) and consumer (tail_) cores
+    // don't false-share.
+    alignas(64) std::atomic<std::size_t> head_{0};
+    alignas(64) std::atomic<std::size_t> tail_{0};
+};

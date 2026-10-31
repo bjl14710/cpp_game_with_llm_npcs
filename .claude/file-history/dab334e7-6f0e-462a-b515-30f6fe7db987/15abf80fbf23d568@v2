@@ -1,0 +1,114 @@
+# Plan: Confidence/Volatility Position Sizing for the Arena
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+The arena's generic walk-forward currently splits capital equally across the
+day's top-N signals regardless of conviction or risk. This replaces that with
+confidence-weighted, volatility-scaled sizing: each pick's weight is
+proportional to its signal confidence divided by the ticker's recent
+volatility, normalized per day, capped per position (default 30%), with any
+capacity the cap can't fill left in cash. Higher-conviction signals on calmer
+tickers get proportionally more paper capital; a lone signal bets 30% of the
+book, not 100%. Sizing mode is part of a strategy's screened configuration so
+a live ledger never silently changes its sizing mid-track-record.
+
+## Goal
+A strategy's stated conviction actually moves position size — and thin-signal
+days scale down exposure instead of concentrating the whole book on one bet.
+
+## Decisions Made (were open questions)
+- **Rule: confidence ÷ volatility, capped** (user decision):
+  `raw_i = conf_i / σ20d_i`, normalized to Σ=1, per-position cap `max_pos`
+  (default 0.30, matching the meanvar `max_w` convention) with iterative
+  excess redistribution. Confidence is normalized per day *within* the
+  strategy — scales are strategy-relative by contract (`strategies/daily.py`),
+  so engulfing's constant 1.0 degenerates gracefully to inverse-vol weighting.
+- **Cap binds → cash** (user decision): gross exposure = min(1, n_picks ×
+  max_pos). One signal ⇒ 30% position, 70% cash. Deliberate behavior change
+  from today's all-in single pick.
+- **Capped Kelly: deferred.** True Kelly needs edge estimates (hit rate,
+  payoff ratio) from trailing trade history — real estimation machinery with a
+  ~30-trade burn-in. Listed out of scope with the blotter already recording
+  everything a future Kelly needs.
+- **Sizing is screened configuration**: `--sizing equal|conf_vol` on
+  `arena-run backtest` (default `conf_vol`), persisted on the strategy row;
+  `arena-run live` reuses the stored mode. Changing sizing requires
+  re-screening — a live track record never mixes sizing regimes. Strategies
+  in pre-existing DBs default to `equal` (legacy).
+
+## Out of Scope (this version)
+- Kelly criterion sizing (see above — future issue, blotter-ready)
+- The GBM meanvar path (`simulate_walkforward`) — already conviction-sized
+  via mean-variance weights; untouched
+- `paper_trading_sim.py` and the intraday PaperEngine
+- Cross-strategy confidence calibration (contract says strategy-relative)
+- Leverage / gross exposure above 1.0
+
+## Affected Areas
+- `walkforward_sim.py` — `run_strategy_walkforward` gains
+  `sizing: str = "equal"`, `max_pos: float = 0.30`, `vol_window: int = 20`:
+  compute per-ticker rolling σ of daily returns (min_periods=10; missing σ →
+  that day's cross-sectional median; no vols at all → equal split), then
+  `_conf_vol_weights(candidates, vols, max_pos)` — normalize, cap,
+  redistribute, cash remainder. `realized = Σ w_i·pos_i·fwd_i` with Σw ≤ 1.
+  `sizing="equal"` reproduces current behavior bit-for-bit (regression-pinned).
+- New helper in `walkforward_sim.py`: `_capped_normalized(raw, cap)` —
+  the normalize/cap/redistribute loop, extracted so it's unit-testable
+  (mirrors `meanvar_long_only`'s cap logic but with the cash-remainder rule).
+- `strategy_arena.py` — `strategies` table gains `sizing TEXT DEFAULT
+  'equal'` (guarded ALTER migration — third plan touching this table after
+  circuit-breaker and divergence: whichever lands later rebases);
+  `record_backtest` stores the mode; `cmd_backtest`/`cmd_live` pass it
+  through; `live` refuses `--sizing` overrides (mode comes from the DB).
+- `tests/test_strategy_walkforward.py` — sizing cases appended;
+  `tests/test_strategy_arena.py` — mode persistence + live reuse.
+
+## Implementation Order
+1. `_capped_normalized` helper + unit tests (pure math: normalization, cap
+   redistribution, all-capped cash remainder, single-pick 30%).
+2. `run_strategy_walkforward` sizing modes + vol computation + fallbacks;
+   tests: equal mode unchanged (pin against known series); conf_vol gives the
+   calmer/higher-conviction ticker the larger weight; lone signal ⇒ 0.30
+   weight and equity moves 30% of the bar return.
+3. Arena persistence + CLI: schema migration, mode stored at screen, live
+   reads stored mode, legacy rows default to equal; idempotency/backfill
+   tests still green under conf_vol.
+
+## Acceptance Criteria
+- [ ] `sizing="equal"` produces byte-identical equity/blotter to current
+      behavior for the same inputs
+- [ ] Given two same-day signals with equal confidence where ticker A has
+      half the σ20d of B, A's weight is twice B's (before cap)
+- [ ] Given equal σ and confidences 0.9 vs 0.3, weights split 0.75/0.25
+      (before cap)
+- [ ] A single-signal day under conf_vol yields weight = max_pos and
+      `1 − max_pos` cash (equity moves by max_pos × bar return)
+- [ ] Weights never exceed max_pos and never sum above 1 (property-style test
+      across random synthetic days)
+- [ ] Sizing mode chosen at `arena-run backtest` is stored and reused by
+      `arena-run live`; a legacy DB row sizes as `equal`
+- [ ] Blotter `weight` column reflects the sized weights (feeds the pending
+      transaction-costs plan's |Δweight| turnover unchanged in shape)
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Confidence 0 on a non-hold signal | Floored at a small epsilon — it was a signal, it gets the minimum share, not zero |
+| σ unavailable (short history) | min_periods=10, else that day's cross-sectional median σ; no σ anywhere ⇒ equal split for the day |
+| σ ≈ 0 (flat ticker) | Floored (e.g. 1e-4 daily) so one dead ticker can't absorb the whole book |
+| All picks hit the cap | Σw = n × max_pos < 1, remainder cash — never force-renormalized |
+| n_picks × max_pos ≥ 1 | Cap non-binding for the marginal names; weights sum to exactly 1 |
+| Long and short picks same day | Weights computed on magnitudes; sign applied at realization (|w| respects the cap) |
+| Mixed sizing across strategies in one arena | Fine — mode is per-strategy config; the report's comparison is per-ledger anyway |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(sizing): _capped_normalized weight helper with cash remainder` — pure math + property tests
+2. `feat(sizing): conf/vol sizing mode in run_strategy_walkforward` — vol windows, fallbacks, equal-mode regression pin
+3. `feat(arena): persist sizing mode per screened strategy, live reuse` — schema migration + CLI + tests
+4. `feat(sizing): capped Kelly from blotter trade history` — FUTURE / not this version; placeholder for the deferred estimator

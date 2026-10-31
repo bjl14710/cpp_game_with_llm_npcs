@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0024 — One Shared Asset Pool</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0024 · Systems design · from PR #99 (#95–#98)</div>
+<h1>One Shared Asset Pool: Collapsing Two Pipelines</h1>
+<p>"Created characters don't look like the townsfolk" and "add more
+hairstyles" arrived as two requests. The audit showed one root cause: NPCs and
+the creator rendered from <em>two unrelated construction methods</em> — rigged
+glTF pack models vs primitive composites — that shared nothing. No amount of
+tuning either pool fixes that; the fix is choosing ONE pool and routing
+everything through it.</p>
+
+<h2>Diagnose before adding assets</h2>
+<p>The tempting move was to add hairstyles to the creator's catalog and call
+it done. But hair added there could <em>never</em> appear on a roaming NPC —
+rigged models can't wear composite parts. When two features share a root
+cause, fixing the structure once beats patching each symptom: after
+unification, "expand hairstyles" became six data rows that both consumers
+picked up with zero wiring.</p>
+
+<h2>The dispatch hook was already there</h2>
+<p>The render loop already chose per-NPC:</p>
+<pre><code>if (customLooks.count(i))  drawCompositeCharacter(...)  // created chars
+else                       drawCharacter(visual);        // rigged pack model</code></pre>
+<p>Unification = widening the existing branch until the else disappears:
+give <em>every</em> NPC a look (<code>npcLooks[i]</code>) and the second path
+is never dispatched. No new render system — the hook one feature built
+became the seam the next feature widened.</p>
+
+<h2>Authored data with a derived fallback</h2>
+<p>Ten townsfolk deserve art direction; future procedural NPCs can't require
+it. The rule that serves both, in one function:</p>
+<pre><code>CharacterLook lookForPersona(name, authored, whyFallback) {
+    if (authored && lookIsValid(*authored)) return *authored;   // art-directed
+    ...
+    return randomizeLook(fnv1a(name));   // deterministic: same name, same face
+}</code></pre>
+<ul>
+<li><strong>Authored wins</strong> when valid — the cast is intentional
+(the cop's cap + visor + slate reads as uniform without the Knight model).</li>
+<li><strong>Fallback is derived, not random</strong>: hashing the name means
+an unauthored NPC keeps the same face across runs — no save data needed.</li>
+<li><strong>Stale data demotes, never kills</strong>: a look naming a removed
+part logs why and falls back; the NPC always spawns.</li>
+</ul>
+
+<h2>Validation lives with the catalog, not the parser</h2>
+<p><code>PersonaLoader</code> checks only <em>structure</em> (five items);
+whether ids exist is checked by <code>lookForPersona</code> at spawn. So the
+persona format doesn't depend on the parts catalog, and editing the catalog
+can't retroactively invalidate persona <em>files</em> — worst case a look
+falls back at runtime, loudly.</p>
+
+<h2>The trade-off was priced, not hidden</h2>
+<p>Unifying retired five rigged, skeletally-animated models in favor of
+primitive composites: real fidelity lost, bought cohesion + customization +
+shared hair. The brief's priority ("literally the same assets") decided it,
+the loss is logged, and the off-ramp (a modular CC0 pack, XL) is documented
+in the plan rather than forgotten.</p>
+
+<div class="callout good"><strong>The general shape.</strong> When two
+consumers need "the same" content, don't align two pools — make one pool and
+give every consumer a resolver (<code>authored → derived fallback</code>)
+into it. Growth (new hair) then reaches every consumer by construction, and
+the roster test can assert the interesting property (authored, valid,
+pairwise-distinct) at the data level.</div>
+</div></body>
+</html>

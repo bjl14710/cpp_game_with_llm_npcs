@@ -1,0 +1,119 @@
+[2026-07-05T07:05:51.746Z] [supervisor] ─── daemon start ─── version=2.1.201 pid=10841 origin=transient
+[2026-07-05T07:05:51.759Z] [supervisor] auth: scheduling proactive refresh in 25430s
+[2026-07-05T07:05:51.760Z] [supervisor] auth: scheduling proactive refresh in 25430s
+[2026-07-05T07:05:51.770Z] [supervisor] workers=0
+[2026-07-05T07:05:51.790Z] [bg] bg: control socket bound at /tmp/cc-daemon-501/4904f0e7/control.sock
+[2026-07-05T07:05:51.984Z] [bg] bg spawned 005dccc0 (slash)
+[2026-07-05T07:06:02.403Z] [bg] bg settled 005dccc0 (crashed)
+[2026-07-05T07:06:04.888Z] [bg] bg spawned 005dccc0 (fleet)
+[2026-07-05T07:06:10.814Z] [bg] bg settled 005dccc0 (killed)
+[2026-07-05T07:06:10.826Z] [bg] bg spawned 005dccc0 (respawn)
+[2026-07-05T07:06:31.680Z] [bg] bg settled 005dccc0 (crashed)
+[2026-07-05T08:32:51.967Z] [bg] bg spare spawned host pid=14895
+[2026-07-05T11:38:40.086Z] [bg] bg spare spawned host pid=23459
+[2026-07-05T12:01:40.118Z] [bg] bg spare spawned host pid=26426
+[2026-07-05T12:07:40.432Z] [bg] bg spare spawned host pid=26947
+[2026-07-05T12:45:24.308Z] [bg] bg spare spawned host pid=27380
+[2026-07-05T12:55:28.118Z] [bg] bg spare spawned host pid=27720
+[2026-07-05T14:09:42.256Z] [supervisor] auth: proactive refresh starting
+[2026-07-05T14:09:42.953Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-05T14:09:42.953Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-05T17:26:28.126Z] [bg] bg spare spawned host pid=33361
+[2026-07-05T17:33:28.132Z] [bg] bg spare spawned host pid=34286
+[2026-07-05T17:49:28.144Z] [bg] bg spare spawned host pid=35115
+[2026-07-05T20:33:38.286Z] [bg] bg spare spawned host pid=40592
+[2026-07-05T21:21:34.659Z] [bg] bg spare spawned host pid=44370
+[2026-07-05T21:34:34.665Z] [bg] bg spare spawned host pid=45106
+[2026-07-05T21:57:34.682Z] [bg] bg spare spawned host pid=46456
+[2026-07-05T22:05:42.732Z] [supervisor] auth: proactive refresh starting
+[2026-07-05T22:05:52.548Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-05T22:05:52.548Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-05T22:23:34.718Z] [bg] bg spare spawned host pid=47747
+[2026-07-06T06:01:52.389Z] [supervisor] auth: proactive refresh starting
+[2026-07-06T06:01:52.924Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-06T06:01:52.924Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-06T09:22:16.208Z] [bg] bg spare spawned host pid=74486
+[2026-07-06T09:32:16.209Z] [bg] bg spare spawned host pid=76124
+[2026-07-06T14:06:43.612Z] [supervisor] auth: proactive refresh starting
+[2026-07-06T14:06:44.457Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-06T14:06:44.457Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-06T22:09:33.367Z] [supervisor] auth: proactive refresh starting
+[2026-07-06T22:09:34.255Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-06T22:09:34.255Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-06T22:27:34.542Z] [supervisor] binary at /Users/brandonlee/.local/bin/claude changed (/Users/brandonlee/.local/share/claude/versions/2.1.201 → /Users/brandonlee/.local/share/claude/versions/2.1.202) — self-restarting for upgrade
+[2026-07-06T22:27:34.544Z] [supervisor] shutting down (cause=upgrade, uptime=141703s, leases=1, live_workers=0)
+[2026-07-06T22:27:35.423Z] [supervisor] ─── daemon start ─── version=2.1.202 pid=81257 origin=transient
+[2026-07-06T22:27:35.435Z] [supervisor] auth: scheduling proactive refresh in 27479s
+[2026-07-06T22:27:35.436Z] [supervisor] auth: scheduling proactive refresh in 27479s
+[2026-07-06T22:27:35.446Z] [supervisor] workers=0
+[2026-07-06T22:27:35.462Z] [bg] bg: control socket bound at /tmp/cc-daemon-501/4904f0e7/control.sock
+[2026-07-06T22:28:25.449Z] [supervisor] idle 50s with no clients — exiting
+[2026-07-06T22:28:25.449Z] [supervisor] shutting down (cause=idle_exit, uptime=50s, leases=0, live_workers=0)
+[2026-07-07T07:00:21.602Z] [supervisor] ─── daemon start ─── version=2.1.202 pid=89645 origin=transient
+[2026-07-07T07:00:21.612Z] [supervisor] auth: scheduling proactive refresh in 27138s
+[2026-07-07T07:00:21.659Z] [supervisor] auth: scheduling proactive refresh in 27138s
+[2026-07-07T07:00:21.669Z] [supervisor] workers=0
+[2026-07-07T07:00:21.686Z] [bg] bg: control socket bound at /tmp/cc-daemon-501/4904f0e7/control.sock
+[2026-07-07T07:00:21.890Z] [bg] bg spawned fb41e0ea (slash)
+[2026-07-07T07:00:29.746Z] [bg] bg: low memory (43MB free) — retiring settled workers before spawning f8807219
+[2026-07-07T07:00:29.746Z] [bg] bg spawned f8807219 (fleet)
+[2026-07-07T07:00:37.822Z] [bg] bg settled fb41e0ea (crashed)
+[2026-07-07T07:00:49.590Z] [bg] bg settled f8807219 (crashed)
+[2026-07-07T07:01:08.692Z] [supervisor] idle 5s with no clients — exiting
+[2026-07-07T07:01:08.692Z] [supervisor] shutting down (cause=idle_exit, uptime=47s, leases=0, live_workers=0)
+[2026-07-16T00:42:14.668Z] [supervisor] ─── daemon start ─── version=2.1.205 pid=19053 origin=transient
+[2026-07-16T00:42:14.688Z] [supervisor] auth: scheduling proactive refresh in 26593s
+[2026-07-16T00:42:14.730Z] [supervisor] auth: scheduling proactive refresh in 26593s
+[2026-07-16T00:42:14.743Z] [supervisor] workers=0
+[2026-07-16T00:42:14.764Z] [bg] bg: control socket bound at /tmp/cc-daemon-501/4904f0e7/control.sock
+[2026-07-16T00:42:14.831Z] [bg] bg spare spawned host pid=19066
+[2026-07-16T00:42:14.989Z] [bg] bg claimed-spare 08895eac (slash)
+[2026-07-16T00:42:15.010Z] [bg] bg spare spawned host pid=19069
+[2026-07-16T00:43:14.746Z] [supervisor] binary at /Users/brandonlee/.local/bin/claude changed (/Users/brandonlee/.local/share/claude/versions/2.1.205 → /Users/brandonlee/.local/share/claude/versions/2.1.211) — self-restarting for upgrade
+[2026-07-16T00:43:14.748Z] [supervisor] shutting down (cause=upgrade, uptime=60s, leases=2, live_workers=1)
+[2026-07-16T00:43:15.850Z] [supervisor] ─── daemon start ─── version=2.1.211 pid=19281 origin=transient
+[2026-07-16T00:43:15.853Z] [supervisor] ─── daemon start ─── version=2.1.211 pid=19280 origin=transient
+[2026-07-16T00:43:15.872Z] [supervisor] another daemon won the lock race (pid=19281) — exiting
+[2026-07-16T00:43:15.872Z] [supervisor] auth: scheduling proactive refresh in 26532s
+[2026-07-16T00:43:15.903Z] [supervisor] auth: scheduling proactive refresh in 26532s
+[2026-07-16T00:43:15.911Z] [supervisor] workers=0
+[2026-07-16T00:43:15.922Z] [bg] bg: control socket bound at /tmp/cc-daemon-501/4904f0e7/control.sock
+[2026-07-16T00:43:15.934Z] [bg] bg adopt: adopted=1 respawned=0 dead=0
+[2026-07-16T00:43:15.972Z] [bg] bg orphan-spare reap: 1
+[2026-07-16T00:43:16.003Z] [bg] bg spare spawned host pid=19296
+[2026-07-16T00:43:30.994Z] [bg] bg: post-takeover prewarm burst — respawned 0/1 stale workers, 1 refused in 0s
+[2026-07-16T08:05:27.948Z] [supervisor] auth: proactive refresh starting
+[2026-07-16T08:05:28.599Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-16T08:05:28.599Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-16T16:13:02.351Z] [supervisor] auth: proactive refresh starting
+[2026-07-16T16:13:03.357Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-16T16:13:03.357Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-17T00:09:03.164Z] [supervisor] auth: proactive refresh starting
+[2026-07-17T00:09:03.836Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-17T00:09:03.836Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-17T08:10:16.486Z] [supervisor] auth: proactive refresh starting
+[2026-07-17T08:10:17.354Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-17T08:10:17.354Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-17T16:06:17.231Z] [supervisor] auth: proactive refresh starting
+[2026-07-17T16:06:17.963Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-17T16:06:17.963Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-18T00:10:09.454Z] [supervisor] auth: proactive refresh starting
+[2026-07-18T00:10:10.323Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-18T00:10:10.323Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-18T06:27:03.819Z] [supervisor] binary at /Users/brandonlee/.local/bin/claude changed (/Users/brandonlee/.local/share/claude/versions/2.1.211 → /Users/brandonlee/.local/share/claude/versions/2.1.214) — self-restarting for upgrade
+[2026-07-18T06:27:03.821Z] [supervisor] shutting down (cause=upgrade, uptime=193428s, leases=0, live_workers=1)
+[2026-07-18T06:27:04.840Z] [supervisor] ─── daemon start ─── version=2.1.214 pid=53798 origin=transient
+[2026-07-18T06:27:04.871Z] [supervisor] auth: scheduling proactive refresh in 5945s
+[2026-07-18T06:27:04.911Z] [supervisor] auth: scheduling proactive refresh in 5945s
+[2026-07-18T06:27:04.918Z] [supervisor] workers=0
+[2026-07-18T06:27:04.935Z] [bg] bg: control socket bound at /tmp/cc-daemon-501/4904f0e7/control.sock
+[2026-07-18T06:27:04.954Z] [bg] bg adopt: adopted=1 respawned=0 dead=0
+[2026-07-18T06:27:04.957Z] [bg] bg orphan-spare reap: 1
+[2026-07-18T06:27:04.985Z] [bg] bg spare spawned host pid=53809
+[2026-07-18T06:27:19.988Z] [bg] bg: post-takeover prewarm burst — respawned 0/1 stale workers, 1 refused in 0s
+[2026-07-18T08:08:32.617Z] [supervisor] auth: proactive refresh starting
+[2026-07-18T08:08:33.347Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-18T08:08:33.347Z] [supervisor] auth: proactive refresh succeeded
+[2026-07-18T16:04:33.174Z] [supervisor] auth: proactive refresh starting
+[2026-07-18T16:04:33.791Z] [supervisor] auth: scheduling proactive refresh in 28560s
+[2026-07-18T16:04:33.791Z] [supervisor] auth: proactive refresh succeeded

@@ -1,0 +1,52 @@
+# MR: feat: July 6 Ideas batch — 9 arena enhancements (#54–#62)
+
+Branch: `feature/july6-batch` → `feature/arena-orchestrator` (stacked on PR #53, which stacks on #52)
+
+## Summary
+Implements all 9 issues of milestone "July 6 2026 Ideas — Arena Enhancements" (#54–#62): conviction-weighted position sizing, a realistic transaction-cost model, a drawdown circuit breaker with manual-only resume, a statistical live-vs-backtest divergence alert, market-regime gating, historical shock-period stress testing, a track-record-weighted ensemble, PSI concept-drift monitoring, and SHAP per-prediction explainability. One commit per issue, suite green after each (**193 passed**, 67 tests added). Review stack order: #52 → #53 → this.
+
+## Changes by Issue
+
+**#54 sizing — `walkforward_sim.py`, `strategy_arena.py`**
+`sizing="conf_vol"`: weight ∝ confidence / 20-day σ, normalized, capped at `--max_pos` (0.30) via an iterative redistribute; when the cap can't fill capacity, the remainder stays in cash (a lone signal bets 30%, not 100%). Sizing is screened configuration — persisted per strategy, reused by live, never switched mid-ledger. `sizing="equal"` is regression-pinned to old behavior.
+
+**#55 costs — new `costs.py`, wired into the generic loop + arena CLI**
+`CostModel` with three modes: `none`, `flat` (legacy per-day haircut, still the default — old results stay reproducible), `realistic` (commission + half-spread + √-impact charged on |Δweight| turnover; holding is free, churn pays; low-ADV tickers cost more). Every equity frame now carries `equity` (net), `equity_gross`, and `cost` columns. Scope note: wired into `run_strategy_walkforward` and `arena-run`; the GBM `simulate_walkforward` and `paper_trading_sim.simulate` still use their original flat logic — deliberate deferral, not silently dropped.
+
+**#56 breaker — `strategy_arena.py`, `analyze_equity.py`**
+Live drawdown beyond `--breaker_dd` (20%) → status PAUSED + TRIP event; PAUSED strategies are skipped until `arena-run resume <name>`, the only path back. Resume moves the high-water anchor to *today* (deviation from the plan's trip-date anchoring, which would have let the whole paused window backfill — the commit message documents why). Paused windows are never backfilled (`live_tick`'s `since_date` floor). Report gains `paused_since`.
+
+**#57 divergence — `strategy_arena.py`, `analyze_equity.py`**
+Backtest screening now stores a daily-return fingerprint (mean/std/n); live ticks run a one-sided z-test against it (`--divergence_z 2.0` after `--min_live_days 20`). Transition-based events (DIVERGED/RECOVERED), flags never pause. Report gains `divergence_z`, `vol_ratio`, `diverged`, `diverged_since`. Not a shadow backtest — that would equal the live ledger by construction.
+
+**#58 regime — new `regime.py`, `strategies/*`, both arena commands**
+Deterministic classifier (high-vol check first, then lag-1 autocorrelation) → `trending` / `mean_reverting` / `high_vol` / `neutral`. `DailyStrategy.compatible_regimes` gates trading: engulfing + meanrev trade only in `{mean_reverting, neutral}`, technical in `{trending, neutral}`, GBM everywhere. Calibration fix vs. the plan: the neutral band widened from ±0.05 to ±0.15 (~1 SE at 60 samples) because the tighter band classified pure white noise as trending/mean-reverting most of the time. `regime_log` table records each day's label; `--no_regime_gate` disables.
+
+**#59 stress — new `shocks.py`, `walkforward_sim.py`**
+Built-in registry (COVID 2020, 2022 selloff, Q4 2018) + `--shocks_json` override (malformed files raise — no silent fallback). `run_shock_tests` replays a bundle or a `DailyStrategy` per window; a failing window becomes an error row, never aborts the rest. `walkforward-sim --stress` prints the per-period table additively.
+
+**#62 ensemble — new `strategies/ensemble.py`, `strategy_arena.py`**
+`EnsembleStrategy` is a pure weighted vote (`score = Σ w·pos·conf`, sign → position, exact tie → hold) with zero DB coupling; `ensemble_weights` derives weights from live Sharpe (floor 0.05 — losers keep a token vote; all-or-nothing equal-weight bootstrap until every member has 20 live days). `arena-run ensemble --name X --members a,b` validates members are PASS (fails fast) and ticks it as its own ledger. Plain `arena-run live` skips ensembles with a pointer to the subcommand (they can't rebuild from the static registry).
+
+**#61 drift — new `drift.py`, `paper_trading_sim.py`, `predict_next.py`**
+`--save_model` now additively embeds `feature_reference` (decile edges per feature from the actual training frame); `predict-next --check_drift` pools the day's feature rows across tickers and prints per-feature PSI with `> 0.25` flags. Legacy bundles without the key get a clear skip notice.
+
+**#60 SHAP — `predict_next.py`, `pyproject.toml` (new dep, approved)**
+`--explain` attaches `shap_top` (top-k signed contributions) per prediction via one `TreeExplainer` per model; `--explain_csv` dumps long-format attributions. Lazy import — the default path never touches shap. Test pins the SHAP consistency identity (base + Σ shap == model prediction) to 1e-9.
+
+**Minor** — `pyproject.toml` (4 new py-modules, shap dep), `uv.lock`, `tests/conftest.py` untouched; 8 new/extended test files.
+
+## Why
+These nine turn the arena from "which strategy looked best" into an instrumented lab: costs and sizing make the numbers honest, the breaker and divergence alert catch failure while it's cheap, regime gating stops strategies from fighting outside their element, stress replay covers the shocks live trading won't include, drift + SHAP make the GBM inspectable, and the ensemble is the first consumer of live track records as data. Trade-offs are documented inline where they bite (provisional-final-bar cost handling, HOLD-gap re-entry not charged, ensemble one-level-only).
+
+## Testing
+`uv run pytest tests/ -m "not exercise"` → **193 passed** (67 new across 8 files). Every feature has hand-computed pins where math matters (PSI, divergence z, SHAP identity, buy-and-hold equity). No live API calls; no shipped model files.
+
+## Risk and Rollback
+All additive; defaults preserve existing behavior everywhere (`flat` costs, `equal` sizing regression-pinned byte-identical, breaker/divergence only touch live arena flows, SHAP/drift are opt-in flags). Arena DBs migrate in place via guarded `ALTER TABLE`s (tested against a pre-feature schema). Real-money paths untouched. Revert = drop the merge; `arena_state/` DBs are disposable.
+
+## Checklist
+- [x] 193 tests pass locally; suite green after every commit
+- [x] One approved new dependency (`shap`); everything else stdlib/pandas/numpy
+- [x] Docstrings + type hints throughout; migrations tested against legacy DBs
+- [ ] Reviewer: the resume-anchor deviation (#56 commit message) and the HOLD-gap cost simplification (`walkforward_sim.py` comment) are the two judgment calls worth a second opinion

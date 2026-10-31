@@ -1,0 +1,59 @@
+#pragma once
+#include "itch_parser.hpp"
+#include "order_book.hpp"  // OrderRecord, PriceLevel, TopOfBook
+#include <cstdint>
+#include <deque>
+#include <stdexcept>
+#include <unordered_map>
+#include <vector>
+
+// FIFO queue-aware order book (SCAFFOLD).
+// Plan: .claude/plans/avellaneda-stoikov-mm-sim.md, step 1.
+//
+// Same public contract as OrderBookFlat PLUS per-level FIFO order queues so
+// price-time priority is ground truth: the MM simulator's shadow order gets
+// a real position in the real queue. top_of_book() must match OrderBookFlat
+// exactly on any message sequence (parity test pins this).
+//
+// TODO(mm-1): implement. Suggested representation:
+//   per level: std::deque<QueueEntry{order_ref, shares}> (FIFO by arrival);
+//   locator: unordered_map<order_ref, {side, level_idx}> — cancels/deletes
+//   find their entry by scanning the (short) level deque; executions
+//   consume from the FRONT (price-time priority), partial front fills
+//   decrement in place.
+
+namespace itch {
+
+class OrderBookQueue {
+public:
+    struct QueueEntry {
+        uint64_t order_ref;
+        uint32_t shares;
+    };
+
+    OrderBookQueue(uint32_t min_price_raw, uint32_t max_price_raw,
+                   uint32_t tick_size = 1);
+
+    // Same mutation API as OrderBookFlat (visitor-compatible).
+    void add(uint64_t order_ref, char side, uint32_t price_raw, uint32_t shares);
+    uint32_t execute(uint64_t order_ref, uint32_t executed_shares);
+    bool del(uint64_t order_ref);
+    void replace(uint64_t old_ref, uint64_t new_ref, uint32_t shares, uint32_t price_raw);
+
+    TopOfBook top_of_book() const;
+
+    // Queue introspection for the shadow order: FIFO entries at a level.
+    const std::deque<QueueEntry>& level_queue(char side, uint32_t price_raw) const;
+
+    uint64_t error_count() const { return error_count_; }
+    std::size_t order_count() const { return 0; /* TODO(mm-1) */ }
+
+private:
+    uint32_t min_price_;
+    uint32_t max_price_;
+    uint32_t tick_size_;
+    uint64_t error_count_ = 0;
+    // TODO(mm-1): per-side vector<deque<QueueEntry>> + ref locator map.
+};
+
+}  // namespace itch

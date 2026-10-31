@@ -10,6 +10,7 @@
 #include "Math.hpp"
 #include "NpcAction.hpp"
 #include "Persona.hpp"
+#include "Role.hpp"
 #include "Schedule.hpp"
 
 namespace llm_npc {
@@ -150,12 +151,65 @@ class Npc {
     std::vector<const TraitDef*> resolvedTraits() const;
     const std::string& gossip() const { return gossip_; }
 
+    // --- Role layer (issue #199) -------------------------------------------
+    //
+    // The per-match part this NPC plays and the one thing they are hiding.
+    // ASSIGNED, never chosen here: generateMystery picks the killer (#178) and
+    // castStoryline deals every other slot (#188). This carries what it is
+    // handed and resolves the id, nothing more.
+    //
+    // NEVER SHOWN TO A PLAYER. No UI, no journal line, no debug overlay reads
+    // these — the whole mechanic is that the town looks the same whoever did
+    // it. The secret reaches the model inside the system prompt; keeping it
+    // out of the transcript is the prompt's job, and test coverage says so.
+    void setRole(std::string roleId, std::string secret) {
+        roleId_ = std::move(roleId);
+        secret_ = std::move(secret);
+    }
+    const std::string& roleId() const { return roleId_; }
+    const std::string& secret() const { return secret_; }
+
+    // Installs the shared role library. Mirrors setTraitRegistry exactly,
+    // including the lifetime rule: the vector must outlive the NPC.
+    void setRoleRegistry(const std::vector<RoleDef>* registry) {
+        roleRegistry_ = registry;
+    }
+
+    // roleId_ resolved against the registry, or nullptr.
+    //
+    // DEMOTE AND LOG, the same contract unknown traitIds have. Never a crash,
+    // and never a silent substitution — substituting for an unknown killer
+    // role would produce a match with two killers, or none, and nothing
+    // downstream would notice.
+    const RoleDef* resolvedRole() const;
+
     // --- Combat interface --------------------------------------------------
 
     // Reduces hp by `amount` (clamped at 0). Transitions state: armed NPCs
     // turn Hostile, unarmed ones Fleeing; hp reaching 0 means Dead either
     // way. No-op when already Dead.
     void takeDamage(int amount);
+
+    // Enters the Dead state directly, without going through takeDamage.
+    //
+    // For the opening murder (plan: opening-murder): the victim STARTS dead,
+    // they are not killed during play. Two reasons this is its own entry point
+    // rather than takeDamage(hp()):
+    //
+    //   - Intent. There is no attacker, no damage amount and no hit; going
+    //     through the damage path to express "was already dead when the match
+    //     began" reads as a killing that happens to have no source.
+    //   - Blast radius. Damage is meant to be observed. World::updateCombat is
+    //     what emits NpcDamagedEvent, and main.cpp turns that into a floating
+    //     "<name> collapses!" callout. takeDamage alone emits nothing today, so
+    //     this is not a bug being dodged — it is a path that stays quiet even
+    //     if the damage path grows a hook later.
+    //
+    // Idempotent, and a no-op on an already-dead NPC.
+    void markDeadAtStart() {
+        hp_ = 0;
+        state_ = NpcState::Dead;
+    }
 
     NpcState combatState() const { return state_; }
     int hp() const { return hp_; }
@@ -167,6 +221,22 @@ class Npc {
     void calmDown() {
         if (state_ != NpcState::Dead) state_ = NpcState::Idle;
     }
+
+    // Plants this NPC on the ground. THE ONE AUTHORITY over an NPC's
+    // vertical position.
+    //
+    // Movement code drives horizontal motion only (see steerXZ) and this owns
+    // the rest. Splitting those two is what let an NPC following a jumping
+    // player climb into the air: the step carried the vertical gap,
+    // City::resolveMovement wrote it through with `pos.y = to.y`, and nothing
+    // put it back.
+    //
+    // Ground is 0 because there is nowhere else an NPC can legally be.
+    // Buildings are solid axis-aligned boxes with no interiors and
+    // resolveMovement refuses to let anyone inside one, so no NPC can stand on
+    // a surface above the plane. If they ever climb, this is the single line
+    // that changes — which is the point of it being one line in one place.
+    void snapToGround() { position_.y = 0.f; }
 
     // Derives facing from the actual displacement since `prevPosition` —
     // the ONE source of truth for "which way am I moving", called once per
@@ -197,6 +267,9 @@ class Npc {
     // when no traits are in play. Resolution happens per prompt so the
     // registry can be shared by every NPC without copies.
     const std::vector<TraitDef>* traitRegistry_ = nullptr;
+    const std::vector<RoleDef>* roleRegistry_ = nullptr;
+    std::string roleId_;
+    std::string secret_;
     std::string gossip_;  // facts heard around town (may be empty)
 
     Vec3 position_{};

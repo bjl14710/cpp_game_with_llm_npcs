@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""Create the 'adding multiplayer' milestone + 7 ready-for-ai issues on
+bjl14710/cpp_game_with_llm_npcs, per .claude/plans/multiplayer-and-aws-deploy.md.
+
+Prereqs (from .claude/.claude/skills/github/SKILL.md):
+  export GH_TOKEN=...          # PAT with repo scope
+  export GITHUB_USERNAME=bjl14710
+  pip install PyGithub
+"""
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from github import Github, GithubException
+
+REPO_SLUG = "bjl14710/cpp_game_with_llm_npcs"
+MILESTONE_TITLE = "Multiplayer v1 — shared world + shared NPCs"
+MILESTONE_DESC = (
+    "2-4 friends join one host over TCP (ip:port), see each other move, and "
+    "talk to the same NPCs with consistent mood/memory. Host machine runs the "
+    "authoritative world and local Ollama. Scaffolded in src/core/Net*.{hpp,cpp} "
+    "with skipped test stubs in tests/test_net_*.cpp. "
+    "Plan: .claude/plans/multiplayer-and-aws-deploy.md (AWS deploy is Phase B, "
+    "not in this milestone)."
+)
+
+ISSUE_TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/issue-N-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    {
+        "title": "feat(net): message protocol and length-prefixed framing",
+        "slug": "net-protocol-framing",
+        "what": (
+            "Implement the scaffolded wire layer: `FrameAssembler::encode`/`feed` "
+            "(4-byte big-endian length prefix + JSON payload, reject prefixes over "
+            "`kMaxFrameBytes` by returning false), and `encodeMessage`/`decodeMessage`/"
+            "`vec3ToJson`/`vec3FromJson` with a MessageType<->string mapping. "
+            "Unknown/missing type or invalid JSON decodes to nullopt."
+        ),
+        "where": (
+            "`src/core/NetFraming.{hpp,cpp}` and `src/core/NetMessage.hpp` (add a "
+            "NetMessage.cpp if bodies outgrow the header; add it to CMakeLists.txt "
+            "core sources). Mirror `StreamAssembler::feed`'s loop shape and "
+            "`parseOllamaChunk`'s allow_exceptions=false parsing."
+        ),
+        "verify": (
+            "Un-skip and implement all stubs in `tests/test_net_framing.cpp` and "
+            "`tests/test_net_protocol.cpp`; `make -C tests test` fully green with "
+            "those 11 cases running (no remaining `doctest::skip()` in these two files)."
+        ),
+        "constraints": (
+            "No sockets in this issue — pure buffer/JSON logic. Do not change "
+            "NetServer/NetClient beyond what compiling requires. Wire format is one "
+            "JSON object per frame with a \"type\" string field; protocol version "
+            "constant stays `kNetProtocolVersion` in NetMessage.hpp."
+        ),
+        "economy_note": (
+            "Use the vendored external/json.hpp (nlohmann) and std only — no new "
+            "libraries, no varint/binary encodings; a fixed 4-byte prefix is enough "
+            "at this scale."
+        ),
+        "concept": "Length-prefixed message framing over TCP byte streams (vs delimiter framing)",
+    },
+    {
+        "title": "feat(net): NetServer accepts players and broadcasts world snapshots",
+        "slug": "netserver-snapshots",
+        "what": (
+            "Implement `NetServer`: bind/listen on Settings::port (0 = ephemeral, "
+            "record in port_), acceptLoop with JoinRequest/Welcome handshake "
+            "(protocol version check, join code check, reject when kMaxPlayers "
+            "reached with a 'session full' reason), per-connection reader threads "
+            "applying PlayerInput, and a tickLoop broadcasting WorldSnapshot "
+            "(all player poses incl. host via setHostPose, plus NPC poses) at "
+            "Settings::snapshotHz. stop() closes everything and joins threads."
+        ),
+        "where": (
+            "`src/core/NetServer.{hpp,cpp}` (Connection struct sketched in the .cpp; "
+            "thread/routing TODOs are in the header). Raw BSD/Winsock sockets — the "
+            "cross-platform #ifdef pattern to copy is in external/httplib.h."
+        ),
+        "verify": (
+            "Un-skip in `tests/test_net_loopback.cpp`: 'client joins and both sides "
+            "see two players in the snapshot', 'player movement propagates through "
+            "server snapshots', 'a fifth join attempt is rejected with session full', "
+            "'protocol version mismatch is rejected at the handshake'. "
+            "`make -C tests test` green; no sleeps-and-hope — poll with a deadline."
+        ),
+        "constraints": (
+            "Depends on the framing/protocol issue. Server is authoritative: clients "
+            "never simulate. SFML-free (src/core rule). NPCs are never deleted, so "
+            "npcIndex stays a stable identifier across snapshots."
+        ),
+        "economy_note": (
+            "One mutex around the connections vector is fine at 4 players — no "
+            "lock-free structures, no epoll/kqueue abstraction; blocking sockets + "
+            "one reader thread per connection."
+        ),
+        "concept": "Server-authoritative state replication and the accept/reader/tick thread split",
+    },
+    {
+        "title": "feat(net): NetClient connect, handshake, input send, poll drain",
+        "slug": "netclient-connect-poll",
+        "what": (
+            "Implement `NetClient`: connect() with a timeout doing the JoinRequest/"
+            "Welcome handshake (storing playerId_, surfacing refusal reasons via "
+            "lastError()), readerLoop feeding FrameAssembler -> decodeMessage -> "
+            "inbox_, poll() swapping the inbox out under the mutex (same pattern as "
+            "LlmClient::drainReplies), sendInput/sendChatOpen/sendChatLine, and "
+            "disconnect() safe to call twice."
+        ),
+        "where": (
+            "`src/core/NetClient.{hpp,cpp}`. The drain-on-main-thread shape to copy "
+            "is `LlmClient::drainReplies` in src/core/LlmClient.cpp."
+        ),
+        "verify": (
+            "Un-skip in `tests/test_net_loopback.cpp`: 'connect to an unreachable "
+            "address fails cleanly' (plus this issue is exercised by the join/movement "
+            "cases from the server issue). `make -C tests test` green."
+        ),
+        "constraints": (
+            "Depends on the framing/protocol issue (and pairs with the NetServer one "
+            "for loopback tests). A framing violation from the server drops the link "
+            "and sets lastError(); no reconnect logic in v1."
+        ),
+        "economy_note": (
+            "Blocking connect with SO_RCVTIMEO/poll for the timeout — no async "
+            "state machine. One reader thread, one send mutex."
+        ),
+        "concept": "Draining a background thread's results on the main loop (inbox swap pattern)",
+    },
+    {
+        "title": "feat(net): route NPC dialogue through the server with mood/speech broadcast",
+        "slug": "server-npc-chat",
+        "what": (
+            "Server-side chat routing: ChatOpen/ChatLine from a client drive the "
+            "host's Npc::ask/LlmClient exactly as single-player does; stream "
+            "ChatDelta and final ChatReply back to the requesting client only, and "
+            "broadcast NpcMoodUpdate + NpcSpeechBubble to everyone else so "
+            "bystanders see expressions and bubbles. Track per-NPC busy state: a "
+            "second player messaging a busy NPC gets a busy indicator reply. A "
+            "client disconnecting mid-request drops its routing entry only."
+        ),
+        "where": (
+            "`src/core/NetServer.cpp` (tickLoop drains client_.drainDeltas()/"
+            "drainReplies() and routes by request id -> Connection), NetMessage "
+            "payload fields for the five chat message types."
+        ),
+        "verify": (
+            "Un-skip in `tests/test_net_loopback.cpp`: 'shared NPC chat updates mood "
+            "for the bystander too', 'LLM failure is reported only to the requesting "
+            "client', 'two clients messaging the same NPC both get answered in "
+            "order', 'client disconnect mid-conversation leaves the server healthy'. "
+            "Uses tests/FakeOllama.hpp (StreamWords and Http500 modes) — no real "
+            "Ollama. `make -C tests test` green."
+        ),
+        "constraints": (
+            "Depends on both NetServer and NetClient issues. Do not modify LlmClient "
+            "— its submit/drain API and single worker already serialize requests; "
+            "route by the returned request id."
+        ),
+        "economy_note": (
+            "Reuse Npc::ask/onReplyArrived and the existing [[MOOD:]] directive "
+            "parsing untouched — the server is a router, not a second dialogue "
+            "implementation."
+        ),
+        "concept": "Request-id-based routing of shared streaming results to per-client channels",
+    },
+    {
+        "title": "feat(menu): Host Game / Join Game pages wired into main.cpp",
+        "slug": "menu-host-join",
+        "what": (
+            "Add a Multiplayer page to the pause menu: Host Game (port entry, start "
+            "NetServer, show 'hosting on <port>, N players') and Join Game (ip:port "
+            "text entry, connect via NetClient, show lastError() on failure and "
+            "return to the page). main.cpp gains Solo/Host/Join modes: Host runs "
+            "NetServer alongside the normal loop feeding setHostPose; Join renders "
+            "poll()'d snapshots for remote players/NPCs and routes DialogUI chat "
+            "through sendChatLine instead of the local LlmClient."
+        ),
+        "where": (
+            "`src/app/Menu.{hpp,cpp}` (follow the existing Page enum / Hit / "
+            "layout() pattern; text entry can follow the key-capture approach used "
+            "for Controls), `src/app/main.cpp`. Remote players can render as the "
+            "existing NPC body mesh with a distinct color."
+        ),
+        "verify": (
+            "Manual (SFML/GL is eyeballed per CLAUDE.md): launch two instances on "
+            "one machine, host in one, join 127.0.0.1:<port> in the other; both "
+            "windows show two avatars moving; joining a dead port shows the error "
+            "and returns to the menu. Solo mode is behaviorally unchanged. "
+            "`make -C tests test` stays green and the cmake game build links."
+        ),
+        "constraints": (
+            "Depends on all four net issues. Solo path must not construct any Net* "
+            "object. Menu stays free of networking types beyond small hooks, same "
+            "as the setModels() injection pattern."
+        ),
+        "economy_note": (
+            "No lobby/browser UI — one text field and two buttons. No new SFML "
+            "widgets; reuse the toast + clickable-rect machinery Menu already has."
+        ),
+        "concept": "Injecting mode-specific behavior into a game loop without forking it (host/join/solo)",
+    },
+    {
+        "title": "test(net): loopback integration fixture for server+client suites",
+        "slug": "loopback-fixture",
+        "what": (
+            "Build the shared fixture sketched at the top of tests/test_net_loopback.cpp: "
+            "a small World (City + 2-3 test personas), an LlmClient pointed at "
+            "FakeOllama, a NetServer on port 0, and a helper that connects N "
+            "NetClients and pumps poll() until a predicate holds or a deadline "
+            "passes. Convert the remaining skipped loopback stubs to use it."
+        ),
+        "where": (
+            "`tests/test_net_loopback.cpp` (fixture can live at the top of the file "
+            "or in a small tests/NetFixture.hpp, matching how FakeOllama.hpp is "
+            "shared)."
+        ),
+        "verify": (
+            "All 9 cases in test_net_loopback.cpp run un-skipped and pass "
+            "deterministically: `for i in 1 2 3 4 5; do make -C tests test || break; "
+            "done` shows no flakes."
+        ),
+        "constraints": (
+            "Do this alongside/after the net feature issues — it's the guardrail "
+            "they're verified against. No fixed sleeps; every wait is a "
+            "predicate + deadline poll. No real network interfaces beyond 127.0.0.1."
+        ),
+        "economy_note": (
+            "Reuse FakeOllama.hpp as-is for the LLM side; do not build a FakeServer "
+            "— the real NetServer on an ephemeral port IS the fixture."
+        ),
+        "concept": "Deterministic integration testing of threaded socket code (predicate polling vs sleeps)",
+    },
+    {
+        "title": "docs(multiplayer): hosting and joining guide",
+        "slug": "docs-multiplayer",
+        "what": (
+            "README section: how to host (port choice, share ip:port, optional join "
+            "code), how to join, the 2-4 player limit, and the reality of joining "
+            "across the internet (host must port-forward, or use Tailscale/ZeroTier; "
+            "we don't do NAT traversal). docs/developer_guide.md: the Net* module "
+            "map, wire format (4-byte BE prefix + JSON w/ type tag, protocol "
+            "version), thread model diagram, and how to run the loopback tests."
+        ),
+        "where": "`README.md`, `docs/developer_guide.md`.",
+        "verify": (
+            "A reader can host and join two instances on one machine using only the "
+            "README section. Developer guide's module table covers NetMessage/"
+            "NetFraming/NetServer/NetClient consistently with the code."
+        ),
+        "constraints": (
+            "Last issue in the milestone — write against the implemented behavior, "
+            "not the plan. Keep the existing docs' voice and table formats."
+        ),
+        "economy_note": (
+            "Extend the existing README/developer_guide sections — no new doc files."
+        ),
+        "concept": "NAT, port forwarding, and why 'send a friend your IP' needs setup",
+    },
+]
+
+
+def main() -> None:
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    username = os.environ.get("GITHUB_USERNAME")
+    if not token or not username:
+        raise SystemExit("Set GH_TOKEN and GITHUB_USERNAME in your shell config first.")
+
+    gh = Github(token)
+    repo = gh.get_repo(os.environ.get("GITHUB_REPO") or REPO_SLUG)
+    print(f"Planning issues for: {repo.full_name}")
+
+    existing_titles = set()
+    for issue in repo.get_issues(state="open"):
+        if not issue.pull_request:
+            existing_titles.add(issue.title.lower())
+    print(f"Existing open issues: {len(existing_titles)}")
+
+    # Overnight workflow labels (idempotent).
+    labels = [
+        ("ready-for-ai", "0075ca", "Scoped and clear — safe for overnight AI run"),
+        ("ai-in-progress", "e4e669", "Claude is currently working on this"),
+        ("ai-completed", "0e8a16", "AI finished — awaiting human review"),
+        ("ai-blocked", "d93f0b", "AI attempted but could not complete"),
+        ("needs-human", "cc317c", "Requires a human decision before work starts"),
+    ]
+    for name, color, description in labels:
+        try:
+            repo.create_label(name=name, color=color, description=description)
+            print(f"Created label: {name}")
+        except GithubException as e:
+            if e.status == 422:
+                print(f"Label exists (skipped): {name}")
+            else:
+                raise
+
+    # Milestone (reuse if a rerun already made it).
+    milestone = None
+    for m in repo.get_milestones(state="open"):
+        if m.title == MILESTONE_TITLE:
+            milestone = m
+            print(f"Milestone exists (reusing): #{m.number}")
+            break
+    if milestone is None:
+        milestone = repo.create_milestone(title=MILESTONE_TITLE, description=MILESTONE_DESC)
+        print(f"Created milestone: {milestone.title} (#{milestone.number})")
+
+    created = []
+    for spec in SPECS:
+        if spec["title"].lower() in existing_titles:
+            print(f"Skipping (exists): {spec['title']}")
+            continue
+        body = ISSUE_TEMPLATE.format(**{k: spec[k] for k in
+                                        ("what", "where", "verify", "constraints",
+                                         "economy_note", "slug", "concept")})
+        issue = repo.create_issue(
+            title=spec["title"],
+            body=body,
+            labels=["ready-for-ai"],
+            assignees=[username],
+            milestone=milestone,
+        )
+        issue.edit(body=body.replace("feature/issue-N-", f"feature/issue-{issue.number}-"))
+        print(f"  Created #{issue.number}: {spec['title']}")
+        print(f"  Concept: {spec['concept']}")
+        created.append({"number": issue.number, "title": spec["title"],
+                        "concept": spec["concept"], "url": issue.html_url})
+
+    print("\n=== Tonight's ready-for-ai queue ===")
+    label = repo.get_label("ready-for-ai")
+    count = 0
+    for issue in repo.get_issues(state="open", labels=[label]):
+        if issue.pull_request:
+            continue
+        print(f"  #{issue.number:3} {issue.title}")
+        print(f"       URL: {issue.html_url}")
+        count += 1
+    print(f"\nTotal: {count} issues queued")
+
+    summary = (
+        f"# Issue Planning Summary\n"
+        f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        f"Repo: {repo.full_name}\n"
+        f"Focus: adding multiplayer\n\n"
+        f"## Issues Created Tonight\n"
+    )
+    for i in created:
+        summary += (f"- #{i['number']}: {i['title']}\n"
+                    f"  Concept: {i['concept']}\n  URL: {i['url']}\n\n")
+    summary += (
+        "\n## What Was NOT Planned\n"
+        "- Phase B (headless cpp_game_server target, deploy-aws-server skill): plan\n"
+        "  defers it until an AWS instance exists; free-tier RAM vs local Ollama is\n"
+        "  an open question in the plan.\n"
+        "- NAT traversal/UPnP, persistence, >4 players, player chat: out of scope\n"
+        "  per .claude/plans/multiplayer-and-aws-deploy.md.\n"
+        "- The unpushed 8-pluggable-llm-and-one-click branch is unrelated to this\n"
+        "  milestone and was not turned into issues.\n"
+    )
+    Path(".claude/memory/planning-session.md").write_text(summary)
+    print("\nPlan saved to .claude/memory/planning-session.md")
+
+
+if __name__ == "__main__":
+    main()

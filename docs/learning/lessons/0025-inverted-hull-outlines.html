@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0025 — Inverted-Hull Outlines</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0025 · Rendering · from PR #108 (#103, milestone #12)</div>
+<h1>Inverted-Hull Outlines in an Immediate-Mode Renderer</h1>
+<p>The Mii-style pass needed every character wrapped in a clean dark line —
+the single strongest "this is a cartoon" signal. There was no shader
+pipeline for it, and none was needed: the classic <em>inverted hull</em>
+does it with the same draw calls the character already uses.</p>
+
+<h2>The trick in one paragraph</h2>
+<p>Draw the object twice. First a slightly <strong>enlarged</strong> copy in
+the outline color with <strong>front faces culled</strong> — so the camera
+sees only the far, inside-out side of the inflated shell. Then draw the real
+object normally on top. The real geometry covers the shell everywhere except
+a thin rim around the silhouette: that rim <em>is</em> the outline, and it
+follows the silhouette from every angle for free.</p>
+
+<h2>Ours, concretely (RaylibRenderer.cpp)</h2>
+<pre><code>rlDrawRenderBatchActive();                 // flush what came before
+rlSetCullFace(RL_CULL_FACE_FRONT);         // show only back faces
+for (const PlacedPart&amp; placed : assembled.parts) {
+    rlPushMatrix();                        // inflate about the PART's center
+    rlTranslatef(at.x, cy, at.z);
+    rlScalef(1.06f, 1.06f, 1.06f);
+    rlTranslatef(-at.x, -cy, -at.z);
+    drawPartRecipe(*placed.part, at, dim, outlineColors);  // all near-black
+    rlPopMatrix();
+}
+rlDrawRenderBatchActive();                 // flush the outline pass
+rlSetCullFace(RL_CULL_FACE_BACK);          // restore
+// ...then the normal color pass, unchanged.</code></pre>
+<ul>
+<li><strong>Same recipes, different colors.</strong> Because #101 isolated
+every part shape behind <code>drawPartRecipe</code>, the outline pass is the
+SAME function with an all-black palette — new parts get outlines for free,
+including future graphics packs.</li>
+<li><strong>Inflate about the part's center</strong>, not the figure's feet:
+scaling about the origin would push high parts (hair) outward more than low
+parts and the rim thickness would vary up the body.</li>
+<li><strong>Uniform screen-ish thickness</strong> comes from the fixed 1.06
+factor at roughly uniform character size (everyone is contract-scaled to
+1.8u, so 6% is ~5cm of rim everywhere).</li>
+</ul>
+
+<h2>Why the batch drains matter</h2>
+<p>raylib's immediate shapes don't hit the GPU per call — they accumulate in
+an rlgl <em>batch</em> that flushes later. A GL state change like
+<code>rlSetCullFace</code> takes effect when the batch is <em>drawn</em>, so
+without an explicit <code>rlDrawRenderBatchActive()</code> before each
+switch, the cull mode could apply to geometry queued earlier (or the outline
+pass could render with the wrong culling entirely). That is also why the two
+passes are <strong>grouped per character</strong> instead of interleaved per
+part: two drains per character instead of two per part.</p>
+
+<h2>Where inverted hull is weak</h2>
+<ul>
+<li><strong>Hard-edged meshes (boxes).</strong> The technique assumes the
+enlarged shell stays "outside" the original; at sharp corners the shell's
+faces move apart and can gap. At our small 1.06 factor and chunky proportions
+the box rims stayed clean — the escalation path (bigger scale → per-recipe
+opt-out) was authored in the skill file but never needed.</li>
+<li><strong>Non-uniform scale in recipes</strong> (head_oval's squashed
+sphere) inherits the hull scale fine because the hull wraps the same matrix
+stack — but a recipe that drew in world space would escape the inflation.
+Recipes must stay in the character's local frame.</li>
+<li><strong>Billboards/sprites don't participate</strong> — the mood emote
+billboard has no hull, which is exactly why it now reads as a style clash
+(playtest finding #1).</li>
+</ul>
+
+<div class="callout good"><strong>The general shape.</strong> When a style
+effect can be expressed as "draw the same thing again with different
+state" (outlines, drop shadows, glow shells), reuse the exact draw path with
+different parameters instead of building a parallel one — one recipe
+function, two passes, and every current and future asset inherits the effect
+by construction.</div>
+
+<div class="callout warn"><strong>State changes in batched renderers.</strong>
+Any time you touch GL state around immediate-mode draws (cull face, blend
+mode, depth), flush the batch first — invisible reordering bugs otherwise
+land on whatever happened to share the batch.</div>
+</div></body>
+</html>

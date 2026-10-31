@@ -1,0 +1,58 @@
+"""Exercise 02: inventory-aware market-maker quoting (Avellaneda-Stoikov-lite).
+
+Implement every method below. Grade yourself with:
+
+    uv run pytest tests/exercises/test_02_market_maker.py -v
+
+See README.md for the spec and lesson 0017
+(docs/learning/lessons/0017-market-making.html) for the theory. The repo's
+fpga/market_maker.vhd quotes mid ± spread/2 with NO inventory input — this
+exercise is the fix for that gap, in Python first.
+"""
+import math  # noqa: F401  (you will want math.log)
+
+
+class InventoryAwareQuoter:
+    """Quotes a bid/ask pair around an inventory-skewed reservation price.
+
+    Parameters
+    ----------
+    gamma : risk aversion (> 0). Higher -> wider spread, stronger skew.
+    sigma : volatility of the mid price (> 0), per unit of `horizon`.
+    horizon : remaining trading horizon T (> 0).
+    max_inventory : position limit; quoting goes one-sided at the limit.
+    k : order-arrival liquidity parameter (> 0, default 1.5).
+    """
+
+    def __init__(self, gamma: float, sigma: float, horizon: float,
+                 max_inventory: int, k: float = 1.5) -> None:
+        # TODO: validate (all of gamma/sigma/horizon/k positive, max_inventory
+        # positive -> ValueError otherwise) and store the parameters.
+        raise NotImplementedError
+
+    def reservation_price(self, mid: float, inventory: int) -> float:
+        """r = mid - q * gamma * sigma^2 * T
+
+        Long inventory (q > 0) must push the reservation price BELOW mid
+        (you want to sell out of the position); short inventory pushes it
+        above.
+        """
+        raise NotImplementedError
+
+    def optimal_spread(self) -> float:
+        """delta = gamma * sigma^2 * T + (2 / gamma) * ln(1 + gamma / k)
+
+        First term: inventory-risk compensation. Second term: how much edge
+        the arrival intensity of orders lets you charge.
+        """
+        raise NotImplementedError
+
+    def quote(self, mid: float, inventory: int) -> tuple[float | None, float | None]:
+        """(bid, ask) centered on the reservation price, half a spread out.
+
+        At the inventory limit go one-sided: at or above +max_inventory stop
+        bidding (bid is None); at or below -max_inventory stop offering
+        (ask is None). Quotes must never cross (bid < ask whenever both
+        exist).
+        """
+        raise NotImplementedError

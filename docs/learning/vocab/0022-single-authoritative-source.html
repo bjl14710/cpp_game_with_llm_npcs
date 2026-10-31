@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0022 — The Single Authoritative Source</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0022 · pairs with lesson 0023</div>
+<h1>Vocab: The Single Authoritative Source</h1>
+<dl>
+<dt>single authoritative source</dt>
+<dd>The one place a quantity is computed or owned. Every other user
+<em>derives</em> from it rather than reconstructing its own copy, so the value
+cannot disagree with itself.</dd>
+
+<dt>moonwalk bug</dt>
+<dd>This codebase's name (from #61) for the failure where two consumers each
+rebuild "the same" value from raw inputs and drift apart — like a character
+sliding backward while animating a forward walk.</dd>
+
+<dt>reconstruction</dt>
+<dd>Recomputing a value beside its real source instead of reading the source.
+The seed of a moonwalk: two reconstructions are only ever coincidentally
+equal.</dd>
+
+<dt>derived value</dt>
+<dd>A value computed on demand from an owner (<code>defaultYaw =
+player.yawDeg + 180</code>). Contrast with a <em>cached</em> copy, which can go
+stale when the owner changes.</dd>
+
+<dt>latch</dt>
+<dd>Capturing a decision at the instant its inputs are meaningful (the mouse
+press) and holding it until a defined release, rather than re-deriving it each
+frame from data that has since moved.</dd>
+
+<dt>sample-per-frame</dt>
+<dd>Re-answering, every tick, a question that was actually settled at an
+earlier event. The time-domain form of reconstruction; the fix is to latch.</dd>
+
+<dt>shortest angular delta</dt>
+<dd>The signed difference between two angles wrapped to [-180°, 180°]
+(<code>shortestAngleDelta</code>), so an ease or turn always takes the short
+arc instead of unwinding the long way round.</dd>
+
+<dt>designed-out bug</dt>
+<dd>A defect removed by structure rather than patched by a guard — after #91 no
+weapon <em>can</em> mis-aim, because there is no second aim vector to be wrong.</dd>
+</dl>
+</div></body>
+</html>

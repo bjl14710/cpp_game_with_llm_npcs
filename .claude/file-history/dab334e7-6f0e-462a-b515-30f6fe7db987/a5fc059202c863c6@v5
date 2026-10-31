@@ -1,0 +1,18 @@
+# Checkpoint
+Session started: 2026-07-14 (overnight #2 — research batch)
+Goal: implement milestone #4 issues #64–#71 from .claude/plans/ specs
+Status: IN PROGRESS
+Branch: feature/research-batch (stacked on feature/gui-scroll-live-signals →
+  july6-batch → arena-orchestrator → arena-strategy-layer → main; the queue's
+  code doesn't exist on main, so the per-issue-branch-off-main template step
+  is inapplicable — one batch branch, one commit per issue, same as 07-07)
+Issues to process: [#64 vol-target, #65 ATR+portfolio breaker, #66 tsmom,
+  #67 lowvol, #68 pead, #69 kelly, #70 indicators→features, #71 pairs]
+Issues completed: []
+Issues failed: []
+Issues skipped: []
+Standing user preference: use recommended options, document decisions, keep moving.
+
+## Prior sessions
+- 2026-07-07: july6 batch #54-#62 (PR #63) — all completed
+- 2026-07-05: arena layer+orchestrator (PRs #52, #53)

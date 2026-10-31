@@ -1,0 +1,76 @@
+#pragma once
+#include "itch_parser.hpp"
+#include "order_book_queue.hpp"
+#include "shadow_order.hpp"
+#include <cstdint>
+#include <vector>
+
+// Avellaneda-Stoikov market-making simulator (SCAFFOLD).
+// Plan: .claude/plans/avellaneda-stoikov-mm-sim.md, steps 3-4.
+//
+// Event loop over a parsed ITCH stream: maintains the FIFO queue book,
+// quotes both sides per the A-S closed form, and applies strategy actions
+// through a tape-time-delayed pending queue (decision latency, default
+// 1 ms). Fills come from ShadowOrder queue mechanics; PnL and inventory
+// are recorded per decision point.
+//
+// A-S closed-form approximation (plan decision 4):
+//   reservation r = m - q * gamma * sigma^2 * (T - t)
+//   spread    delta = gamma * sigma^2 * (T - t) + (2/gamma) * ln(1 + gamma/kappa)
+//   quotes at r +/- delta/2, tick-rounded, clamped inside the touch.
+//
+// TODO(mm-3): AS quoter as a pure function of (mid, q, sigma2, t) -> quotes.
+// TODO(mm-3): pending-action queue keyed by tape time (apply before any
+//   event with timestamp >= action time; drop actions past session end).
+// TODO(mm-4): the loop, accounting, and time-series recording.
+
+namespace itch {
+
+struct MMParams {
+    double   gamma = 1e-4;          // risk aversion
+    double   kappa = 1.5;           // book liquidity parameter
+    uint32_t quote_size = 100;      // shares per side
+    int32_t  inventory_cap = 500;   // pull risk-increasing quote beyond this
+    uint64_t latency_ns = 1'000'000;  // decision+action delay (1 ms default)
+    uint64_t session_end_ns = 57'600'000'000'000;  // 16:00 ET
+    uint32_t min_price_raw = 2'800'000;   // AAPL golden-day defaults
+    uint32_t max_price_raw = 3'000'000;
+};
+
+struct MMSample {
+    uint64_t timestamp_ns;
+    double   mid;
+    double   microprice;
+    int32_t  inventory;
+    double   cash;
+    double   mark_to_mid_pnl;
+    uint32_t bid_quote_raw;   // 0 when pulled
+    uint32_t ask_quote_raw;   // 0 when pulled
+};
+
+struct MMResult {
+    std::vector<MMSample>   samples;
+    std::vector<ShadowFill> fills;
+    uint64_t requote_count      = 0;
+    uint64_t clamped_quote_count = 0;
+    uint64_t dropped_late_actions = 0;
+    double   realized_pnl        = 0.0;   // spread capture, closed round-trips
+    int32_t  terminal_inventory  = 0;
+    double   terminal_mark       = 0.0;   // terminal inventory at final mid
+};
+
+class MMSimulator {
+public:
+    explicit MMSimulator(MMParams params);
+
+    // Consume a full framed buffer (visitor-driven, max speed — no
+    // ReplayClock dependency; composes with it later).
+    MMResult run(const uint8_t* buf, std::size_t len);   // TODO(mm-4)
+
+private:
+    MMParams params_;
+    // TODO(mm-4): OrderBookQueue, live ShadowOrders, pending-action queue,
+    // rolling sigma^2 estimator (reuses microprice), accounting state.
+};
+
+}  // namespace itch

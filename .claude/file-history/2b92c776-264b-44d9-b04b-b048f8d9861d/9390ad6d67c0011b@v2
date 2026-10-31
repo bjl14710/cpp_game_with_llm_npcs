@@ -1,0 +1,50 @@
+// Scaffolded stubs for the sandbox map editor (plan: sandbox-map-editor).
+// Each stub maps to an acceptance criterion; un-skip in the same commit
+// that implements its step. Editor input/camera are eyeball-verified;
+// everything here is headless core.
+#include "SandboxMap.hpp"
+#include "doctest.h"
+
+using namespace llm_npc;
+
+TEST_CASE("piece catalog rows are well-formed" * doctest::skip()) {
+    // Step 1. TODO(sandbox): every PieceDef has non-empty id/assetId,
+    // positive footprint tiles, height > 0 for solid pieces, pack "core";
+    // findPiece resolves each id and nullptr on unknowns.
+}
+
+TEST_CASE("map JSON round-trips byte-stable" * doctest::skip()) {
+    // Step 1. TODO(sandbox): a map with every piece kind + both npc source
+    // forms → toJson → fromJson → toJson yields identical text; fromJson
+    // rejects malformed input and version > kMapFormatVersion.
+}
+
+TEST_CASE("validateMap names every failure class" * doctest::skip()) {
+    // Step 1. TODO(sandbox): unknown piece id, off-grid, out of bounds,
+    // SOLID footprint overlap, npc inside a solid, malformed npc source —
+    // one MapError each with a where + specific reason; a valid fixture
+    // returns empty. These strings double as LLM retry feedback.
+}
+
+TEST_CASE("buildCity compiles pieces to native collision" * doctest::skip()) {
+    // Step 1. TODO(sandbox): AABBs match tile footprints exactly
+    // (tile * kMapTileUnits); Building ids are assetId + "#" + n; visual
+    // (solid=false) pieces emit NO Building; resolveMovement blocks a
+    // player circle on a placed solid exactly like a downtown building.
+}
+
+TEST_CASE("town <-> sandbox <-> town round-trip" * doctest::skip()) {
+    // Step 2. TODO(sandbox): World::loadCity swaps city + clears npcs/
+    // projectiles; reloading makeDowntown restores collision behavior;
+    // per-NPC side arrays are rebuilt by the extracted spawn lambdas
+    // (covered here at the World level, main-side by smoke run).
+}
+
+TEST_CASE("placed NPCs spawn with stored persona and look, schedules off" *
+          doctest::skip()) {
+    // Step 5. TODO(sandbox): "persona:baker" resolves the shipped roster
+    // entry (position overridden to placement, schedule suppressed);
+    // "character:<id>" resolves through CharacterStore; a deleted
+    // character id is skipped with a logged reason and the map still
+    // loads.
+}

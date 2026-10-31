@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0005 — Prediction Models in Trading</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+  .axis {
+    background: var(--panel-2); border-radius: 8px; padding: 10px 14px; margin: 10px 0;
+    border-left: 3px solid var(--accent);
+  }
+  .axis strong { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0005</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Five axes</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 What you predict</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Pooling</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Families</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 In this project</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Prediction Models in Trading</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: Lesson 0003 covered the
+    <em>algorithms</em> in the repo (linear regression, MA rule, gradient boosting).
+    This lesson zooms out to the <em>design space</em> those algorithms sit inside.
+    Every working trading model is a five-axis decision; understanding the axes lets
+    you evaluate, replace, or extend what's here without flailing.
+  </p>
+
+  <!-- ===================== §1 FIVE AXES ===================== -->
+  <h2>1. A trading prediction model lives on five axes</h2>
+  <p>
+    A "model" in trading isn't just "GBM" or "LSTM." Two engineers can both say
+    "gradient boosting" and have built completely different systems. The thing
+    that actually differs is these five choices:
+  </p>
+
+  <div class="axis"><strong>1. Target</strong> — what number (or class) you train to predict.</div>
+  <div class="axis"><strong>2. Horizon</strong> — over what future window the target is measured.</div>
+  <div class="axis"><strong>3. Pooling</strong> — one model across all assets, or one per asset.</div>
+  <div class="axis"><strong>4. Output shape</strong> — point estimate, distribution, or action.</div>
+  <div class="axis"><strong>5. Adaptivity</strong> — train once forever, or rolling retrain.</div>
+
+  <p>Where this repo sits:</p>
+  <table>
+    <tr><th>Axis</th><th>This repo's choice</th><th>Where it's set</th></tr>
+    <tr><td>Target</td><td>Next-day return magnitude (a continuous number)</td><td><code>build_features</code> → <code>fwd_ret_1d</code></td></tr>
+    <tr><td>Horizon</td><td>1 trading day</td><td><code>.shift(-1)</code> in <code>build_features</code></td></tr>
+    <tr><td>Pooling</td><td><strong>Cross-sectional</strong> — one model on stacked rows from all tickers</td><td><code>simulate</code> in <code>paper_trading_sim.py</code></td></tr>
+    <tr><td>Output shape</td><td>Point estimate (no uncertainty, no quantiles)</td><td><code>GradientBoostingRegressor.predict</code></td></tr>
+    <tr><td>Adaptivity</td><td>Either: <em>one-shot train</em> (paper_trading_sim) or <em>rolling retrain</em> (walkforward_sim with <code>--rolling_retrain</code>)</td><td><code>walkforward_sim.py:184–207</code></td></tr>
+  </table>
+
+  <div class="callout">
+    <strong>The mental shift:</strong> "What model should I use?" is the wrong opening question.
+    "What target, on what horizon, pooled how, expressed how, refreshed how often?" — answer those,
+    and the algorithm choice (GBM, linear, neural) follows almost mechanically.
+  </div>
+
+  <!-- ===================== §2 TARGET ===================== -->
+  <h2>2. Axis 1 — What you predict</h2>
+
+  <p>
+    The single most consequential modeling choice. The same dataset can support
+    several different prediction problems, each with different math, different
+    evaluation, and different downstream use.
+  </p>
+
+  <table>
+    <tr><th>Target</th><th>Type</th><th>Why pick it</th><th>Used in this repo?</th></tr>
+    <tr>
+      <td><strong>Return direction</strong> (up/down)</td>
+      <td>Binary classification</td>
+      <td>You only care about side of the bet.</td>
+      <td><em>No</em> — would lose magnitude info needed for ranking.</td>
+    </tr>
+    <tr>
+      <td><strong>Return magnitude</strong> (a number)</td>
+      <td>Regression</td>
+      <td>You need to rank N tickers and size positions.</td>
+      <td><strong>Yes</strong>. <code>fwd_ret_1d</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Volatility</strong> (next-day or next-week)</td>
+      <td>Regression (positive)</td>
+      <td>Sizing positions, pricing options, risk overlays.</td>
+      <td><em>Not directly</em>, but <code>vol_10</code> shows up as a feature.</td>
+    </tr>
+    <tr>
+      <td><strong>Jump probability</strong></td>
+      <td>Binary classification on a rare event</td>
+      <td>Tail-risk hedging, event-driven strategies.</td>
+      <td>No.</td>
+    </tr>
+    <tr>
+      <td><strong>Market regime</strong> (calm / stress)</td>
+      <td>Hidden state classification</td>
+      <td>Switch strategy or reduce exposure under stress.</td>
+      <td><strong>Yes, secondary</strong>. GaussianMixture in <code>walkforward_sim.py</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Optimal action</strong> (buy/hold/sell amount)</td>
+      <td>Reinforcement learning</td>
+      <td>End-to-end optimization including execution.</td>
+      <td>No. Out of scope.</td>
+    </tr>
+  </table>
+
+  <h3>What about horizon?</h3>
+  <p>
+    Horizon and target are tangled. <em>"Next return"</em> means nothing without a
+    horizon. The repo's daily horizon shapes everything: yfinance OHLCV is daily,
+    features are daily, target is 1-day-ahead, retraining (when enabled) is monthly.
+    Move to a 5-second horizon and you'd need tick data, microsecond features,
+    and a completely different infrastructure (see Lessons 0001–0002).
+  </p>
+
+  <!-- ===================== §3 POOLING ===================== -->
+  <h2>3. Axis 3 — Cross-sectional pooling, the non-obvious decision</h2>
+
+  <p>
+    The repo trains <strong>one</strong> <code>GradientBoostingRegressor</code> on
+    stacked rows from every ticker. This is a meaningful choice, and many beginners
+    would default to the other approach without realizing they've picked.
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Per-asset models (one per ticker)</h4>
+      <p>
+        Train AAPL's model only on AAPL data, MSFT's only on MSFT data, etc.
+        Captures asset-specific quirks; suffers from small training sets;
+        completely fails on a ticker with no history (IPOs, additions to the index).
+      </p>
+    </div>
+    <div class="card">
+      <h4>Cross-sectional pooled (this repo)</h4>
+      <p>
+        Stack all (ticker, date) rows into one big dataset; train one model that
+        learns a feature-to-return mapping that applies to <em>any</em> ticker.
+        Far more training data; generalizes to new tickers; assumes the
+        feature-return relationship is roughly universal.
+      </p>
+    </div>
+  </div>
+
+  <span class="filepath">paper_trading_sim.py:simulate (lines 198–216)</span>
+<pre>stacked = []
+<span class="kw">for</span> t, f <span class="kw">in</span> feats.items():
+    f2 = f.<span class="fn">copy</span>()
+    f2[<span class="str">"ticker"</span>] = t                   <span class="com"># label the ticker on each row</span>
+    stacked.<span class="fn">append</span>(f2)
+panel = pd.<span class="fn">concat</span>(stacked).<span class="fn">dropna</span>()  <span class="com"># one big tall DataFrame</span>
+
+<span class="com"># ... time-split each ticker ...</span>
+
+X_train, y_train, feat_cols = <span class="fn">prepare_xy</span>(train_df)
+model = <span class="fn">train_model</span>(X_train, y_train)    <span class="com"># single model, all tickers' rows</span>
+</pre>
+
+  <p>
+    Notice <code>prepare_xy</code> explicitly drops the <code>ticker</code> column from
+    the feature matrix. The model never learns "AAPL behaves differently than MSFT" —
+    it learns a universal mapping from technical features to return. That's the
+    cross-sectional assumption baked in.
+  </p>
+
+  <div class="callout warn">
+    <strong>When pooling breaks:</strong> if a small-cap biotech behaves nothing like
+    a mega-cap tech name, a pooled model averages across the difference and gets both
+    wrong. Real production setups often pool <em>within</em> sector or market-cap
+    bucket. The repo doesn't bucket at all — keep that limit in mind.
+  </div>
+
+  <!-- ===================== §4 FAMILIES ===================== -->
+  <h2>4. Axis-blind tour: the model families you'll see in trading literature</h2>
+
+  <div class="grid3">
+    <div class="card">
+      <h4>Linear / factor models</h4>
+      <p>
+        Fama-French, BARRA, Arbitrage Pricing Theory. Weights on a small set of
+        risk factors (size, value, momentum). Still dominant in mid-frequency.
+        FPGA-friendly. <strong>In repo:</strong> the predictor in
+        <code>linear_regression_predictor.vhd</code> is the simplest case.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Tree ensembles</h4>
+      <p>
+        Gradient boosting (XGBoost, LightGBM, sklearn GBM), random forests. Workhorse
+        of buy-side equity research at the daily/weekly horizon.
+        Non-linear, robust, easy to validate. <strong>In repo:</strong> the flagship.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Sequence neural nets</h4>
+      <p>
+        LSTM / GRU / Transformer applied to OHLCV sequences. Capture long-range
+        temporal dependencies. Heavy to train, hard to backtest honestly. Common
+        in academic papers, less in production than you'd think.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Time-series foundation models (2024–2025 wave)</h4>
+      <p>
+        TimesFM (Google, 200M params), Chronos (Amazon, T5-based), Kronos
+        (pretrained on K-line data). Pretrained on billions of time-series points;
+        used for zero-/few-shot forecasting. Promising; far from outperforming
+        well-tuned trees on tabular alpha.
+      </p>
+    </div>
+    <div class="card">
+      <h4>State-space / regime models</h4>
+      <p>
+        Hidden Markov Models, Gaussian Mixture Models. Don't predict returns
+        directly; identify a latent regime (calm/stress) and route policy.
+        <strong>In repo:</strong> <code>walkforward_sim.py</code> uses
+        <code>GaussianMixture</code> as a stress detector.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Reinforcement learning</h4>
+      <p>
+        Learn an action policy directly from reward signals. Promising for
+        execution and market-making. Notoriously hard to train and validate
+        on financial data. Not in this repo.
+      </p>
+    </div>
+  </div>
+
+  <h3>The honest takeaway</h3>
+  <p>
+    For tabular daily-frequency equity prediction — exactly what this repo does — a
+    well-tuned gradient booster beats almost everything. Neural sequence models and
+    foundation models win on text-like or richly-sequential inputs, not on a few
+    daily-bar features. The repo's choice of GBM is defensible, even with all the
+    sexier options on the table.
+  </p>
+
+  <!-- ===================== §5 IN THIS PROJECT ===================== -->
+  <h2>5. In this project — the adaptivity axis</h2>
+
+  <p>
+    Of the five axes, the one Lesson 0003 didn't touch is <strong>adaptivity</strong>.
+    The repo actually has both modes wired up — fair to know they exist.
+  </p>
+
+  <h3>Mode A: train-once (the simple backtest)</h3>
+  <span class="filepath">paper_trading_sim.py:simulate (overview)</span>
+<pre><span class="com"># 1. Take 70% of the timeline as training (default --train_ratio=0.7).</span>
+<span class="com"># 2. Fit ONE model on that block.</span>
+<span class="com"># 3. Use it unchanged for the entire 30% test block.</span>
+model = <span class="fn">train_model</span>(X_train, y_train)
+preds = model.<span class="fn">predict</span>(X_test)
+</pre>
+  <p>
+    Simple to reason about, but the model never sees the regime shift between 2019
+    and 2024. A pre-COVID model "predicting" 2020 is, charitably, optimistic.
+  </p>
+
+  <h3>Mode B: rolling retrain</h3>
+  <span class="filepath">walkforward_sim.py (lines 184–235, condensed)</span>
+<pre><span class="kw">if</span> rolling_retrain <span class="kw">and</span> <span class="fn">_should_retrain</span>(last_train_dt, dt):
+    <span class="com"># Re-fit the model using all rows up to (but not including) `dt`</span>
+    <span class="com"># Frequency: --retrain_freq {daily, weekly, monthly, quarterly}</span>
+    <span class="com"># Window:    --train_window_days N  (e.g. 756 = ~3y)</span>
+    model = <span class="fn">refit_model</span>(history_up_to(dt))
+    last_train_dt = dt
+</pre>
+  <p>
+    Every retrain bin (default monthly), the model is refit on the most recent
+    <code>--train_window_days</code> of past data only. Each prediction uses information
+    that was actually available at the time — the textbook walk-forward discipline
+    that prevents look-ahead bias.
+  </p>
+
+  <h3>Mode C (bolted on): a regime model as risk overlay</h3>
+  <span class="filepath">walkforward_sim.py (lines 300–317)</span>
+<pre><span class="com"># GaussianMixture as a stress/regime classifier on recent returns</span>
+gm = <span class="fn">GaussianMixture</span>(n_components=hmm_states, random_state=<span class="num">42</span>)
+gm.<span class="fn">fit</span>(returns_window)
+probs = gm.<span class="fn">predict_proba</span>(returns_window)
+
+<span class="kw">if</span> probs[-<span class="num">1</span>, stress_comp] >= hmm_prob:
+    gm_hit = <span class="kw">True</span>          <span class="com"># "today looks like the high-vol component"</span>
+
+stress = <span class="fn">bool</span>(high_vol <span class="kw">or</span> deep_dd <span class="kw">or</span> cusum_hit <span class="kw">or</span> gm_hit)
+<span class="com"># If stress, scale portfolio weights down toward cash (--risk_scale)</span>
+</pre>
+  <p>
+    Two things to notice:
+  </p>
+  <ul>
+    <li>
+      The GMM doesn't predict returns. It predicts which of K hidden regimes today
+      belongs to. The regime then <em>gates</em> the return-prediction model's
+      output — a classic "decoupled signal + decoupled risk" architecture.
+    </li>
+    <li>
+      Four independent stress detectors are OR-ed together: vol filter, drawdown
+      filter, CUSUM change-point test, and the GMM regime probability. This is
+      <strong>ensembling at the regime level</strong>, not the prediction level.
+    </li>
+  </ul>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> the regime overlay is impressive scaffolding, but
+    none of the saved model bundles in <code>models/</code> were trained with the
+    full risk overlay turned on. The headline ~27% annualized number comes from the
+    base GBM. Treat the HMM/CUSUM/etc. as <em>available knobs</em> rather than
+    proven contributors until you ablate them yourself.
+  </div>
+
+  <!-- ===================== §6 OFTEN CONFUSED WITH ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Predicting a return vs predicting a price</h4>
+      <p>
+        Always predict <strong>returns</strong>, not <strong>prices</strong>. Prices
+        are non-stationary (a $200 AAPL is not comparable to a $100 AAPL), have
+        wildly different scales across tickers, and are dominated by their long-run
+        drift. Returns are stationary-enough, comparable, and zero-mean.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Cross-sectional vs time-series prediction</h4>
+      <p>
+        <strong>Cross-sectional</strong> = "given many assets on day T, rank them."
+        <strong>Time-series</strong> = "given one asset, forecast its next value."
+        The repo's GBM is cross-sectional in spirit (top-N over all tickers each day);
+        a per-ticker LSTM would be time-series.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Forecasting vs filtering</h4>
+      <p>
+        <strong>Forecasting</strong>: estimate a future value (next return).
+        <strong>Filtering</strong>: estimate a present hidden state from past
+        observations (HMM regime "is today calm or stressed?"). The GMM overlay
+        is filtering, not forecasting.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Point estimate vs distributional forecast</h4>
+      <p>
+        A <strong>point estimate</strong> says "expected return = 0.4%." A
+        <strong>distributional forecast</strong> says "expected = 0.4%, std = 1.8%,
+        95% interval [−2.6%, 3.4%]." Risk-aware sizing wants the latter; the repo
+        works around having only point estimates by computing covariance separately
+        in <code>predict_next.py</code>.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Walk-forward retrain vs online learning</h4>
+      <p>
+        <strong>Walk-forward retrain</strong>: stop, refit on a window, resume.
+        <strong>Online learning</strong>: model updates after every observation
+        (incremental SGD, Bayesian update). The repo's <code>rolling_retrain</code>
+        is the former — periodic batch refit, not true online.
+      </p>
+    </div>
+    <div class="card">
+      <h4>In-sample vs out-of-sample R²</h4>
+      <p>
+        Both numbers will be reported by any honest backtest. In-sample R² is
+        always optimistic — it's the score on the rows the model has already seen.
+        Out-of-sample R² is the only one anyone should trust. Look for "test_preds"
+        in this repo's <code>--save_preds</code> output.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. <code>paper_trading_sim.py</code> trains <em>one</em> <code>GradientBoostingRegressor</code> on the stacked dataset from all tickers, dropping the ticker column from the features. What is the implicit assumption?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="No — yfinance gives daily OHLCV per ticker, and each ticker has its own per-row features. Pooling is a modeling decision, not an artefact of the data source.">That yfinance can't return per-ticker data, only stacked panels.</li>
+      <li data-correct="true"  data-why="Right. Without the ticker column, the model treats every row identically — it learns a single feature → return mapping that's supposed to apply to any ticker. If small-cap biotech behaves nothing like mega-cap tech, that assumption breaks down and a real production setup would bucket by sector or market cap first.">That the relationship between technical features and next-day return is roughly universal across tickers — i.e. it doesn't depend on which company you're looking at.</li>
+      <li data-correct="false" data-why="Dropping the column is what enforces the assumption — but the assumption itself is about feature-return universality, not about overfitting prevention.">That including the ticker column would cause overfitting on a categorical variable.</li>
+      <li data-correct="false" data-why="There's no embedding being learned here. GradientBoostingRegressor with default settings doesn't do learned embeddings of any kind.">That the model will learn its own ticker embedding from the numeric features.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. What does the <code>GaussianMixture</code> block in <code>walkforward_sim.py</code> actually predict?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="No — GaussianMixture is unsupervised here, fit on a window of recent returns. It doesn't see fwd_ret_1d at all and never predicts return magnitudes.">The next day's return magnitude.</li>
+      <li data-correct="true"  data-why="Correct. GMM is a *filtering* model — given recent returns, it estimates the probability that today belongs to each of K Gaussian components, one of which is treated as the 'high-vol / stress' component. The output is a state probability, not a return.">The probability that the most recent day belongs to a 'high-vol' / 'stress' latent component, used to gate portfolio exposure.</li>
+      <li data-correct="false" data-why="GBM here means Gradient Boosting; the GaussianMixture (GMM) is a separate, smaller model used only for the risk overlay, not as the prediction model.">The same thing as the GradientBoostingRegressor — it's an ensemble alternative.</li>
+      <li data-correct="false" data-why="The GMM looks at past returns, not future ones. Forecasting tomorrow's volatility is a different (forecasting) problem; the GMM does filtering of the present hidden state.">Tomorrow's volatility level as a forecast.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. You decide to add a target that predicts "will the stock move more than 5% tomorrow?" as a binary 0/1. What's the most accurate description of what you've just changed?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's adaptivity (axis 5). You haven't touched retrain frequency. You changed what the model predicts.">You've changed the adaptivity axis — the model will now retrain more often.</li>
+      <li data-correct="true"  data-why="Right. You moved from a continuous regression target (return magnitude) to a binary classification target (large move yes/no). That cascades: you'd switch from GradientBoostingRegressor to GradientBoostingClassifier, change the loss to log-loss, and your downstream code can no longer rank by predicted magnitude — only by predicted probability of the event.">You've changed the target axis from continuous regression to binary classification, which cascades into a different loss function and a different downstream allocation step.</li>
+      <li data-correct="false" data-why="No — pooling describes whether you have one model per ticker or one shared. Adding a different target doesn't change that.">You've changed the pooling axis from cross-sectional to per-asset.</li>
+      <li data-correct="false" data-why="Output shape distinguishes point estimates from distributional forecasts; both regression and classification output point estimates of different things. The bigger change is target type, not output shape.">You've changed the output-shape axis from point to distributional.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. Why does <code>build_features</code> in <code>paper_trading_sim.py</code> use <code>pct_change</code> (returns) rather than the raw close price as the target?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's true but secondary. The deeper reason is that returns are roughly stationary while prices are not — a $50 AAPL and a $250 AAPL are not directly comparable.">Because returns are smaller numbers, so the model converges faster.</li>
+      <li data-correct="false" data-why="Returns have heavier tails than a Gaussian (kurtosis is high). It's not the normality that justifies using returns — it's stationarity and cross-asset comparability.">Because daily returns are normally distributed, but prices aren't.</li>
+      <li data-correct="true"  data-why="Correct. Prices are non-stationary (their mean drifts with the long-run trend), and a $50 AAPL is a completely different scale from a $250 AAPL or a $10 penny stock. Returns are roughly stationary, comparable across tickers, and centered near zero — properties a pooled cross-sectional model relies on.">Because prices are non-stationary and not comparable across tickers; returns are roughly stationary and comparable, which the cross-sectional pooling assumption requires.</li>
+      <li data-correct="false" data-why="It's not a library limitation — sklearn happily fits on price-like targets. The reason to avoid them is statistical, not technical.">Because <code>GradientBoostingRegressor</code> rejects targets with non-zero mean.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. A colleague proposes replacing the GBM with a time-series foundation model (TimesFM or Chronos) for daily next-day prediction. Best response?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Pretrained ≠ better on tabular alpha. On the academic benchmarks they shine; on equity cross-sectional return prediction, a tuned GBM is still hard to beat. Recent papers (Re-Visiting TSFMs in Finance, 2025) document this.">"Great — these models are pretrained on billions of points, so they'll outperform our tiny dataset.</li>
+      <li data-correct="false" data-why="No — TimesFM/Chronos run on standard CPU/GPU. The relevant constraint here isn't compute; it's whether the model's strengths match the problem.">"Won't work — those models can't run on consumer hardware.</li>
+      <li data-correct="true"  data-why="Right. Foundation models like TimesFM, Chronos, and Kronos shine on rich sequential inputs with little fine-tuning, but on tabular daily-bar features in a cross-sectional ranking task — exactly what this repo does — well-tuned gradient boosting is still the workhorse. Worth experimenting on a side branch, not worth replacing the proven path.">"Worth a side experiment but not a replacement — on tabular daily-bar features with cross-sectional ranking, well-tuned GBM is still hard to beat per recent finance benchmarks of TSFMs.</li>
+      <li data-correct="false" data-why="The repo's structure has nothing to do with whether TSFMs would win. They'd integrate fine; the open question is predictive performance, not plumbing.">"Impossible — our pipeline is tabular, and these models only accept text.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. You add a small-cap biotech to your <code>tickers.txt</code> alongside the existing large-cap tech names. The backtest's Sharpe drops noticeably. What's the most likely modeling-level cause?</summary>
+    <p>
+      The pooled model is now averaging across two regimes — small-cap biotech and
+      large-cap tech — that have genuinely different relationships between
+      technical features and next-day return (biotech is event-driven; tech is
+      momentum-driven). The cross-sectional assumption breaks. Fixes: bucket the
+      universe by sector or market cap and train one model per bucket, or add
+      categorical/sector features back into the input. The repo doesn't bucket
+      today — this is a real, fixable gap.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You want to add a confidence interval to each prediction so <code>predict_next.py</code> can size positions smaller when the model is uncertain. What axis are you changing, and what's a clean way to do it without abandoning the current GBM?</summary>
+    <p>
+      That's the <strong>output-shape axis</strong> — moving from point estimate to
+      distributional forecast. Clean ways: (a) train two GBMs with quantile loss
+      at the 10th and 90th percentiles to bracket the prediction (sklearn supports
+      <code>loss='quantile'</code> via the <code>HistGradientBoostingRegressor</code>); (b)
+      compute residual standard deviation on a held-out validation slice and use
+      that as a constant uncertainty; (c) bootstrap-ensemble many GBMs and use the
+      empirical spread. Option (a) is the simplest principled choice and lives
+      within the existing toolchain.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. <code>walkforward_sim.py</code> with <code>--rolling_retrain --retrain_freq monthly</code> beats the train-once mode of <code>paper_trading_sim.py</code> on 2020–2024 by a wide margin. Why isn't rolling retrain just always the right choice?</summary>
+    <p>
+      Two reasons. First, <em>compute</em>: every retrain costs a full GBM fit;
+      monthly is fine, daily is expensive. Second, and more important,
+      <em>statistical noise</em>: a too-frequent retrain on a too-short window will
+      overfit the most recent market microstructure and whiplash. The default
+      <code>--train_window_days 756</code> (~3 years) and monthly retrain is a
+      defensible bias-variance compromise — but it's a compromise, not a free win.
+      Always-train-on-everything (no rolling window) drifts; always-retrain-on-the-
+      last-month chases noise. The sweet spot is asset- and regime-dependent.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidates: <strong>(a) Walk-forward backtesting + look-ahead bias</strong>
+    formalized against <code>walkforward_sim.py</code> internals, or
+    <strong>(b) Mean-variance portfolio optimization</strong> grounded in
+    <code>predict_next.py:meanvar_long_only</code>. Lesson 0005's scenarios poked at both.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

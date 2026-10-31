@@ -1,0 +1,93 @@
+"""Draft PR for the groups milestone; close #120-#124."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Milestone #15 — the player forms a small party and holds ONE
+conversation with several NPCs, who also answer each other. Turn-based
+over the same structured-JSON pipeline as solo talk; solo paths are
+byte-identical when no group is active. One atomic commit per issue.
+
+**#120 mood-gated follow** (`645d863`) — "follow me" already reached
+`NpcAction::Follow` through propose-validate-commit; the whole mechanic
+needed was the VALIDATE gate: hostile/fleeing/angry NPCs drop the action
+to None whatever the model emitted (the civilian-arrest demotion
+pattern). No parallel mechanic.
+
+**#121 GroupSession core** (`52da198`) — participants, speaker-labeled
+transcript (rendered for per-speaker prompts), addressed-by-name turn
+resolution (leading name only; full beats first; unknown falls through
+to round-robin that continues after an addressed speaker), NPC-to-NPC
+floor capped at 2 consecutive turns, participant removal. Fully
+headless-tested.
+
+**#122 app wiring** (`539c8e0`) — talking while NPCs follow opens a
+group (player + ≤3 NPCs, the brief's latency cap). Each turn rides the
+ENTIRE solo pipeline — the speaker's own `npc.ask` with their
+persona/traits/memory plus the labeled transcript, standard routing,
+streamed under the speaker's name — so directives, moods, and history
+work unchanged. NPC↔NPC replies answer whoever just spoke, then the
+floor returns. Dead participants drop with a note.
+
+**#123 memories + attribution** (`5a597fd`) — because every turn goes
+through the speaker's own history, close-time summaries are
+per-perspective for free, and fact extraction runs per participant with
+facts committed under THEIR name. Pinned by test: one transcript, N
+private memories.
+
+**#124 latency + ambient chatter** — per-turn latency logs to stderr
+(one model call per turn, strictly sequential); measured numbers and the
+honest ambient-chatter assessment live in OVERNIGHT_REPORT.md (local):
+ambient NPC↔NPC chatter did NOT fall out naturally — it needs a
+proximity trigger and an overhear UI, so it is written up as the
+follow-up the brief anticipated, not forced in.
+
+## Verification
+- `make -C tests test` green at every commit; final **199 cases /
+  32,034 assertions** (addressing, caps, labels, removal, follow gate,
+  per-perspective histories, attribution).
+- Smoke boot clean; solo dialogue untouched by construction
+  (`group.active()` discriminates every added branch).
+
+## Needs human verification (LLM feel is interactive)
+- Ask an NPC to follow, walk to another, press T: the party line, the
+  labeled three-way transcript, NPC-to-NPC replies, and the turn cap.
+- An angry NPC refusing "follow me" in words AND in movement.
+
+## Notes
+- Stacked on `feature/npc-traits` (PR #132). Merge order:
+  #130 → #131 → #132 → this. Do not merge; review only.
+- Group ratings (F1/F2) stay solo-only for now (logged follow-up).
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="feat: follow mechanic + N-way group conversations (#120-#124)",
+           body=BODY, base="feature/npc-traits", head="feature/group-conversations", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in range(120, 125):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/group-conversations`. Draft PR #{pr.number} open for review (base: feature/npc-traits). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: closed -> PR #{pr.number}")
+print("done")

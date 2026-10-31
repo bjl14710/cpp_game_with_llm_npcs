@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drill 0008 — Doc-Grounded Compliance Auditing</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#2d333b;
+  --green:#34d399;--blue:#60a5fa;--yellow:#fbbf24;--red:#f87171;
+  --orange:#fb923c;--purple:#a78bfa;--teal:#22d3ee;--pink:#f472b6;
+  --text:#c9d1d9;--dim:#6e7681;--border:#30363d;--code:#010409;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.7;min-height:100vh}
+
+/* ── SHELL ─── */
+#start-screen,#drill-screen,#results-screen{max-width:700px;margin:0 auto;padding:2rem 1.3rem 5rem}
+.hidden{display:none!important}
+
+/* ── START SCREEN ─── */
+.logo{font-family:var(--mono);font-size:.75rem;color:var(--dim);letter-spacing:.08em;margin-bottom:.5rem}
+h1{font-size:1.75rem;color:#fff;margin-bottom:.3rem}
+.sub{font-size:.93rem;color:var(--dim);margin-bottom:2rem}
+
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.8rem}
+.chip{font-family:var(--mono);font-size:.76rem;padding:.3rem .75rem;border-radius:20px;
+      border:1px solid var(--border);cursor:pointer;background:var(--surf2);
+      color:var(--dim);transition:all .15s;user-select:none}
+.chip.on{border-color:var(--green);background:rgba(52,211,153,.1);color:var(--green)}
+.chip.all-chip{border-color:var(--blue);color:var(--blue)}
+.chip.all-chip.on{background:rgba(96,165,250,.1)}
+
+.opt-row{display:flex;align-items:center;gap:.8rem;margin-bottom:1.8rem;font-size:.88rem;color:var(--dim)}
+.toggle{width:38px;height:20px;border-radius:10px;background:var(--surf3);border:1px solid var(--border);
+        cursor:pointer;position:relative;transition:background .15s}
+.toggle.on{background:var(--green)}
+.toggle::after{content:'';position:absolute;width:14px;height:14px;border-radius:50%;
+               background:#fff;top:2px;left:2px;transition:left .15s}
+.toggle.on::after{left:20px}
+.toggle-lbl{cursor:pointer}
+
+.begin-btn{font-family:var(--mono);font-size:.9rem;padding:.65rem 2rem;
+           border-radius:6px;border:none;background:var(--green);color:#0d1117;
+           cursor:pointer;font-weight:700;letter-spacing:.04em;transition:opacity .15s}
+.begin-btn:hover{opacity:.85}
+.begin-btn:disabled{opacity:.4;cursor:not-allowed}
+
+.count-note{font-size:.8rem;color:var(--dim);margin-top:.8rem}
+
+/* ── DRILL SCREEN ─── */
+.drill-header{display:flex;align-items:center;gap:1rem;margin-bottom:.9rem}
+.prog-text{font-family:var(--mono);font-size:.8rem;color:var(--dim)}
+.prog-bar{flex:1;height:4px;background:var(--surf3);border-radius:2px;overflow:hidden}
+.prog-fill{height:100%;background:var(--green);border-radius:2px;transition:width .25s}
+
+.q-meta{display:flex;gap:.5rem;margin-bottom:1rem}
+.tag{font-family:var(--mono);font-size:.7rem;padding:.18rem .52rem;border-radius:3px;border:1px solid var(--border);color:var(--dim)}
+.tag.ch-device{border-color:var(--blue);color:var(--blue)}
+.tag.ch-block{border-color:var(--purple);color:var(--purple)}
+.tag.ch-registry{border-color:var(--yellow);color:var(--yellow)}
+.tag.ch-gui{border-color:var(--teal);color:var(--teal)}
+.tag.ch-separation{border-color:var(--orange);color:var(--orange)}
+.tag.ch-traps{border-color:var(--red);color:var(--red)}
+.tag.type-mc{border-color:var(--dim)}
+.tag.type-wr{border-color:var(--pink);color:var(--pink)}
+
+.q-text{font-size:1.02rem;color:#e6edf3;font-weight:600;margin-bottom:1.1rem;line-height:1.55}
+
+pre.snippet{background:var(--code);border:1px solid var(--border);border-radius:6px;
+            padding:.85rem 1rem;font-family:var(--mono);font-size:.8rem;
+            line-height:1.8;overflow-x:auto;margin-bottom:1rem;white-space:pre-wrap}
+.cm{color:#2d4a5a;font-style:italic}.kw{color:#ff7b72}.fn{color:var(--green)}
+.str{color:#a5d6ff}.cls{color:var(--yellow)}.num{color:var(--orange)}.pm{color:#d2a8ff}
+
+/* MC */
+.opts{list-style:none}
+.opts li{background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+         padding:.55rem 1rem;margin-bottom:.4rem;cursor:pointer;font-size:.9rem;
+         transition:border-color .12s,background .12s;line-height:1.5}
+.opts li:hover:not(.lk){border-color:var(--green);background:rgba(52,211,153,.06)}
+.opts li.ok{border-color:var(--green);background:rgba(52,211,153,.09);color:var(--green)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.07);color:var(--red)}
+.opts li.lk{cursor:default}
+.mc-fb{font-size:.84rem;margin-top:.5rem;padding:.4rem .8rem;border-radius:4px;display:none}
+.mc-fb.ok{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.2)}
+.mc-fb.no{background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.2)}
+
+/* Written recall */
+textarea{width:100%;background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+         color:var(--text);font-family:var(--mono);font-size:.84rem;padding:.7rem .9rem;
+         resize:vertical;min-height:90px;outline:none;transition:border-color .15s}
+textarea:focus{border-color:var(--blue)}
+.wr-actions{display:flex;gap:.6rem;margin-top:.6rem;flex-wrap:wrap}
+.wr-btn{font-family:var(--mono);font-size:.77rem;padding:.3rem .75rem;border-radius:4px;
+        border:1px solid var(--border);background:none;color:var(--dim);cursor:pointer;
+        transition:all .14s}
+.wr-btn:hover{border-color:var(--blue);color:var(--blue)}
+.wr-btn.show-btn:hover{border-color:var(--yellow);color:var(--yellow)}
+.concept-hits{margin-top:.7rem;font-size:.83rem;line-height:1.8}
+.hit{color:var(--green)}.miss{color:var(--red)}
+.tally{font-family:var(--mono);font-size:.9rem;font-weight:700;margin-bottom:.4rem}
+.rough-note{font-size:.74rem;color:var(--dim);margin-top:.3rem;font-style:italic}
+.model-ans{margin-top:.8rem;background:var(--surf2);border:1px solid var(--border);
+           border-radius:6px;padding:.8rem 1rem;font-size:.87rem;line-height:1.65;display:none}
+.model-ans strong{color:var(--yellow)}
+.self-rate{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+.sr-btn{font-family:var(--mono);font-size:.75rem;padding:.28rem .7rem;border-radius:4px;
+        border:1px solid var(--border);background:none;cursor:pointer;transition:all .14s}
+.sr-knew{color:var(--green);border-color:var(--green)}
+.sr-knew:hover{background:rgba(52,211,153,.1)}
+.sr-review{color:var(--red);border-color:var(--red)}
+.sr-review:hover{background:rgba(248,113,113,.1)}
+
+/* Nav */
+.nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:1.5rem}
+.nav-btn{font-family:var(--mono);font-size:.82rem;padding:.4rem 1.1rem;border-radius:5px;
+         border:1px solid var(--border);background:var(--surf2);color:var(--dim);
+         cursor:pointer;transition:all .14s}
+.nav-btn:hover:not(:disabled){border-color:var(--green);color:var(--green)}
+.nav-btn:disabled{opacity:.3;cursor:not-allowed}
+.nav-btn.finish{border-color:var(--yellow);color:var(--yellow);background:rgba(251,191,36,.07)}
+
+/* Results */
+h2{font-size:1.4rem;color:#fff;margin-bottom:.6rem}
+.score-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0}
+.sc-box{background:var(--surf2);border:1px solid var(--border);border-radius:8px;
+        padding:1rem;text-align:center}
+.sc-big{font-family:var(--mono);font-size:2.2rem;font-weight:700;color:var(--green);line-height:1.1}
+.sc-lbl{font-size:.8rem;color:var(--dim);margin-top:.3rem}
+.miss-list{margin-top:1.5rem}
+.miss-list h3{font-size:.95rem;color:var(--yellow);margin-bottom:.7rem}
+.miss-item{background:var(--surf2);border:1px solid var(--border);border-radius:5px;
+           padding:.5rem .9rem;margin-bottom:.4rem;font-size:.84rem}
+.results-btns{display:flex;gap:.8rem;margin-top:1.8rem;flex-wrap:wrap}
+.r-btn{font-family:var(--mono);font-size:.84rem;padding:.5rem 1.2rem;border-radius:5px;
+       border:1px solid var(--border);background:none;cursor:pointer;transition:all .15s}
+.r-btn.primary{border-color:var(--green);color:var(--green)}
+.r-btn.primary:hover{background:rgba(52,211,153,.08)}
+.r-btn.secondary{color:var(--dim)}
+.r-btn.secondary:hover{border-color:var(--blue);color:var(--blue)}
+</style>
+</head>
+<body>
+
+<!-- ══ START ══ -->
+<div id="start-screen">
+  <div class="logo">DRILL / 0008</div>
+  <h1>Doc-Grounded Compliance Auditing</h1>
+  <p class="sub">Active recall drill — scoring taxonomy, probes, xfail ledger, vendor-doc diff</p>
+
+  <div class="chips" id="channel-chips">
+    <span class="chip all-chip on" data-ch="all">all channels</span>
+    <span class="chip on" data-ch="taxonomy">scoring taxonomy</span>
+    <span class="chip on" data-ch="probes">self-verifying probes</span>
+    <span class="chip on" data-ch="ledger">xfail ledger</span>
+    <span class="chip on" data-ch="diff">vendor-doc diff</span>
+    <span class="chip on" data-ch="workflow">fix workflow</span>
+    <span class="chip on" data-ch="traps">traps &amp; gotchas</span>
+  </div>
+
+  <div class="opt-row">
+    <div class="toggle on" id="shuffle-tog" onclick="toggleShuffle()"></div>
+    <span class="toggle-lbl" onclick="toggleShuffle()">Shuffle questions</span>
+  </div>
+
+  <button class="begin-btn" id="begin-btn" onclick="begin()">Begin drill</button>
+  <p class="count-note" id="count-note">20 questions selected</p>
+</div>
+
+<!-- ══ DRILL ══ -->
+<div id="drill-screen" class="hidden">
+  <div class="drill-header">
+    <span class="prog-text" id="prog-text">Q 1 / 20</span>
+    <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="q-meta" id="q-meta"></div>
+  <div class="q-text" id="q-text"></div>
+  <div id="q-body"></div>
+
+  <div class="nav-row">
+    <button class="nav-btn" id="prev-btn" onclick="go(-1)" disabled>← prev</button>
+    <button class="nav-btn" id="next-btn" onclick="go(1)">next →</button>
+  </div>
+</div>
+
+<!-- ══ RESULTS ══ -->
+<div id="results-screen" class="hidden">
+  <div class="logo">DRILL / 0007 — RESULTS</div>
+  <h2>Session complete</h2>
+  <div class="score-grid">
+    <div class="sc-box"><div class="sc-big" id="mc-score">-</div><div class="sc-lbl">MC correct</div></div>
+    <div class="sc-box"><div class="sc-big" id="wr-score">-</div><div class="sc-lbl">Written: knew it</div></div>
+  </div>
+  <div class="miss-list" id="miss-list"></div>
+  <div class="results-btns">
+    <button class="r-btn primary" onclick="reviewMissed()">Review missed only</button>
+    <button class="r-btn secondary" onclick="restart()">Restart from scratch</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// QUESTION BANK
+// ══════════════════════════════════════════════════════
+const BANK = [
+// ── SCORING TAXONOMY ──────────────────────────────────
+
+{ch:'taxonomy',type:'mc',
+ q:'<code>TIMERA0:CLOCK:DIVIDER 128</code> is accepted by the model, but ID×TAIDEX hardware tops out at /64. Which audit score is correct, and why is it not just PARTIAL?',
+ opts:[
+   {t:'ACCEPTS_INVALID — the model silently permits a state the doc says cannot exist; that is a distinct category because its fix is validation, not behavior change.',correct:true,why:'Correct. The audit plan deliberately keeps "permits the impossible" separate from "does the documented thing imperfectly" — different bug class, different fix.'},
+   {t:'PARTIAL — it works for typical dividers and only misses one edge value.',correct:false,why:'PARTIAL is for right-concept-missing-edge-cases in documented behavior. Accepting an impossible encoding is its own category (ACCEPTS_INVALID) per the audit design.'},
+   {t:'NON_COMPLIANT — any deviation from the doc is non-compliance.',correct:false,why:'NON_COMPLIANT means the typical, documented use contradicts the doc (e.g. ADC full scale hardcoded to 3.3 V). Valid dividers work fine here; the problem is what ELSE gets accepted.'},
+   {t:'UNDOCUMENTED — /128 appears nowhere in the doc, so it cannot be scored.',correct:false,why:'UNDOCUMENTED is for simulator features with no doc basis (like injection commands), not for invalid parameter values on a documented command.'},
+ ]},
+
+{ch:'taxonomy',type:'wr',
+ q:'Why do UNDOCUMENTED commands (like <code>ADC:CHANNEL0:INJECT</code>) sit OUTSIDE the compliance score? What would counting them do to the metric?',
+ concepts:[
+   {label:'simulator features by design',terms:['simulator','feature','tool','inject','test']},
+   {label:'no doc behavior to comply with',terms:['no doc','nothing to comply','no basis','not in the doc','never describes']},
+   {label:'would punish/distort the score',terms:['punish','distort','penal','unfair','skew','never be compliant']},
+ ],
+ model:'Injection and fault-profile commands are the simulator\'s own tooling — the TI documentation never describes them, so there is no documented behavior to comply with. Counting them would force them to score non-COMPLIANT forever, punishing the tool for being a tool and diluting the metric. The score therefore only divides COMPLIANT by the scored categories (COMPLIANT + PARTIAL + NON_COMPLIANT + ACCEPTS_INVALID); UNDOCUMENTED and FRAMEWORK are listed but excluded.',
+},
+
+{ch:'taxonomy',type:'mc',
+ q:'Which of these is the audit\'s example of a fully COMPLIANT command family?',
+ opts:[
+   {t:'<code>ADC:RESOLUTION</code> — accepts 8/10/12, rejects everything else with -224, matching ADC12RES.',correct:true,why:'Correct. It matches SLAU367P §34.3 for both typical use AND boundary/invalid input — the bar for COMPLIANT.'},
+   {t:'<code>ADC:CHANNEL0:RAW?</code> — returns a 12-bit code clamped to 0..4095.',correct:false,why:'NON_COMPLIANT: it divides by a hardcoded 3.3 V regardless of the selected reference, contradicting the §34.2.1 conversion formula.'},
+   {t:'<code>GPIO:PORT1:PULLUP</code> — an 8-bit read/write mask.',correct:false,why:'NON_COMPLIANT: hardware has one PxREN enable with PxOUT choosing pull direction; independent PULLUP/PULLDOWN masks can express impossible states.'},
+   {t:'<code>WDT:STATE?</code> — correctly reports RUNNING after reset.',correct:false,why:'The post-PUC default is right but the state can never change (no WDTHOLD) — scored NON_COMPLIANT as a stub.'},
+ ]},
+
+// ── SELF-VERIFYING PROBES ─────────────────────────────
+
+{ch:'probes',type:'mc',
+ q:'In <code>scripts/audit_msp430.py</code>, what does a probe returning <code>True</code> mean?',
+ opts:[
+   {t:'The recorded finding still reproduces against a fresh device — the audit entry is still accurate.',correct:true,why:'Correct. Probes assert the documented-vs-actual gap still exists; True = report still describes reality.'},
+   {t:'The command behaves correctly per the TI documentation.',correct:false,why:'Inverted — probes assert the BUG reproduces, not correctness. A fixed bug makes its probe return False (STALE).'},
+   {t:'The command is registered in the handler table.',correct:false,why:'Registration is checked by the family/UNSCORED mechanism, not by probes. Probes execute behavior.'},
+   {t:'The probe itself ran without raising an exception.',correct:false,why:'Probes return an explicit boolean about behavior; not raising is not the signal.'},
+ ]},
+
+{ch:'probes',type:'wr',
+ q:'Explain the audit\'s two failure gates — STALE and UNSCORED. What triggers each, and what does each force a developer to do?',
+ concepts:[
+   {label:'STALE = probe stopped reproducing',terms:['stale','no longer reproduces','probe fail','stopped','false']},
+   {label:'STALE forces rescoring the entry',terms:['rescore','update the entry','review','re-audit']},
+   {label:'UNSCORED = command with no audit entry',terms:['unscored','no entry','new command','without an audit']},
+   {label:'both exit non-zero',terms:['exit 1','non-zero','fails','exit code']},
+ ],
+ model:'STALE fires when a probe no longer reproduces its recorded finding — the model changed, so the audit entry may now be wrong; the developer must review and rescore that entry (and update or delete the probe). UNSCORED fires when the live device registers a command family with no entry in the FINDINGS database — someone grew the SCPI surface without auditing it; the developer must add a scored, cited entry. Either condition makes the script exit 1, so both drift directions (code changed / code added) are loud.',
+},
+
+{ch:'probes',type:'wr',
+ q:'Write (or sketch) a probe for this finding: "CLOCK:MCLK:DIVIDER accepts /64 although CSCTL3.DIVM stops at /32." What must it assert?',
+ concepts:[
+   {label:'send the invalid write',terms:['process','clock:mclk:divider 64','divider 64','64']},
+   {label:'assert no error queued',terms:['error','_error','errors(dev) == 0','no error']},
+   {label:'assert state actually changed',terms:['mclk_div','== 64','state','stored']},
+ ],
+ model:'def probe_mclk_divider_64(dev):\n    dev.process("CLOCK:MCLK:DIVIDER 64")\n    return _errors(dev) == 0 and dev.clock.mclk_div == 64\n\nIt must assert the BUG reproduces: the doc-invalid value is accepted without a SCPI error AND is actually stored. When someone adds validation, the probe returns False → STALE → the entry gets rescored.',
+},
+
+{ch:'probes',type:'mc',
+ q:'Why would writing the probe as <code>assert divider 128 is REJECTED</code> be wrong for the audit, even though that is the correct hardware behavior?',
+ opts:[
+   {t:'The audit tracks current reality; a correctness assertion fails today and passes silently after a fix — the exact opposite of the alarm the audit needs.',correct:true,why:'Correct. The probe direction is deliberate: assert-the-bug means a fix trips the STALE gate and forces the report to be updated.'},
+   {t:'Because pytest asserts cannot be used inside the audit script.',correct:false,why:'The script could use any assertion style; the issue is signal direction, not mechanics.'},
+   {t:'Because rejection would require modifying msp430.py first.',correct:false,why:'The probe never modifies anything — it only observes. The problem is what a pass/fail would MEAN over time.'},
+   {t:'It would be fine — both directions detect the same change.',correct:false,why:'They detect it with opposite polarity: assert-correct is red today (noise) and silently green after a fix (no forcing function). Assert-bug is green today and loudly red on fix.'},
+ ]},
+
+// ── XFAIL LEDGER ──────────────────────────────────────
+
+{ch:'ledger',type:'mc',
+ q:'A developer fixes the timer divider validation but forgets the ledger. What happens when the suite runs, and why?',
+ opts:[
+   {t:'test_divider_128_rejected now passes → strict xfail reports XPASS as a FAILURE → the developer must delete the marker deliberately.',correct:true,why:'Correct. strict=True is the forcing function: the ledger can only shrink through a conscious edit, never by drift.'},
+   {t:'The test is reported XPASS and the suite stays green; the marker is cleaned up by the next audit run.',correct:false,why:'That is non-strict xfail behavior. These markers use strict=True precisely so XPASS fails the suite. The audit script never edits tests.'},
+   {t:'Nothing — xfail tests are skipped, so the fix is invisible to them.',correct:false,why:'xfail is not skip: the test RUNS and its outcome is checked against the expectation.'},
+   {t:'The suite fails because the fix broke other timer tests.',correct:false,why:'Possible in general but not the mechanism being tested here — the guaranteed failure comes from the strict XPASS.'},
+ ]},
+
+{ch:'ledger',type:'wr',
+ q:'The 16 xfail markers duplicate knowledge that already lives in the audit report. Why encode it twice — what does the test-suite encoding add over the report (and over a TODO comment)?',
+ concepts:[
+   {label:'executes on every test run',terms:['execut','every run','ci','runs','automatic']},
+   {label:'alarms on fixes (strict XPASS)',terms:['xpass','strict','alarm','fails the suite','loud']},
+   {label:'TODOs verify nothing',terms:['todo','comment','verify nothing','rot','never alarm']},
+   {label:'lives next to the code path devs touch',terms:['next to','in the test','where developers','discover']},
+ ],
+ model:'The report is read by humans occasionally; the test suite executes on every run. Encoding the gaps as strict xfails makes the knowledge self-enforcing in the workflow developers already use: a fix triggers an XPASS failure right where they are working, without them ever opening the audit report. A TODO comment records the same fact but verifies nothing and alarms never — it rots. The duplication is deliberate cross-linking: the xfail reason cites the audit entry, and both artifacts alarm independently when reality changes.',
+},
+
+// ── VENDOR-DOC DIFF ───────────────────────────────────
+
+{ch:'diff',type:'mc',
+ q:'<code>ADC:OVERSAMPLE</code> lands in MISSING_FROM_GENERATED in the diff report. What does that classification mean here?',
+ opts:[
+   {t:'The model implements it but the doc-derived spec has no basis for it — correct handling of a simulator-only feature.',correct:true,why:'Correct. ADC12_B has no hardware oversampling; a doc-grounded spec MUST omit it, so the classifier routing it to MISSING_FROM_GENERATED is the system working.'},
+   {t:'The generator failed to extract it from the PDF and should be fixed.',correct:false,why:'Extracting it would fabricate ground truth — the doc never describes oversampling for ADC12_B.'},
+   {t:'The doc describes it but the model forgot it.',correct:false,why:'That is MISSING_FROM_MODEL — the opposite direction (e.g. TIMERA3/TIMERA4 instances).'},
+   {t:'Both sides implement it with different behavior.',correct:false,why:'That is CONFLICT, which requires the feature to exist on both sides.'},
+ ]},
+
+{ch:'diff',type:'wr',
+ q:'Define CONFLICT in the diff report: what conditions produce it, and why do CONFLICTs warn rather than block? Give one real example from the MSP430 diff.',
+ concepts:[
+   {label:'both sides claim the feature',terms:['both','exists in both','same feature','model and']},
+   {label:'behavioral probe disagrees',terms:['doc-valid rejected','invalid accepted','echo','read back','different behavior','probe']},
+   {label:'warn not block: signal for engineers',terms:['warn','never block','not block','signal','informational']},
+   {label:'example: CC0:MODE / divider 128 / ADC:REFERENCE / PxREN',terms:['cc0:mode','capture','128','reference','banana','pxren','resistor']},
+ ],
+ model:'CONFLICT means the feature exists on both sides but behaves differently, detected three ways: a doc-valid value is rejected, a doc-invalid value is accepted, or an echo_check write does not read back (plus the structural case where the doc feature maps to model_equivalent commands with a different shape, like PxREN vs PULLUP/PULLDOWN). Conflicts warn and never block because divergence is exactly the signal the tool exists to surface — blocking generation on it would hide the most useful output. Real examples: TIMERA0:CC0:MODE CAPTURE reads back COMPARE; TIMERA0:CLOCK:DIVIDER accepts 128; ADC:REFERENCE accepts BANANA; GPIO pull resistors split PxREN into impossible independent masks.',
+},
+
+{ch:'diff',type:'mc',
+ q:'What does <code>echo_check: true</code> on a spec entry catch that presence-checking cannot?',
+ opts:[
+   {t:'Handlers that accept a write without error but silently ignore it — the value never reads back.',correct:true,why:'Correct. TIMERA0:CC0:MODE CAPTURE is the canonical case: no error, no effect. Only write-then-query round-tripping exposes it.'},
+   {t:'Commands registered under the wrong SCPI short form.',correct:false,why:'Naming issues surface as MISSING entries or via model_equivalent, not echo checks.'},
+   {t:'Handlers that raise unexpected exceptions.',correct:false,why:'Exceptions already surface through the device error queue during the valid_values pass.'},
+   {t:'Response formatting differences like 0xFF vs 255.',correct:false,why:'It compares case-insensitively against the written value — format mismatches would be a spurious conflict, which is why echo_check is only set where formats round-trip.'},
+ ]},
+
+// ── FIX WORKFLOW ──────────────────────────────────────
+
+{ch:'workflow',type:'wr',
+ q:'Walk the full artifact-update loop for issue #19\'s divider fix (validate ≤ /64): what happens in the audit, the edge-case suite, and the diff report — and which updates are forced vs automatic?',
+ concepts:[
+   {label:'audit probe STALE → rescore (forced)',terms:['stale','rescore','exit 1','update the entry']},
+   {label:'xfail XPASS → delete marker (forced)',terms:['xpass','delete','remove the marker','strict']},
+   {label:'diff CONFLICT→MATCH (automatic)',terms:['match','automatic','re-execute','on its own','conflict becomes']},
+ ],
+ model:'1) Fix msp430.py to reject dividers over 64. 2) Run the audit: probe_timer_divider_128 stops reproducing → STALE, exit 1 — you are FORCED to rescore the TIMERAn:CLOCK:DIVIDER entry (ACCEPTS_INVALID → COMPLIANT) and update the probe. 3) Run pytest: test_divider_128_rejected XPASSes → strict marker fails the suite — you are FORCED to delete the marker. 4) Run the diff report: its probes re-execute live, so the TIMERA0:CLOCK:DIVIDER CONFLICT becomes MATCH automatically. Every artifact either updates itself or refuses to stay quiet until you update it.',
+},
+
+{ch:'workflow',type:'mc',
+ q:'Which artifact needs NO manual edit after a behavior fix lands?',
+ opts:[
+   {t:'The vendor-doc diff report — its classifications come from probes executed against the live device every run.',correct:true,why:'Correct. compare() probes a fresh MSP430() at generation time, so CONFLICT→MATCH happens by re-running it.'},
+   {t:'The audit findings database — probes rescore entries automatically.',correct:false,why:'Probes DETECT the change (STALE) but scores are curated judgments; a human rescores the entry.'},
+   {t:'The edge-case test file — pytest removes stale xfail markers.',correct:false,why:'pytest fails on the strict XPASS; deleting the marker is a deliberate human edit.'},
+   {t:'All three require manual edits.',correct:false,why:'The diff report regenerates fully from live probes — no stored judgments to update.'},
+ ]},
+
+// ── TRAPS & GOTCHAS ───────────────────────────────────
+
+{ch:'traps',type:'mc',
+ q:'Why do both reports print the exact doc revisions (SLAU367P / SLASE54D) in their headers?',
+ opts:[
+   {t:'So a future re-audit against a newer revision can tell whether the MODEL drifted or the DOC did.',correct:true,why:'Correct. Findings are claims about code-vs-document; without pinning the document, a revision bump makes every finding ambiguous.'},
+   {t:'Because TI requires attribution when quoting documentation.',correct:false,why:'Attribution is not the engineering reason; disambiguating drift sources is.'},
+   {t:'To let the scripts download the right PDF automatically.',correct:false,why:'Nothing downloads at audit time — the PDFs are committed in hardware_docs/ and the scripts never read them.'},
+   {t:'Purely cosmetic — the revision never affects interpretation.',correct:false,why:'It is load-bearing: SLAU367P §25.2.1.1 might say something different in revision Q, changing whether a finding still holds.'},
+ ]},
+
+{ch:'traps',type:'wr',
+ q:'The audit engine builds a fresh <code>MSP430()</code> for every probe, and the diff comparator a fresh device per spec entry. What bug does this prevent? Give a concrete failure if devices were shared.',
+ concepts:[
+   {label:'probe writes mutate device state',terms:['mutate','state','writes','side effect','leak']},
+   {label:'order-dependent false results',terms:['order','depend','earlier probe','previous','cross']},
+   {label:'concrete example',terms:['divider','error queue','reference','vcc','reset','queue']},
+ ],
+ model:'Probes work by writing to the device and inspecting state/error queues — they are destructive. Sharing one device makes results order-dependent: e.g. probe_lpm35_rejected asserts the error queue length is exactly 1, so any earlier probe that queued an error (say the VCC range probe) would make it miscount and report a false STALE; likewise a probe that set ADC:REFERENCE VREF would contaminate a later conversion probe. Fresh instances make every probe a pure function of the code under audit, so results are stable regardless of execution order.',
+},
+
+]; // end BANK
+
+// ══════════════════════════════════════════════════════
+// APP STATE
+// ══════════════════════════════════════════════════════
+let selectedCh = new Set(['taxonomy','probes','ledger','diff','workflow','traps']);
+let doShuffle = true;
+let queue = [];
+let idx = 0;
+let mcResults = {}; // qidx → true/false
+let wrResults = {}; // qidx → 'knew'|'review'|null
+let typedAnswers = {};
+
+// ── channel chips ──
+document.querySelectorAll('.chip').forEach(c => {
+  c.addEventListener('click', () => {
+    if (c.dataset.ch === 'all') {
+      const allOn = selectedCh.size === 6;
+      if (allOn) { selectedCh.clear(); document.querySelectorAll('.chip:not(.all-chip)').forEach(x => x.classList.remove('on')); c.classList.remove('on'); }
+      else { selectedCh = new Set(['taxonomy','probes','ledger','diff','workflow','traps']); document.querySelectorAll('.chip:not(.all-chip)').forEach(x => x.classList.add('on')); c.classList.add('on'); }
+    } else {
+      if (selectedCh.has(c.dataset.ch)) { selectedCh.delete(c.dataset.ch); c.classList.remove('on'); }
+      else { selectedCh.add(c.dataset.ch); c.classList.add('on'); }
+      const allChip = document.querySelector('.all-chip');
+      allChip.classList.toggle('on', selectedCh.size === 6);
+    }
+    updateCount();
+  });
+});
+
+function updateCount() {
+  const n = BANK.filter(q => selectedCh.has(q.ch)).length;
+  document.getElementById('count-note').textContent = n + ' questions selected';
+  document.getElementById('begin-btn').disabled = n === 0;
+}
+
+function toggleShuffle() {
+  doShuffle = !doShuffle;
+  document.getElementById('shuffle-tog').classList.toggle('on', doShuffle);
+}
+
+function begin() {
+  queue = BANK.filter(q => selectedCh.has(q.ch));
+  if (doShuffle) shuffle(queue);
+  idx = 0; mcResults = {}; wrResults = {}; typedAnswers = {};
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('drill-screen').classList.remove('hidden');
+  render();
+}
+
+function restart() {
+  document.getElementById('results-screen').classList.add('hidden');
+  document.getElementById('start-screen').classList.remove('hidden');
+  updateCount();
+}
+
+function reviewMissed() {
+  const missed = queue.filter((q, i) => {
+    if (q.type === 'mc') return mcResults[i] === false;
+    if (q.type === 'wr') return wrResults[i] === 'review' || wrResults[i] == null;
+    return false;
+  });
+  if (!missed.length) { alert('No misses to review!'); return; }
+  queue = missed;
+  if (doShuffle) shuffle(queue);
+  idx = 0; mcResults = {}; wrResults = {}; typedAnswers = {};
+  document.getElementById('results-screen').classList.add('hidden');
+  document.getElementById('drill-screen').classList.remove('hidden');
+  render();
+}
+
+function go(dir) {
+  // save textarea
+  const ta = document.querySelector('#q-body textarea');
+  if (ta) typedAnswers[idx] = ta.value;
+  idx += dir;
+  if (idx >= queue.length) { showResults(); return; }
+  if (idx < 0) idx = 0;
+  render();
+}
+
+function render() {
+  const q = queue[idx];
+  document.getElementById('prog-text').textContent = `Q ${idx+1} / ${queue.length}`;
+  document.getElementById('prog-fill').style.width = ((idx / queue.length) * 100) + '%';
+
+  // meta tags
+  const chLabel = {device:'device layer',block:'block layer',registry:'registration',gui:'gui path',separation:'device/block split',traps:'traps & gotchas'};
+  document.getElementById('q-meta').innerHTML =
+    `<span class="tag ch-${q.ch}">${chLabel[q.ch]}</span>` +
+    `<span class="tag type-${q.type}">${q.type === 'mc' ? 'multiple choice' : 'written recall'}</span>`;
+
+  document.getElementById('q-text').innerHTML = q.q;
+
+  const body = document.getElementById('q-body');
+  body.innerHTML = '';
+
+  if (q.type === 'mc') renderMC(q, body);
+  else renderWR(q, body);
+
+  document.getElementById('prev-btn').disabled = idx === 0;
+  const isLast = idx === queue.length - 1;
+  const nb = document.getElementById('next-btn');
+  nb.textContent = isLast ? 'finish ✓' : 'next →';
+  nb.className = 'nav-btn' + (isLast ? ' finish' : '');
+}
+
+function renderMC(q, body) {
+  const ul = document.createElement('ul'); ul.className = 'opts';
+  const opts = [...q.opts];
+  shuffle(opts);
+  opts.forEach(opt => {
+    const li = document.createElement('li');
+    li.innerHTML = opt.t;
+    li.dataset.correct = String(opt.correct);
+    li.dataset.why = opt.why;
+    ul.appendChild(li);
+  });
+  body.appendChild(ul);
+
+  const fb = document.createElement('div'); fb.className = 'mc-fb'; body.appendChild(fb);
+
+  // restore already-answered
+  const prev = mcResults[idx];
+  if (prev !== undefined) {
+    ul.querySelectorAll('li').forEach(li => {
+      li.classList.add('lk');
+      if (li.dataset.correct === 'true') li.classList.add('ok');
+    });
+    fb.style.display = 'block';
+    fb.className = 'mc-fb ' + (prev ? 'ok' : 'no');
+    fb.textContent = prev ? '✓ Correct.' : '✗ Not quite — correct answer highlighted.';
+  }
+
+  ul.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (li.classList.contains('lk')) return;
+      ul.querySelectorAll('li').forEach(x => x.classList.add('lk'));
+      const correct = li.dataset.correct === 'true';
+      li.classList.add(correct ? 'ok' : 'no');
+      if (!correct) ul.querySelector('[data-correct="true"]').classList.add('ok');
+      mcResults[idx] = correct;
+      fb.style.display = 'block';
+      fb.className = 'mc-fb ' + (correct ? 'ok' : 'no');
+      fb.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+    });
+  });
+}
+
+function renderWR(q, body) {
+  const ta = document.createElement('textarea');
+  ta.placeholder = 'Type your answer here…';
+  ta.value = typedAnswers[idx] || '';
+  body.appendChild(ta);
+
+  const actions = document.createElement('div'); actions.className = 'wr-actions';
+  const checkBtn = document.createElement('button'); checkBtn.className = 'wr-btn'; checkBtn.textContent = 'Check my answer';
+  const showBtn = document.createElement('button'); showBtn.className = 'wr-btn show-btn'; showBtn.textContent = 'Show model answer';
+  actions.append(checkBtn, showBtn); body.appendChild(actions);
+
+  const hitsDiv = document.createElement('div'); hitsDiv.className = 'concept-hits'; body.appendChild(hitsDiv);
+  const modelDiv = document.createElement('div'); modelDiv.className = 'model-ans'; body.appendChild(modelDiv);
+
+  const roughNote = document.createElement('p'); roughNote.className = 'rough-note';
+  roughNote.textContent = 'Keyword check is rough — self-judge honestly against the model answer.';
+  body.appendChild(roughNote);
+
+  checkBtn.addEventListener('click', () => {
+    typedAnswers[idx] = ta.value;
+    const text = ta.value.toLowerCase();
+    const results = q.concepts.map(c => ({ label: c.label, hit: c.terms.some(t => text.includes(t.toLowerCase())) }));
+    const got = results.filter(r => r.hit).length;
+    const total = results.length;
+    hitsDiv.innerHTML = `<div class="tally">${got} / ${total} key concepts detected</div>` +
+      results.map(r => `<div class="${r.hit ? 'hit' : 'miss'}">${r.hit ? '✓' : '✗'} ${r.label}</div>`).join('');
+  });
+
+  showBtn.addEventListener('click', () => {
+    typedAnswers[idx] = ta.value;
+    modelDiv.style.display = 'block';
+    modelDiv.innerHTML = `<strong>Model answer:</strong><br>${q.model.replace(/\n/g,'<br>')}
+      <div class="self-rate">
+        <button class="sr-btn sr-knew" onclick="rate(${idx},'knew',this)">✓ Knew it</button>
+        <button class="sr-btn sr-review" onclick="rate(${idx},'review',this)">⚑ Needs review</button>
+      </div>`;
+    // restore rating
+    if (wrResults[idx]) {
+      const btn = wrResults[idx] === 'knew' ? modelDiv.querySelector('.sr-knew') : modelDiv.querySelector('.sr-review');
+      if (btn) btn.style.fontWeight = '700';
+    }
+  });
+
+  // restore if already rated
+  if (wrResults[idx]) {
+    modelDiv.style.display = 'block';
+    modelDiv.innerHTML = `<strong>Model answer:</strong><br>${q.model.replace(/\n/g,'<br>')}
+      <div class="self-rate">
+        <button class="sr-btn sr-knew" onclick="rate(${idx},'knew',this)">✓ Knew it</button>
+        <button class="sr-btn sr-review" onclick="rate(${idx},'review',this)">⚑ Needs review</button>
+      </div>`;
+    const btn = wrResults[idx] === 'knew' ? modelDiv.querySelector('.sr-knew') : modelDiv.querySelector('.sr-review');
+    if (btn) btn.style.fontWeight = '700';
+  }
+}
+
+function rate(i, rating, btn) {
+  wrResults[i] = rating;
+  btn.closest('.self-rate').querySelectorAll('button').forEach(b => b.style.fontWeight = '');
+  btn.style.fontWeight = '700';
+}
+
+function showResults() {
+  document.getElementById('drill-screen').classList.add('hidden');
+  document.getElementById('results-screen').classList.remove('hidden');
+
+  const mcQs = queue.filter((q, i) => q.type === 'mc');
+  const mcTotal = mcQs.length;
+  const mcCorrect = Object.values(mcResults).filter(Boolean).length;
+  document.getElementById('mc-score').textContent = `${mcCorrect}/${mcTotal}`;
+
+  const wrQs = queue.filter((q, i) => q.type === 'wr');
+  const knew = Object.values(wrResults).filter(r => r === 'knew').length;
+  const wrTotal = wrQs.length;
+  document.getElementById('wr-score').textContent = `${knew}/${wrTotal}`;
+
+  const missDiv = document.getElementById('miss-list');
+  const missed = queue.filter((q, i) => {
+    if (q.type === 'mc') return mcResults[i] === false;
+    if (q.type === 'wr') return wrResults[i] === 'review' || wrResults[i] == null;
+    return false;
+  });
+  if (missed.length) {
+    missDiv.innerHTML = `<h3>Topics to revisit (${missed.length})</h3>` +
+      missed.map(q => `<div class="miss-item">${q.q.replace(/<[^>]+>/g,'').substring(0,100)}…</div>`).join('');
+  } else {
+    missDiv.innerHTML = '<p style="color:var(--green);font-family:var(--mono)">✓ Clean sweep — no misses!</p>';
+  }
+}
+
+// Fisher-Yates
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+updateCount();
+</script>
+</body>
+</html>

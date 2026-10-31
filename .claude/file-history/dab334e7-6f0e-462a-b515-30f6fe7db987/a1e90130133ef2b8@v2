@@ -1,0 +1,49 @@
+"""Test stubs for the Streamlit dashboard's data layer (streamlit_app/data.py).
+
+Plan: .claude/plans/streamlit-dashboard.md. These tests must run WITHOUT
+streamlit installed — data.py is pure by design. Skips lift as the
+implementing commit lands (same discipline as prior scaffolds).
+"""
+import pytest
+
+SKIP = "scaffold: streamlit dashboard not implemented yet"
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_arena_rows_reads_seeded_db_with_badges(tmp_path):
+    """Seed via ArenaState -> rows carry badge keys; all six statuses map."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_arena_rows_is_read_only(tmp_path):
+    """The mode=ro connection: an attempted write through it raises."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_arena_rows_missing_db_returns_empty_list(tmp_path):
+    """No DB file -> [] (UI renders the empty state), never an exception."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_arena_headline_counts(tmp_path):
+    """tracked / live(PASS) / diverged counts over mixed-status rows."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_equity_metrics_delegates_and_flags_missing_column(tmp_path):
+    """Valid CSV -> compute_metrics dict + frame (incl. equity_gross when
+    present); CSV without 'equity' -> FriendlyDashboardError with the same
+    message analyze-equity gives."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_live_tape_isolates_failing_ticker():
+    """watch_once's per-ticker error isolation flows through (injected fetch)."""
+
+
+def test_data_module_imports_without_streamlit():
+    """The layer split's whole point: importable with no streamlit installed."""
+    import streamlit_app.data as data
+
+    assert set(data.STATUS_BADGES) == {
+        "PASS", "PROBATION", "PAUSED", "EXCLUDED", "REFERENCE", "RESEARCH"}

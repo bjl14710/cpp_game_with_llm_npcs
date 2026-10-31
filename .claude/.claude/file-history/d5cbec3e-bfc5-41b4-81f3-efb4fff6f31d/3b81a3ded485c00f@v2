@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0007 — Hardware Abstraction Layers and the C++ base class</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 30px; margin: 8px 0 6px; line-height: 1.25; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .layer-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0007 &middot; cpp_games / docs / learning</div>
+  <h1>Hardware Abstraction Layers and the C++ base class</h1>
+  <p class="why">Why this matters: lesson 0001 promised that <code class="inline">LlmClient</code>'s design would let you swap Ollama for <code class="inline">llama.cpp</code>. Lesson 0004 said the same about an FPGA backend. This is the lesson where you learn the C++ machinery to actually do it &mdash; the abstract base class &mdash; and the architectural pattern that organises the result, the Hardware Abstraction Layer.</p>
+</header>
+
+<h2>1. The concept</h2>
+
+<p>A <b>Hardware Abstraction Layer (HAL)</b> is a slice of software that hides "where does the work physically happen" from the rest of the program. The application above the HAL deals in <em>what</em> it wants done; the HAL knows <em>how</em> on this particular hardware. Same idea every time:</p>
+
+<div class="layer-diagram">    +-------------------------------------------+
+    |              your application             |
+    |        ("ask Wren how she's doing")       |
+    +-------------------------------------------+
+                          |
+                          v  one interface, same call from above
+    +-------------------------------------------+
+    |          Hardware Abstraction Layer       |
+    |   (one abstract base class declares it)   |
+    +-------------------------------------------+
+              /              |             \
+             v               v              v
+    +-------------+  +---------------+  +-----------+
+    | OllamaHTTP  |  | llama.cpp     |  | XRT FPGA  |
+    | over the    |  | linked into   |  | Alveo V80 |
+    | localhost   |  | this binary   |  | over PCIe |
+    +-------------+  +---------------+  +-----------+</div>
+
+<p>The pattern shows up everywhere:</p>
+<ul>
+  <li><b>Arduino's <code class="inline">digitalWrite(pin, HIGH)</code>.</b> Same line of code drives a totally different SoC under each Arduino board.</li>
+  <li><b>Linux device drivers.</b> Your program calls <code class="inline">read()</code> on a file descriptor; the kernel routes that to one of hundreds of drivers depending on what's behind it.</li>
+  <li><b>SFML's <code class="inline">window.draw(...)</code>.</b> Same call on Windows (DirectX path under SFML) vs Linux (OpenGL under SFML).</li>
+  <li><b>Your <code class="inline">LlmClient::processOne()</code>.</b> The rest of the game already doesn't care whether the LLM is HTTP, in-process, or on an FPGA &mdash; <em>but the choice is hardcoded</em>. A HAL formalises it.</li>
+</ul>
+
+<p>The <b>shape</b> of every HAL is the same:</p>
+<ol>
+  <li>One abstract base class declares the operations the application needs ("submit a chat request, return a reply").</li>
+  <li>For each piece of real hardware (or transport, or library), a concrete derived class implements those operations.</li>
+  <li>The application holds a pointer or reference to the base class. At runtime it calls a method; C++'s <b>virtual dispatch</b> routes to the right derived method.</li>
+  <li>The choice of which derived class to use is made at <em>one</em> spot &mdash; usually a factory function or constructor argument &mdash; and nothing above the HAL knows or cares.</li>
+</ol>
+
+<h2>2. The C++ machinery &mdash; constructing the base class</h2>
+
+<p>There are exactly four C++ features you need to build a HAL: <code class="inline">virtual</code>, <code class="inline">= 0</code>, <code class="inline">override</code>, and a <code class="inline">virtual</code> destructor. They're small, and they interact in one important way that catches everyone the first time.</p>
+
+<pre class="code"><span class="com">// The abstract base. "= 0" makes it a *pure* virtual function — there is no</span>
+<span class="com">// implementation, and the class cannot be instantiated on its own.</span>
+<span class="kw">class</span> Hardware {
+ <span class="kw">public</span>:
+    <span class="com">// (1) virtual destructor — see the callout below; this is the gotcha.</span>
+    <span class="kw">virtual</span> ~Hardware() = <span class="kw">default</span>;
+
+    <span class="com">// (2) the interface — pure virtual methods, one per operation.</span>
+    <span class="kw">virtual</span> <span class="kw">void</span> turnOn() = <span class="num">0</span>;
+    <span class="kw">virtual</span> <span class="kw">void</span> turnOff() = <span class="num">0</span>;
+    <span class="kw">virtual</span> <span class="typ">bool</span> isOn() <span class="kw">const</span> = <span class="num">0</span>;
+};
+
+<span class="com">// A concrete implementation. "override" tells the compiler "I'm overriding</span>
+<span class="com">// a virtual in the base." If the base signature changes, you get a build</span>
+<span class="com">// error instead of silently writing a *new* unrelated method.</span>
+<span class="kw">class</span> LedOnPinD13 : <span class="kw">public</span> Hardware {
+ <span class="kw">public</span>:
+    <span class="kw">void</span> turnOn()  <span class="kw">override</span> { digitalWrite(<span class="num">13</span>, HIGH); on_ = <span class="kw">true</span>; }
+    <span class="kw">void</span> turnOff() <span class="kw">override</span> { digitalWrite(<span class="num">13</span>, LOW);  on_ = <span class="kw">false</span>; }
+    <span class="typ">bool</span> isOn() <span class="kw">const</span> <span class="kw">override</span> { <span class="kw">return</span> on_; }
+ <span class="kw">private</span>:
+    <span class="typ">bool</span> on_ = <span class="kw">false</span>;
+};
+
+<span class="com">// Application code holds a pointer to the BASE. It doesn't know which</span>
+<span class="com">// derived class is actually behind it.</span>
+<span class="kw">void</span> blink(Hardware&amp; hw) {
+    hw.turnOn();
+    sleep(<span class="num">1</span>);
+    hw.turnOff();
+}</pre>
+
+<div class="callout bug">
+  <h3>The virtual-destructor gotcha &mdash; the #1 HAL bug</h3>
+  <p>If you <code class="inline">delete</code> through a base-class pointer (or use <code class="inline">std::unique_ptr&lt;Hardware&gt;</code>, which does that for you), the destructor that runs must be the <em>derived</em> destructor. That only happens if the base destructor is marked <code class="inline">virtual</code>. Forget it, and you'll silently leak derived-class members &mdash; sockets, file handles, threads &mdash; with <em>no</em> compile-time warning. Make every HAL base class destructor <code class="inline">virtual</code>, every time, without thinking. It is a one-line cost that prevents a whole category of mystery leaks.</p>
+</div>
+
+<h3>What each keyword does</h3>
+
+<table class="compare">
+  <thead><tr><th>Keyword</th><th>Used on</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code class="inline">virtual</code></td><td>A base-class method</td><td>"Calls to this method through a base-class pointer should look up the derived class's version at runtime." Without it, the call goes to the base version, no matter what's actually behind the pointer.</td></tr>
+    <tr><td><code class="inline">= 0</code></td><td>A virtual method</td><td>Makes it <b>pure virtual</b>: no implementation, derived classes <em>must</em> provide one. A class with any pure-virtual method is <b>abstract</b> and cannot be instantiated.</td></tr>
+    <tr><td><code class="inline">override</code></td><td>A derived-class method</td><td>"This is supposed to be overriding a base virtual; please verify." Catches typo'd signatures at compile time. Use it on every override.</td></tr>
+    <tr><td><code class="inline">virtual</code> destructor</td><td>The base class destructor</td><td>Required if you'll ever <code class="inline">delete</code> a derived through a base pointer. The default is non-virtual, which is dangerous for HAL bases. Always virtual.</td></tr>
+  </tbody>
+</table>
+
+<h2>3. In your project &mdash; refactoring <code class="inline">LlmClient</code> into a HAL</h2>
+
+<p>Your <code class="inline">LlmClient</code> is already <em>conceptually</em> a HAL &mdash; the rest of the game doesn't know whether the brain is HTTP, llama.cpp, or an FPGA &mdash; but the choice is currently <b>hardcoded</b> by <code class="inline">httplib::Client</code> being baked into <code class="inline">processOne()</code>. Let's formalise it.</p>
+
+<h3>Step 1 &mdash; pull the interface out into a base class</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmBackend.hpp (proposed)</small>
+<pre class="code"><span class="pp">#pragma once</span>
+<span class="pp">#include</span> <span class="str">"LlmClient.hpp"</span>   <span class="com">// for ChatRequest / ChatReply</span>
+
+<span class="kw">namespace</span> llm_npc {
+
+<span class="com">// HAL base: every backend knows how to turn one request into one reply.</span>
+<span class="com">// Everything else (queueing, threading, the public LlmClient surface) stays</span>
+<span class="com">// transport-agnostic above this line.</span>
+<span class="kw">class</span> LlmBackend {
+ <span class="kw">public</span>:
+    <span class="kw">virtual</span> ~LlmBackend() = <span class="kw">default</span>;   <span class="com">// REQUIRED — the gotcha from §2</span>
+
+    <span class="com">// One blocking call: the worker thread invokes this. The base doesn't</span>
+    <span class="com">// know if it'll be 50 ms or 5 seconds — that's the backend's business.</span>
+    <span class="kw">virtual</span> ChatReply request(<span class="kw">const</span> ChatRequest&amp; req) = <span class="num">0</span>;
+
+    <span class="com">// Optional metadata for diagnostics / UI.</span>
+    <span class="kw">virtual</span> std::string name() <span class="kw">const</span> = <span class="num">0</span>;
+
+    <span class="com">// HAL safety: most backends shouldn't be copied or moved. Delete them.</span>
+    LlmBackend(<span class="kw">const</span> LlmBackend&amp;) = <span class="kw">delete</span>;
+    LlmBackend&amp; <span class="kw">operator</span>=(<span class="kw">const</span> LlmBackend&amp;) = <span class="kw">delete</span>;
+
+ <span class="kw">protected</span>:
+    LlmBackend() = <span class="kw">default</span>;   <span class="com">// only derived classes call this</span>
+};
+
+}  <span class="com">// namespace llm_npc</span></pre>
+
+<h3>Step 2 &mdash; today's HTTP code becomes one derived class</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/OllamaBackend.cpp (proposed)</small>
+<pre class="code"><span class="kw">class</span> OllamaBackend : <span class="kw">public</span> LlmBackend {
+ <span class="kw">public</span>:
+    OllamaBackend(std::string host, <span class="typ">int</span> port, std::string model)
+        : host_(std::move(host)), port_(port), model_(std::move(model)) {}
+
+    ChatReply request(<span class="kw">const</span> ChatRequest&amp; req) <span class="kw">override</span> {
+        <span class="com">// — the EXACT body of the current LlmClient::processOne() —</span>
+        httplib::Client cli(host_, port_);
+        <span class="com">// ... build JSON, POST /api/chat, parse response ...</span>
+    }
+
+    std::string name() <span class="kw">const</span> <span class="kw">override</span> { <span class="kw">return</span> <span class="str">"ollama-http"</span>; }
+
+ <span class="kw">private</span>:
+    std::string host_;
+    <span class="typ">int</span> port_;
+    std::string model_;
+};</pre>
+
+<h3>Step 3 &mdash; the FPGA backend from lesson 0004 slots in as another derived class</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/XrtFpgaBackend.cpp (proposed)</small>
+<pre class="code"><span class="kw">class</span> XrtFpgaBackend : <span class="kw">public</span> LlmBackend {
+ <span class="kw">public</span>:
+    XrtFpgaBackend(<span class="kw">const</span> std::string&amp; xclbinPath)
+        : device_(xrt::device(<span class="num">0</span>)),
+          uuid_(device_.load_xclbin(xclbinPath)),
+          kernel_(device_, uuid_, <span class="str">"qwen"</span>) {}
+
+    ChatReply request(<span class="kw">const</span> ChatRequest&amp; req) <span class="kw">override</span> {
+        <span class="com">// — the hypothetical XRT body from lesson 0004 —</span>
+        <span class="kw">auto</span> tokens = tokenize(req);
+        inputBuf_.write(tokens.data());
+        inputBuf_.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        <span class="kw">auto</span> run = kernel_(inputBuf_, outputBuf_, tokens.size());
+        run.wait();
+        outputBuf_.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        ChatReply r; r.id = req.id; r.ok = <span class="kw">true</span>;
+        r.content = detokenize(outputBuf_);
+        <span class="kw">return</span> r;
+    }
+
+    std::string name() <span class="kw">const</span> <span class="kw">override</span> { <span class="kw">return</span> <span class="str">"xrt-alveo-v80"</span>; }
+
+ <span class="kw">private</span>:
+    xrt::device device_;   xrt::uuid uuid_;   xrt::kernel kernel_;
+    xrt::bo inputBuf_;     xrt::bo outputBuf_;
+};</pre>
+
+<h3>Step 4 &mdash; <code class="inline">LlmClient</code> holds a pointer-to-base, not a hardcoded transport</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.hpp (proposed edit)</small>
+<pre class="code"><span class="kw">class</span> LlmClient {
+ <span class="kw">public</span>:
+    <span class="com">// Backend is injected at construction; LlmClient owns it via unique_ptr.</span>
+    <span class="kw">explicit</span> LlmClient(std::unique_ptr&lt;LlmBackend&gt; backend);
+    ~LlmClient();
+
+    <span class="com">// ... submit / drainReplies / etc. all UNCHANGED ...</span>
+
+ <span class="kw">private</span>:
+    <span class="kw">void</span> workerLoop();
+
+    std::unique_ptr&lt;LlmBackend&gt; backend_;   <span class="com">// the only thing that changed</span>
+    <span class="com">// ... mutexes, CV, queue, atomics, thread — all unchanged ...</span>
+};</pre>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp (proposed edit)</small>
+<pre class="code"><span class="kw">void</span> LlmClient::workerLoop() {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        <span class="com">// ... unchanged: pop a request under the mutex ...</span>
+
+        ChatReply reply = backend_-&gt;request(req);   <span class="com">// VIRTUAL DISPATCH</span>
+
+        <span class="com">// ... unchanged: push reply under the reply mutex ...</span>
+    }
+}</pre>
+
+<p>One line changed in <code class="inline">workerLoop()</code>. The arrow operator on <code class="inline">backend_</code> looks at the actual derived type at runtime and dispatches to the right <code class="inline">request</code> &mdash; <code class="inline">OllamaBackend::request</code>, <code class="inline">XrtFpgaBackend::request</code>, whatever. The worker, the mutexes, the queue, the atomic counters &mdash; nothing else moves. <code class="inline">main.cpp</code> picks the backend once:</p>
+
+<pre class="code"><span class="kw">auto</span> backend = std::make_unique&lt;OllamaBackend&gt;(
+    cfg.host, cfg.port, cfg.model);                 <span class="com">// or XrtFpgaBackend, or...</span>
+LlmClient client(std::move(backend));</pre>
+
+<p>Everything else &mdash; <code class="inline">Npc</code>, <code class="inline">Persona</code>, <code class="inline">DialogUI</code> &mdash; is unchanged. They only ever talked to <code class="inline">LlmClient</code>'s public surface, and that surface is unchanged.</p>
+
+<div class="callout real">
+  <h3>The payoff lesson 0001 promised</h3>
+  <p>Lesson 0001 said you could replace Ollama with <code class="inline">llama.cpp</code> "by changing <code class="inline">processOne()</code>'s body." That was almost-true: today it requires editing <code class="inline">LlmClient.cpp</code>. After this HAL refactor, the swap doesn't need <em>any</em> edit to <code class="inline">LlmClient</code> &mdash; you write a new <code class="inline">LlamaCppBackend</code> alongside <code class="inline">OllamaBackend</code> and pick which one to instantiate. This is the textbook reward for the pattern.</p>
+</div>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Abstraction vs. encapsulation</h3>
+<p>Both hide things, but for different reasons. <b>Encapsulation</b> is private fields and members &mdash; <em>hiding the internals</em> of <em>one</em> class. <b>Abstraction</b> is hiding which of <em>several</em> implementations is in play behind one interface. <code class="inline">LlmClient</code>'s private mutex is encapsulation; <code class="inline">LlmBackend</code>'s pure-virtual <code class="inline">request</code> is abstraction. You'll mix both in almost every HAL.</p>
+
+<h3>Inheritance vs. composition</h3>
+<p>Inheritance ("derived is-a base") is what a HAL needs &mdash; you literally want "Ollama is-a LlmBackend." Composition ("class has-a member") is what you use most other times. The rule of thumb: <em>compose by default; inherit when you genuinely need substitutability</em>. Substitutability is exactly what a HAL is about.</p>
+
+<h3>Virtual dispatch vs. templates (runtime vs. compile-time polymorphism)</h3>
+<p>You can get "different code for different backends" two ways. <b>Virtual</b> picks at runtime via the vtable &mdash; tiny indirect call cost (~1 ns), the choice is in a variable. <b>Templates</b> generate a different copy of the calling code per type, picked at compile time &mdash; no runtime cost but no runtime choice either. For a HAL, virtual is almost always the right call: the backend is selected from config at startup, not chosen per-request. Templates win when the choice is fixed at compile time and the call site is in a tight loop.</p>
+
+<h3>Base class vs. interface</h3>
+<p>Java and C# have an <code class="inline">interface</code> keyword for "abstract methods only, no data, no implementation." C++ doesn't &mdash; but you can build one by writing a class with <em>only</em> pure virtual methods and a virtual destructor, no data members. That's what <code class="inline">LlmBackend</code> in step 1 above is. Many C++ codebases call them "interfaces" anyway; the language just doesn't have a separate keyword.</p>
+
+<h3><code class="inline">virtual</code> vs. <code class="inline">override</code></h3>
+<p>You write <code class="inline">virtual</code> on the <b>base</b> to say "this method dispatches dynamically." You write <code class="inline">override</code> on the <b>derived</b> to say "this method is supposed to override a base virtual; please check." Skipping <code class="inline">override</code> compiles but is risky: if the base later changes signature (e.g. <code class="inline">request(const ChatRequest&amp;)</code> &rarr; <code class="inline">request(ChatRequest&amp;&amp;)</code>), the derived version silently becomes a <em>new unrelated method</em> and the old virtual goes back to the base default at runtime. Use <code class="inline">override</code> on every override.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">You forget <code class="inline">virtual</code> on <code class="inline">LlmBackend</code>'s destructor. <code class="inline">LlmClient</code> owns a <code class="inline">std::unique_ptr&lt;LlmBackend&gt;</code> pointing to an <code class="inline">OllamaBackend</code>. The program runs and exits without crashing. What went wrong?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Compilers don't generally warn about a missing virtual destructor unless they see polymorphic delete in your code — and even then it's a heuristic warning that's easy to miss.">
+      Nothing &mdash; the compiler would have refused to compile that code.
+    </li>
+    <li data-correct="true" data-why="Right. unique_ptr<LlmBackend> calls 'delete' through a base pointer. Without virtual, only the base destructor runs — the derived's fields (host_, port_, model_) are destroyed via the implicit struct teardown, but if they'd been threads/sockets/file handles they would have leaked silently with no warning. The bug is invisible in this trivial case and a memory leak in general.">
+      Only the base destructor runs on destruction. Derived-class members get destroyed via the implicit struct teardown, but any derived-class custom cleanup logic is silently skipped.
+    </li>
+    <li data-correct="false" data-why="The derived destructor runs only if the base destructor is virtual. That's the whole point of the rule.">
+      The derived destructor runs because <code class="inline">unique_ptr</code> always invokes it directly.
+    </li>
+    <li data-correct="false" data-why="The atomic counter isn't related to destructor virtuality. The bug is about which destructor runs, not about thread safety.">
+      The atomic counter <code class="inline">nextId_</code> resets to zero.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A teammate writes <code class="inline">ChatReply request(ChatRequest req)</code> (by value) on <code class="inline">OllamaBackend</code> instead of <code class="inline">ChatReply request(const ChatRequest&amp; req)</code> as the base declares. They forget the <code class="inline">override</code> keyword. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A signature mismatch makes the derived 'request' a new, unrelated method. The base's pure virtual is never overridden, so the class stays abstract and can't be instantiated. Compilation fails, but for a different reason than they expected.">
+      Compiles and runs correctly &mdash; C++ allows the by-value variant as a valid override.
+    </li>
+    <li data-correct="false" data-why="Without override, the compiler doesn't emit that warning. That's literally what the override keyword was added in C++11 to enable.">
+      The compiler warns about a hidden override but compiles anyway.
+    </li>
+    <li data-correct="true" data-why="Right. With override removed, the derived method becomes a *new* unrelated method (different signature = different name effectively). The base's pure virtual request() is still not overridden, so OllamaBackend remains abstract — make_unique<OllamaBackend>(...) fails to compile. The override keyword exists precisely to turn this kind of mistake into an immediate, obvious build error rather than a runtime mystery.">
+      Compile error: <code class="inline">OllamaBackend</code> is still abstract because the by-value method has a different signature and doesn't count as an override.
+    </li>
+    <li data-correct="false" data-why="Linker errors are the wrong layer. The mistake is caught by the compiler when it sees you trying to construct an abstract class.">
+      Linker error at the call site of <code class="inline">backend_-&gt;request()</code>.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">After the HAL refactor, you want to add an <code class="inline">LmStudioBackend</code> for users who prefer LM Studio's HTTP API. Which files do you have to touch?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Persona, Npc, DialogUI live above the HAL — they only talk to LlmClient's public surface. The refactor's whole job is to make this kind of addition cheap.">
+      <code class="inline">Persona.hpp</code>, <code class="inline">Npc.cpp</code>, <code class="inline">DialogUI.cpp</code>, and <code class="inline">main.cpp</code>.
+    </li>
+    <li data-correct="true" data-why="Yes. Add LmStudioBackend.hpp/.cpp (a new derived class), and adjust main.cpp (or a factory in main) to construct it instead of OllamaBackend when the config asks for it. Optionally CMakeLists if the new file needs to be compiled. Nothing inside LlmClient changes; nothing above it changes.">
+      A new <code class="inline">LmStudioBackend.hpp</code>/<code class="inline">.cpp</code>, the backend-picking code in <code class="inline">main.cpp</code>, and <code class="inline">CMakeLists.txt</code> to compile the new file.
+    </li>
+    <li data-correct="false" data-why="The whole point of the abstraction is *not* to rewrite LlmClient. The refactor put the backend behind a pointer-to-base so you don't have to.">
+      <code class="inline">LlmClient.cpp</code> needs a new branch in <code class="inline">workerLoop()</code> to detect the LM Studio case.
+    </li>
+    <li data-correct="false" data-why="Inheritance trees more than one level deep are rarely a clean design choice for a HAL; you'd parallel OllamaBackend, not derive from it. They're different transports, not different kinds of one transport.">
+      You inherit <code class="inline">LmStudioBackend</code> from <code class="inline">OllamaBackend</code> because both use HTTP.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Why does the proposed <code class="inline">LlmBackend</code> base class explicitly delete the copy constructor and copy-assignment operator?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Pure virtual methods alone don't prevent copy semantics — the compiler will still generate copy operations for the data members of derived classes. Disabling copy is a separate, deliberate choice.">
+      Pure virtual methods automatically forbid copying.
+    </li>
+    <li data-correct="true" data-why="Right. Backends typically own non-copyable resources — open sockets, FPGA device handles, llama.cpp model state. Default copying would shallow-copy these into broken duplicates. Better to forbid copy at the base, force everyone to pass by pointer/reference, and let unique_ptr<LlmBackend> handle ownership transparently.">
+      Backends own non-copyable resources (sockets, device handles, model state); a copy would create a broken duplicate. Force users to pass by pointer/reference instead.
+    </li>
+    <li data-correct="false" data-why="There's no such thing as 'virtual copy' in C++ in the way virtual dispatch works for methods. The clone idiom exists but is separate; the default copy ctor is non-virtual and that's just how the language works.">
+      Otherwise, copies would call the base virtual destructor twice on shutdown.
+    </li>
+    <li data-correct="false" data-why="Copy/move have no special interaction with std::unique_ptr that would cause that bug. unique_ptr itself is non-copyable; that's already a safety net.">
+      Without deletion, <code class="inline">std::unique_ptr</code> would silently start copying the backend each time it was passed.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A junior dev proposes "make <code class="inline">LlmBackend</code> a template instead of a virtual base &mdash; templates are zero-cost." What's the strongest single-sentence argument against?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Modern C++ runs perfectly well with templates; that's not the issue. The issue is when the choice is made, not which feature is more 'modern.'">
+      Templates are old C++ style and shouldn't be used in new code.
+    </li>
+    <li data-correct="true" data-why="Right. Templates resolve at compile time — you'd have to pick the backend by recompiling. Virtual dispatch lets you read llm.cfg at runtime, instantiate the matching derived class, and pass it as unique_ptr<LlmBackend>. The vtable indirection costs ~1 ns per call; the request itself costs ~1 second. The 'zero-cost' framing is dominant in the wrong dimension.">
+      Templates pick the backend at compile time, but we want to pick it at runtime from <code class="inline">llm.cfg</code> &mdash; and the vtable cost is invisible next to a 1-second HTTP call.
+    </li>
+    <li data-correct="false" data-why="Templates don't lose type information; if anything, they preserve more. The complaint is about *when* the choice is made.">
+      Templates lose type information at instantiation, so the wrong backend can be selected.
+    </li>
+    <li data-correct="false" data-why="Template instantiation does add compile time, but that's a secondary practical concern. The architectural answer (compile-time vs runtime choice) is the real one.">
+      Templates increase binary size, which matters for an FPGA bitstream.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> Sketch the diff (one sentence per file) to add a third backend, <code class="inline">LlamaCppBackend</code>, which links <code class="inline">llama.cpp</code> directly into the game binary. List which files in the proposed HAL structure get created, edited, or stay untouched.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> Find <em>one</em> place inside <code class="inline">LlmClient</code> today (pre-refactor) where the code depends on the backend being HTTP &mdash; not just <code class="inline">processOne</code>'s body, but somewhere else where a leak would happen. (Hint: think about what <code class="inline">httplib::Client</code> is, and how that maps onto resources for an FPGA or in-process backend.)</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> The shooter game has <code class="inline">Projectile</code>, <code class="inline">Enemy</code>, <code class="inline">Pickup</code>, and <code class="inline">ImpactEffect</code> as separate types in separate vectors. Should they share an abstract <code class="inline">Entity</code> base with virtual <code class="inline">update(float dt)</code>? Reason from both this lesson (HAL = "substitutability") and lesson 0003 (cache-friendliness of contiguous arrays of one type).</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can explain why a HAL exists in one sentence</label></li>
+  <li><label><input type="checkbox"> Read section 2 &mdash; I can list the four C++ features and what each does</label></li>
+  <li><label><input type="checkbox"> Walked through the LlmBackend refactor &mdash; I see what does and doesn't change</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I know which pair I'd reach for: virtual vs templates, base vs interface</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://blog.mbedded.ninja/programming/languages/c-plus-plus/designing-a-hal-in-cpp/">mbedded.ninja: Designing a HAL in C++</a> &middot;
+    <a href="https://www.embeddedrelated.com/showarticle/1579.php">Jacob Beningo: HAL via abstract interfaces (C++ from C)</a> &middot;
+    <a href="https://en.cppreference.com/cpp/language/abstract_class">cppreference: abstract classes</a> &middot;
+    <a href="https://en.cppreference.com/cpp/language/override">cppreference: the <code>override</code> specifier</a> &middot;
+    <a href="https://en.cppreference.com/cpp/language/virtual">cppreference: virtual functions</a>
+  </p>
+  <p>Lesson 0007 &middot; <code class="inline">docs/learning/lessons/0007-hal-and-abstract-base-classes.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

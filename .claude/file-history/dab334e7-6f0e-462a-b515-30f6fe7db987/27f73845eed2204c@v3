@@ -1,0 +1,78 @@
+# Overnight Build Report
+Date: 2026-07-07
+Session: "July 6th 2026 ideas" pipeline — plans → issues → implementation → PR
+Issues attempted: 9 (milestone #3, issues #54–#62)
+
+## Summary
+The full pipeline ran end to end: 5 new plan docs written (9 total committed),
+milestone "July 6 2026 Ideas — Arena Enhancements" created with 9 ready-for-ai
+issues, and **all 9 implemented** on `feature/july6-batch` — one commit per
+issue, suite green after each. Draft **PR #63** is open (stacked on #53 → #52),
+all 9 issues labeled `ai-completed` with PR links. Final suite: **193 passed**
+(67 new tests). Mid-session detour: resolved the merge conflict on the game
+repo's PR #56 (see below).
+
+## Completed ✅
+| Issue | Feature | Commit |
+|-------|---------|--------|
+| #54 | Confidence/volatility position sizing (cap→cash, screened config) | 16c9275 |
+| #55 | Transaction costs — commission + spread + √impact on turnover | 3093826 |
+| #56 | Drawdown circuit breaker, manual-only resume | 8c808c4 |
+| #57 | Live-vs-backtest divergence z-test alert | af40e34 |
+| #58 | Regime classifier + strategy gating | 73ee188 + 0caba41 |
+| #59 | Historical shock-period stress mode | cc765b3 |
+| #62 | Track-record-weighted ensemble | f7ae610 |
+| #61 | PSI concept-drift monitoring | 630f653 |
+| #60 | SHAP per-prediction explainability (new `shap` dep, approved) | 8f88eef |
+
+## Failed ❌ / Skipped ⏭
+None of the 9. Two scope notes recorded rather than silently dropped:
+- Costs (#55) wired into the generic loop + arena only; the GBM
+  `simulate_walkforward` and `paper_trading_sim.simulate` retain their
+  original flat-cost logic (follow-up candidate).
+- `/scaffold` was subsumed into implementation — stubs would have been
+  throwaway with the overnight building immediately from the plans.
+
+## Design deviations from the plans (documented judgment calls) 🔍
+1. **Breaker resume anchors to the resume moment, not the trip date** — the
+   plan's anchor would have let the entire paused window backfill (details in
+   commit 8c808c4's message; pinned by test).
+2. **Regime neutral band widened ±0.05 → ±0.15** — the plan's threshold
+   classified pure white noise as trending/mean-reverting most of the time
+   (SE of lag-1 autocorr at n=60 ≈ 0.13). Neutral must be the default state.
+3. **Realistic costs treat a no-pick day as "no rebalance", not forced exit**
+   — and a HOLD-gap re-entry at the same weight isn't charged a fresh entry
+   (comment in `walkforward_sim.py`; simplification, flagged for review).
+
+## Side quest: game repo merge conflict ✅
+`cpp_game_with_llm_npcs` PR #56 (`feature/issue-38-raylib-characters` → main)
+was `mergeable: false`. Local branch was stale; the remote's 2 merge commits
+conflicted with main's raylib rebuild (#55–#60). Merged main's true tip in
+(git `ort` resolved what GitHub's checker — confused by multiple merge bases —
+called dirty), verified **127 C++ test cases / 824 assertions + full CMake
+build**, pushed. PR #56 is now `mergeable: true, state: clean`, ready for your
+review/merge. Leftover: untracked `build_merge_check/` scratch dir (my rm was
+denied) — safe to delete.
+
+## Learning Materials
+| Concept | Lesson | Drill |
+|---------|--------|-------|
+| Statistical monitoring of live strategies (PSI / z-test / breaker) | ✅ 0036 | ✅ 0007 |
+
+Index rebuilt (8 lessons, 7 drills). `open docs/learning/lessons/0036-monitoring-live-strategies-statistically.html`
+
+## Test Status
+`uv run pytest tests/ -m "not exercise"` → **193 passed, 54 deselected**.
+Every commit on the branch left the suite green.
+
+## Suggested First Move
+Review the stack bottom-up: PR #52 (strategy layer) → #53 (orchestrator) →
+**#63 (this batch)**. In #63, the two judgment calls worth your eyes first are
+the resume-anchor deviation and the HOLD-gap cost simplification (both linked
+in the PR checklist). Merging #52 retargets #53 automatically, then #53 → #63.
+
+## Draft PRs Awaiting Review
+- #52 — arena strategy layer (base: main)
+- #53 — arena orchestrator (base: #52's branch)
+- #63 — July 6 ideas batch, 9 features (base: #53's branch)
+- Game repo #56 — now conflict-free, awaiting your merge decision

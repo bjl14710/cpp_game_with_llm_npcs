@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lesson 0003 — Running Silmulator on Windows, Mac &amp; Linux</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#30363d;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;
+  --yellow:#e3b341;--purple:#bc8cff;--text:#c9d1d9;--dim:#8b949e;
+  --border:#30363d;--code:#0d1117;
+  --win:#0078d4;--mac:#555;--linux:#dd4814;--docker:#2496ed;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.7;min-height:100vh}
+.page{max-width:820px;margin:0 auto;padding:2.5rem 1.5rem 5rem}
+
+/* ── header ── */
+.lbl{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.15em;
+     text-transform:uppercase;margin-bottom:.5rem}
+h1{font-size:1.9rem;color:#fff;line-height:1.2;margin-bottom:.5rem}
+.tagline{color:var(--accent);font-size:.97rem;margin-bottom:2rem}
+
+/* ── progress tracker ── */
+.progress-bar{background:var(--surf);border:1px solid var(--border);border-radius:8px;
+              padding:1rem 1.2rem;margin-bottom:2.5rem}
+.progress-bar h3{font-family:var(--mono);font-size:.75rem;color:var(--dim);
+                 text-transform:uppercase;letter-spacing:.08em;margin-bottom:.7rem}
+.sections{display:flex;flex-wrap:wrap;gap:.45rem}
+.sec-chip{font-family:var(--mono);font-size:.75rem;padding:.28rem .75rem;
+          border:1px solid var(--border);border-radius:20px;color:var(--dim);
+          cursor:pointer;user-select:none;transition:all .15s}
+.sec-chip.done{border-color:var(--green);color:var(--green);
+               background:rgba(63,185,80,.1)}
+#progress-pct{font-family:var(--mono);font-size:.82rem;color:var(--accent);
+              margin-top:.6rem}
+
+/* ── section cards ── */
+section{background:var(--surf);border:1px solid var(--border);border-radius:8px;
+        padding:1.5rem 1.6rem;margin-bottom:1.4rem}
+section h2{font-size:1.1rem;color:#fff;margin-bottom:.9rem;
+           display:flex;align-items:center;gap:.6rem}
+.snum{font-family:var(--mono);font-size:.72rem;background:var(--surf2);
+      border:1px solid var(--border);border-radius:4px;padding:.15rem .45rem;
+      color:var(--dim)}
+p{margin-bottom:.75rem}
+p:last-child{margin-bottom:0}
+
+/* ── platform tags ── */
+.ptag{display:inline-block;font-family:var(--mono);font-size:.72rem;
+      padding:.18rem .55rem;border-radius:4px;margin-right:.35rem;
+      font-weight:700;letter-spacing:.04em}
+.p-win{background:rgba(0,120,212,.15);color:#60a5fa;border:1px solid rgba(0,120,212,.35)}
+.p-mac{background:rgba(120,120,120,.15);color:#d1d5db;border:1px solid rgba(120,120,120,.3)}
+.p-lnx{background:rgba(221,72,20,.15);color:#fb923c;border:1px solid rgba(221,72,20,.3)}
+.p-all{background:rgba(88,166,255,.12);color:var(--accent);border:1px solid rgba(88,166,255,.3)}
+.p-docker{background:rgba(36,150,237,.12);color:#38bdf8;border:1px solid rgba(36,150,237,.3)}
+
+/* ── step lists ── */
+.steps{list-style:none;counter-reset:step;padding:0}
+.steps li{counter-increment:step;padding:.5rem 0 .5rem 2.6rem;position:relative;
+          border-bottom:1px solid var(--border)}
+.steps li:last-child{border-bottom:none}
+.steps li::before{content:counter(step);position:absolute;left:0;top:.55rem;
+                  width:1.7rem;height:1.7rem;border-radius:50%;
+                  background:var(--surf2);border:1px solid var(--border);
+                  display:flex;align-items:center;justify-content:center;
+                  font-family:var(--mono);font-size:.75rem;color:var(--accent)}
+
+/* ── method cards ── */
+.methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.9rem;margin-bottom:1.2rem}
+.method{background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+        padding:1rem 1.1rem}
+.method h4{font-size:.9rem;color:#fff;margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
+.method p{font-size:.85rem;color:var(--dim);margin:0}
+.method-badge{font-family:var(--mono);font-size:.7rem;padding:.12rem .4rem;
+              border-radius:3px;background:var(--surf3);color:var(--text)}
+
+/* ── code blocks ── */
+pre{background:var(--code);border:1px solid var(--border);border-radius:6px;
+    padding:.9rem 1.1rem;overflow-x:auto;font-family:var(--mono);
+    font-size:.83rem;line-height:1.65;margin:1rem 0}
+pre:last-child{margin-bottom:0}
+code{font-family:var(--mono);font-size:.85em;background:var(--surf2);
+     padding:.1em .35em;border-radius:3px;color:var(--text)}
+.cm{color:#5a6e8a;font-style:italic}
+.kw{color:#ff7b72}.fn{color:#d2a8ff}.str{color:#a5d6a7}
+.cmd{color:#79c0ff}.flag{color:#ffa657}.env{color:#e6edf3}
+.ok{color:var(--green)}.path{color:var(--yellow)}
+
+/* ── comparison table ── */
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{background:var(--surf2);color:var(--dim);font-family:var(--mono);
+   font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+   padding:.55rem .9rem;text-align:left;border:1px solid var(--border)}
+td{padding:.55rem .9rem;border:1px solid var(--border);vertical-align:top;line-height:1.5}
+tr:nth-child(even) td{background:rgba(22,27,34,.5)}
+.tick{color:var(--green);font-size:1.1rem}
+.cross{color:var(--red);font-size:1.1rem}
+.warn{color:var(--yellow);font-size:1.1rem}
+
+/* ── callouts ── */
+.callout{border-radius:6px;padding:.85rem 1.1rem;margin:1rem 0;
+         font-size:.88rem;display:flex;gap:.65rem;align-items:flex-start}
+.callout-icon{font-size:1.1rem;flex-shrink:0;margin-top:.05rem}
+.tip{background:rgba(63,185,80,.07);border:1px solid rgba(63,185,80,.25)}
+.warn-box{background:rgba(211,153,34,.07);border:1px solid rgba(211,153,34,.3)}
+.info{background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.25)}
+
+/* ── quiz ── */
+.quiz-section{background:var(--surf);border:2px solid var(--accent);border-radius:8px;
+              padding:1.5rem 1.6rem;margin-bottom:1.4rem}
+.quiz-section h2{font-size:1.1rem;color:#fff;margin-bottom:1.3rem}
+.question{margin-bottom:1.4rem}
+.question p{font-weight:600;color:#fff;margin-bottom:.65rem;font-size:.95rem}
+.options{list-style:none;padding:0}
+.options li{background:var(--surf2);border:1px solid var(--border);border-radius:5px;
+            padding:.5rem .9rem;margin-bottom:.38rem;cursor:pointer;
+            font-size:.88rem;user-select:none;transition:border-color .12s,background .12s}
+.options li:hover:not(.locked){border-color:var(--accent);background:rgba(88,166,255,.07)}
+.options li:focus{outline:2px solid var(--accent);outline-offset:2px}
+.options li.correct{border-color:var(--green);background:rgba(63,185,80,.1);color:var(--green)}
+.options li.wrong{border-color:var(--red);background:rgba(248,81,73,.08);color:var(--red)}
+.options li.locked{cursor:default}
+.feedback{font-size:.85rem;margin-top:.5rem;padding:.4rem .7rem;border-radius:4px;display:none}
+.feedback.correct{background:rgba(63,185,80,.1);color:var(--green);
+                  border:1px solid rgba(63,185,80,.28)}
+.feedback.wrong{background:rgba(248,81,73,.08);color:var(--red);
+                border:1px solid rgba(248,81,73,.28)}
+.quiz-score{font-family:var(--mono);text-align:center;font-size:1.1rem;
+            color:var(--accent);margin-top:1rem;display:none}
+.mark-done{display:inline-flex;align-items:center;gap:.5rem;margin-top:1.1rem;
+           font-family:var(--mono);font-size:.8rem;padding:.4rem .9rem;
+           border:1px solid var(--border);border-radius:5px;cursor:pointer;
+           background:var(--surf2);color:var(--dim);user-select:none;
+           transition:all .15s}
+.mark-done:hover{border-color:var(--green);color:var(--green)}
+.mark-done.done{border-color:var(--green);color:var(--green);
+                background:rgba(63,185,80,.08)}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ── header ───────────────────────────────────────────────── -->
+<div class="lbl">Lesson 0003</div>
+<h1>Running Silmulator on Windows, Mac &amp; Linux</h1>
+<p class="tagline">Know all four launch paths so you can get the app running in any environment — dev machine, Docker, or end-user install.</p>
+
+<!-- ── progress tracker ── -->
+<div class="progress-bar">
+  <h3>Lesson progress</h3>
+  <div class="sections" id="chip-container"></div>
+  <div id="progress-pct">0 / 6 sections complete</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 1 — THE FOUR WAYS TO RUN
+══════════════════════════════════════════════════════════════ -->
+<section id="s1">
+<h2><span class="snum">01</span> The Four Ways to Run Silmulator</h2>
+
+<p>Every launch path ultimately runs the same Python entry point — <code>silmulator/app.py:main()</code> — called via <code>main.py</code>. What differs is <em>how</em> the dependencies are installed and <em>how</em> the display is set up.</p>
+
+<div class="methods">
+  <div class="method">
+    <h4><span class="ptag p-all">ALL</span> <span class="method-badge">Dev mode</span></h4>
+    <p>Clone + pip/uv install deps + <code>python main.py</code>. Fastest for development; no packaging step.</p>
+  </div>
+  <div class="method">
+    <h4><span class="ptag p-docker">Docker</span> <span class="method-badge">Browser</span></h4>
+    <p><code>docker compose up</code>, then open <code>localhost:6080</code>. Runs on any OS with no display drivers.</p>
+  </div>
+  <div class="method">
+    <h4><span class="ptag p-mac">macOS</span> <span class="method-badge">Installer</span></h4>
+    <p><code>build_installer.sh</code> → <code>.dmg</code>. Drag <code>Silmulator.app</code> to Applications; launch like any app.</p>
+  </div>
+  <div class="method">
+    <h4><span class="ptag p-win">Windows</span> <span class="method-badge">Installer</span></h4>
+    <p><code>build_installer.bat</code> → <code>.exe</code> (NSIS) or <code>.zip</code>. Run the installer; start from Start Menu.</p>
+  </div>
+</div>
+<div class="methods">
+  <div class="method">
+    <h4><span class="ptag p-lnx">Linux</span> <span class="method-badge">AppImage</span></h4>
+    <p><code>build_installer.sh</code> → <code>.AppImage</code>. Mark executable; double-click or run from terminal.</p>
+  </div>
+</div>
+
+<button class="mark-done" onclick="markDone('s1',this)">○ Mark complete</button>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 2 — DEV MODE (ALL PLATFORMS)
+══════════════════════════════════════════════════════════════ -->
+<section id="s2">
+<h2><span class="snum">02</span> Dev Mode — Direct Python Launch <span class="ptag p-all">All platforms</span></h2>
+
+<p>This is what you use every day as the developer. The project uses <strong>uv</strong> to manage the virtual environment, but plain pip works too.</p>
+
+<ol class="steps">
+  <li>
+    <strong>Install Python 3.9+</strong> — <span class="ptag p-win">Win</span> use the Microsoft Store or <code>winget install Python.Python.3.11</code>. <span class="ptag p-mac">Mac</span> <code>brew install python@3.11</code> or the official .pkg. <span class="ptag p-lnx">Linux</span> <code>sudo apt install python3.11</code> or <code>dnf install python3</code>.
+  </li>
+  <li>
+    <strong>Install uv</strong> (recommended):
+    <pre><span class="cm"># macOS / Linux</span>
+<span class="cmd">curl -LsSf https://astral.sh/uv/install.sh | sh</span>
+
+<span class="cm"># Windows (PowerShell)</span>
+<span class="cmd">powershell -c "irm https://astral.sh/uv/install.ps1 | iex"</span></pre>
+  </li>
+  <li>
+    <strong>Clone &amp; enter the project</strong>:
+    <pre><span class="cmd">git clone &lt;repo-url&gt; Silmulator</span>
+<span class="cmd">cd Silmulator/Silmulator</span></pre>
+  </li>
+  <li>
+    <strong>Install dependencies</strong>:
+    <pre><span class="cm"># with uv (creates .venv automatically)</span>
+<span class="cmd">uv sync</span>
+
+<span class="cm"># OR with pip</span>
+<span class="cmd">pip install -r requirements.txt</span></pre>
+  </li>
+  <li>
+    <strong>Launch</strong>:
+    <pre><span class="cm"># with uv</span>
+<span class="cmd">uv run python main.py</span>
+
+<span class="cm"># OR with activated venv</span>
+<span class="cmd">source .venv/bin/activate</span>   <span class="cm"># macOS / Linux</span>
+<span class="cmd">.venv\Scripts\activate</span>       <span class="cm"># Windows</span>
+<span class="cmd">python main.py</span></pre>
+  </li>
+</ol>
+
+<p>Where does this lead in code? <code>main.py</code> is a two-liner:</p>
+<pre><span class="cm"># Silmulator/main.py</span>
+<span class="kw">import</span> sys
+<span class="kw">from</span> silmulator.app <span class="kw">import</span> main   <span class="cm"># → silmulator/app.py:main()</span>
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    sys.exit(main())               <span class="cm"># exits with the Qt event loop return code</span></pre>
+
+<div class="callout tip">
+  <span class="callout-icon">💡</span>
+  <div>After <code>pip install -e .</code> (editable install), the command <code>silmulator</code> becomes available as a terminal command on any platform — it calls the same <code>silmulator.app:main</code> via <code>pyproject.toml</code>'s <code>[project.scripts]</code> entry.</div>
+</div>
+
+<button class="mark-done" onclick="markDone('s2',this)">○ Mark complete</button>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 3 — DOCKER (ANY OS, BROWSER)
+══════════════════════════════════════════════════════════════ -->
+<section id="s3">
+<h2><span class="snum">03</span> Docker — Browser Launch <span class="ptag p-docker">Any OS</span></h2>
+
+<p>Docker is the easiest cross-platform method: no Python install, no display drivers, no PyQt6 version headaches. The container runs Xvfb (virtual framebuffer) + VNC + NoVNC, and you connect via a browser.</p>
+
+<ol class="steps">
+  <li>
+    <strong>Install Docker Desktop</strong> for your platform. On Linux, Docker Engine is enough.
+  </li>
+  <li>
+    <strong>Start the container</strong>:
+    <pre><span class="cmd">cd Silmulator/</span>   <span class="cm"># repo root, where docker-compose.yml lives</span>
+<span class="cmd">docker compose up -d</span></pre>
+  </li>
+  <li>
+    <strong>Open in browser</strong>: navigate to <code>http://localhost:6080/vnc.html</code>. Password: <code>silmulator</code>.
+  </li>
+  <li>
+    <strong>Stop</strong>: <code>docker compose down</code>. Saved layouts persist in the <code>silmulator-config</code> named volume.
+  </li>
+</ol>
+
+<p>Useful variants:</p>
+<pre><span class="cm"># Change port if 6080 is taken</span>
+<span class="env">APP_PORT</span>=8080 <span class="cmd">docker compose up -d</span>
+
+<span class="cm"># Change the VNC password</span>
+<span class="env">VNC_PASSWORD</span>=mysecret <span class="cmd">docker compose up -d</span>
+
+<span class="cm"># Check health</span>
+<span class="cmd">docker compose ps</span>        <span class="cm"># shows "healthy" once VNC is ready</span>
+<span class="cmd">docker compose logs -f</span>   <span class="cm"># stream logs; look for "x11vnc is ready"</span></pre>
+
+<div class="callout info">
+  <span class="callout-icon">ℹ️</span>
+  <div>The production Dockerfile is a <strong>multi-stage build</strong>: stage 1 compiles the C++ SCPI extension (<code>scpi_core.so</code>) inside a builder image; stage 2 copies only the <code>.so</code> file into a slim runtime image with Qt6 and NoVNC. This keeps the final image small while bundling the optional C++ speedup automatically.</div>
+</div>
+
+<button class="mark-done" onclick="markDone('s3',this)">○ Mark complete</button>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 4 — STANDALONE INSTALLERS
+══════════════════════════════════════════════════════════════ -->
+<section id="s4">
+<h2><span class="snum">04</span> Standalone Installers — Ship to End Users</h2>
+
+<p>All three installer builds use <strong>PyInstaller</strong> (<code>silmulator.spec</code>) to bundle the Python interpreter, all dependencies, and the app into a single artifact that users can run without installing Python.</p>
+
+<h3 style="font-size:.95rem;color:#fff;margin:1.2rem 0 .6rem"><span class="ptag p-mac">macOS</span> → .dmg</h3>
+
+<ol class="steps">
+  <li>Ensure Python 3.9+ and optionally <code>brew install create-dmg</code> are available.</li>
+  <li>Run: <pre><span class="cmd">./build_installer.sh</span></pre></li>
+  <li>Output: <code>dist/Silmulator-1.0.0-macos-arm64.dmg</code></li>
+  <li>Distribute the DMG; users drag <code>Silmulator.app</code> to their Applications folder.</li>
+</ol>
+
+<div class="callout warn-box">
+  <span class="callout-icon">⚠️</span>
+  <div>macOS Gatekeeper will block unsigned apps on first launch. The user must right-click → Open to bypass this, or you need an Apple Developer certificate + <code>codesign</code> + <code>notarytool</code> for a smooth out-of-box experience.</div>
+</div>
+
+<h3 style="font-size:.95rem;color:#fff;margin:1.2rem 0 .6rem"><span class="ptag p-lnx">Linux</span> → .AppImage</h3>
+
+<ol class="steps">
+  <li>Run: <pre><span class="cmd">./build_installer.sh</span></pre>
+    (The script downloads <code>appimagetool</code> automatically if it's missing.)</li>
+  <li>Output: <code>dist/Silmulator-1.0.0-linux-x86_64.AppImage</code></li>
+  <li>Distribute the AppImage; users mark it executable and run it:
+    <pre><span class="cmd">chmod +x Silmulator-1.0.0-linux-x86_64.AppImage</span>
+<span class="cmd">./Silmulator-1.0.0-linux-x86_64.AppImage</span></pre>
+  </li>
+</ol>
+
+<h3 style="font-size:.95rem;color:#fff;margin:1.2rem 0 .6rem"><span class="ptag p-win">Windows</span> → .exe or .zip</h3>
+
+<ol class="steps">
+  <li>Open Command Prompt (not PowerShell — the script is a <code>.bat</code>).</li>
+  <li>Optionally install <a href="https://nsis.sourceforge.io/Download" style="color:var(--accent)">NSIS 3.x</a> for a proper installer <code>.exe</code>.</li>
+  <li>Run: <pre><span class="cmd">build_installer.bat</span></pre></li>
+  <li>Output (with NSIS): <code>dist\Silmulator-1.0.0-windows-installer.exe</code><br>
+      Output (without NSIS): <code>dist\Silmulator-1.0.0-windows.zip</code> — unzip and run <code>Silmulator.exe</code> inside.</li>
+</ol>
+
+<button class="mark-done" onclick="markDone('s4',this)">○ Mark complete</button>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 5 — COMPARISON TABLE
+══════════════════════════════════════════════════════════════ -->
+<section id="s5">
+<h2><span class="snum">05</span> Comparison — When to Use Which</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Method</th>
+      <th>Python needed?</th>
+      <th>Needs display?</th>
+      <th>Best for</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>python main.py</code></td>
+      <td><span class="tick">✓</span> Yes</td>
+      <td><span class="tick">✓</span> Native display</td>
+      <td>Active development on any OS</td>
+    </tr>
+    <tr>
+      <td><code>uv run python main.py</code></td>
+      <td><span class="tick">✓</span> Yes (uv handles venv)</td>
+      <td><span class="tick">✓</span> Native display</td>
+      <td>Dev — fastest first-time setup</td>
+    </tr>
+    <tr>
+      <td><code>silmulator</code> (installed)</td>
+      <td><span class="tick">✓</span> Yes</td>
+      <td><span class="tick">✓</span> Native display</td>
+      <td>Dev on a configured machine</td>
+    </tr>
+    <tr>
+      <td>Docker (browser / NoVNC)</td>
+      <td><span class="cross">✗</span> No</td>
+      <td><span class="cross">✗</span> No — browser only</td>
+      <td>CI, remote machines, any OS with zero setup</td>
+    </tr>
+    <tr>
+      <td>Docker (dev / X11 forward)</td>
+      <td><span class="cross">✗</span> No</td>
+      <td><span class="warn">~</span> X11 server needed</td>
+      <td>Dev inside container, live code edits</td>
+    </tr>
+    <tr>
+      <td>.dmg / .AppImage / .exe</td>
+      <td><span class="cross">✗</span> No — self-contained</td>
+      <td><span class="tick">✓</span> Native display</td>
+      <td>Distributing to end users with no Python</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout tip" style="margin-top:1.2rem">
+  <span class="callout-icon">💡</span>
+  <div><strong>Often confused:</strong> Docker NoVNC mode vs X11 forwarding. <strong>NoVNC</strong> renders inside a full virtual X11 session inside the container and streams it to the browser — no local X server needed, works on any OS. <strong>X11 forwarding</strong> (dev mode) sends Qt draw calls to your local X server — faster and feels more native, but requires XQuartz (Mac), VcXsrv (Win), or a running X11 server (Linux).</div>
+</div>
+
+<button class="mark-done" onclick="markDone('s5',this)">○ Mark complete</button>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SECTION 6 — QUIZ
+══════════════════════════════════════════════════════════════ -->
+<div class="quiz-section" id="s6">
+<h2>Check Your Understanding</h2>
+
+<div class="question" data-question>
+  <p>Q1. You want to run Silmulator on a remote Linux CI server with no display. Which launch method works?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="python main.py requires a real display server; it will fail with 'cannot connect to X server' in a headless environment.">python main.py directly on the server</li>
+    <li data-correct="true"  data-why="Correct. Docker with NoVNC runs a virtual framebuffer (Xvfb) inside the container. The browser is the display — no physical screen or X server needed on the host.">docker compose up -d, then access via browser at :6080</li>
+    <li data-correct="false" data-why="AppImage needs a native display to open a Qt window. It will fail the same way as python main.py on a headless server.">Run the Linux AppImage on the server</li>
+    <li data-correct="false" data-why="uv run python main.py still launches the Qt GUI, which requires a display. uv only manages the Python environment, not the display.">uv run python main.py — uv handles the display setup</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q2. After running <code>pip install -e .</code>, which command launches Silmulator?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="silmulator-gui is also registered in pyproject.toml as a gui-script, but 'silmulator' alone is the canonical command defined under [project.scripts].">silmulator-gui (the gui-script entry is the only one)</li>
+    <li data-correct="true"  data-why="Correct. pyproject.toml registers 'silmulator' under [project.scripts] pointing to silmulator.app:main — pip install creates this shim on PATH.">silmulator</li>
+    <li data-correct="false" data-why="python main.py works but it's the pre-install path. After pip install -e . the 'silmulator' command on PATH is the right tool.">python main.py (the installed entry-point is only for packaged releases)</li>
+    <li data-correct="false" data-why="There is no 'sil' command registered. The script name comes from the [project.scripts] key in pyproject.toml.">sil (short alias registered in setup.py)</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q3. On macOS, a user double-clicks <code>Silmulator.app</code> from the DMG and gets "Silmulator can't be opened because Apple cannot check it for malicious software." What is the quickest fix that does NOT require code-signing?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Disabling Gatekeeper entirely (spctl --master-disable) is heavy-handed and removes all app security checks system-wide. Not appropriate for one app.">Disable Gatekeeper entirely: sudo spctl --master-disable</li>
+    <li data-correct="false" data-why="The app already has execute permission from the DMG build; chmod +x is for AppImages and scripts, not .app bundles on macOS.">Run chmod +x Silmulator.app in Terminal first</li>
+    <li data-correct="true"  data-why="Correct. Right-click (or Control-click) → Open bypasses Gatekeeper's quarantine for unsigned apps. The user is asked to explicitly confirm once; subsequent launches open normally.">Right-click (Control-click) → Open → confirm in the dialog</li>
+    <li data-correct="false" data-why="Moving the app outside the DMG to Applications first doesn't remove the quarantine xattr — the same Gatekeeper block still fires.">Drag to Applications first, then double-click from there</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q4. The Windows installer build produces a <code>.zip</code> instead of a <code>.exe</code> installer. Why?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="PyInstaller produces a folder of files by default. The .bat script packages those into a zip or .exe; it is not PyInstaller that chooses between the two.">PyInstaller on Windows always outputs a .zip; NSIS converts it to .exe later in a separate step.</li>
+    <li data-correct="false" data-why="Python version has no bearing on the installer format. The .zip vs .exe choice is determined by whether NSIS (makensis) is found on PATH.">Python is below 3.11, so NSIS cannot produce an .exe for that version.</li>
+    <li data-correct="true"  data-why="Correct. build_installer.bat checks whether makensis.exe is on PATH (or in the default NSIS install location). If it's missing, the script falls back to zipping the PyInstaller output folder.">NSIS (makensis) is not installed or not on PATH — the .bat falls back to zipping the PyInstaller output.</li>
+    <li data-correct="false" data-why="The .bat file has no such check. It attempts the .exe build if NSIS is present and falls back to .zip if not, regardless of which Windows version is running.">The machine is running Windows 10 or below; the .exe installer requires Windows 11.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q5. You clone the repo on macOS and run <code>uv sync</code> — what does that do, specifically?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="uv sync creates (or updates) the .venv from uv.lock / pyproject.toml. It does not run any build steps or compile the C++ extension.">Compiles the C++ SCPI extension and installs all Python deps into the system Python.</li>
+    <li data-correct="false" data-why="uv sync reads uv.lock and installs exactly those versions. 'uv add' or 'uv lock --upgrade' is what updates the lockfile.">Updates uv.lock to the latest package versions and installs them.</li>
+    <li data-correct="true"  data-why="Correct. uv sync reads uv.lock (or pyproject.toml if no lockfile) and installs the pinned set of packages into the project's .venv, creating it if it doesn't exist yet.">Creates (or updates) .venv with the exact package versions from uv.lock, without touching the system Python.</li>
+    <li data-correct="false" data-why="uv sync is a local project command; it does not push or pull from any remote. 'uv publish' is for uploading packages.">Syncs the local package cache with the PyPI remote index — downloads any packages that are out of date.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="quiz-score" id="quiz-score"></div>
+<button class="mark-done" onclick="markDone('s6',this)">○ Mark complete</button>
+</div>
+
+</div><!-- .page -->
+
+<script>
+// ── section progress ───────────────────────────────────────────
+const SEC_LABELS = {
+  s1:'Launch paths overview',
+  s2:'Dev mode',
+  s3:'Docker / browser',
+  s4:'Standalone installers',
+  s5:'Comparison table',
+  s6:'Quiz',
+};
+const done = {};
+const container = document.getElementById('chip-container');
+Object.entries(SEC_LABELS).forEach(([id,label])=>{
+  const chip = document.createElement('div');
+  chip.className='sec-chip';chip.id='chip-'+id;
+  chip.textContent=label;
+  chip.onclick=()=>{ document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'}); };
+  container.appendChild(chip);
+});
+function markDone(id,btn){
+  done[id]=true;
+  btn.textContent='✓ Complete';btn.classList.add('done');
+  document.getElementById('chip-'+id)?.classList.add('done');
+  const n=Object.keys(done).length;
+  document.getElementById('progress-pct').textContent=
+    `${n} / ${Object.keys(SEC_LABELS).length} sections complete`;
+}
+
+// ── quiz ───────────────────────────────────────────────────────
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+let answered=0,correct_count=0;
+const total_q=document.querySelectorAll('[data-question]').length;
+
+document.querySelectorAll('[data-question]').forEach(q=>{
+  const list=q.querySelector('.options');
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+  const fb=q.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li=>{
+    li.tabIndex=0;
+    const commit=()=>{
+      if(li.classList.contains('locked'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('locked'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'correct':'wrong');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('correct');
+      fb.style.display='block';fb.className='feedback '+(ok?'correct':'wrong');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      answered++;if(ok)correct_count++;
+      if(answered===total_q){
+        const sc=document.getElementById('quiz-score');
+        sc.style.display='block';
+        sc.textContent=`Score: ${correct_count} / ${total_q}`;
+        sc.style.color=correct_count===total_q?'var(--green)':correct_count>=3?'var(--yellow)':'var(--red)';
+      }
+    };
+    li.addEventListener('click',commit);
+    li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')commit();});
+  });
+});
+</script>
+</body>
+</html>

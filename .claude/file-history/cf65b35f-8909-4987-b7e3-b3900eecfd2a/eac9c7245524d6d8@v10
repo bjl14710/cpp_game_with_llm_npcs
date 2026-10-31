@@ -1,0 +1,49 @@
+# Optimization/Instrumentation #2: Microstructure Signals on the Flat Book
+
+> **STATUS: TEMPLATE — numbers TBD.** Fill in once steps 2-5 of
+> `.claude/plans/microstructure-signals.md` are implemented and benchmarked.
+> Match the style of `01-flat-book.md`: concrete before/after numbers,
+> a mechanism explanation, constraints, and reproduce commands.
+
+## Summary
+
+TODO: one paragraph — what per-event cost OFI + microprice added to the flat
+book's update path, measured on the real AAPL golden day (2019-12-30).
+
+## Before / After Numbers
+
+Measurement: the 1,519,871-message AAPL-filtered 12302019 sample day.
+Platform: TODO (machine, compiler, flags).
+
+| Metric | Bare book (bench_main_flat) | Book + MicrostructureEngine | Delta |
+|--------|:---------------------------:|:---------------------------:|:-----:|
+| p50    | TODO ns | TODO ns | TODO |
+| p99    | TODO ns | TODO ns | TODO |
+| p99.9  | TODO ns | TODO ns | TODO |
+| mean   | TODO ns | TODO ns | TODO |
+
+TODO: note that `emit()` calls `top_of_book()` (an O(price-range) scan) on
+every update — measure whether that dominates, and if so document the
+incremental-best-tracking optimization as the follow-up.
+
+## What the Signals Are
+
+TODO: brief recap — OFI (Cont-Kukanov-Stoikov best-level definition) and
+microprice (depth-weighted mid), pointing at
+`cpp/itch/microstructure_signals.hpp` for the formulas.
+
+## Real-Data Sanity Checks
+
+TODO after first real run:
+- events emitted vs messages parsed (expect ~1 event per book-affecting msg)
+- skipped_one_sided count (pre-market one-sided books are normal)
+- microprice stayed within the day's traded range
+- fitted session Kyle's lambda and whether rolling windows are stable
+
+## Commands to Reproduce
+
+```bash
+./scripts/fetch_itch_sample.sh AAPL     # golden day + fixture
+# TODO: bench command(s) once the engine is wired into a bench driver
+pytest tests/test_micro_events.py tests/test_kyles_lambda.py
+```

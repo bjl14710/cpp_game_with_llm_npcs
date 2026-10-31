@@ -1,0 +1,59 @@
+# Plan: Fix Stale Connector Lines on Block Move
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: S
+
+## The Idea (one paragraph)
+Connector lines (wires between block ports) don't move when a block is
+dragged — they're drawn once at wire-creation time and never recomputed
+afterward. In PyQt6's Graphics View Framework this doesn't happen
+automatically; a connector has to be explicitly notified and recompute its
+own geometry whenever either endpoint block moves. Fix it by having blocks
+notify their attached connectors on position change, and having connectors
+correctly recompute their line geometry from live port positions.
+
+## Goal
+Dragging any block updates every wire attached to it in real time, with no
+stale or "ghost" line segments left behind — during the drag, not just after
+mouse release.
+
+## Out of Scope (this version)
+- Rerouting/orthogonal wire paths — stays whatever line style is used today, just position-correct
+- Performance optimization for scenes with hundreds of connectors, unless testing reveals it's actually needed
+- The canvas panning bug — tracked as a separate plan
+
+## Affected Areas
+*(Paths inferred from your repo summary — confirm against the actual tree
+before running `/plan-github`.)*
+- `silmulator/gui/canvas.py` — block `itemChange()` override, connector registration
+- `silmulator/gui/blocks/` — likely needs `itemChange()` added to a shared base block class if not already present
+- Wherever the connector/wire item class is defined (likely `canvas.py` or a dedicated connections module) — needs an `updatePath()` method
+- New file: `tests/test_canvas_connector_sync.py`
+
+## Implementation Order
+1. Audit the current connector implementation first: confirm lines are computed once at creation and never touched again — read the actual code before changing anything, don't assume the diagnosis without checking
+2. Ensure draggable block items have `QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges` (or `ItemSendsScenePositionChanges`, whichever fits the current coordinate model) set
+3. Override `itemChange()` on the block base class; on `QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged`, iterate the block's attached connectors and call `updatePath()` on each
+4. Implement/fix each connector's `updatePath()`: call `prepareGeometryChange()` first, then recompute line/path endpoints from the live `scenePos()` of both connected ports
+5. Verify visually: drag a block with attached wires and confirm no ghost trails, wires track continuously during the drag
+
+## Acceptance Criteria
+- [ ] Dragging a block updates every connector line attached to it continuously during the drag, not only after mouse release
+- [ ] No stale/ghost line segments remain visible after a move
+- [ ] Moving either endpoint of a connection (source or destination block) correctly updates the wire
+- [ ] Tests pass: `python -m pytest tests/test_canvas_connector_sync.py -v`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Block with multiple wires attached moves | All attached wires update, not just the first one found |
+| Block is deleted while wires are attached | Wires are removed/cleaned up too, not left dangling with a missing endpoint |
+| Two connected blocks are moved simultaneously (e.g. multi-select drag) | Wire correctly tracks both moving endpoints |
+
+## Open Questions
+- Does the current connector class already track which ports it connects, or does that need to be added as part of this fix? Confirm during the audit step (#1) before finalizing effort estimate.
+
+## Suggested GitHub Issues
+1. `canvas: audit + document current connector position-update mechanism (or lack thereof)`
+2. `canvas: block itemChange() notifies attached connectors on move`
+3. `canvas: connector updatePath() correctness (prepareGeometryChange + live port positions)`

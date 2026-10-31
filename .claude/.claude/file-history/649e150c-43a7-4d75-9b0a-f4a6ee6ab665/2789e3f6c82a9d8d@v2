@@ -1,0 +1,48 @@
+# Exercise 01 — Limit Order Book (price-time priority)
+
+**Lesson:** [0016 — Order-book dynamics](../../docs/learning/lessons/0016-order-book-dynamics.html)
+**Difficulty:** foundational — do this one first; exercises 02+ build on its concepts.
+
+## Goal
+
+Implement `OrderBook` in `order_book.py`: a limit order book where price wins
+first and, at the same price, time (arrival order) wins — exactly the matching
+rule used by most equity exchanges.
+
+## Spec
+
+- `add_limit(order_id, side, price, qty)` — rest a limit order. `side` is
+  `"buy"` or `"sell"`. Reject (ValueError) bad sides, non-positive qty/price,
+  duplicate ids.
+- `cancel(order_id)` — remove a resting order; `KeyError` if unknown. An
+  emptied price level must vanish so the BBO re-derives.
+- `best_bid()` / `best_ask()` / `bbo()` — top of book; `None` on an empty side.
+- `level_qty(side, price)` — total resting qty at one level.
+- `execute_market(side, qty)` — aggressor order: a buy lifts asks cheapest
+  first, a sell hits bids highest first; FIFO within a level; partial fills
+  leave the remainder at the **front** of the queue; returns `list[Fill]`.
+- `imbalance(levels=1)` — `(bid_qty − ask_qty) / (bid_qty + ask_qty)` over the
+  top N levels per side; `0.0` on an empty book; always in `[−1, 1]`.
+
+## Acceptance criteria
+
+```bash
+uv run pytest tests/exercises/test_01_order_book.py -v
+```
+
+All tests pass (none skipped). Until you implement a method, its tests show
+as **skipped** ("Exercise not implemented yet").
+
+## Hints
+
+- `dict[price] -> collections.deque[[order_id, qty]]` per side gives you FIFO
+  for free; a second dict `order_id -> (side, price)` makes cancel O(level).
+- `max(bids)` / `min(asks)` are fine here — a real matching engine would keep
+  sorted levels (see the lesson's discussion of why), but correctness first.
+- The FIFO-at-same-price tests are the heart of this exercise: queue position
+  is half of why latency matters in HFT.
+
+## Check yourself
+
+Solution: [`solutions/01_order_book/order_book.py`](../../solutions/01_order_book/order_book.py)
+— peek only after the suite passes or you're truly stuck.

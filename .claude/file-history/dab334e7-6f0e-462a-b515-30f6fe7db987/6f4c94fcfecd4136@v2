@@ -1,0 +1,42 @@
+"""Registry of known historical market shock windows for stress testing.
+
+These are historical facts, not tunables: the built-in three ship as the
+default so ``walkforward-sim --stress`` needs no authoring to use. A JSON
+file of the same shape (``{"name": ["YYYY-MM-DD", "YYYY-MM-DD"], ...}``)
+passed via ``--shocks_json`` merges over (and can override) the built-ins
+by name. See .claude/plans/stress-test-mode.md.
+"""
+from __future__ import annotations
+
+import json
+from typing import Dict, Tuple
+
+#: name -> (start, end), inclusive daily-bar windows.
+SHOCKS: Dict[str, Tuple[str, str]] = {
+    "covid_2020": ("2020-02-15", "2020-04-15"),      # COVID crash + first rebound leg
+    "selloff_2022": ("2022-01-01", "2022-10-15"),    # rate-hike bear market
+    "vol_spike_2018": ("2018-10-01", "2018-12-24"),  # Q4 2018 selloff
+}
+
+
+def load_shocks(json_path: str | None) -> Dict[str, Tuple[str, str]]:
+    """Built-in shock registry, optionally merged with a JSON override file.
+
+    The file maps name -> [start, end]. Entries merge over the built-ins by
+    name (an override with a known name replaces it; new names are added).
+    A malformed file raises with the file named — the built-ins are NOT
+    silently used as a fallback, since that would mask a typo'd path or a
+    broken custom window and quietly stress-test the wrong scenarios.
+    """
+    shocks = dict(SHOCKS)
+    if json_path is None:
+        return shocks
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            custom = json.load(f)
+        for name, window in custom.items():
+            start, end = window  # must be a 2-item [start, end]
+            shocks[name] = (str(start), str(end))
+    except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise SystemExit(f"could not load shock windows from {json_path}: {exc}") from exc
+    return shocks

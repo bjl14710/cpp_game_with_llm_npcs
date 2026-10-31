@@ -1,0 +1,23 @@
+# Glossary
+
+Terms introduced across all learning modules in this repo. Each term links to the vocab file where it is defined in full.
+
+---
+
+## 0001 — pybind11 + CMake FetchContent
+
+Source: [vocab/0001-pybind11-cmake-extension.html](vocab/0001-pybind11-cmake-extension.html)
+
+| Term | Type | One-line definition |
+|------|------|---------------------|
+| **pybind11** | Library | Header-only C++ library that exposes C++ types and functions to Python via compile-time template metaprogramming — no code generation step. |
+| **PYBIND11_MODULE** | C++ Macro | Generates the `extern "C" PyObject* PyInit_<name>()` entry point that Python's import machinery calls after `dlopen()`-ing the shared library. |
+| **pybind11_add_module** | CMake Function | CMake wrapper around `add_library(SHARED)` that sets the correct Python extension suffix, strips the `lib` prefix, applies `-fvisibility=hidden`, and enables LTO in Release mode. |
+| **FetchContent** | CMake Module | Downloads external CMake dependencies at configure time and makes their targets available in the same CMake scope. Used as a fallback when pybind11 is not pip-installed. |
+| **scikit-build-core** | Build Backend | PEP 517 build backend that invokes CMake when pip builds a wheel, enabling `pip install .` to compile C++ extensions automatically. |
+| **PYBIND11_FINDPYTHON** | CMake Variable | When set to `ON` before `find_package(pybind11)`, instructs pybind11 to use CMake's modern `FindPython3` module instead of the deprecated `FindPythonLibs` — essential for venv and uv-managed Pythons. |
+| **editable install** | Python Packaging | `pip install -e .` mode where Python source changes are immediately importable; C++ extension changes still require a recompile. |
+| **ABI** | Concept | Application Binary Interface — the compiled-code contract. Python C extensions are ABI-tagged (e.g. `cpython-312`) and are not binary-compatible across Python versions. |
+| **shared object (.so)** | OS Concept | Native library loaded at runtime via `dlopen()`. A Python C extension is a `.so` with a `PyInit_` entry point. On macOS it is `.dylib`; on Windows, `.pyd`. |
+| **parity test** | Testing Pattern | Verifies a C++ implementation produces the same output as a NumPy reference within floating-point tolerance (e.g. `1e-9`). Serves as both a correctness gate and a regression guard. |
+| **type caster** | pybind11 Concept | Compile-time template specialisation that converts C++ types to Python objects and back at the function call boundary (e.g. `std::vector<double>` ↔ `list[float]` via `pybind11/stl.h`). |

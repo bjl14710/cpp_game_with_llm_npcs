@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0020 — Socket Contracts</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0020 · Systems design · from PR #77 (character creator)</div>
+<h1>Socket Contracts: Per-Part Attach Points vs Per-Pair Offsets</h1>
+<p>The character creator's core promise is "any combination of parts renders
+correctly". Whether that promise scales depends entirely on where the
+attachment knowledge lives.</p>
+
+<h2>The trap: per-pair offsets</h2>
+<p>The obvious first implementation is a table of hand-tuned offsets:
+"round eyes on the blocky head sit at (0, 0.42, 0.38); on the round head at
+(0, 0.40, 0.30)…" That table grows as <strong>parts × parts</strong> — adding
+one head means re-tuning an offset against every eye and hair part, and a
+missed pair ships as floating eyeballs.</p>
+
+<h2>The contract: each part describes only itself</h2>
+<pre><code>PartDef {
+  id:        "head_round"
+  localSize: (0.72, 0.72, 0.72)      // anchor at bottom-center
+  sockets:   { eyes: (0, .40, .30),   // MY eye position, MY local space
+               hair: (0, .64, 0) }
+}
+CategorySpec rows:  Head→Body via "head",  Eyes→Head via "eyes",  Hair→Head via "hair"</code></pre>
+<p>Assembly is a fold over the category specs: each part lands at
+<em>parent anchor + parent's declared socket</em>. Knowledge is
+<strong>parts + categories</strong>, not parts²: a wider head declares its
+eye socket farther forward and every eye part inherits that placement for
+free. Adding a category (a hat, a held item) is one spec row plus socket
+entries on the parts that can carry it — no restructuring.</p>
+
+<h2>Where the size contract fits</h2>
+<p>The brief flagged the interaction. Resolution order is the whole answer:
+sockets resolve in <em>unscaled local space</em> first, the assembly's total
+height is measured, then <strong>one uniform scale</strong> takes the figure
+to the same 1.8-unit character height contract the pack models use. Scale
+per-part and sockets drift; scale once at the end and alignment is
+invariant. Swapping the art style later means re-authoring parts — the
+contract keeps world proportions fixed on top of everything else.</p>
+
+<h2>Guard rails that make it hold</h2>
+<ul>
+<li><strong>Style tags</strong> (round/blocky/any) gate combinations in the
+validator, the picker, and the randomizer — one predicate
+(<code>styleCompatible</code>), three call sites.</li>
+<li><strong>Exhaustive test</strong>: every parts combination is assembled;
+validity must equal pairwise style compatibility, all categories must place,
+and the head must sit above the body's midpoint. The promise is checked at
+the data level, not eyeballed per pair.</li>
+<li><strong>Explicit "none"</strong>: baldness is a real zero-size part, so
+the assembly never has holes and the picker never needs a special case.</li>
+</ul>
+
+<div class="callout good"><strong>The general shape.</strong> Whenever
+"any A works with any B" is the requirement, make A and B each describe
+themselves against a shared contract and derive the pairing — the moment
+knowledge about a specific (A,B) pair appears anywhere, the combinatorial
+promise is already broken.</div>
+</div></body>
+</html>

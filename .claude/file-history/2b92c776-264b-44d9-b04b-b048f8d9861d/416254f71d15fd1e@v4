@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0012 — Deterministic Tests for Threaded Socket Code</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; }
+  ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); }
+  .good { border-left-color:var(--green); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0012 · Testing · from tests/test_net_loopback.cpp</div>
+<h1>Deterministic Tests for Threaded Socket Code</h1>
+<p>The loopback suite spins up a real server, real clients, and a fake LLM — and
+passes every time. Here's the discipline that makes that possible.</p>
+
+<h2>Test the real stack, fake the boundary</h2>
+<p><code>tests/test_net_loopback.cpp</code> does not mock <code>NetServer</code> or
+<code>NetClient</code> — it runs both over <code>127.0.0.1</code>, because the threading and
+framing <em>are</em> the things under test. What it fakes is the external boundary:
+<code>FakeOllama</code> plays the LLM (canned streamed replies, error modes like
+<code>Http500</code>). The rule of thumb:</p>
+<div class="callout good">Fake what you don't own (Ollama's HTTP API). Run what you do own
+(your sockets, your threads, your router) for real — on the loopback interface,
+where the network is fast and private.</div>
+<p>Two tricks make real sockets test-friendly:</p>
+<ul>
+<li><strong>Port 0</strong>: asking the OS to bind "any free port" (then reading it back with
+<code>getsockname</code>) means parallel test runs never collide on a hardcoded port.</li>
+<li><strong>The fixture mirrors production wiring</strong>: <code>ChatLoopback::hostFrame()</code> is
+the same three-line pump <code>main.cpp</code> runs per frame. If the fixture wiring
+diverges from the game's, the tests verify a program nobody ships.</li>
+</ul>
+
+<h2>Never sleep and hope</h2>
+<p>The cardinal sin of async testing:</p>
+<pre><code>client.sendInput(...);
+std::this_thread::sleep_for(200ms);          // "should be enough"  ← flake factory
+CHECK(snapshotArrived());</code></pre>
+<p>Too short on a loaded CI machine → false failure. Long enough to be safe → the
+suite crawls. The loopback suite's replacement is <strong>predicate polling with a
+deadline</strong>:</p>
+<pre><code>bool eventually(predicate, pump, deadline = 3000ms) {
+    auto end = now() + deadline;
+    while (now() &lt; end) {
+        if (pump) pump();          // drive the host frame / drain clients
+        if (predicate()) return true;   // succeed the instant it's true
+        sleep_for(5ms);
+    }
+    return false;                  // honest failure with a bounded wait
+}</code></pre>
+<p>Fast when the system is fast (usually a few milliseconds), honest when it hangs
+(bounded, reports failure). The <code>pump</code> parameter matters: shared-NPC chat
+needs the host loop to keep draining queues while we wait, exactly like the real
+game loop would.</p>
+
+<h2>Force the ugly interleavings</h2>
+<p>Concurrency bugs live in orderings that "never happen" on a fast machine. Good
+suites force them:</p>
+<ul>
+<li><code>FakeOllama</code> serves responses in <strong>7-byte chunks</strong> so JSON always splits
+mid-token across TCP reads — the framing gets no easy days.</li>
+<li>The framing test feeds a wire frame <strong>one byte at a time</strong>.</li>
+<li>The ordering test <em>waits until the NPC is busy</em> with player A's question
+before sending player B's — making the queue-contention path deterministic
+instead of accidental.</li>
+<li>The regression test for the <code>LlmClient</code> deadlock constructs and destroys
+the client 200 times — hammering the exact destructor-vs-wait window.</li>
+</ul>
+
+<h2>Flake checks: run it again. And again.</h2>
+<p>One green run of threaded code proves little — the schedule you got is one of
+millions. Tonight's protocol was <code>for i in 1..8: ./run_tests</code> after each
+networking change, and it paid for itself immediately: run 3 of the first batch
+<strong>hung</strong>, exposing a pre-existing lost-wakeup deadlock in <code>LlmClient</code>'s
+destructor (see lesson 0011) that had nothing to do with the new code — the new
+tests just rolled the dice more often.</p>
+<div class="callout">When a threaded test hangs, don't kill it — <em>autopsy</em> it first:
+<code>sample &lt;pid&gt;</code> (macOS) or <code>gdb -p</code> (Linux) shows every thread's stack.
+A deadlock diagnosis is usually two stack traces: who is waiting, and who was
+supposed to wake them.</div>
+</div></body></html>

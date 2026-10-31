@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0001 — LLM Integration</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --ink:#e6edf3; --dim:#8b949e;
+    --line:#30363d; --accent:#58a6ff; --accent2:#7ee787; --warn:#f0883e;
+    --good:#3fb950; --bad:#f85149; --hit:#3fb950; --miss:#f85149;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;
+    background-image:radial-gradient(circle at 15% -10%,#16203022,transparent 40%),
+                     radial-gradient(circle at 90% 0%,#1d2a1a22,transparent 45%);}
+  .wrap{max-width:840px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-family:var(--mono);font-size:1.35rem;letter-spacing:.5px;margin:.2em 0}
+  h1 .blink{color:var(--accent2);animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion:reduce){h1 .blink{animation:none}}
+  .sub{color:var(--dim);font-family:var(--mono);font-size:.82rem;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;
+    box-shadow:0 1px 0 #0006}
+  .bubble{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin:0 0 16px}
+  .bubble::after{content:"";position:absolute;left:26px;bottom:-9px;width:16px;height:16px;
+    background:var(--panel2);border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+    transform:rotate(45deg)}
+  .tagrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .tag{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.6px;
+    padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  .tag.cat{color:var(--accent);border-color:#1f6feb55;background:#1f6feb14}
+  .tag.type{color:var(--accent2);border-color:#2ea04355;background:#2ea04314}
+  .qtext{font-size:1.05rem;margin:6px 0 4px}
+  pre{font-family:var(--mono);font-size:.8rem;background:#0a0e14;border:1px solid var(--line);
+    border-radius:8px;padding:12px 14px;overflow:auto;color:#c9d1d9;margin:12px 0}
+  pre .c{color:#8b949e}
+  .cite{font-family:var(--mono);font-size:.72rem;color:var(--dim);margin-top:-4px}
+  ul.options{list-style:none;padding:0;margin:14px 0 0}
+  ul.options li{border:1px solid var(--line);background:#0d1117;border-radius:8px;padding:11px 14px;
+    margin-bottom:9px;cursor:pointer;transition:border-color .12s,background .12s}
+  ul.options li:hover{border-color:var(--accent)}
+  ul.options li.picked-correct{border-color:var(--good);background:#2ea04318}
+  ul.options li.picked-wrong{border-color:var(--bad);background:#f8514918}
+  ul.options li.show-correct{border-color:var(--good)}
+  ul.options li .why{display:block;margin-top:7px;font-size:.82rem;color:var(--dim);font-family:var(--sans)}
+  textarea{width:100%;min-height:120px;background:#0a0e14;color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:12px;font-family:var(--mono);font-size:.86rem;resize:vertical}
+  .btn{font-family:var(--mono);font-size:.82rem;border:1px solid var(--line);background:var(--panel2);
+    color:var(--ink);padding:8px 14px;border-radius:8px;cursor:pointer;transition:.12s}
+  .btn:hover{border-color:var(--accent);color:#fff}
+  .btn.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  .btn.primary:hover{background:#388bfd}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .spacer{flex:1}
+  .feedback{margin-top:12px;font-family:var(--mono);font-size:.82rem}
+  .check{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+  .concept{font-family:var(--mono);font-size:.82rem;padding:3px 0}
+  .concept .hit{color:var(--hit)} .concept .miss{color:var(--miss)}
+  .tally{font-family:var(--mono);font-weight:bold;margin:6px 0}
+  .model{background:#0a0e14;border-left:3px solid var(--accent2);border-radius:0 8px 8px 0;
+    padding:12px 14px;margin-top:12px;font-size:.92rem}
+  .rate{display:flex;gap:10px;margin-top:12px}
+  .progress{height:7px;background:#0a0e14;border:1px solid var(--line);border-radius:999px;overflow:hidden;margin:6px 0 18px}
+  .progress > div{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width .25s}
+  .chip{font-family:var(--mono);font-size:.8rem;border:1px solid var(--line);background:#0d1117;color:var(--dim);
+    padding:7px 12px;border-radius:999px;cursor:pointer;user-select:none}
+  .chip.on{background:#1f6feb22;border-color:var(--accent);color:var(--ink)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+  .toggle{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.82rem;color:var(--dim);margin-top:14px;cursor:pointer}
+  .note{font-size:.8rem;color:var(--dim);font-style:italic;margin-top:16px}
+  .big{font-size:2.2rem;font-family:var(--mono);color:var(--accent2)}
+  .stat{font-family:var(--mono);margin:6px 0}
+  a{color:var(--accent)}
+  .hidden{display:none}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>LLM Integration drill<span class="blink">▌</span></h1>
+  <div class="sub">cpp_game_with_llm_npcs · drill 0001 · grounded in src/core</div>
+
+  <!-- START -->
+  <section id="start" class="card">
+    <p>Self-test on how the live local LLM is wired into the game: the Ollama
+    sidecar, the async worker, the NDJSON stream, persona prompting, and the
+    directive-tag protocol. Most questions are <b>written recall</b> — type your
+    answer, then check it against the model answer.</p>
+    <p style="font-family:var(--mono);font-size:.82rem;color:var(--dim)">Pick channels to drill:</p>
+    <div class="chips" id="chips"></div>
+    <label class="toggle"><input type="checkbox" id="shuffle" checked> shuffle question order</label>
+    <div class="btnrow">
+      <button class="btn primary" id="begin">begin drill →</button>
+    </div>
+  </section>
+
+  <!-- QUESTION -->
+  <section id="quiz" class="card hidden">
+    <div class="progress"><div id="bar"></div></div>
+    <div class="tagrow">
+      <span class="tag" id="qcount"></span>
+      <span class="tag cat" id="qcat"></span>
+      <span class="tag type" id="qtype"></span>
+    </div>
+    <div id="qbody"></div>
+    <div class="btnrow">
+      <button class="btn ghost" id="prev">← prev</button>
+      <div class="spacer"></div>
+      <button class="btn" id="next">next →</button>
+    </div>
+    <p class="note">Heads-up: the keyword check is a rough substring match — it
+    can miss a right answer worded differently. Always judge your answer against
+    the model answer and rate yourself honestly.</p>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="results" class="card hidden">
+    <h1 style="font-size:1.1rem">Results</h1>
+    <div class="big" id="mcScore"></div>
+    <div class="stat" id="mcLine"></div>
+    <div class="stat" id="wrLine"></div>
+    <div id="reviewList"></div>
+    <div class="btnrow">
+      <button class="btn" id="reviewMissed">review only what I missed</button>
+      <button class="btn ghost" id="restart">restart</button>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ---------- question bank (grounded in real code) ---------- */
+const CATS = {
+  sidecar:   "Sidecar architecture",
+  async:     "Async & threading",
+  streaming: "Streaming protocol",
+  persona:   "Persona & prompting",
+  directives:"Directive protocol",
+};
+
+const Q = [
+  /* ---- WRITTEN: real code ---- */
+  {type:"wr",cat:"async",
+   prompt:"LlmClient holds two separate mutexes, requestMutex_ and replyMutex_. Why two instead of one shared lock?",
+   code:"std::mutex requestMutex_;  std::queue<ChatRequest> requests_;\nstd::mutex replyMutex_;    std::vector<ChatReply> replies_; std::vector<ChatDelta> deltas_;",
+   cite:"src/core/LlmClient.hpp:102",
+   model:"They protect two independent data structures touched by different threads. The worker thread pulls from the request queue; the main thread drains replies/deltas. With one lock the main thread draining replies would contend with the worker waiting for requests. Two locks let producer and consumer run without contention, and the main thread can drain replies without ever blocking the worker mid-HTTP-call.",
+   concepts:[
+     {label:"Two independent structures (request queue vs reply/delta buffers)",terms:["two ","independent","separate","different structure","queue","buffer"]},
+     {label:"Different threads own each (worker vs main)",terms:["worker","main thread","producer","consumer"]},
+     {label:"Avoids contention / lets them run in parallel",terms:["contend","contention","parallel","without block","don't block","not block","concurren"]},
+     {label:"Main can drain without stalling the worker mid-call",terms:["drain","mid-call","mid call","while","during","in flight","in-flight"]},
+   ]},
+
+  {type:"wr",cat:"async",
+   prompt:"In workerLoop the comment says inFlight_ is set false 'only after the reply is queued.' What goes wrong if you drop the flag right after processOne() returns instead?",
+   code:"inFlight_.store(true);\nChatReply reply = processOne(req);\nif (!req.internal) { lock; replies_.push_back(...); }\n// drop AFTER queuing:\ninFlight_.store(false);",
+   cite:"src/core/LlmClient.cpp:78",
+   model:"busy()/inFlight_ is polled by the UI to show the 'thinking…' state. If you cleared it before pushing the reply, there is a window where the UI sees busy()==false but the reply has not landed in replies_ yet — so the UI would briefly flip to 'idle/done' before the text appears, causing a flicker or a missed reply. Queuing the reply first closes that race.",
+   concepts:[
+     {label:"busy()/inFlight_ is read by the UI",terms:["busy","inflight","in flight","ui","poll","thinking"]},
+     {label:"There'd be a window where idle but reply not yet queued",terms:["window","gap","before","race","not yet","hasn't"]},
+     {label:"Causes flicker / UI thinks it's done early",terms:["flicker","idle","done early","glitch","blip","brief"]},
+   ]},
+
+  {type:"wr",cat:"persona",
+   prompt:"Npc::ask() sends a snapshot of history but only appends the player line after a SUCCESSFUL reply (in onReplyArrived). Why not append the player line immediately when asking?",
+   code:"std::uint64_t Npc::ask(const std::string& playerLine){\n  pendingUserLine_ = playerLine;\n  pendingId_ = client_.submit(persona_.renderSystemPrompt(), history_, playerLine);\n  return pendingId_;\n}",
+   cite:"src/core/Npc.cpp:28",
+   model:"So a failed request can be retried without polluting context. If the HTTP call fails (Ollama down, timeout), nothing was committed to history — the unanswered user turn isn't left dangling in front of the next request. The line is parked in pendingUserLine_ and only joins history_ once a real assistant reply pairs with it.",
+   concepts:[
+     {label:"Failed request shouldn't pollute history",terms:["fail","error","pollut","retry","retri"]},
+     {label:"Avoids a dangling unanswered user turn",terms:["dangling","unanswered","orphan","without","no reply","half"]},
+     {label:"Held in pendingUserLine_ until reply pairs with it",terms:["pendinguserline","pending","park","paired","pair","appended only","commit"]},
+   ]},
+
+  {type:"wr",cat:"directives",
+   prompt:"onReplyArrived runs parseDirectives BEFORE the text is stored in history or shown. Why must the tags be stripped before both of those, not just before display?",
+   code:"std::string content = reply.content;\nconst Directives directives = parseDirectives(content); // mutates content\napplyAction(directives.action);\nhistory_.push_back({\"assistant\", content});",
+   cite:"src/core/Npc.cpp:51",
+   model:"Two reasons. (1) The transcript must never show the raw [[ACTION:…]]/[[MOOD:…]] brackets to the player. (2) The reply is also appended to history_, which is fed back to the model on the next turn — if the tags stayed in, the model would see its own bracket syntax as part of the conversation and start echoing/garbling it. Stripping once before storing handles both.",
+   concepts:[
+     {label:"Tags must not appear in the player-facing transcript",terms:["transcript","display","shown","player see","ui","screen"]},
+     {label:"History is fed back to the model next turn",terms:["history","fed back","next turn","context","resent","sent again","future"]},
+     {label:"Model would echo/learn its own tag syntax otherwise",terms:["echo","mimic","copy","its own","repeat","garble","reinforc"]},
+   ]},
+
+  {type:"wr",cat:"streaming",
+   prompt:"Why does the streaming path need StreamAssembler at all? Why not just json::parse() whatever bytes each content_receiver callback delivers?",
+   code:"hreq.content_receiver = [&](const char* data, size_t length, ...) {\n  assembler.feed(std::string_view(data,length), handleLine);\n  return true;\n};",
+   cite:"src/core/LlmClient.cpp:157, StreamAssembler.hpp:62",
+   model:"HTTP delivers arbitrary byte slices, not whole lines. One NDJSON line can be split across several content_receiver calls, and one call can carry several lines plus a partial one. StreamAssembler buffers bytes and only fires onLine once it sees a '\\n', so each callback gets parsed as a complete JSON object. takeRemainder() flushes a final line that had no trailing newline.",
+   concepts:[
+     {label:"HTTP delivers arbitrary byte slices, not whole lines",terms:["arbitrary","byte","slice","chunk","not whole","not aligned","split"]},
+     {label:"A line may span multiple callbacks / a callback may hold many",terms:["span","multiple","across","several","partial","boundary"]},
+     {label:"Buffers until newline, fires one complete line",terms:["newline","\\n","buffer","complete line","reassembl","delimit"]},
+     {label:"takeRemainder flushes a trailing line with no \\n",terms:["takeremainder","remainder","trailing","flush","final line","last line"]},
+   ]},
+
+  {type:"wr",cat:"persona",
+   prompt:"The action protocol tells the NPC to emit an action tag 'only if your character would actually agree to' the action. Explain how this makes NPC compliance feel in-character WITHOUT the game hardcoding per-NPC rules.",
+   code:"\"...only if you are actually performing a physical action the player\n asked for and your character would agree to, add ONE directive...\"",
+   cite:"src/core/Persona.hpp:48 (renderActionProtocol)",
+   model:"The decision to obey is delegated to the LLM, which is already role-playing the persona (traits, role, speaking style from the system prompt). A gruff guard refuses 'follow me'; a friendly shopkeeper agrees — and each only emits [[ACTION:…]] when, in character, it would. The game never hardcodes 'NPC #3 obeys follow'; the persona prompt constrains HOW the character behaves and the model picks the action, so behavior emerges from character rather than a rules table.",
+   concepts:[
+     {label:"The model/LLM decides whether to obey",terms:["model","llm","decides","delegat","picks","chooses"]},
+     {label:"It's already role-playing the persona",terms:["persona","role-play","role play","in character","character","traits"]},
+     {label:"No hardcoded per-NPC/per-action rules in game code",terms:["hardcod","hard-cod","no rule","rules table","not enforce","without code","emerge"]},
+     {label:"Persona constrains HOW not WHAT it can do",terms:["how not what","how it","constrain","style"]},
+   ]},
+
+  {type:"wr",cat:"directives",
+   prompt:"Civilian personas are only ever given [[ACTION: call_police]] in their prompt — never arrest. Yet applyAction STILL converts Arrest→CallPolice for non-police. Why keep that server-side guard if the prompt already withholds the arrest tag?",
+   code:"if (action == NpcAction::Arrest && !persona_.police)\n    action = NpcAction::CallPolice;",
+   cite:"src/core/Npc.cpp:69",
+   model:"You can't trust a small model to obey the prompt perfectly. qwen2.5:3b may emit [[ACTION: arrest]] anyway — copying it from earlier context, hallucinating it, or misreading the rules. The code is defense-in-depth: the prompt is a soft request, the applyAction check is the hard guarantee that only police actually arrest. Never let unvalidated LLM output drive a privileged game action.",
+   concepts:[
+     {label:"Can't trust the (small) model to follow the prompt",terms:["trust","unreliable","small model","might emit","anyway","hallucin","disobey","ignore"]},
+     {label:"Defense in depth / prompt is soft, code is the hard rule",terms:["defense","depth","soft","hard","guarantee","backstop","enforce","validate"]},
+     {label:"Only police should arrest — privileged action",terms:["police","privileg","only","authori","gate"]},
+   ]},
+
+  {type:"wr",cat:"sidecar",
+   prompt:"Each Npc owns its own bounded history_ vector; LlmClient keeps no conversation state. Why put history on the NPC rather than centralizing it in the shared client?",
+   code:"// Npc.hpp\nstd::vector<ChatTurn> history_;   // per NPC\n// LlmClient: only transport — submit()/drainReplies(), no history",
+   cite:"src/core/Npc.hpp:106",
+   model:"Each NPC is a distinct conversation. The player walks from the baker to a cop to the librarian; each must remember only its own turns, in its own voice, or context would bleed across characters. LlmClient is a stateless transport/chokepoint shared by everyone — it just relays system prompt + that NPC's history + the new line. Centralizing history would force the client to track which turns belong to which NPC, duplicating what the Npc objects already are.",
+   concepts:[
+     {label:"Each NPC is an independent conversation",terms:["independent","separate","distinct","own conversation","per npc","each npc"]},
+     {label:"Context would bleed between characters otherwise",terms:["bleed","mix","cross","leak","contaminat","confus"]},
+     {label:"LlmClient is stateless transport/chokepoint shared by all",terms:["stateless","transport","chokepoint","shared","relay","just send"]},
+   ]},
+
+  {type:"wr",cat:"async",
+   prompt:"DialogueSession::deltaArrived ignores any delta whose id != pendingId_ (returns false). Give a concrete in-game situation where a delta arrives with a NON-matching id, and what would break without that check.",
+   code:"bool DialogueSession::deltaArrived(uint64_t id, const std::string& text){\n  if (state_!=WaitingReply && state_!=Streaming) return false;\n  if (id==0 || id!=pendingId_) return false;\n  streamingText_ += text; ...\n}",
+   cite:"src/core/DialogueSession.cpp:26",
+   model:"You talk to the baker, then close the dialog and walk to the cop before the baker's reply finishes. The baker's late stream fragments still arrive in drainDeltas. Without the id check they'd be appended into the cop's open conversation (or a closed one), splicing one NPC's words into another's bubble. The id correlates each fragment to the exact request the open session is waiting on; the baker's still get routed to the baker's history by the NPC, just not shown.",
+   concepts:[
+     {label:"A reply from a previous/closed conversation arrives late",terms:["previous","earlier","closed","walked away","another npc","prior","late"]},
+     {label:"Without the check it'd splice into the wrong conversation",terms:["wrong","splice","mix","bleed","append into","other npc","leak"]},
+     {label:"id correlates fragment to the open session's request",terms:["id","correlate","match","pendingid","request id","identify"]},
+   ]},
+
+  {type:"wr",cat:"streaming",
+   prompt:"What is warmUp() for, and how does the 'internal' request it sends differ from a normal chat request in processOne?",
+   code:"void LlmClient::warmUp(){ ChatRequest req; req.internal=true; enqueue(...); }\n// processOne: if(!req.internal){ build messages... }   stream=true, keep_alive",
+   cite:"src/core/LlmClient.cpp:46, main.cpp:222",
+   model:"warmUp() is fired once at startup to make Ollama load the model into memory so the first real conversation answers fast instead of paying the cold-start cost. The internal request sends an empty messages array (no system/history/user), which makes Ollama load the model and return immediately. It also produces no deltas and no ChatReply — workerLoop skips queuing a reply, and processOne skips pushing deltas, when req.internal is true.",
+   concepts:[
+     {label:"Preloads the model so first real reply is fast",terms:["preload","warm","load","memory","cold","first","startup"]},
+     {label:"Sends empty messages",terms:["empty","no message","no system","no history","blank"]},
+     {label:"Produces no deltas and no reply",terms:["no delta","no reply","skip","not queued","produces no","suppress"]},
+     {label:"Pairs with keep_alive to keep the model resident",terms:["keep_alive","keep alive","resident","stay loaded"]},
+   ]},
+
+  {type:"wr",cat:"directives",
+   prompt:"parseDirectives is deliberately tolerant of 'the mess a small model actually produces.' Name three distinct kinds of malformed/loose tag input it still handles correctly.",
+   cite:"src/core/NpcAction.hpp:88",
+   model:"Any three of: (1) single OR double brackets — [MOOD: happy] and [[MOOD: happy]] both parse; (2) tags placed anywhere — start, middle, or end of the reply, not just the final line; (3) duplicate mood tags — the LAST recognized mood wins; (4) unknown keywords — still stripped from the text so brackets never reach the transcript, even though they map to no action; (5) spaces inside the keyword — 'call police' is normalized to 'call_police'; (6) synonyms — 'flustered'→embarrassed, 'mad'→angry, etc.",
+   concepts:[
+     {label:"Single vs double brackets both accepted",terms:["single","double","bracket","[[","one bracket","[ "]},
+     {label:"Tags anywhere, not just the final line",terms:["anywhere","middle","start","end","placement","position","not just"]},
+     {label:"Duplicate moods → last one wins",terms:["duplicate","last","wins","multiple mood","more than one"]},
+     {label:"Unknown keywords still stripped",terms:["unknown","unrecogn","still strip","erase","removed"]},
+     {label:"Spaces normalized / synonyms mapped",terms:["space","underscore","normal","synonym","flustered","mad","alias"]},
+   ]},
+
+  {type:"wr",cat:"sidecar",
+   prompt:"Trace one player line end-to-end: from pressing Enter in the dialog box to the NPC's words streaming onto the screen. Name the key calls in order across the threads.",
+   cite:"src/app/main.cpp:324, 410, 417",
+   model:"Main thread: dialog.handleEvent → npc.ask(line) → client.submit() enqueues a ChatRequest and returns an id → session.submitted(id). Worker thread: workerLoop pops the request → processOne POSTs /api/chat with stream=true → for each NDJSON line, pushes a ChatDelta and accumulates content. Main thread, each frame: client.drainDeltas() → session.deltaArrived(id,text) → dialog.appendStreamingDelta (words appear live). On completion: client.drainReplies() → npc.onReplyArrived (parse tags, append to history) → session.replyArrived → dialog endStreaming + final line + stage direction.",
+   concepts:[
+     {label:"ask()/submit() enqueues request, returns id",terms:["ask","submit","enqueue","id","queue"]},
+     {label:"session.submitted records the pending id",terms:["submitted","pending","session"]},
+     {label:"worker processOne POSTs the stream",terms:["processone","worker","post","/api/chat","http","stream"]},
+     {label:"drainDeltas → deltaArrived → live UI",terms:["draindeltas","delta","streaming","appendstreaming","live","fragment"]},
+     {label:"drainReplies → onReplyArrived → history + final",terms:["drainreplies","onreplyarrived","reply","history","final","endstreaming"]},
+   ]},
+
+  {type:"wr",cat:"streaming",
+   prompt:"The request sends \"stream\": true even though stream:false (one JSON blob at the end) would be simpler to parse. What does streaming buy, and what's the cost?",
+   code:"json body = { {\"model\",...}, {\"messages\",messages},\n  {\"stream\", true}, {\"keep_alive\",...}, {\"options\",{{\"temperature\",...}}} };",
+   cite:"src/core/LlmClient.cpp:109",
+   model:"It cuts perceived latency: words appear in the bubble as the model generates them instead of after a 1–3 s silent wait, so the conversation feels responsive even though total generation time is the same. The cost is client complexity — you need StreamAssembler to reframe byte slices into lines, parseOllamaChunk per line, a delta channel to the UI, and a 'done' check to know when it's complete, versus a single json::parse on a complete body.",
+   concepts:[
+     {label:"Lower perceived latency / words appear immediately",terms:["perceived","latency","immediately","as it","live","responsive","first word","incremental"]},
+     {label:"Total generation time is unchanged — it's UX",terms:["same","total","unchanged","ux","feel","perception","not faster"]},
+     {label:"Cost: client complexity (assembler, deltas, done check)",terms:["complex","assembler","delta","done","reframe","harder","more code"]},
+   ]},
+
+  {type:"wr",cat:"sidecar",
+   prompt:"The core library (LlmClient, Npc, DialogueSession, parseDirectives) has no SFML or OpenGL. Why is that split worth maintaining, given the renderer is full of GL?",
+   cite:"src/core vs src/app",
+   model:"The core holds all the logic that can be wrong (threading, history bounding, tag parsing, the dialogue state machine) and keeping it SFML/GL-free means it compiles and unit-tests headlessly in the Linux container — no window, no GPU. The app layer (Renderer3D, main) is the thin, hard-to-test GL shell. So the testable surface stays maximal and the untestable surface stays minimal; bugs in parsing or threading get caught by doctest, not by eyeballing the game.",
+   concepts:[
+     {label:"Core is unit-testable headlessly (no window/GPU)",terms:["test","headless","container","doctest","unit","no window","no gpu","offline"]},
+     {label:"App layer is the thin untestable GL shell",terms:["app","renderer","gl","shell","thin","glue"]},
+     {label:"Maximize testable logic, isolate the untestable",terms:["logic","isolate","maxim","minim","separate","split","boundary"]},
+   ]},
+
+  /* ---- MULTIPLE CHOICE ---- */
+  {type:"mc",cat:"sidecar",
+   prompt:"LlmClient talks to the model over plain HTTP. Where does it POST, and what secures that call?",
+   options:[
+     {t:"POST to localhost:11434/api/chat, with no auth because it's a local sidecar process",correct:true,
+      why:"LlmConfig defaults host=localhost, port=11434; processOne POSTs /api/chat. Ollama on localhost needs no key."},
+     {t:"POST to localhost:8080/v1/chat with a bearer token read from the environment at startup",correct:false,
+      why:"Wrong port and path, and there is no token — the code sets no Authorization header anywhere."},
+     {t:"POST to api.ollama.ai/chat over TLS using the player's account credentials",correct:false,
+      why:"Ollama here is a local sidecar, not a cloud service; nothing leaves the machine and there are no credentials."},
+     {t:"A WebSocket to localhost:11434 kept open for the whole session, authed by a handshake",correct:false,
+      why:"It's a normal HTTP POST per request via cpp-httplib, not a persistent WebSocket."},
+   ]},
+
+  {type:"mc",cat:"streaming",
+   prompt:"In Ollama's streamed /api/chat response, what does each line's message.content hold?",
+   options:[
+     {t:"A fragment of the reply that the client must concatenate with the others",correct:true,
+      why:"handleLine does content += chunk.delta — each chunk is a piece, accumulated into the full reply."},
+     {t:"The complete reply so far, resent in full on every line as it grows",correct:false,
+      why:"Ollama sends only the new fragment per line, not a cumulative snapshot; concatenation would duplicate text."},
+     {t:"The entire final reply, delivered once on the very first line",correct:false,
+      why:"That's the stream:false behavior; with stream:true the text arrives piece by piece across many lines."},
+     {t:"A token id that the client must look up in a vocab table to get text",correct:false,
+      why:"The API returns decoded text fragments, not raw token ids; there's no vocab lookup in the client."},
+   ]},
+
+  {type:"mc",cat:"streaming",
+   prompt:"How does processOne know the stream finished successfully (not just that the socket closed)?",
+   options:[
+     {t:"It saw a parsed line with \"done\": true before the connection ended",correct:true,
+      why:"chunk.done sets sawDone; if the stream ends without it, processOne reports 'stream ended before completion'."},
+     {t:"The content_receiver returns false to signal the client to stop reading",correct:false,
+      why:"The receiver always returns true; completion is data-driven via the done flag, not a return value."},
+     {t:"A final line whose content equals the literal sentinel \"[DONE]\"",correct:false,
+      why:"That's an OpenAI SSE convention; Ollama uses a boolean done field on the JSON object instead."},
+     {t:"The HTTP status flips from 200 to 204 on the last chunk",correct:false,
+      why:"Status is read once from the response header; it doesn't change per chunk, and 200 holds throughout."},
+   ]},
+
+  {type:"mc",cat:"streaming",
+   prompt:"LlmConfig sets keep_alive = \"10m\". What does that control?",
+   options:[
+     {t:"How long Ollama keeps the model loaded in memory after a request",correct:true,
+      why:"keep_alive holds the model resident (Ollama default 5m) so the next conversation skips the cold-start load."},
+     {t:"The HTTP read timeout before the worker abandons a slow request",correct:false,
+      why:"That's requestTimeoutSeconds passed to set_read_timeout, a separate setting."},
+     {t:"How many conversation turns each NPC retains before trimming history",correct:false,
+      why:"History bounding is maxHistoryTurns in Npc, unrelated to the Ollama keep_alive field."},
+     {t:"How long a generated reply is cached and reused for identical prompts",correct:false,
+      why:"Ollama doesn't cache replies by prompt; keep_alive is about model residency, not response caching."},
+   ]},
+
+  {type:"mc",cat:"directives",
+   prompt:"A reply contains two mood tags: [[MOOD: angry]] earlier and [[MOOD: happy]] at the end. Which mood does parseDirectives report?",
+   options:[
+     {t:"happy — the last recognized mood tag wins",correct:true,
+      why:"The loop overwrites out.mood on each recognized mood, so the final one in the text is what sticks."},
+     {t:"angry — the first mood tag is taken and the rest ignored",correct:false,
+      why:"There's no early-out on the first match; later tags overwrite earlier ones."},
+     {t:"neutral — conflicting mood tags cancel and reset to the default",correct:false,
+      why:"Nothing resets on conflict; the parser just keeps the most recent recognized mood."},
+     {t:"both — Directives stores a list and the renderer blends the two",correct:false,
+      why:"Directives.mood is a single value, not a list; there is no blending."},
+   ]},
+
+  {type:"mc",cat:"persona",
+   prompt:"A civilian NPC's reply somehow includes [[ACTION: arrest]]. What does the game do?",
+   options:[
+     {t:"applyAction rewrites it to CallPolice, so the civilian flags down the real police",correct:true,
+      why:"if (action==Arrest && !persona_.police) action=CallPolice — only police personas truly arrest."},
+     {t:"The civilian walks over and arrests the player anyway, since the tag was emitted",correct:false,
+      why:"The arrest is gated on persona_.police; a civilian's arrest tag is downgraded, never executed."},
+     {t:"parseDirectives rejects the tag as invalid and the reply is dropped entirely",correct:false,
+      why:"'arrest' is a valid keyword and the reply is kept; the guard is in applyAction, not the parser."},
+     {t:"The request is resent to the model with a stricter prompt until it complies",correct:false,
+      why:"There's no retry loop; the conversion happens locally and immediately in applyAction."},
+   ]},
+
+  {type:"mc",cat:"async",
+   prompt:"Why are drainReplies() and drainDeltas() safe to call from the 60fps render loop without stalling it?",
+   options:[
+     {t:"Each swaps its buffer out under a brief lock and returns it; no lock is held during rendering",correct:true,
+      why:"out.swap(replies_) under replyMutex_ is O(1); the loop then iterates the local copy lock-free."},
+     {t:"They spin-wait until the worker has finished the current HTTP call, then copy",correct:false,
+      why:"They never wait on the worker; an in-flight call doesn't block a drain — that's the whole point."},
+     {t:"They run on the worker thread, so the main thread never touches the buffers",correct:false,
+      why:"drain* are called from the main thread; the worker only pushes into the buffers."},
+     {t:"They hold replyMutex_ for the full duration of the frame to prevent new pushes",correct:false,
+      why:"The lock is released the instant the swap returns; holding it all frame would block the worker."},
+   ]},
+];
+
+/* ---------- engine ---------- */
+const state = { order:[], idx:0, answers:{}, reviewMode:false };
+// answers[qOriginalIndex] = {typed:"", mcCorrect:bool|null, checked:bool, revealed:bool, selfRate:'knew'|'review'|null}
+
+const el = id => document.getElementById(id);
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* start screen chips */
+const selected = new Set(Object.keys(CATS));
+function renderChips(){
+  const c = el("chips"); c.innerHTML="";
+  const all = document.createElement("span");
+  all.className="chip"+(selected.size===Object.keys(CATS).length?" on":"");
+  all.textContent="all";
+  all.onclick=()=>{ if(selected.size===Object.keys(CATS).length){selected.clear();} else {Object.keys(CATS).forEach(k=>selected.add(k));} renderChips(); };
+  c.appendChild(all);
+  for(const [k,name] of Object.entries(CATS)){
+    const s=document.createElement("span");
+    s.className="chip"+(selected.has(k)?" on":"");
+    s.textContent=name;
+    s.onclick=()=>{ selected.has(k)?selected.delete(k):selected.add(k); renderChips(); };
+    c.appendChild(s);
+  }
+}
+renderChips();
+
+function ans(i){ return state.answers[i] || (state.answers[i]={typed:"",mcCorrect:null,checked:false,revealed:false,selfRate:null}); }
+
+function begin(missedOnly){
+  let pool = Q.map((q,i)=>i).filter(i=>selected.has(Q[i].cat));
+  if(missedOnly){
+    pool = pool.filter(i=>{
+      const a=state.answers[i]; if(!a) return false;
+      if(Q[i].type==="mc") return a.mcCorrect===false;
+      return a.selfRate==="review";
+    });
+    if(pool.length===0){ alert("Nothing marked as missed/needs-review yet."); return; }
+  }
+  if(pool.length===0){ alert("Pick at least one channel."); return; }
+  if(el("shuffle").checked) shuffle(pool);
+  state.order=pool; state.idx=0; state.reviewMode=missedOnly;
+  el("start").classList.add("hidden");
+  el("results").classList.add("hidden");
+  el("quiz").classList.remove("hidden");
+  render();
+}
+
+function render(){
+  const i = state.order[state.idx];
+  const q = Q[i]; const a = ans(i);
+  el("qcount").textContent = `Q ${state.idx+1} / ${state.order.length}`;
+  el("qcat").textContent = CATS[q.cat];
+  el("qtype").textContent = q.type==="mc" ? "multiple choice" : "written recall";
+  el("bar").style.width = ((state.idx)/(state.order.length))*100 + "%";
+
+  const body = el("qbody"); body.innerHTML="";
+  const bubble=document.createElement("div"); bubble.className="bubble";
+  const p=document.createElement("p"); p.className="qtext"; p.textContent=q.prompt; bubble.appendChild(p);
+  body.appendChild(bubble);
+  if(q.code){ const pre=document.createElement("pre"); pre.textContent=q.code; body.appendChild(pre); }
+  if(q.cite){ const c=document.createElement("div"); c.className="cite"; c.textContent="↳ "+q.cite; body.appendChild(c); }
+
+  if(q.type==="mc") renderMC(q,a,body);
+  else renderWR(q,a,body);
+
+  el("prev").disabled = state.idx===0;
+  el("next").textContent = state.idx===state.order.length-1 ? "see results →" : "next →";
+}
+
+function renderMC(q,a,body){
+  const ul=document.createElement("ul"); ul.className="options";
+  const opts = shuffle(q.options.map(o=>o)); // shuffle DOM order each render
+  opts.forEach(o=>{
+    const li=document.createElement("li");
+    li.dataset.correct = o.correct ? "true":"false";
+    li.textContent=o.t;
+    const why=document.createElement("span"); why.className="why"; why.textContent=o.why; why.style.display="none";
+    li.appendChild(why);
+    li.onclick=()=>{
+      if(a.mcCorrect!==null) return; // already answered
+      const correct = li.dataset.correct==="true";
+      a.mcCorrect = correct;
+      li.classList.add(correct?"picked-correct":"picked-wrong");
+      // reveal all whys, mark the correct one
+      ul.querySelectorAll("li").forEach(x=>{
+        x.querySelector(".why").style.display="block";
+        if(x.dataset.correct==="true") x.classList.add("show-correct");
+      });
+    };
+    ul.appendChild(li);
+  });
+  body.appendChild(ul);
+  // restore answered state
+  if(a.mcCorrect!==null){
+    ul.querySelectorAll("li").forEach(x=>{
+      x.querySelector(".why").style.display="block";
+      if(x.dataset.correct==="true") x.classList.add(a.mcCorrect?"picked-correct":"show-correct");
+      else if(x.dataset.correct==="false" && !a.mcCorrect) x.classList.add(""); // leave neutral
+    });
+    const fb=document.createElement("p"); fb.className="feedback";
+    fb.style.color = a.mcCorrect ? "var(--good)":"var(--bad)";
+    fb.textContent = a.mcCorrect ? "✓ Answered correctly." : "✗ Marked wrong — review the highlighted answer.";
+    body.appendChild(fb);
+  }
+}
+
+function renderWR(q,a,body){
+  const ta=document.createElement("textarea");
+  ta.placeholder="Type your answer from memory…";
+  ta.value=a.typed;
+  ta.oninput=()=>{ a.typed=ta.value; };
+  body.appendChild(ta);
+
+  const row=document.createElement("div"); row.className="btnrow";
+  const checkBtn=document.createElement("button"); checkBtn.className="btn"; checkBtn.textContent="check my answer";
+  const showBtn=document.createElement("button"); showBtn.className="btn ghost"; showBtn.textContent="show me the answer";
+  row.appendChild(checkBtn); row.appendChild(showBtn);
+  body.appendChild(row);
+
+  const out=document.createElement("div"); body.appendChild(out);
+
+  checkBtn.onclick=()=>{
+    a.checked=true;
+    const text=(a.typed||"").toLowerCase();
+    const hits=q.concepts.map(c=>({c, hit:c.terms.some(t=>text.includes(t.toLowerCase()))}));
+    const got=hits.filter(h=>h.hit).length;
+    let html=`<div class="check"><div class="tally">${got} / ${q.concepts.length} key concepts detected</div>`;
+    hits.forEach(h=>{
+      html+=`<div class="concept"><span class="${h.hit?'hit':'miss'}">${h.hit?'✓':'○'}</span> ${h.c.label}</div>`;
+    });
+    html+=`</div>`;
+    out.innerHTML=html;
+  };
+
+  showBtn.onclick=()=>{
+    a.revealed=true;
+    let html=`<div class="model"><b>Model answer</b><br>${q.model}</div>`;
+    html+=`<div class="rate"><span style="font-family:var(--mono);font-size:.82rem;color:var(--dim);align-self:center">rate yourself:</span>
+      <button class="btn" data-r="knew">knew it</button>
+      <button class="btn" data-r="review">needs review</button></div>`;
+    // keep any existing concept check above
+    const prior = out.querySelector(".check");
+    out.innerHTML = (prior?prior.outerHTML:"") + html;
+    out.querySelectorAll("[data-r]").forEach(b=>{
+      b.onclick=()=>{
+        a.selfRate=b.dataset.r;
+        out.querySelectorAll("[data-r]").forEach(x=>x.classList.remove("primary"));
+        b.classList.add("primary");
+      };
+    });
+    if(a.selfRate){
+      const sel=out.querySelector(`[data-r="${a.selfRate}"]`); if(sel) sel.classList.add("primary");
+    }
+  };
+
+  // restore prior check/reveal
+  if(a.checked) checkBtn.onclick();
+  if(a.revealed) showBtn.onclick();
+}
+
+el("prev").onclick=()=>{ if(state.idx>0){state.idx--; render();} };
+el("next").onclick=()=>{ if(state.idx<state.order.length-1){state.idx++; render();} else showResults(); };
+el("begin").onclick=()=>begin(false);
+el("restart").onclick=()=>{ el("results").classList.add("hidden"); el("start").classList.remove("hidden"); };
+el("reviewMissed").onclick=()=>begin(true);
+
+function showResults(){
+  el("quiz").classList.add("hidden");
+  el("results").classList.remove("hidden");
+  el("bar").style.width="100%";
+
+  const mc = state.order.filter(i=>Q[i].type==="mc");
+  const mcRight = mc.filter(i=>state.answers[i] && state.answers[i].mcCorrect===true).length;
+  const wr = state.order.filter(i=>Q[i].type==="wr");
+  const knew = wr.filter(i=>state.answers[i] && state.answers[i].selfRate==="knew").length;
+  const review = wr.filter(i=>state.answers[i] && state.answers[i].selfRate==="review").length;
+  const unrated = wr.length - knew - review;
+
+  el("mcScore").textContent = mc.length ? `${mcRight} / ${mc.length}` : "—";
+  el("mcLine").textContent = mc.length ? `multiple choice correct` : `no MC questions in this set`;
+  el("wrLine").textContent = `written recall — ${knew} knew it · ${review} need review · ${unrated} unrated`;
+
+  const missed = state.order.filter(i=>{
+    const a=state.answers[i]; if(!a) return false;
+    return Q[i].type==="mc" ? a.mcCorrect===false : a.selfRate==="review";
+  });
+  const rl=el("reviewList");
+  if(missed.length){
+    rl.innerHTML = `<div class="stat" style="margin-top:14px;color:var(--warn)">To revisit (${missed.length}):</div>` +
+      missed.map(i=>`<div class="concept" style="color:var(--dim)">· [${CATS[Q[i].cat]}] ${Q[i].prompt}</div>`).join("");
+  } else {
+    rl.innerHTML = `<div class="stat" style="margin-top:14px;color:var(--good)">Nothing flagged for review. Solid run.</div>`;
+  }
+}
+</script>
+</body>
+</html>

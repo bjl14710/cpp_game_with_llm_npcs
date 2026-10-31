@@ -1,0 +1,76 @@
+"""Cointegration on price *levels* (paper Part 2.5).
+
+Correlation is about co-movement of returns; cointegration is about a long-run
+level equilibrium (a mean-reverting spread). Engle-Granger handles the two-series
+case; Johansen generalises to >2 series and is order-independent.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+
+@dataclass
+class CointResult:
+    method: str
+    statistic: float
+    p_value: float | None       # Engle-Granger has a p-value; Johansen uses crit values
+    cointegrated: bool
+    verdict: str                # plain-English summary for the dashboard
+
+
+def engle_granger(y0: pd.Series, y1: pd.Series, alpha: float = 0.05) -> CointResult:
+    """Augmented Engle-Granger two-step test (statsmodels ``coint``).
+
+    Null = no cointegration; reject (p < alpha) => the spread is stationary /
+    mean-reverting (a pairs-trading basis).
+    """
+    from statsmodels.tsa.stattools import coint
+
+    joined = pd.concat([y0, y1], axis=1, join="inner").dropna()
+    stat, p_value, _ = coint(joined.iloc[:, 0], joined.iloc[:, 1])
+    cointegrated = p_value < alpha
+    verdict = (
+        f"Engle-Granger: {'cointegrated' if cointegrated else 'no cointegration'} "
+        f"(p={p_value:.3f}). "
+        + (
+            "A stationary, mean-reverting spread exists -- a pairs-trading basis."
+            if cointegrated
+            else "No stable long-run level equilibrium detected over this window."
+        )
+    )
+    return CointResult("engle_granger", float(stat), float(p_value), bool(cointegrated), verdict)
+
+
+def johansen(prices: pd.DataFrame, det_order: int = 0, k_ar_diff: int = 1) -> CointResult:
+    """Johansen trace test (statsmodels ``coint_johansen``) for >=2 price series.
+
+    Reports whether at least one cointegrating vector exists by comparing the
+    rank-0 trace statistic to its 95% critical value (order-independent, unlike
+    Engle-Granger).
+    """
+    from statsmodels.tsa.vector_ar.vecm import coint_johansen
+
+    data = prices.dropna()
+    res = coint_johansen(data, det_order, k_ar_diff)
+    trace_stat = float(res.lr1[0])              # rank r=0 trace statistic
+    crit_95 = float(res.cvt[0, 1])              # 90/95/99 -> index 1 is 95%
+    cointegrated = trace_stat > crit_95
+    n_vectors = int((res.lr1 > res.cvt[:, 1]).sum())
+    verdict = (
+        f"Johansen trace: {'cointegrated' if cointegrated else 'no cointegration'} "
+        f"(trace={trace_stat:.2f} vs 95% crit={crit_95:.2f}; "
+        f"{n_vectors} cointegrating vector(s))."
+    )
+    return CointResult("johansen", trace_stat, None, bool(cointegrated), verdict)
+
+
+def spread(y0: pd.Series, y1: pd.Series) -> pd.Series:
+    """OLS hedge-ratio spread y0 - beta*y1 (the Engle-Granger residual series)."""
+    joined = pd.concat([y0, y1], axis=1, join="inner").dropna()
+    a, b = joined.iloc[:, 0], joined.iloc[:, 1]
+    beta = np.polyfit(b.to_numpy(), a.to_numpy(), 1)[0]
+    return (a - beta * b).rename("spread")

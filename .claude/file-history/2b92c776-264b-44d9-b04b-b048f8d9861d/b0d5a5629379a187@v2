@@ -1,0 +1,88 @@
+"""PR: the pluggable-llm port into dev (per the user's branch-audit request)."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+The branch audit found ONE stranded branch whose work was genuinely
+mergeable: `8-pluggable-llm-and-one-click` — local-only, never pushed,
+built on the pre-raylib line. This PR ports it onto the current game,
+conflicts resolved current-state-wins as requested. Four commits:
+
+**One-click launchers** (`10adc0c`) — run.sh / run.command / run.ps1 /
+run.bat now START Ollama if it isn't running and pull the configured
+model on first run (cloud providers skip Ollama). Header comments merged
+with the raylib-era notes.
+
+**Pluggable LLM backends** (`0eb2eeb`) — LlmClient keeps its public API
+and threading but delegates HTTP+parse to a swappable `LlmBackend`:
+`OllamaBackend` (the old body moved — **with dev's later `think=false`
+fast-path RE-ADDED**, the one behavior regression the port audit caught:
+without it qwen3 replies take 24s instead of 2.7s) and `OpenAiBackend`
+(OpenAI /chat/completions SSE; works keyless against Ollama's `/v1`
+shim over http, real cloud over https when built with OpenSSL — which
+stays optional). Config gains provider/base_url/api_key_env with
+env-then-secrets.cfg key resolution (secrets gitignored, example
+shipped). The old branch's stray SFML-era files (Offense.cpp,
+PersonaFactory.cpp — weapons-line ancestry) were deliberately NOT
+brought along.
+
+**Vision doc** (`671782d`) — docs/VISION.md: the Character.ai-in-3D
+product architecture, per-message cost table, monetization options, and
+staged roadmap; README/DEVELOPER refreshed (SFML-era instructions from
+the old branch dropped).
+
+**Model picker** (`9884b91`) — re-BUILT on the raylib Menu (the
+original was SFML): an "LLM Model" page lists installed models, marks
+the current one, switches the live client on click, and persists via
+the ported comment-preserving `setKvValue`.
+
+## Verification
+- `make -C tests test` green: **216 cases / 32,121 assertions** (ported
+  OpenAI-chunk stream tests, provider/key-resolution config tests,
+  setKvValue tests all live).
+- Live: worldgen generated a valid map straight through the refactored
+  backend (LlmClient → OllamaBackend → stream → validate).
+- Smoke boot clean; local behavior byte-compatible by design
+  (OllamaBackend is the moved body + the think fast-path).
+
+## What this unlocks (from VISION.md)
+Cloud NPCs the moment you add OpenSSL + a key:
+`provider = openrouter`, `OPENROUTER_API_KEY` set, pick a model — no
+code changes. Test the cloud path TODAY with zero deps:
+`provider = openai`, `base_url = http://localhost:11434/v1`.
+
+## Needs human verification
+- The Model page (menu input isn't headless): switch models mid-session
+  and confirm the next reply uses the pick + llm.cfg updated.
+- run.command double-click flow on your machine.
+
+## Notes
+- Base: `dev` (as requested — review the changes here, then merge and
+  roll dev→main whenever). Not merged by me.
+- The rest of the audit: ~30 branches are content-empty (only your PR
+  merge commits) and safe to delete; the old SFML gameplay lines
+  (7-weapons-money-and-mayhem etc.) hold UNPORTED FEATURES (economy,
+  traffic, crowds, interiors, 5x5 town, graduated charges) that need
+  re-building on the modern game, not merging — documented in
+  .claude/plans/legacy-feature-gaps.md.
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="port: pluggable LLM backends, one-click launch, model picker (from the stranded local branch)",
+           body=BODY, base="dev", head="feature/pluggable-llm-port", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")

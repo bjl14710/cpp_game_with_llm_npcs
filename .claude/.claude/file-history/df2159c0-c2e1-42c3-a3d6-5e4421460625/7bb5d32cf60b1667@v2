@@ -1,0 +1,58 @@
+# Issue Planning Summary
+Date: 2026-06-28
+Repo: bjl14710/algo_trading_practice
+Focus: Intraday Candlestick Strategies ("intraday candlestick strategies")
+
+## Milestone Created
+#1 — Intraday Candlestick Strategy Engine
+
+## Issues Created This Session (new)
+- #30: Add `strategies/` package with `BaseStrategy` ABC
+  Concept: Abstract base classes and the strategy pattern in Python
+  URL: https://github.com/bjl14710/algo_trading_practice/issues/30
+
+- #31: Implement Bullish/Bearish Engulfing signal detector
+  Concept: Candlestick pattern detection without lookahead bias
+  URL: https://github.com/bjl14710/algo_trading_practice/issues/31
+
+- #32: Build intraday paper simulation engine
+  Concept: Bar-by-bar simulation without lookahead
+  URL: https://github.com/bjl14710/algo_trading_practice/issues/32
+
+- #33: Add `intraday-sim` CLI entry point
+  Concept: Extensible CLI design with a strategy registry
+  URL: https://github.com/bjl14710/algo_trading_practice/issues/33
+
+## Existing Issues Labelled ready-for-ai (bodies unchanged, spec added as comment)
+- #26: Create morning runner/pipeline that runs trades
+  Concept: Pipeline orchestration with configurable scheduling and dry-run gates
+
+- #6: Create shorting option to the code (portfolio-level, NOT intraday short trades)
+  Concept: Long-short mean-variance portfolio construction
+
+- #9: Create ticker file creator for all NASDAQ options
+  Concept: Web scraping for financial universe construction
+
+- #4: Make Robinhood run continuously
+  Concept: Market-hours scheduling in Python
+
+## Implementation Order for Overnight Session
+#30 → #31 → #32 → #33 (each depends on the previous)
+#26, #6, #9, #4 are independent of each other and of the strategies chain
+
+## What Was NOT Planned (and why)
+- #7 S&P 500 ticker creator: already done (scripts/universe_builder.py)
+- #16 Docker research: already done (docker-compose.yml exists)
+- #21 Ensure uv working: already done
+- #8 RDP: hardware/OS setup, not code
+- #17 App Store: requires Apple Developer account
+- #19 Cloud hosting: requires account + infra decision; depends on #26 first
+- #20 Licenses: human decision (MIT recommended)
+- #18 Cybersecurity: explicitly gated on project being public
+- #11/#12/#13 News research: no concrete spec or integration point yet
+- #14 Oil drum example: no data source spec
+- #15 Strategy list: research task; revisit after candlestick engine has 2+ strategies
+- #22 C++/Rust: investigation; needs profiling first
+- #24 C++ model deployment: investigation; needs daily model to be stable first
+- #28 Web app + Robinhood refinement: depends on #26 being stable first
+- #10 Date-range return checker: small quality-of-life item; add to #26 scope or do separately

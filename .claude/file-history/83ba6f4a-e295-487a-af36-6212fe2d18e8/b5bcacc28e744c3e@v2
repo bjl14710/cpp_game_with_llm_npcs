@@ -1,0 +1,145 @@
+"""Datasheet-grounded fault and drift models for the simulated MSP430.
+
+Every tolerance here is a number from the MSP430FR599x datasheet (SLASE54D,
+in ``hardware_docs/ti/MSP430FR5994/``) — nothing is invented:
+
+- §8.12.3.3  DCO: ±3.5% trimmed frequency tolerance; 2–3 ns cycle jitter
+- §8.12.9.3  ADC12_B: INL ±2.2 LSB (single-ended), DNL −0.99/+1.0 LSB,
+  offset error ±1.5 mV max, gain error ±1.7% max (2.5-V internal reference)
+
+Two profiles exist per peripheral:
+
+- ``NOMINAL`` — the ideal device. Bit-identical to the model's historical
+  behavior so enabling this module is a zero-regression change.
+- ``CORNER``  — a part that is worst-case *within* specification: every
+  error term sits at its datasheet maximum, with per-instance signs sampled
+  deterministically at construction and ``*RST`` (part-to-part variation,
+  not per-read noise).
+
+The fault layer composes with injection: ``inject_adc()`` still sets the
+ideal input voltage; a CORNER profile transforms that ideal reading the way
+a marginal converter would.
+"""
+
+from __future__ import annotations
+
+import math
+import random
+from dataclasses import dataclass, field
+
+# --- SLASE54D §8.12.3.3 (DCO) ----------------------------------------------
+DCO_TOLERANCE = 0.035          # ±3.5% on every trimmed DCOFSEL frequency
+DCO_JITTER_MAX_S = 3e-9        # cycle jitter, max
+
+# --- SLASE54D §8.12.9.3 (ADC12_B linearity, worst case within spec) ---------
+ADC_INL_MAX_LSB = 2.2          # integral nonlinearity, single-ended inputs
+ADC_DNL_MAX_LSB = 1.0          # differential nonlinearity (+1.0 / −0.99)
+ADC_OFFSET_MAX_V = 1.5e-3      # offset error, ±1.5 mV max
+ADC_GAIN_MAX = 0.017           # gain error, ±1.7% max (2.5-V internal ref)
+
+NOMINAL = "NOMINAL"
+CORNER = "CORNER"
+PROFILES = (NOMINAL, CORNER)
+
+# Fixed base seed: fault signs are reproducible across runs and instances,
+# which the deterministic-testing requirement values over per-part entropy.
+_DEFAULT_SEED = 0x5994
+
+
+@dataclass
+class FaultState:
+    """Per-device fault profiles and the sampled part-to-part error signs."""
+
+    seed: int = _DEFAULT_SEED
+    adc_profile: str = NOMINAL
+    clock_profile: str = NOMINAL
+    timer_profile: str = NOMINAL
+
+    # Sampled at construction and *RST (see resample); ±1 each.
+    _dco_sign: int = field(default=1, init=False)
+    _adc_gain_sign: int = field(default=1, init=False)
+    _adc_offset_sign: int = field(default=1, init=False)
+    _jitter_sign: int = field(default=1, init=False)
+
+    def __post_init__(self) -> None:
+        self.resample()
+
+    def resample(self) -> None:
+        """Sample per-instance error signs (part-to-part variation).
+
+        Called at construction and on ``*RST`` per the plan's rule: ranges
+        are sampled per instance, never per read.
+        """
+        rng = random.Random(self.seed)
+        self._dco_sign = rng.choice((-1, 1))
+        self._adc_gain_sign = rng.choice((-1, 1))
+        self._adc_offset_sign = rng.choice((-1, 1))
+        self._jitter_sign = rng.choice((-1, 1))
+
+    def reset_profiles(self) -> None:
+        """Return every peripheral to the NOMINAL profile (used by *RST)."""
+        self.adc_profile = NOMINAL
+        self.clock_profile = NOMINAL
+        self.timer_profile = NOMINAL
+
+    # ------------------------------------------------------------------
+    # Clock system
+    # ------------------------------------------------------------------
+
+    def dco_factor(self) -> float:
+        """Multiplier for every DCO-derived frequency.
+
+        NOMINAL is exactly 1.0; CORNER sits at the full ±3.5% tolerance
+        bound of SLASE54D §8.12.3.3 with the per-instance sign.
+        """
+        if self.clock_profile == CORNER:
+            return 1.0 + self._dco_sign * DCO_TOLERANCE
+        return 1.0
+
+    # ------------------------------------------------------------------
+    # ADC12_B
+    # ------------------------------------------------------------------
+
+    def adc_code(self, voltage: float, full_scale_v: float, resolution: int) -> int:
+        """Convert an ideal input voltage to an output code.
+
+        NOMINAL reproduces the historical model exactly:
+        ``int(voltage / full_scale_v * ((1 << resolution) - 1))``, clamped.
+
+        CORNER applies, in order, the worst-case-within-spec error terms of
+        SLASE54D §8.12.9.3 as deterministic functions of the ideal reading:
+
+        - gain error: ×(1 ± 1.7%)
+        - offset error: ±1.5 mV referred to the input
+        - INL: a ±2.2-LSB bow, modeled as ``INL_max · sin(π · code/FS)`` —
+          the classic single-bow transfer-curve deviation
+        - quantization to the selected resolution (8/10/12 bits)
+        """
+        max_code = (1 << resolution) - 1
+        if self.adc_profile != CORNER:
+            code = int(voltage / full_scale_v * max_code)
+            return max(0, min(max_code, code))
+
+        vin = voltage * (1.0 + self._adc_gain_sign * ADC_GAIN_MAX)
+        vin += self._adc_offset_sign * ADC_OFFSET_MAX_V
+        ideal = vin / full_scale_v * max_code
+        bow = ADC_INL_MAX_LSB * math.sin(math.pi * ideal / max_code) if 0 <= ideal <= max_code else 0.0
+        code = int(ideal + bow)
+        return max(0, min(max_code, code))
+
+    # ------------------------------------------------------------------
+    # Timers
+    # ------------------------------------------------------------------
+
+    def timer_interval_s(self, ticks: int, tick_frequency_hz: float) -> float:
+        """Seconds spanned by ``ticks`` timer counts at ``tick_frequency_hz``.
+
+        The caller passes the *drifted* tick frequency (clock profile already
+        applied). A CORNER timer profile adds capture jitter at the datasheet
+        maximum (±3 ns per SLASE54D §8.12.3.3) across the two capture edges
+        that bound an interval, with the per-instance sign.
+        """
+        seconds = ticks / tick_frequency_hz
+        if self.timer_profile == CORNER:
+            seconds += self._jitter_sign * 2 * DCO_JITTER_MAX_S
+        return seconds

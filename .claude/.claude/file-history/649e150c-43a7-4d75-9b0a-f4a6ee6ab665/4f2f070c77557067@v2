@@ -1,0 +1,58 @@
+# Exercise 04 — C++: O(1) Moving Average + Lock-Free SPSC Ring
+
+**Lessons:** [0009 — Low-latency C++](../../docs/learning/lessons/0009-low-latency-cpp.html),
+[0010 — Best practices](../../docs/learning/lessons/0010-low-latency-cpp-best-practices.html)
+**Toolchain:** `g++` only (no cmake). Both parts are header-only templates.
+
+## Part A — `ring_ma.hpp` (warm-up)
+
+[`gradient_boosting/sample_with_gradient_boosting.cpp`](../../gradient_boosting/sample_with_gradient_boosting.cpp)
+recomputes its moving average over the whole window every tick — O(window),
+and its own comments admit it. Implement `RingMA<N>`:
+
+- `push(x)` — O(1): subtract the sample falling out, add the new one.
+- `average()` — O(1), **no loop**: running sum / count.
+- `size()`, `warmed_up()` — count saturates at N.
+- Fixed `std::array` storage; no heap anywhere.
+
+## Part B — `spsc_ring.hpp` (the real one)
+
+Lock-free single-producer/single-consumer queue `SpscRing<T, N>`:
+
+- N is a power of two (static_assert provided); wrap with `(i+1) & (N-1)`.
+- **Usable capacity is N−1** — one slot stays empty so full ≠ empty.
+- `try_push` (producer only): relaxed-load own counter `head_`,
+  acquire-load `tail_`, write the slot, **release-store** `head_`.
+- `try_pop` (consumer only): mirror image.
+- `head_` and `tail_` each `alignas(64)` — separate cache lines, no false
+  sharing. The grading test checks `sizeof` to catch a forgotten alignas.
+
+Why release/acquire and not seq_cst or relaxed everywhere: the release-store
+on `head_` is what publishes the slot write to the consumer's acquire-load;
+relaxed would let the counter become visible before the data. seq_cst works
+but costs a full fence on x86 stores — see lesson 0010.
+
+## Acceptance criteria
+
+```bash
+uv run pytest tests/exercises/test_04_spsc_ring.py -v
+# or directly:
+bash tests/exercises/cpp/run_cpp.sh
+```
+
+The threaded test moves 1,000,000 sequenced items through a 1024-slot ring
+and verifies nothing is lost, reordered, or corrupted.
+
+## Hints
+
+- Until you implement a method, its placeholder throws and the harness
+  reports "NOT IMPLEMENTED" (pytest shows a skip).
+- After it works, add `noexcept` to `push`/`average`/`try_push`/`try_pop` —
+  hot-path discipline from lesson 0010.
+- If the threaded test hangs: your full/empty conditions are inverted, or
+  you loaded your own counter with `acquire` and the other side's with
+  `relaxed` (it's the other way around).
+
+## Check yourself
+
+Solutions: [`solutions/04_spsc_ring/`](../../solutions/04_spsc_ring/)

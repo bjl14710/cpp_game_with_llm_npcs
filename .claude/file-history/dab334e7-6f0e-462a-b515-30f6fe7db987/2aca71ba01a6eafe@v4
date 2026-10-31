@@ -1,0 +1,80 @@
+"""Mean-reversion / breakout strategy on daily closes.
+
+Two regimes in one strategy (plan step 2):
+  - Mean reversion: fade extremes — when the z-score of close vs its
+    rolling mean is beyond entry_z, position AGAINST the move.
+  - Breakout override: a close beyond the rolling high/low channel signals
+    a genuine trend, so breakout direction wins over the fade.
+"""
+import math
+
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class MeanReversionStrategy(DailyStrategy):
+    """Fade z-score extremes unless a channel breakout overrides.
+
+    Intended signal logic:
+      - z = (close - rolling_mean(lookback)) / rolling_std(lookback)
+      - close > max(High, breakout_lookback) -> +1 breakout long
+      - close < min(Low, breakout_lookback)  -> -1 breakout short
+      - z <= -entry_z -> +1 (buy the dip)
+      - z >= +entry_z -> -1 (sell the rip)
+      - otherwise HOLD. Confidence = min(|z| / entry_z, 2.0) so deeper
+        extremes rank higher; breakouts get confidence 1.0.
+    """
+
+    name = "meanrev"
+    compatible_regimes = frozenset({"mean_reverting", "neutral"})
+
+    def __init__(
+        self,
+        lookback: int = 20,
+        entry_z: float = 2.0,
+        breakout_lookback: int = 55,
+    ) -> None:
+        self.lookback = lookback
+        self.entry_z = entry_z
+        self.breakout_lookback = breakout_lookback
+
+    @property
+    def warmup_bars(self) -> int:
+        """Longest of the z-score and breakout-channel windows."""
+        return max(self.lookback, self.breakout_lookback) + 1
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Evaluate breakout-then-zscore rules on the latest bar."""
+        if len(df) < self.warmup_bars:
+            return HOLD
+        close = df["Close"].astype(float)
+        last = float(close.iloc[-1])
+
+        # Channel excludes the current bar so today's own high/low can't
+        # mask its breakout.
+        channel = df.iloc[-(self.breakout_lookback + 1):-1]
+        if last > float(channel["High"].max()):
+            return DailySignal(position=1, confidence=1.0,
+                               reason=f"breakout above {self.breakout_lookback}-bar high")
+        if last < float(channel["Low"].min()):
+            return DailySignal(position=-1, confidence=1.0,
+                               reason=f"breakout below {self.breakout_lookback}-bar low")
+
+        window = close.iloc[-self.lookback:]
+        mean = float(window.mean())
+        std = float(window.std(ddof=1))
+        if not math.isfinite(std) or std < 1e-9 * max(abs(mean), 1.0):
+            return HOLD
+        z = (last - mean) / std
+        confidence = min(abs(z) / self.entry_z, 2.0)
+        if z <= -self.entry_z:
+            return DailySignal(position=1, confidence=confidence,
+                               reason=f"meanrev long z={z:.2f}")
+        if z >= self.entry_z:
+            return DailySignal(position=-1, confidence=confidence,
+                               reason=f"meanrev short z={z:.2f}")
+        return HOLD
+
+
+__all__ = ["MeanReversionStrategy"]

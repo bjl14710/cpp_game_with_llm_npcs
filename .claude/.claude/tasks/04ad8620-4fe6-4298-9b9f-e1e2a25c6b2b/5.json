@@ -1,0 +1,9 @@
+{
+  "id": "5",
+  "subject": "Issue #6: Headless overnight integration",
+  "description": "requirements-dev pytest-xvfb, docs/visual-testing.md, single test command in docs",
+  "activeForm": "Building headless integration docs (#6)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

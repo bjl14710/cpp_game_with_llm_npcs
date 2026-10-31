@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0019 — Distance Fog</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0019 · pairs with lesson 0019</div>
+<h1>Vocab: Distance Fog in a Forward Renderer</h1>
+<dl>
+<dt>forward renderer</dt>
+<dd>A pipeline that shades each object as it's drawn (as opposed to
+deferred rendering's G-buffer pass). Fog composes directly into each draw's
+fragment shader — no extra pass needed.</dd>
+
+<dt>squared-exponential fog</dt>
+<dd><code>1 - exp(-(d·k)²)</code>: flat near the camera, steep roll-off at
+distance. The middle ground between linear fog's hard "wall" and plain
+exponential's everywhere-dulling.</dd>
+
+<dt>fog density</dt>
+<dd>The single scalar (0.006 here) controlling where the roll-off lands.
+Tune against two anchor distances: the gameplay bubble that must stay crisp
+and the world edge that should vanish.</dd>
+
+<dt>uniform</dt>
+<dd>A shader parameter constant across a draw call
+(<code>fogColor</code>, <code>fogDensity</code>, per-frame
+<code>cameraPos</code>). Set via <code>SetShaderValue</code>; cache the
+location integer instead of looking it up by string every frame.</dd>
+
+<dt>rlgl batch</dt>
+<dd>raylib's immediate-mode geometry accumulator behind DrawCube/DrawPlane/
+DrawCylinder. Uses the <em>current</em> shader
+(<code>BeginShaderMode</code>), not any material — the second draw path a
+scene-wide effect must cover.</dd>
+
+<dt>material shader assignment</dt>
+<dd>Setting <code>model.materials[i].shader</code> after load so
+<code>DrawMesh</code> uses a custom shader. Shared across models by design;
+the owner unloads it exactly once.</dd>
+
+<dt>CPU vs GPU skinning</dt>
+<dd>CPU skinning (raylib 5.5) poses vertices in memory before drawing —
+custom shaders see finished geometry. GPU skinning poses in the vertex
+shader — custom shaders must reimplement it or characters freeze in bind
+pose.</dd>
+</dl>
+</div></body>
+</html>

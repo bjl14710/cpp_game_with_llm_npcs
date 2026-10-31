@@ -1,0 +1,84 @@
+"""Kyle's lambda: rolling-window price-impact estimation (scaffold).
+
+Kyle's lambda measures price impact per unit of signed order flow: in the
+regression ``delta_price = intercept + lambda * signed_flow + noise``, lambda is the
+slope. Here signed flow is the per-window sum of OFI increments and the
+price change is the microprice delta over the same window — both from the
+C++ event stream (:mod:`oil_alpha.microstructure.events`).
+
+Resolved decision (plan): ROLLING intraday windows (default 5 minutes) with
+a whole-session estimate as the aggregate; low-observation windows are
+flagged rather than silently fitted — mirrors how ``analysis/leadlag.py``
+pins its sign convention with a synthetic known-answer test.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pandas as pd
+
+#: Default rolling window: 5 minutes, in ITCH nanoseconds-since-midnight.
+DEFAULT_WINDOW_NS: int = 5 * 60 * 1_000_000_000
+
+#: Windows with fewer regression observations than this are flagged not-ok.
+MIN_OBS_PER_WINDOW: int = 30
+
+
+@dataclass(frozen=True)
+class LambdaWindow:
+    """One rolling-window regression result.
+
+    ``ok`` is False when the window had fewer than ``min_obs`` observations —
+    the fitted values are then reported for transparency but must not be
+    trusted (plan edge case: low-liquidity window).
+    """
+
+    start_ns: int          # window start, ns since midnight
+    end_ns: int            # window end (exclusive)
+    lam: float             # fitted lambda (price impact per share of OFI)
+    intercept: float
+    r_squared: float
+    n_obs: int
+    ok: bool
+
+
+@dataclass(frozen=True)
+class KylesLambdaResult:
+    """Session-level result: per-window estimates plus the aggregate fit."""
+
+    windows: list[LambdaWindow]
+    session_lambda: float      # single regression over the whole session
+    session_r_squared: float
+    session_n_obs: int
+    n_windows_ok: int
+
+
+def estimate_kyles_lambda(
+    events: pd.DataFrame,
+    window_ns: int = DEFAULT_WINDOW_NS,
+    min_obs: int = MIN_OBS_PER_WINDOW,
+) -> KylesLambdaResult:
+    """Estimate Kyle's lambda from a microstructure event stream.
+
+    ``events`` must have the columns of
+    :data:`oil_alpha.microstructure.events.EVENT_COLUMNS`.
+
+    TODO(micro-4): implement as
+      1. bucket events into contiguous ``window_ns`` windows by timestamp_ns;
+      2. within each window aggregate: x = sum(ofi), y = last(microprice) -
+         first(microprice) over fixed sub-intervals (e.g. 1s bars) so each
+         window yields n_obs (x, y) pairs;
+      3. OLS per window -> LambdaWindow (ok = n_obs >= min_obs);
+      4. one OLS across all sub-interval pairs -> session_lambda.
+    Validation: a synthetic stream with a known injected impact coefficient
+    must be recovered within tolerance (tests/test_kyles_lambda.py), same
+    pattern as the CCF synthetic-lead test.
+
+    Edge cases (plan): empty ``events`` -> ValueError with a clear message;
+    a window with < min_obs observations -> ok=False, never a silent fit.
+    """
+    raise NotImplementedError(
+        "TODO(micro-4): rolling OLS of microprice change on OFI "
+        "(plan: .claude/plans/microstructure-signals.md step 5)"
+    )

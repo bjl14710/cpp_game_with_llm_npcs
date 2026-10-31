@@ -1,0 +1,99 @@
+# HFT_Trading_Practice_Repo — Context Summary
+
+Paste this into a Claude session to give it full context about the repo.
+
+## What this is
+
+A personal learning repo with **two layers of a quant trading firm in miniature**:
+
+1. **Python research layer** (`src/oil_alpha/`) — a daily-frequency CL-vs-XLE
+   lead-lag study ("do WTI futures lead the energy ETF?"), grounded in
+   `crude_oil_research.txt`. Free data only (yfinance, FRED, Stooq), no API keys.
+2. **C++ HFT layer** (`cpp/`) — Nasdaq TotalView-ITCH 5.0 feed parser, two
+   limit-order-book implementations (std::map baseline vs cache-friendly flat
+   array), top-of-book signal, and an HDR-style nanosecond latency histogram
+   with benchmarks. This is the genuinely HFT part; the Python side is
+   statistical research where speed is irrelevant.
+
+Bridge: pybind11 module `oil_volume_cpp` (built by scikit-build-core via
+`pip install -e .`), exposing `rolling_mean` to Python.
+
+## How to run
+
+```bash
+# setup (Python ≥3.10; repo verified with 3.12 + uv venv)
+pip install -r requirements.txt
+pip install -e .                       # builds the C++ extension too
+
+streamlit run app/dashboard.py         # GUI: live stages, CCF plot, budget, costs
+PYTHONPATH=src python -m oil_alpha.pipeline   # headless: stage progress + summary
+pytest                                 # 35 tests (cleaning guards, CCF signs, C++ parity)
+
+./scripts/build_cpp.sh                 # C++ benches + GoogleTest (15 tests, ctest in _build/)
+./_build/cpp/itch/bench_main           # hash-map book latency benchmark
+./_build/cpp/itch/bench_main_flat      # flat-array book latency benchmark
+```
+
+## Key architecture facts
+
+- `src/oil_alpha/pipeline.py` — `run_pipeline()` is a **generator yielding
+  ProgressEvent** objects through six stages: download → spot-check → clean →
+  lead-lag → cointegration → costs. The Streamlit GUI and the CLI consume the
+  same event stream (single code path); the final event carries a
+  `PipelineResult` dataclass with everything (prices, returns, leadlag, granger,
+  cointegration, costs, APIBudget, ComputeMetrics, warnings).
+- `src/oil_alpha/analysis/leadlag.py` — CCF computed by hand with an explicit
+  sign convention: ρ(k) = corr(x_t, y_{t+k}); **peak at k>0 ⇒ x leads y**.
+  Pinned by a unit test against a synthetic known lead. Granger causality runs
+  both directions (predictive precedence ≠ causation).
+- `src/oil_alpha/clean.py` — handles the Apr-2020 negative-WTI settlement
+  (CLK20 at −$37.63 breaks log returns → falls back to simple returns over that
+  window) and CL=F front-month roll-day jumps.
+- `src/oil_alpha/config.py` — symbols (CL=F, XLE, USO, XOM, CVX), `LEAD`/`LAG`
+  hypothesis constants, free-tier API caps, bp-denominated cost model.
+- `cpp/itch/itch_parser.hpp` — ITCH 5.0 subset (A/F/E/C/X/D/U messages),
+  big-endian, prices fixed-point ×10000, 2-byte length framing; never reads past
+  the buffer, counts skipped/error messages.
+- `cpp/itch/order_book_flat.hpp` — price levels in a flat
+  `vector<uint32_t>` indexed by `(price − min_price)/tick`; O(1) updates, one
+  contiguous L2-resident allocation. Tradeoff: price bounds fixed at
+  construction. See `docs/perf/01-flat-book.md`: p50 83→42 ns (−49%), p99 −21%
+  vs the std::map baseline, zero correctness regression.
+- `cpp/common/latency_histogram.hpp` — HDR-style histogram; benches headline
+  p99/p99.9 because tail latency is what costs money in trading.
+
+## Conventions & workflow (from CLAUDE.md)
+
+- Commits: `type(scope): description` (feat/fix/docs/refactor/test/chore);
+  feature branches only, never direct to main; tests required for new logic;
+  no TODOs/placeholders; type hints everywhere; docstrings on public functions.
+- Learning system: `docs/learning/` holds numbered HTML lessons
+  (`/teach`), drills (`/drill-me`), PROGRESS.md and GLOSSARY.md. Lessons so far:
+  0001 pybind11+CMake, 0002 system map & usage.
+
+## Known behaviour / gotchas
+
+- Expected stable-window result: **CL leads XLE at short positive lags**; the
+  opposite usually signals a sign/alignment bug. However, a verified live run
+  over 2015→2026 gave peak lag 0 (corr 0.58, contemporaneous) and Granger
+  significant only in the XLE→CL direction (p=0.0006) — window-dependent, not
+  necessarily a bug; the sign-convention tests pass.
+- On macOS, `bench_main` p50 can read 0 ns (timer granularity coarser than one
+  book update); compare means instead (measured: 59.3 ns map vs 28.4 ns flat).
+- Future milestones (need tick/book data the free sources lack): Kyle's λ, OFI,
+  microprice, Avellaneda-Stoikov, Hayashi-Yoshida intraday lead-lag.
+
+## Layout
+
+```
+src/oil_alpha/        research package (config, data/, clean, analysis/, pipeline, metrics)
+app/dashboard.py      Streamlit GUI
+cpp/oil_volume/       pybind11 module (oil_volume_cpp)
+cpp/itch/             ITCH parser, order books, signal, benches
+cpp/common/           latency histogram
+cpp/tests/            GoogleTest suite (15 tests)
+tests/                pytest suite (35 tests)
+scripts/build_cpp.sh  CMake build driver
+docs/perf/            optimization write-ups (before/after numbers)
+docs/learning/        lessons, drills, glossary, progress
+```

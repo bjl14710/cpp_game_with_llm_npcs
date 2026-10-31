@@ -1,0 +1,36 @@
+// Scaffolded stubs for LLM world generation (plan: llm-world-generation).
+// The VALIDATOR is the deliverable — all tests offline, no model calls.
+// Map-side validation stubs live in test_sandbox_map.cpp (validateMap is
+// shared); these cover the cast side and the generation envelope.
+#include "WorldGenValidate.hpp"
+#include "doctest.h"
+
+using namespace llm_npc;
+
+TEST_CASE("validateCast: every failure class yields a specific error" *
+          doctest::skip()) {
+    // Step 1. TODO(worldgen): unparseable persona text, invalid look part
+    // id (error suggests the nearest valid id), unknown trait id (once
+    // traits merge), empty name, duplicate names in the batch — one
+    // CastError each with where + reason; a valid fixture returns empty.
+}
+
+TEST_CASE("generated characters load through the EXISTING loaders" *
+          doctest::skip()) {
+    // Step 2. TODO(worldgen): a valid GeneratedCharacter round-trips
+    // through parsePersonaText + lookIsValid — no generation-only load
+    // path exists (the acceptance's one-entrance rule).
+}
+
+TEST_CASE("extractJsonObject tolerates fences and prose" * doctest::skip()) {
+    // Step 2. TODO(worldgen): ```json fences, leading/trailing prose,
+    // nested braces in strings — first balanced object extracted;
+    // no object at all = false, never a partial parse.
+}
+
+TEST_CASE("retry feedback renders every error verbatim" * doctest::skip()) {
+    // Step 2. TODO(worldgen): renderRetryFeedback includes each
+    // MapError/CastError where+reason; retries cap at 3; after the cap
+    // NOTHING loads (no partial results, no auto-repair — auto-nudging
+    // placements would hide model quality and poison the benchmark).
+}

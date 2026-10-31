@@ -1,0 +1,23 @@
+# Issue Planning Summary
+Date: 2026-07-17
+Repo: bjl14710/Silmulator
+Focus: fix_merge_conflict
+
+## Issues Created
+- #35: docs: resolve PROGRESS.md Session-3 collision and renumber sessions
+  across the msp430 PR stack
+  Concept: Three-way merge semantics for append-only log files
+  URL: https://github.com/bjl14710/Silmulator/issues/35
+
+## Context
+Verified before filing: #25/#26/#27 merged into master; master's PROGRESS.md
+has "Session 3 (2026-06-28)"; PR #28's branch has "Session 3 (2026-07-15,
+issue #18)"; git merge-tree confirms the content conflict. The overnight
+stack's Sessions 3-8 all shift to 4-9 after keep-both resolution — the fix
+must cascade up all six stacked branches (merge, not rebase).
+
+## What Was NOT Planned
+- No milestone created — single issue, ceremony not warranted.
+- The three remaining strict xfails (ADC12ENC gate, invalid-channel convert,
+  TA0 CCR3) were deliberately not queued — they're next-milestone material
+  and the user hasn't asked yet.

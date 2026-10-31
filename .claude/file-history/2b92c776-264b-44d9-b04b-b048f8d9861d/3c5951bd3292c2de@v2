@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0020 — Socket Contracts</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0020 · pairs with lesson 0020</div>
+<h1>Vocab: Socket Contracts</h1>
+<dl>
+<dt>socket</dt>
+<dd>A named attach point a part declares in its own local space
+(<code>head_round.sockets["eyes"]</code>). Children snap to it; the child
+never knows which parent it landed on.</dd>
+
+<dt>anchor</dt>
+<dd>The implicit origin every part attaches BY — here bottom-center of the
+part's bounding size, matching the game's feet-on-ground position
+convention.</dd>
+
+<dt>per-pair offset table</dt>
+<dd>The anti-pattern: attachment positions keyed by (parent, child) pairs.
+Grows quadratically, and every missing pair is a visual bug.</dd>
+
+<dt>category spec</dt>
+<dd>The row that wires a category into the assembly: which parent category
+it attaches to and via which socket name. The assembly is a fold over these
+rows, parents before children.</dd>
+
+<dt>style tag</dt>
+<dd>A compatibility family on each part ("round", "blocky", "any"). One
+predicate gates the validator, picker, and randomizer so incompatible art
+styles never mix.</dd>
+
+<dt>assembly space</dt>
+<dd>The unscaled coordinate frame parts are placed in before the single
+size-contract scale. Socket math happens here; world sizing happens once,
+afterwards.</dd>
+
+<dt>record independence</dt>
+<dd>Persona and look live in separate tables/structs joined only by
+character_id at the spawn site — either can change, migrate, or fail
+without touching the other.</dd>
+</dl>
+</div></body>
+</html>

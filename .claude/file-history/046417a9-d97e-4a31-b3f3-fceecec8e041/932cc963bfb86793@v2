@@ -1,0 +1,89 @@
+#pragma once
+
+// map.hpp — Static level geometry for the "Dust" CSGO-inspired map.
+//
+// The map is represented as a flat list of axis-aligned box walls.
+// No BSP or portal required at this scale. drawMap() iterates the list
+// and calls drawTexturedBox() for each wall (defined in main.cpp).
+//
+// Coordinate system matches main.cpp (kArenaHalfSize = 80):
+//   X = east/west, Z = north/south, Y = up
+//
+// Layout (bird's-eye, not to scale):
+//
+//   +--T-Spawn--+---Mid---+--A-Site--+
+//   |           |         |          |
+//   |  T-start  | central |  A bomb  |
+//   |           |  open   |          |
+//   +-----------+----+----+----------+
+//                    |   B corridor
+//               +----+----+
+//               |  B-Site  |
+//               +----------+
+
+#include <SFML/Graphics.hpp>
+#include <vector>
+
+// Forward declarations — defined in main.cpp
+struct Vec3;
+void drawTexturedBox(const Vec3& center, float halfX, float halfY, float halfZ,
+                     unsigned int texture, const sf::Color& tint, float tileScale);
+
+// A single axis-aligned wall box in the level.
+struct MapWall {
+    Vec3   center;
+    float  hx = 0.0f;   // half-extent in X
+    float  hy = 0.0f;   // half-extent in Y
+    float  hz = 0.0f;   // half-extent in Z
+    unsigned int tex = 0;
+    sf::Color    tint = sf::Color::White;
+    float  tileScale  = 3.0f;
+};
+
+// Rectangular region on the XZ plane used for enemy and player spawning.
+struct SpawnZone {
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minZ = 0.0f;
+    float maxZ = 0.0f;
+};
+
+// Spawn zone constants — used by spawnEnemy() in main.cpp.
+// T-spawn: player always starts here.
+constexpr float kTSpawnX  = -60.0f;
+constexpr float kTSpawnZ  = -60.0f;
+
+// A-site and B-site are the only valid enemy spawn regions.
+// TODO(impl): tune these coordinates to match the final wall layout.
+inline SpawnZone aSpawnZone() { return SpawnZone{ 30.0f, 70.0f, -70.0f, -20.0f }; }
+inline SpawnZone bSpawnZone() { return SpawnZone{-20.0f, 20.0f,  30.0f,  70.0f }; }
+
+// Returns the complete wall list for the Dust map.
+// Called once at startup; result stored in GameState.
+// TODO(impl): fill in the full corridor geometry below.
+//   Each MapWall entry is: { center, hx, hy, hz, texture, tint, tileScale }
+//   Use gTextures.wall for load-bearing walls, gTextures.crate for cover objects,
+//   gTextures.ground for floor quads (hy = 0.5).
+inline std::vector<MapWall> buildMapWalls(unsigned int wallTex,
+                                          unsigned int concreteTex,
+                                          unsigned int metalTex) {
+    std::vector<MapWall> walls;
+    // TODO(impl): outer boundary walls (replace kArenaHalfSize perimeter)
+    // TODO(impl): T-spawn room walls
+    // TODO(impl): mid corridor walls (two parallel walls, choke entrance)
+    // TODO(impl): A-site room walls
+    // TODO(impl): B-corridor walls
+    // TODO(impl): B-site room walls
+    // TODO(impl): cover objects (crates, barriers) inside each zone
+    return walls;
+}
+
+// Renders every wall in the map.
+// Call in place of drawArena(). Requires OpenGL 2.1 context + GL_TEXTURE_2D.
+// TODO(impl): iterate walls and call drawTexturedBox for each entry.
+inline void drawMap(const std::vector<MapWall>& walls) {
+    for (const auto& w : walls) {
+        // TODO(impl): drawTexturedBox(w.center, w.hx, w.hy, w.hz, w.tex, w.tint, w.tileScale);
+        (void)w;
+    }
+}

@@ -126,3 +126,47 @@ TEST_CASE("PersonaLoader defaults armed to false when key absent") {
 
     CHECK(true);
 }
+
+// ---- fleeing NPCs stay on the ground (bug 3) -------------------------------
+
+TEST_CASE("a FLEEING npc does not burrow away from a player above it") {
+    // The sinking half of the report. The flee direction was
+    // normalize(npc - player), a THREE-dimensional normalize, so a player
+    // above the NPC produced a downward component; City::resolveMovement
+    // wrote it through with `pos.y = to.y` and nothing put it back.
+    World world(City::makeDowntown());
+    // Open ground: makeNpcAt(2, 0) — used by the tests above, which do not
+    // move — is inside a building, and a pinned NPC would pass this by
+    // never going anywhere.
+    world.player().position = Vec3{10.f, 6.f, 10.f};  // on top of something
+    world.addNpc(makeNpcAt(8.f, 8.f));
+    world.npcs()[0].takeDamage(1);  // unarmed -> Fleeing
+    REQUIRE(world.npcs()[0].combatState() == NpcState::Fleeing);
+
+    for (int frame = 0; frame < 300; ++frame) {
+        world.updateCombat(1.f / 60.f);
+        // No snapToGround: it would erase the drift this is looking for.
+        CAPTURE(frame);
+        REQUIRE(world.npcs()[0].position().y == doctest::Approx(0.f));
+    }
+    // It moved horizontally, so this is not passing by standing still. Checked
+    // against where it STARTED rather than against distance from the player:
+    // downtown is full of solid buildings and resolveMovement will happily
+    // pin a fleeing NPC against one, which says nothing about the bug.
+    CHECK(distanceXZ(world.npcs()[0].position(), Vec3{8.f, 0.f, 8.f}) > 0.5f);
+}
+
+TEST_CASE("a HOSTILE npc does not levitate toward a player above it") {
+    World world(City::makeDowntown());
+    world.player().position = Vec3{10.f, 6.f, 10.f};
+    world.addNpc(makeNpcAt(28.f, 28.f, /*armed=*/true));
+    world.npcs()[0].takeDamage(1);  // armed -> Hostile
+    REQUIRE(world.npcs()[0].combatState() == NpcState::Hostile);
+
+    for (int frame = 0; frame < 300; ++frame) {
+        world.updateCombat(1.f / 60.f);
+        // No snapToGround: it would erase the drift this is looking for.
+        CAPTURE(frame);
+        REQUIRE(world.npcs()[0].position().y == doctest::Approx(0.f));
+    }
+}

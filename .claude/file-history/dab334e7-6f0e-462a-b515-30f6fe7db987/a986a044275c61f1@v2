@@ -1,0 +1,97 @@
+"""Test stubs for the 2026-07-14 research batch (plans in .claude/plans/).
+
+One skipped stub per key acceptance criterion; the suite stays green on
+the scaffold. Implementing commits remove the skips (same discipline as
+the original arena scaffold — see tests/test_daily_strategies.py history).
+"""
+import pandas as pd
+import pytest
+
+SKIP = "scaffold: research batch not implemented yet"
+
+
+# --- TSMOM (trend-following.md) --------------------------------------------
+
+@pytest.mark.skip(reason=SKIP)
+def test_tsmom_uptrend_longs_with_vol_scaled_confidence(make_ohlcv):
+    """12mo uptrend, calm -> +1, confidence ~ trend/(sigma*sqrt(252))."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_tsmom_negative_trend_is_hold_never_short(make_ohlcv):
+    """Long-only: downtrend -> HOLD."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_tsmom_skip_window_excludes_recent_month(make_ohlcv):
+    """Trend positive only inside skip_days -> HOLD (skip actually works)."""
+
+
+# --- Low-vol (low-volatility.md) --------------------------------------------
+
+@pytest.mark.skip(reason=SKIP)
+def test_lowvol_calm_ticker_wins_top_slot(make_ohlcv):
+    """Two tickers, top_n=1: lower-sigma name is always the pick."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_lowvol_sigma_floor_bounds_confidence(make_ohlcv):
+    """Flat ticker cannot take infinite confidence."""
+
+
+# --- PEAD (pead-strategy.md) -------------------------------------------------
+
+@pytest.mark.skip(reason=SKIP)
+def test_pead_long_exactly_report_plus_1_through_hold_days(make_ohlcv):
+    """Signal +1 in [report+1, report+hold_days], HOLD outside (lookahead guard)."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_pead_surprise_denominator_floored_at_ten_cents():
+    """(0.55, 0.40) -> +37.5%; estimate 0.01 uses the 0.10 floor."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_pead_illiquid_ticker_holds_despite_surprise(make_ohlcv):
+    """ADV below min_adv -> HOLD even at +100% surprise."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_pead_missing_ticker_attr_or_cache_is_hold(make_ohlcv):
+    """No df.attrs['ticker'] or no cached earnings -> HOLD, not a crash."""
+
+
+# --- ConfirmedStrategy (indicators-to-features.md) ---------------------------
+
+@pytest.mark.skip(reason=SKIP)
+def test_confirmed_direction_mode_matrix():
+    """agree -> base signal; oppose -> HOLD; confirmer-HOLD blocks."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_confirmed_veto_mode_lets_holds_pass():
+    """veto mode: only an OPPOSITE confirmer signal blocks."""
+
+
+# --- Kelly (fractional-kelly.md) ----------------------------------------------
+
+@pytest.mark.skip(reason=SKIP)
+def test_kelly_fraction_pinned_and_clamped():
+    """f* = mu/var pinned by hand; lam*f* clamped [0,1]; negative edge -> 0."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_kelly_bootstrap_below_min_trades():
+    """< 30 trades -> multiplier exactly 1.0."""
+
+
+# --- Pairs (pairs-stat-arb.md) -------------------------------------------------
+
+@pytest.mark.skip(reason=SKIP)
+def test_engle_granger_separates_cointegrated_from_independent():
+    """x vs x+noise passes at 5%; independent walks fail (seeded)."""
+
+
+@pytest.mark.skip(reason=SKIP)
+def test_pair_backtest_entry_exit_stop_sequence():
+    """Scripted spread path produces the exact z-band transitions."""

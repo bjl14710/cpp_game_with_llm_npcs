@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0002 — How FPGAs Are Used in HFT</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Stage diagram */
+  .pipeline {
+    display: flex; flex-direction: column; gap: 8px; margin: 16px 0;
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 16px;
+  }
+  .stage {
+    display: grid; grid-template-columns: 60px 1fr 90px; gap: 14px; align-items: center;
+    padding: 10px 12px; background: var(--panel-2); border-radius: 8px;
+    border-left: 3px solid var(--accent);
+  }
+  .stage .num { color: var(--accent); font-weight: 700; font-size: 14px; }
+  .stage .what { font-size: 14px; }
+  .stage .lat { text-align: right; font-family: "JetBrains Mono", monospace; color: var(--accent-2); font-size: 13px; }
+  .arrow { text-align: center; color: var(--ink-dim); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0002</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Why FPGAs</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Pipeline pattern</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 In this project</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Contrasts</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>How FPGAs Are Used in HFT</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: the <code>fpga/</code> folder
+    holds three working VHDL modules — <code>market_maker.vhd</code>,
+    <code>linear_regression_predictor.vhd</code>, and
+    <code>moving_average_trader.vhd</code>. To extend them honestly you need to
+    understand <em>what</em> FPGAs do in HFT systems and, just as important,
+    <em>what they don't do</em>.
+  </p>
+
+  <!-- ===================== §1 WHY FPGAS ===================== -->
+  <h2>1. Why an FPGA, and not a fast CPU?</h2>
+
+  <p>
+    A CPU is a general-purpose machine. It fetches instructions, predicts branches,
+    fights cache misses, and obeys an operating system that can interrupt it at any
+    moment. None of that is free, and the variability — the <strong>jitter</strong> —
+    is what kills HFT strategies, even more than the average latency.
+  </p>
+
+  <p>
+    An <strong>FPGA (Field-Programmable Gate Array)</strong> is a sea of configurable
+    logic blocks (LUTs), flip-flops, DSP slices, and routing fabric. You describe
+    your trading logic in HDL (VHDL or Verilog), the tools <em>synthesize</em> that
+    description into a wire-level circuit, and the chip becomes that circuit until
+    you reload it. There is no instruction stream. There is no OS. There is a clock,
+    and on every rising edge, every register in your design updates simultaneously.
+  </p>
+
+  <h3>The numbers that justify the complexity</h3>
+  <table>
+    <tr><th>Path</th><th>Tick-to-trade</th><th>Jitter</th><th>Notes</th></tr>
+    <tr>
+      <td>Python over the internet</td>
+      <td>~50–500 ms</td>
+      <td>Massive (GIL, network)</td>
+      <td>Where <code>paper_trading_sim.py</code> lives.</td>
+    </tr>
+    <tr>
+      <td>Tuned C++ with kernel bypass (DPDK / Solarflare OpenOnload)</td>
+      <td>~750–800 ns</td>
+      <td>Low (~100 ns)</td>
+      <td>20–30% latency win vs vanilla TCP.</td>
+    </tr>
+    <tr>
+      <td>FPGA NIC (parsing in hardware → strategy on chip → packet out)</td>
+      <td>~100–500 ns</td>
+      <td>Near-zero (deterministic)</td>
+      <td>Where <code>market_maker.vhd</code> wants to live.</td>
+    </tr>
+  </table>
+  <p class="small">
+    Sources: industry summaries on Solarflare OpenOnload latencies and FPGA tick-to-trade in 2025 (see chat).
+  </p>
+
+  <h3>What an FPGA actually buys you (4 things)</h3>
+  <ol>
+    <li><strong>Determinism.</strong> No OS scheduler, no cache, no branch predictor. The same input takes the same number of cycles every single time. Strategies are easier to certify against exchange latency floors.</li>
+    <li><strong>True parallelism.</strong> The 3-feature dot product in <code>linear_regression_predictor.vhd</code> computes <em>all three multiplies in the same cycle</em>. A CPU pipelines them serially.</li>
+    <li><strong>Wire-speed I/O.</strong> The NIC <em>is</em> the FPGA. Market data packets enter the PHY and are parsed inside the same chip that emits the order packet — no PCIe round-trip, no kernel hop.</li>
+    <li><strong>Low and predictable power.</strong> An Artix-7 fabric burns 5–25 W. A tuned Xeon burns hundreds. Power matters in colocation cabinets where thermal headroom is the real constraint.</li>
+  </ol>
+
+  <div class="callout warn">
+    <strong>What FPGAs <em>don't</em> buy you:</strong> developer velocity, complex
+    branching logic, or floating-point ML. Every change requires a 10-minute-to-hours
+    synthesis run. Decision trees are notoriously bad on FPGAs (the
+    <code>fpga/README.md</code> notes this on lines 152–155). Big neural nets need
+    HLS toolchains like hls4ml or FINN — not handwritten VHDL.
+  </div>
+
+  <!-- ===================== §2 PIPELINE PATTERN ===================== -->
+  <h2>2. The universal HFT-FPGA pattern: registered pipelines + valid handshakes</h2>
+
+  <p>
+    Almost every HFT FPGA module — including all three in this repo — follows the
+    same shape:
+  </p>
+
+  <div class="pipeline">
+    <div class="stage"><span class="num">0</span><span class="what">Market data tick arrives at the PHY (e.g. parsed from a 10 GbE UDP packet by an on-chip decoder)</span><span class="lat">~25 ns</span></div>
+    <div class="arrow">▼</div>
+    <div class="stage"><span class="num">1</span><span class="what">Feature extraction stage — registered. <em>Combinational</em> arithmetic this cycle, latched at the next clock edge.</span><span class="lat">4 ns @ 250 MHz</span></div>
+    <div class="arrow">▼</div>
+    <div class="stage"><span class="num">2</span><span class="what">Decision stage — registered. Threshold compare, signal generation, risk check.</span><span class="lat">4 ns</span></div>
+    <div class="arrow">▼</div>
+    <div class="stage"><span class="num">3</span><span class="what">Order build + emit — registered. Pack a FIX/OUCH message, hand to MAC, out the SFP+.</span><span class="lat">~50 ns</span></div>
+  </div>
+
+  <p>Two ideas to internalize:</p>
+
+  <h3>(a) Registered pipeline</h3>
+  <p>
+    Each stage does some arithmetic <em>between</em> clock edges and <em>latches the result</em> at the next edge.
+    More stages = lower clock period (faster clock, more throughput) but more cycles of latency. It's a knob, not a free win.
+  </p>
+
+  <h3>(b) The <code>valid</code> handshake</h3>
+  <p>
+    Every stage carries a <code>valid_in</code> bit alongside its data. The next stage only
+    accepts and processes data when <code>valid_in = '1'</code>. After processing, it asserts
+    <code>valid_out = '1'</code> for exactly one cycle so the next consumer knows the output
+    is real. This is the universal solution to "what does this cycle's register actually mean?"
+  </p>
+
+<pre><span class="com">-- The pattern, in any HFT VHDL module ever written:</span>
+<span class="kw">process</span>(clk)
+<span class="kw">begin</span>
+    <span class="kw">if</span> rising_edge(clk) <span class="kw">then</span>
+        <span class="kw">if</span> rst_n = <span class="str">'0'</span> <span class="kw">then</span>
+            <span class="com">-- everything to zero on reset</span>
+            valid_out <= <span class="str">'0'</span>;
+        <span class="kw">else</span>
+            valid_out <= valid_in;   <span class="com">-- carry the valid bit forward</span>
+            <span class="kw">if</span> valid_in = <span class="str">'1'</span> <span class="kw">then</span>
+                <span class="com">-- ONLY compute when the input is real</span>
+                result_reg <= some_arithmetic(input_reg);
+            <span class="kw">end if</span>;
+        <span class="kw">end if</span>;
+    <span class="kw">end if</span>;
+<span class="kw">end process</span>;
+</pre>
+
+  <!-- ===================== §3 IN THIS PROJECT ===================== -->
+  <h2>3. The three modules in <code>fpga/</code>, read as one system</h2>
+
+  <p>
+    Imagine the data flow that <em>doesn't exist yet</em> in the repo but is implied by the modules:
+  </p>
+  <p class="small">
+    market data → <code>linear_regression_predictor</code> &nbsp;OR&nbsp; <code>moving_average_trader</code> → trading signal → <code>market_maker</code> → quotes out
+  </p>
+
+  <h3>(a) <code>linear_regression_predictor.vhd</code> — a 2-stage dot product</h3>
+  <span class="filepath">fpga/linear_regression_predictor.vhd (lines 107–124, condensed)</span>
+<pre><span class="com">-- Stage 1: three multiplies, all running in parallel on the SAME cycle.</span>
+stage1_multiply : <span class="kw">process</span>(clk)
+<span class="kw">begin</span>
+    <span class="kw">if</span> rising_edge(clk) <span class="kw">then</span>
+        <span class="kw">if</span> valid_in = <span class="str">'1'</span> <span class="kw">then</span>
+            prod_f0 <= W_F0 * feature_0;   <span class="com">-- 0.30 × price</span>
+            prod_f1 <= W_F1 * feature_1;   <span class="com">-- -0.10 × imbalance</span>
+            prod_f2 <= W_F2 * feature_2;   <span class="com">-- 0.20 × volatility</span>
+        <span class="kw">end if</span>;
+    <span class="kw">end if</span>;
+<span class="kw">end process</span>;
+</pre>
+  <p>
+    Three DSP slices, fired simultaneously, all done in one 4 ns cycle.
+    A CPU would dispatch those multiplies sequentially through its FPU.
+  </p>
+
+  <span class="filepath">fpga/linear_regression_predictor.vhd (lines 139–155, condensed)</span>
+<pre><span class="com">-- Stage 2: sum the products, add the intercept, threshold to a 2-bit signal.</span>
+acc := prod_f0 + prod_f1 + prod_f2 + resize(W0 * to_signed(<span class="num">1000</span>, <span class="num">32</span>), <span class="num">64</span>);
+
+<span class="kw">if</span> acc &gt; THRESHOLD_POS <span class="kw">then</span>
+    signal_r <= <span class="str">"01"</span>;   <span class="com">-- BUY</span>
+<span class="kw">elsif</span> acc &lt; THRESHOLD_NEG <span class="kw">then</span>
+    signal_r <= <span class="str">"10"</span>;   <span class="com">-- SELL</span>
+<span class="kw">else</span>
+    signal_r <= <span class="str">"00"</span>;   <span class="com">-- HOLD</span>
+<span class="kw">end if</span>;
+</pre>
+  <p>
+    Notice the integer scaling: weights are <code>×1000</code>, features are <code>×1000</code>,
+    so the accumulator is at <code>×10⁶</code>. That's how the comparator can be a pure
+    integer compare with no floating-point cost. <strong>Total module latency: 2 cycles ≈ 8 ns.</strong>
+  </p>
+
+  <h3>(b) <code>moving_average_trader.vhd</code> — a O(1) sliding window</h3>
+  <p>
+    A naive moving average over a 20-sample window would need 20 adders in series.
+    This module uses the classic incremental trick: <em>add the newest sample, subtract the oldest</em>.
+    One adder, one subtractor, every cycle, regardless of window size.
+  </p>
+  <span class="filepath">fpga/moving_average_trader.vhd (lines 136–149, condensed)</span>
+<pre><span class="kw">if</span> warmed_up = <span class="str">'1'</span> <span class="kw">then</span>
+    <span class="com">-- Full window: subtract outgoing, add incoming. O(1) regardless of WINDOW.</span>
+    running_sum <= running_sum
+                   + resize(price_in,         SUM_BITS)
+                   - resize(price_reg(WINDOW-<span class="num">1</span>), SUM_BITS);
+<span class="kw">else</span>
+    <span class="com">-- Warm-up: just accumulate the first WINDOW samples.</span>
+    running_sum <= running_sum + resize(price_in, SUM_BITS);
+<span class="kw">end if</span>;
+</pre>
+  <p>
+    This is why HFT FPGA code looks so unfamiliar — every algorithm has to be re-expressed
+    so it fits in a fixed-depth combinational chain that meets the clock period. A Python
+    one-liner like <code>df['close'].rolling(20).mean()</code> hides hundreds of operations;
+    on the FPGA each one of those operations is silicon you have to lay out.
+  </p>
+
+  <h3>(c) <code>market_maker.vhd</code> — quote generator (covered in Lesson 0001)</h3>
+  <p>
+    Reminder of how it fits: when the predictor emits a non-HOLD signal, the market maker
+    block is what actually produces the <code>buy_price_out</code> and <code>sell_price_out</code>
+    to send to the exchange. The predictor decides <em>whether</em> to quote; the market maker
+    decides <em>what</em> the quote is. 1 clock-cycle latency (4 ns).
+  </p>
+
+  <h3>End-to-end latency budget for this project (theoretical)</h3>
+  <table>
+    <tr><th>Stage</th><th>Latency</th><th>Status in repo</th></tr>
+    <tr><td>10 GbE UDP parse</td><td>~25 ns</td><td><em>Not built</em> (README "Future Roadmap")</td></tr>
+    <tr><td>linear_regression_predictor (2 stages)</td><td>~8 ns</td><td><strong>Built</strong></td></tr>
+    <tr><td>market_maker (1 stage)</td><td>~4 ns</td><td><strong>Built</strong></td></tr>
+    <tr><td>Order encode + TX</td><td>~50 ns</td><td><em>Not built</em></td></tr>
+    <tr><th>Total tick-to-trade (estimated)</th><th>~90 ns</th><th></th></tr>
+  </table>
+  <p class="small">
+    Compare to the ~750–800 ns of a Solarflare-class CPU stack. The arithmetic kernels
+    in this repo are already in the right ballpark for top-quartile HFT. The missing
+    pieces are I/O, not math.
+  </p>
+
+  <!-- ===================== §4 OFTEN CONFUSED WITH ===================== -->
+  <h2>4. Often confused with</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>FPGA vs ASIC</h4>
+      <p>
+        An <strong>ASIC</strong> is silicon manufactured for one specific design — fastest
+        possible, but tape-out costs millions and the design is frozen forever.
+        An <strong>FPGA</strong> is generic silicon you reprogram in seconds via a new
+        bitstream. HFT firms iterate strategies weekly; nobody tapes out an ASIC for that.
+      </p>
+    </div>
+    <div class="card">
+      <h4>FPGA vs GPU</h4>
+      <p>
+        A <strong>GPU</strong> is massively parallel but its parallelism is SIMD across
+        thousands of threads on the same instruction — great for training neural nets,
+        wrong shape for "one tick → one quote." Latency from PCIe + driver alone exceeds
+        what an FPGA's <em>entire</em> tick-to-trade budget allows.
+      </p>
+    </div>
+    <div class="card">
+      <h4>VHDL vs Verilog</h4>
+      <p>
+        Two HDLs that compile to the same gates. <strong>VHDL</strong> is verbose,
+        strongly typed, popular in defense/aerospace and this repo.
+        <strong>Verilog</strong> (and SystemVerilog) is terser and more common at
+        web-scale silicon firms. Religious choice; not technical.
+      </p>
+    </div>
+    <div class="card">
+      <h4>HDL vs HLS</h4>
+      <p>
+        <strong>HDL</strong> (VHDL/Verilog) describes hardware register-by-register.
+        <strong>HLS</strong> (High-Level Synthesis) takes annotated C++ and generates
+        HDL for you. Faster to write; sometimes worse area/timing. <code>hls_synthesis.tcl</code>
+        in this repo drives the HLS flow on the hand-written VHDL.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Combinational vs Sequential logic</h4>
+      <p>
+        <strong>Combinational</strong> logic produces outputs that depend only on
+        current inputs — no clock involved. <strong>Sequential</strong> logic uses
+        flip-flops driven by a clock, holding state between cycles. HFT pipelines are
+        combinational <em>between</em> stages, sequential <em>at</em> each stage boundary.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Synthesis vs Place &amp; Route</h4>
+      <p>
+        <strong>Synthesis</strong> turns VHDL into a netlist of generic gates.
+        <strong>Place &amp; Route (PAR)</strong> assigns each gate to physical LUTs on
+        the chip and routes the wires. Timing closure (meeting the clock period) is
+        won or lost at PAR — that's why HFT engineers stare at PAR reports for hours.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §5 QUIZ ===================== -->
+  <h2>5. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. <code>linear_regression_predictor.vhd</code> uses two pipeline stages. If you ran a single tick through it, how long until you got the trading signal at 250 MHz?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That would be one stage of 4 ns — but the module is explicitly a 2-stage pipeline (multiply, then accumulate + threshold).">~4 ns (one cycle).</li>
+      <li data-correct="true"  data-why="Right — 2 stages × 4 ns/cycle = 8 ns from valid_in to valid_out for a single tick.">~8 ns (two cycles).</li>
+      <li data-correct="false" data-why="No — that's the period of a 10 GHz clock; the design runs at 250 MHz (4 ns per cycle).">~100 ps.</li>
+      <li data-correct="false" data-why="That's roughly CPU-with-kernel-bypass tick-to-trade, not an FPGA stage of dot-product math.">~750 ns.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. Why does <code>moving_average_trader.vhd</code> maintain a <code>running_sum</code> and only add the new sample / subtract the oldest, instead of summing all 20 samples each cycle?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="VHDL syntax isn't the constraint — it's silicon. The question is what fits in one clock period.">Because VHDL can't express a 20-input adder.</li>
+      <li data-correct="true"  data-why="Correct — an incremental update is one adder + one subtractor regardless of WINDOW, so it meets timing at 250 MHz. Summing 20 samples would need a 5-level adder tree that may not close.">Because the incremental update is O(1) and meets the clock-period budget regardless of window size; a 20-deep adder tree might fail timing.</li>
+      <li data-correct="false" data-why="The shift register and the running sum are independent — one stores samples, the other tracks the total.">Because there isn't enough BRAM for the shift register.</li>
+      <li data-correct="false" data-why="Floating point isn't involved — everything is integer-scaled ×100. The reason is timing, not numerics.">Because floating-point adders have too much rounding error.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Your colleague wants to deploy a 100-tree <code>GradientBoostingRegressor</code> directly as hand-written VHDL on the FPGA. What's the best response?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Just throwing more LUTs at deep mux trees doesn't fix the fundamental shape mismatch with FPGA fabric — see the README note on this (lines 152–155).">"Sure, just use a bigger FPGA — Alveo U250 has plenty of LUTs."</li>
+      <li data-correct="false" data-why="Trees and float comparisons make this expensive in hand-written HDL. The HLS / hls4ml route exists exactly because hand-coding doesn't scale.">"Yes, hand-written VHDL is always best for HFT."</li>
+      <li data-correct="true"  data-why="Right — decision trees branch on float comparisons, producing deep multiplexer trees; 100 trees explodes LUT usage. The README points to hls4ml or Vitis AI as the practical path. Hand VHDL is for small dot products like the linear regressor.">"Hand-VHDL is great for the linear predictor, but 100-tree GBMs need an HLS toolchain like hls4ml or Vitis AI — the README documents exactly that."</li>
+      <li data-correct="false" data-why="A GPU's PCIe round-trip + driver latency already eats more than the entire FPGA tick-to-trade budget. Wrong shape entirely.">"Move it to a GPU instead — they're better at ML inference."</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. What does the <code>valid_in</code> / <code>valid_out</code> handshake in these modules actually do?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="No — reset is a separate signal (rst_n). valid_in says 'this cycle's data is real'; reset says 'wipe all state'.">It resets the module's internal state.</li>
+      <li data-correct="true"  data-why="Exactly. Without a valid bit, a downstream block can't distinguish a fresh tick from stale register contents. The flag rides through every pipeline stage so each consumer knows whether to act.">It marks which cycles carry real data versus stale register contents, propagating through every pipeline stage so consumers know when to act.</li>
+      <li data-correct="false" data-why="It is a single bit, not a checksum. The packet integrity check (if any) lives in the network layer, not here.">It's a checksum that verifies the input bits weren't corrupted.</li>
+      <li data-correct="false" data-why="No — the clock is the clock. valid_in gates whether to use the data on a given clock edge, not the rate of the edges themselves.">It throttles the clock frequency of the module.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. Which statement about FPGA-NIC HFT systems is most accurate?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's the CPU-with-kernel-bypass path. FPGA NICs do parsing on-chip and skip PCIe entirely for the hot path.">Market data is parsed by the kernel, then DMA'd to the FPGA over PCIe for the strategy to run.</li>
+      <li data-correct="true"  data-why="Correct — the FPGA IS the NIC. Packets enter the PHY and the parsing, strategy logic, and order emission all happen on the same chip. PCIe is only used for configuration and slow-path telemetry.">Packets enter the FPGA's own PHY, are parsed in-fabric, drive the strategy, and exit as orders on the same chip — PCIe is reserved for configuration and slow-path telemetry.</li>
+      <li data-correct="false" data-why="No — top FPGA systems are at 100–500 ns tick-to-trade. Sub-nanosecond is below the speed of light across a typical board trace.">A modern FPGA NIC achieves sub-nanosecond tick-to-trade.</li>
+      <li data-correct="false" data-why="FPGAs absolutely run an OS sometimes (Zynq has an ARM PS), but not in the hot path. The strategy logic lives in PL (programmable logic) with no OS in the way.">FPGAs run a tiny embedded Linux that processes ticks.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §6 SCENARIOS ===================== -->
+  <h2>6. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. You change the constant <code>W_F0</code> in <code>linear_regression_predictor.vhd</code> from <code>300</code> to <code>450</code>. What do you have to do before the change runs on the board?</summary>
+    <p>
+      You have to <strong>re-synthesize and re-place-and-route</strong> the design,
+      then load the new bitstream onto the FPGA. The constants are baked into the
+      configuration of the LUTs and DSP slices at synthesis time — there is no
+      "runtime variable" to write to. This is why HFT firms that want
+      online-tunable parameters wire them as <em>input ports</em> driven by a
+      register file on the PCIe side, not as <code>constant</code>s.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. <code>moving_average_trader.vhd</code> has a <code>warmed_up</code> flag that only goes high after WINDOW samples have arrived. Why does <code>valid_s2</code> in stage 2 use <code>valid_s1 <strong>and</strong> warmed_s1</code>?</summary>
+    <p>
+      Because the moving average is meaningless during warm-up — you'd be dividing a
+      partial sum by 20 instead of by the (smaller) number of samples actually seen.
+      Emitting <code>valid_s2 = '0'</code> until warm-up is complete tells any
+      downstream consumer "ignore my outputs; they're not real yet." This is the
+      same valid-handshake discipline as in the rest of the file, just guarded by
+      the additional warm-up condition.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. The README's roadmap mentions "10 GbE UDP stack" and "Risk engine in one clock cycle." Why are those the next two priorities if you wanted real tick-to-trade?</summary>
+    <p>
+      Because the three modules in <code>fpga/</code> only implement the
+      <strong>arithmetic kernel</strong>. To call this end-to-end you need (a) a way
+      to <em>receive</em> market data without going through the kernel, which is the
+      10 GbE UDP stack, and (b) a <em>last-cycle gate</em> that vetoes orders that
+      would breach position or notional limits — a hardware risk engine. Without (b)
+      a single bug in the predictor can blow up the firm before any human can react.
+      Without (a) you've built a Ferrari engine with no wheels.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson idea: <strong>The Limit Order Book in depth</strong> — price-time
+    priority, queue position, and what "top of book" actually means. That builds on
+    why <code>market_maker.vhd</code> wants to quote <em>inside</em> the spread, not
+    just at the existing best bid/ask.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+"""Name -> DailyStrategy registry so arena CLI flags select strategies.
+
+Usage (once implemented):
+    from strategies.registry import get_strategy, available_strategies
+    strat = get_strategy("engulfing")
+    strat = get_strategy("gbm", bundle_path="models/model_bundle_....joblib")
+"""
+from typing import Callable
+
+from strategies.candlestick_daily import DailyEngulfingStrategy
+from strategies.daily import DailyStrategy
+from strategies.gbm_adapter import GBMStrategy
+from strategies.low_vol import LowVolatilityStrategy
+from strategies.mean_reversion import MeanReversionStrategy
+from strategies.pead import PEADStrategy
+from strategies.technical import TechnicalStrategy
+from strategies.trend import TrendFollowingStrategy
+
+#: All arena-eligible strategies. Keys are the CLI names used by
+#: ``arena-run --strategies gbm,engulfing,technical,meanrev``.
+STRATEGY_REGISTRY: dict[str, Callable[..., DailyStrategy]] = {
+    DailyEngulfingStrategy.name: DailyEngulfingStrategy,
+    TechnicalStrategy.name: TechnicalStrategy,
+    MeanReversionStrategy.name: MeanReversionStrategy,
+    GBMStrategy.name: GBMStrategy,
+    TrendFollowingStrategy.name: TrendFollowingStrategy,
+    LowVolatilityStrategy.name: LowVolatilityStrategy,
+    PEADStrategy.name: PEADStrategy,
+}
+
+
+def available_strategies() -> list[str]:
+    """Sorted CLI names of every registered strategy."""
+    return sorted(STRATEGY_REGISTRY)
+
+
+def get_strategy(name: str, **kwargs) -> DailyStrategy:
+    """Construct a registered strategy by CLI name.
+
+    Args:
+        name: Registry key, e.g. "engulfing". Case-sensitive.
+        **kwargs: Passed to the strategy constructor (e.g. bundle_path=...
+            for "gbm", lookback=... for "meanrev").
+
+    Raises:
+        KeyError: Unknown name — message lists valid options so CLI errors
+            are self-explanatory.
+    """
+    try:
+        factory = STRATEGY_REGISTRY[name]
+    except KeyError:
+        raise KeyError(
+            f"Unknown strategy '{name}'. Available: {', '.join(available_strategies())}"
+        ) from None
+    return factory(**kwargs)
+
+
+__all__ = ["STRATEGY_REGISTRY", "available_strategies", "get_strategy"]

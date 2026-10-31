@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0013 — DMA (Direct Market &amp; Memory Access)</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body { font: 16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif; padding: 40px 24px 120px; }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill { display: inline-block; background: var(--panel-2); color: var(--accent); padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; margin-right: 6px; }
+  code, pre, .mono { font-family: "JetBrains Mono","SF Mono",Menlo,Consolas,monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre { background: var(--code-bg); padding: 16px 18px; border-radius: 8px; overflow-x: auto; font-size: 13.5px; line-height: 1.55; border: 1px solid var(--rule); }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .illus { color: var(--accent-2); font-size: 12px; font-style: italic; }
+  .callout { border-left: 3px solid var(--accent); background: var(--panel); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0; }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; }
+  .question { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; margin: 14px 0; }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li { cursor: pointer; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); margin: 6px 0; border: 1px solid transparent; transition: background .15s,border-color .15s; }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74,222,128,.08); }
+  ul.options li.picked-bad { border-color: var(--bad); background: rgba(248,113,113,.08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard { position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px); padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px; display: flex; gap: 18px; align-items: center; margin: 0 0 28px; font-size: 14px; flex-wrap: wrap; }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+  sup a.fn { color: var(--accent); text-decoration: none; font-weight: 600; }
+  sup a.fn:hover { text-decoration: underline; }
+  .sources { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 20px; }
+  .sources ol { padding-left: 20px; margin: 6px 0; }
+  .sources li { margin: 6px 0; font-size: 13px; color: var(--ink-dim); }
+  .sources li a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0013</span>
+    <label class="check"><input type="checkbox" />§1 Two homonyms</label>
+    <label class="check"><input type="checkbox" />§2 Trading DMA</label>
+    <label class="check"><input type="checkbox" />§3 Hardware DMA</label>
+    <label class="check"><input type="checkbox" />§4 Where they collide</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>DMA — Direct Market Access &amp; Direct Memory Access</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: in trading conversations
+    "DMA" means <em>Direct Market Access</em> — how you reach an exchange. In
+    hardware conversations "DMA" means <em>Direct Memory Access</em> — how a chip
+    reaches host RAM without the CPU. Both are unavoidable in HFT, both
+    constantly come up, and people confuse them constantly. This lesson nails
+    down both.
+  </p>
+
+  <p class="illus">Illustrative code where the repo doesn't have the real thing yet.</p>
+
+  <!-- ===================== §1 TWO HOMONYMS ===================== -->
+  <h2>1. The same acronym, two totally different ideas</h2>
+
+  <table>
+    <tr><th>Sense</th><th>Stands for</th><th>What it's about</th><th>Lives in</th></tr>
+    <tr>
+      <td>Trading DMA</td>
+      <td>Direct Market Access</td>
+      <td>A buy-side firm sending orders straight onto an exchange's matching engine, bypassing the broker's manual desk.<sup><a class="fn" href="#fn-1">[1]</a></sup></td>
+      <td>Business / regulatory layer</td>
+    </tr>
+    <tr>
+      <td>Hardware DMA</td>
+      <td>Direct Memory Access</td>
+      <td>A peripheral (NIC, FPGA, GPU) reading/writing host RAM without the CPU running each transfer.<sup><a class="fn" href="#fn-2">[2]</a></sup></td>
+      <td>Operating-system / silicon layer</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <strong>Rule of thumb:</strong> if the speaker is talking about FINRA, brokers, or
+    "we got direct access to NASDAQ," they mean trading DMA. If they're talking about
+    PCIe, descriptor rings, or "zero-copy from the NIC to our FPGA," they mean hardware
+    DMA. Same letters; rarely the same conversation.
+  </div>
+
+  <!-- ===================== §2 TRADING DMA ===================== -->
+  <h2>2. Trading DMA — the regulated layer</h2>
+
+  <h3>The basic picture</h3>
+  <p>
+    Traditionally an asset manager phones a broker, the broker enters the order on
+    the manager's behalf. With <strong>Direct Market Access</strong>, the manager's
+    own algorithm sends the order straight to the exchange's matching engine over
+    the broker's connection.<sup><a class="fn" href="#fn-1">[1]</a></sup> The broker is
+    still legally on the hook for risk checks and trade reporting, but no human
+    sits in the middle.
+  </p>
+
+  <p>Three flavors with progressively less broker involvement:</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Traditional brokered order</h4>
+      <p>Buy-side sends an order to the broker; broker's trader works it on the exchange. Used for large/illiquid blocks where human discretion adds value. Latency: human-scale.</p>
+    </div>
+    <div class="card">
+      <h4>DMA proper</h4>
+      <p>Buy-side's algo connects through the broker's <em>infrastructure</em> (gateway, risk checks, exchange membership) but submits orders directly. The broker's pre-trade risk filter runs inline on every order.<sup><a class="fn" href="#fn-1">[1]</a></sup></p>
+    </div>
+    <div class="card">
+      <h4>Sponsored access (SA)</h4>
+      <p>Buy-side gets the broker's MPID and exchange connectivity but skips most of the broker's stack — including, historically, the broker's risk filter. Lowest latency; highest systemic risk; the form regulators care most about.<sup><a class="fn" href="#fn-3">[3]</a></sup></p>
+    </div>
+    <div class="card">
+      <h4>Exchange membership</h4>
+      <p>Skip the broker entirely. Become a member of the exchange yourself. Highest fixed cost (capital, regulatory, ops); used by the largest HFT firms and proprietary trading shops.</p>
+    </div>
+  </div>
+
+  <h3>Why HFT firms love sponsored access</h3>
+  <p>
+    Each layer between you and the matching engine adds microseconds and dollars. SA
+    gives HFT firms the regulatory cover of "the broker's customer" without the
+    latency of routing through the broker's order management system. Latency arbitrage,
+    market making, and statistical arbitrage all benefit.<sup><a class="fn" href="#fn-1">[1]</a></sup>
+  </p>
+
+  <h3>Why regulators were spooked: SEC Rule 15c3-5</h3>
+  <p>
+    Naked sponsored access (broker hands over its connection with no risk checks)
+    was identified as a serious systemic risk after Knight Capital's 2012 incident
+    (different mechanism, same shape of fear: an algo gone wrong dumping orders
+    into a venue with no kill switch). SEC Rule 15c3-5 (the "Market Access Rule",
+    effective 2011) requires the broker to maintain <em>pre-trade</em> risk
+    controls — order size limits, credit limits, kill switches — that cannot be
+    disabled.<sup><a class="fn" href="#fn-4">[4]</a></sup> FINRA's 2025 oversight
+    report continues to treat market-access compliance as a top examination
+    priority.<sup><a class="fn" href="#fn-5">[5]</a></sup>
+  </p>
+
+  <h3>The practical wire: a FIX session</h3>
+  <p>
+    Most DMA connections use the FIX protocol (or the exchange's binary
+    equivalent: OUCH, ITCH, MITCH, Native, etc.). An illustrative single order:
+  </p>
+
+<pre>8=FIX.4.4|9=145|35=D|49=BUYSIDEALGO|56=EXCHGW|34=42|52=20260610-14:30:00.123|
+11=ORD-00012|21=1|55=ESZ6|54=1|60=20260610-14:30:00.122|38=10|40=2|44=4523.25|59=0|10=041|
+</pre>
+  <p>
+    <code>35=D</code> = NewOrderSingle. <code>54=1</code> = Buy. <code>38=10</code>
+    contracts. <code>40=2</code> Limit. <code>44=4523.25</code> at price. The
+    broker's risk filter inspects this <em>before</em> it leaves; HFT firms
+    measure latency through the filter in microseconds and shop brokers
+    accordingly.
+  </p>
+
+  <!-- ===================== §3 HARDWARE DMA ===================== -->
+  <h2>3. Hardware DMA — the silicon layer</h2>
+
+  <h3>The basic problem</h3>
+  <p>
+    A NIC receives a packet from the wire. A FPGA wants that packet. Without DMA,
+    the CPU would have to copy every byte from the NIC into user-space buffers
+    via a syscall — which is exactly the kernel-stack cost you saw in
+    Lessons 0004 and 0011 (~50 µs).
+  </p>
+
+  <p>
+    <strong>Direct Memory Access</strong> lets the peripheral (NIC, FPGA, GPU)
+    move data into and out of host RAM by talking directly to the memory
+    controller. The CPU is told when it's done, but isn't involved in the
+    transfer itself.<sup><a class="fn" href="#fn-6">[6]</a></sup>
+  </p>
+
+  <h3>The standard PCIe DMA pattern</h3>
+  <p>
+    Four objects work together. Every modern NIC, FPGA, and SmartNIC does this in
+    some variation.<sup><a class="fn" href="#fn-7">[7]</a></sup>
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>1. Descriptor ring</h4>
+      <p>A pre-allocated array of small structs in <em>host memory</em>, mapped so the device can read/write it. Each entry says "DMA this many bytes to/from this physical address."</p>
+    </div>
+    <div class="card">
+      <h4>2. Doorbell register</h4>
+      <p>A memory-mapped register on the device. The CPU writes to it (one PCIe write) to say "I just added a new descriptor — go look."<sup><a class="fn" href="#fn-7">[7]</a></sup></p>
+    </div>
+    <div class="card">
+      <h4>3. DMA engine on the device</h4>
+      <p>Hardware on the NIC/FPGA that reads descriptors, fetches/writes data to host RAM over PCIe, and updates the descriptor's "done" flag.</p>
+    </div>
+    <div class="card">
+      <h4>4. Completion notification</h4>
+      <p>Either an interrupt (cold path) or the CPU polling the descriptor ring (hot path). HFT uses the polling pattern with kernel-bypass to avoid interrupt cost.</p>
+    </div>
+  </div>
+
+  <p>Illustrative receive flow on a kernel-bypass NIC:</p>
+<pre><span class="com">// 1. App owns a region of memory (the RX ring) mapped into the NIC's address space.</span>
+<span class="kw">volatile</span> RxDescriptor* rx_ring = <span class="fn">map_dma_region</span>(<span class="num">1024</span>);
+
+<span class="com">// 2. Hot loop: poll the ring head; never wait for an interrupt.</span>
+<span class="kw">while</span> (running) {
+    <span class="kw">if</span> (rx_ring[head].status &amp; DESC_DONE) [[<span class="kw">likely</span>]] {
+        Tick tick = <span class="fn">parse</span>(rx_ring[head].payload);   <span class="com">// payload was DMA'd by the NIC</span>
+        <span class="fn">on_tick</span>(tick);
+        rx_ring[head].status = <span class="num">0</span>;                  <span class="com">// hand the slot back to the NIC</span>
+        head = (head + <span class="num">1</span>) &amp; (<span class="num">1024</span> - <span class="num">1</span>);
+    } <span class="kw">else</span> {
+        <span class="fn">_mm_pause</span>();                              <span class="com">// busy-poll friendly</span>
+    }
+}
+</pre>
+
+  <p>
+    Notice what this delivers: the packet enters the NIC, is written to host RAM
+    by the NIC's DMA engine, and is read by the application — <em>without ever
+    crossing the kernel</em>. That's the architectural meaning of "kernel bypass"
+    (Lesson 0004) made concrete.
+  </p>
+
+  <h3>Zero-copy</h3>
+  <p>
+    The slogan "zero-copy" means the bytes are read and written from their final
+    location, never copied between buffers along the way.<sup><a class="fn" href="#fn-8">[8]</a></sup>
+    In the example above, the payload arrives in the application's RX ring and
+    is parsed in place. No <code>memcpy</code>. No allocator. Closest practical
+    embodiment of the "no syscalls, no allocation in the hot path" rule from
+    Lesson 0009.
+  </p>
+
+  <h3>Modern speeds</h3>
+  <p>
+    PCIe Gen5 x16 DMA engines like Arkville move data between host memory and
+    FPGA fabric at up to ~60 GB/s (≈480 Gbps) per direction with sub-microsecond
+    completion latency.<sup><a class="fn" href="#fn-9">[9]</a></sup> That's gigabit
+    market-data feeds and full LOB snapshots, easily, with budget to spare.
+  </p>
+
+  <!-- ===================== §4 WHERE THEY COLLIDE ===================== -->
+  <h2>4. Where the two DMAs meet in an HFT stack</h2>
+
+  <p>
+    The full pipeline of a colocated HFT system, from exchange to strategy,
+    needs <em>both</em> at the same time:
+  </p>
+
+  <ol>
+    <li>Buy-side firm signs a <strong>Trading DMA</strong> deal with a broker (or becomes an exchange member). Gets an MPID, a binary-protocol gateway, and a colocation rack.</li>
+    <li>Inside the rack, market data flows in through a kernel-bypass NIC using <strong>Hardware DMA</strong> straight into the strategy process's RX ring.</li>
+    <li>Strategy decides; writes an order descriptor into the TX ring; rings the doorbell.</li>
+    <li>NIC <strong>Hardware DMA</strong>s the order onto the wire as a FIX/OUCH/native message, which the exchange treats as the firm's <strong>Trading DMA</strong> order.</li>
+  </ol>
+
+  <p>
+    So both flavors of DMA are load-bearing on every single tick of a competitive
+    HFT system. Confusing them in conversation is harmless. Confusing them in
+    design — for example, thinking "if we have Trading DMA we don't need
+    Hardware DMA" — is how slow systems get built.
+  </p>
+
+  <div class="callout warn">
+    <strong>In this repo today:</strong> neither flavor exists. The Robinhood
+    executor (<code>scripts/robinhood_executor.py</code>) uses Robinhood's REST
+    API which is the opposite of Trading DMA — there's a whole broker stack in
+    the middle. And no PCIe NICs are in play; everything's regular kernel TCP.
+    Both are honest cold-path choices for a daily-rebalance retail-style strategy.
+  </div>
+
+  <!-- ===================== §5 OFTEN CONFUSED ===================== -->
+  <h2>5. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Trading DMA vs Sponsored Access</h4>
+      <p>
+        <strong>DMA proper</strong>: orders flow through the broker's infrastructure
+        and risk filters. <strong>Sponsored access</strong>: uses the broker's
+        membership but bypasses much of its stack; lowest latency, biggest
+        regulatory concern.<sup><a class="fn" href="#fn-3">[3]</a></sup>
+      </p>
+    </div>
+    <div class="card">
+      <h4>Hardware DMA vs PIO</h4>
+      <p>
+        <strong>DMA</strong>: device moves data; CPU just gets notified.
+        <strong>Programmed I/O (PIO)</strong>: CPU executes load/store
+        instructions to copy every byte. PIO is what existed before DMA; modern
+        systems use DMA for anything past a few bytes.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Zero-copy vs DMA</h4>
+      <p>
+        <strong>DMA</strong> is the mechanism the device uses to access host
+        memory. <strong>Zero-copy</strong> is the design property of doing so
+        without intermediate buffers. Zero-copy requires DMA; DMA doesn't always
+        achieve zero-copy if the OS still ferries the data into user space.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Trading DMA vs Direct Connect</h4>
+      <p>
+        "Direct connect" usually means a physical fiber to the exchange's
+        matching engine room. <strong>Trading DMA</strong> is the business and
+        regulatory arrangement on top of that connect. You need both.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Hardware DMA vs RDMA</h4>
+      <p>
+        <strong>DMA</strong>: device ↔ local host RAM.
+        <strong>RDMA</strong> (Remote DMA): device ↔ <em>another machine's</em>
+        host RAM, over the network (InfiniBand, RoCE). Common in HPC; some HFT
+        risk systems use it for fast state replication between hosts.
+      </p>
+    </div>
+    <div class="card">
+      <h4>MPID vs ECN / Venue</h4>
+      <p>
+        An <strong>MPID</strong> (Market Participant Identifier) is the unique
+        4-character code identifying a broker-dealer on a venue. Buy-side firms
+        using sponsored access trade <em>under their sponsoring broker's
+        MPID</em> — which is why the broker's risk obligations don't go away.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §6 QUIZ ===================== -->
+  <h2>6. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. A coworker says "we got DMA last quarter." They mean Trading DMA. What's the most distinctive thing about that arrangement vs traditional brokered orders?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Hardware DMA is the other meaning of the same acronym. The two senses don't overlap on this point.">"DMA" here means the NIC writes packets straight into host memory.</li>
+      <li data-correct="true" data-why="Right. Trading DMA means the buy-side's algo submits orders directly to the exchange matching engine through the broker's infrastructure, without a human at the broker working the order. The broker still bears the regulatory risk and runs pre-trade filters.">The firm's algorithm sends orders straight to the exchange's matching engine through the broker's pipes, without a human at the broker working the order.</li>
+      <li data-correct="false" data-why="Exchange membership is a different (more expensive) arrangement. DMA proper still uses a broker's exchange membership as the intermediary; the buy-side just controls the order flow.">The firm became a member of the exchange and no longer needs a broker.</li>
+      <li data-correct="false" data-why="REST APIs are the opposite of trading DMA — they're high-latency consumer-grade access. DMA refers to direct, low-latency access through dedicated infrastructure.">The firm now talks to the exchange via a public REST API instead of FIX.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. What does <em>sponsored access</em> get the buy-side firm that ordinary DMA does not?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Exchange membership is what gives you an MPID of your own. Sponsored access uses the SPONSOR'S MPID; the buy-side trades under it.">An MPID and full exchange membership.</li>
+      <li data-correct="true" data-why="Right. Sponsored access lets the buy-side use the broker's connectivity and membership while bypassing most of the broker's order management infrastructure, cutting microseconds. Historically the risk filter was also bypassed — that's exactly what SEC Rule 15c3-5 addressed in 2011 by requiring pre-trade controls that cannot be disabled.">Use of the broker's exchange membership while bypassing most of the broker's order management stack, saving microseconds of latency.</li>
+      <li data-correct="false" data-why="Sponsored access does the opposite — it reduces broker involvement. Reporting obligations still ride with the sponsoring broker.">Permission to trade without any broker involvement or reporting obligation.</li>
+      <li data-correct="false" data-why="The pre-trade risk filter is now mandated by SEC Rule 15c3-5 — sponsoring brokers must run one. Naked access where the filter is bypassed is the abuse the rule was written to prevent.">An exemption from pre-trade risk checks.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. In the PCIe DMA receive flow, what does the doorbell register actually do?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That's the descriptor ring's job — it holds the addresses the device should DMA to/from. The doorbell is a notification mechanism, not a descriptor store.">It stores the addresses of buffers the device should write data into.</li>
+      <li data-correct="true" data-why="Right. The CPU writes to the doorbell to signal 'I just published a new descriptor; come read the ring.' That single PCIe write replaces an interrupt or a syscall and is one of the reasons modern kernel-bypass NICs achieve sub-microsecond turnaround.">It's a memory-mapped register the CPU writes to as a single PCIe write to notify the device that there's new work in the descriptor ring.</li>
+      <li data-correct="false" data-why="The address translation happens in the IOMMU/MMU, not via a doorbell. The doorbell is a one-bit-or-so notification register.">It translates between virtual and physical memory addresses on the device side.</li>
+      <li data-correct="false" data-why="Generating interrupts is separate. The doorbell is the producer-to-device signal; completions back to the CPU come via separate interrupt vectors or polling.">It is the mechanism by which the device fires an interrupt back at the CPU.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. A teammate sketches a system: "We have Trading DMA, so we don't need Hardware DMA — the orders go straight to the exchange." Why is this wrong?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="They're orthogonal and the system needs both. Trading DMA is a business/regulatory arrangement; Hardware DMA is how the silicon moves bytes. One does not replace the other.">They're right — Trading DMA includes hardware-level acceleration as part of the package.</li>
+      <li data-correct="true" data-why="Correct. Trading DMA is the business agreement that lets your algo reach the matching engine through the broker. Hardware DMA is how bytes move on PCIe between NIC and host RAM. Without Hardware DMA the kernel network stack burns ~50 µs per round-trip — making your Trading DMA pointlessly slow.">Trading DMA is a regulatory arrangement; Hardware DMA is how packets move on PCIe. Without the latter the kernel stack adds ~50 µs and erases the latency benefit of the former.</li>
+      <li data-correct="false" data-why="Standard PCIe NICs use DMA out of the box — it's not optional or expensive. The question is whether the system uses kernel bypass on top of it.">Hardware DMA is an expensive specialty feature most NICs don't support.</li>
+      <li data-correct="false" data-why="Trading DMA refers to order routing; HTTP REST is what consumer-grade retail APIs use. The two have nothing to do with each other architecturally.">Trading DMA actually uses HTTP REST, so there's no DMA at the silicon level anyway.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. SEC Rule 15c3-5 (the Market Access Rule) requires what of a broker that provides sponsored access?</p>
+    <ul class="options">
+      <li data-correct="true" data-why="Right. The rule, in force since 2011 and a persistent focus of FINRA's annual examinations (including 2025), requires broker-dealers to maintain pre-trade risk and supervisory controls — credit limits, size caps, kill switches — that cannot be disabled by the customer. 'Naked' sponsored access (no filter) is explicitly prohibited.">The broker must run pre-trade risk and supervisory controls — credit/size limits, kill switches — that cannot be disabled by the sponsored customer.</li>
+      <li data-correct="false" data-why="Backwards — Rule 15c3-5 prohibits 'naked' sponsored access, where the broker hands over its connection with no pre-trade risk filter. That arrangement is exactly what the rule was written to stop.">The broker may hand the customer raw connectivity to the exchange with no risk checks ("naked access").</li>
+      <li data-correct="false" data-why="The rule isn't about latency disclosure — it's about pre-trade risk controls. Latency is a marketing topic, not a regulatory one in this rule.">The broker must publish round-trip latency for every sponsored customer.</li>
+      <li data-correct="false" data-why="Order types are exchange-level, not broker-imposed by this rule. The rule's focus is risk controls on the sponsoring broker, not the customer's strategy choices.">The broker must restrict the customer to a limited set of order types.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §7 SCENARIOS ===================== -->
+  <h2>7. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. Your firm is hiring "DMA engineers." Two résumé piles arrive. One contains kernel/PCIe specialists; the other contains FIX/exchange-connectivity specialists. Which is which, and which do you actually want?</summary>
+    <p>
+      The kernel/PCIe pile is Hardware-DMA people: they'll build or tune the NIC
+      drivers, descriptor rings, and zero-copy paths. The FIX pile is
+      Trading-DMA people: they'll handle exchange certification, FIX session
+      negotiation, broker risk-filter integration, and Rule 15c3-5 compliance.
+      You almost certainly want both — but the job posting should be split,
+      because hiring one when you needed the other costs a year.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. After a deploy, your sponsored-access connection is suddenly rejecting orders with reason code "PRE_TRADE_RISK_FAIL." Trade volumes are unchanged. What changed and what's the path back?</summary>
+    <p>
+      The sponsoring broker's pre-trade risk filter (the one mandated by
+      Rule 15c3-5) rejected those orders for breaching a configured limit —
+      order size, credit, notional, or kill-switch threshold. The deploy likely
+      changed something the filter cares about: maybe your strategy started
+      placing larger orders, or order rates spiked past a configured cap, or a
+      new instrument lacks a configured limit. The path back is to call the
+      broker's relationship desk, get the rejection logs from their gateway,
+      identify which limit fired, and either roll back the strategy change or
+      negotiate a new limit. You cannot simply turn the filter off — that's
+      illegal.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. You profile a kernel-bypass NIC pipeline and see 80% of the per-tick time in a memcpy from the NIC's RX ring into your application's parsing buffer. Diagnose.</summary>
+    <p>
+      You have DMA but not zero-copy. The NIC is correctly DMA'ing the packet
+      into your RX ring, but the application then copies it again into a
+      separate parsing buffer — defeating the point. Fix: parse the payload
+      in place inside the RX ring slot, never copy it. Either restructure the
+      parser to walk a memory range or use a small <code>std::span</code>-like
+      view that the parser consumes from the ring. Confirm with a fresh profile
+      that the memcpy is gone before celebrating; the second-order win is that
+      your L1 cache stops being polluted with duplicated data.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next in your queue: <strong>Hardware Acceleration Practices</strong> (FPGA vs GPU
+    vs SmartNIC vs ASIC vs NPU — which workloads go where in an HFT firm).
+  </p>
+
+  <h2>Sources</h2>
+  <div class="sources">
+    <ol>
+      <li id="fn-1"><a href="https://en.wikipedia.org/wiki/Direct_market_access">Direct market access — Wikipedia</a></li>
+      <li id="fn-2"><a href="https://www.cs.cornell.edu/~ragarwal/pubs/host-networking-accelerators.pdf">High-throughput and Flexible Host Networking for Accelerated Computing — Cornell</a></li>
+      <li id="fn-3"><a href="https://blog.counselstack.com/market-access-direct-market-access-sponsored-access-compliance/">Market Access: Direct market access, sponsored access, compliance — CounselStack</a></li>
+      <li id="fn-4"><a href="https://www.finra.org/rules-guidance/key-topics/market-access">Market Access — FINRA</a></li>
+      <li id="fn-5"><a href="https://www.finra.org/rules-guidance/key-topics/market-access">FINRA 2025 Annual Regulatory Oversight Report — Market Access topic</a></li>
+      <li id="fn-6"><a href="https://databento.com/microstructure/dma">What is direct market access (DMA)? — Databento Microstructure Guide</a></li>
+      <li id="fn-7"><a href="https://arxiv.org/pdf/1903.10200">FPGA-based reconfigurable PCIe NIC with zero-copy DMA — CERN NA62 paper, arXiv:1903.10200</a></li>
+      <li id="fn-8"><a href="https://www.intel.com/content/www/us/en/docs/oneapi-fpga-add-on/optimization-guide/2023-1/zero-copy-memory-access.html">Zero-Copy Memory Access — Intel oneAPI FPGA Add-on Optimization Guide</a></li>
+      <li id="fn-9"><a href="https://atomicrules.com/products/arkville-fpga-host-memory-data-mover-ip-solution/">Arkville FPGA Gen5 PCIe DMA IP — Atomic Rules</a></li>
+    </ol>
+  </div>
+</main>
+<script>
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+const answered=new Set();let correctCount=0;
+const totalQuestions=document.querySelectorAll('[data-question]').length;
+const scoreEl=document.getElementById('quizScore');
+function refreshScore(){scoreEl.textContent=correctCount+' / '+totalQuestions;}
+document.querySelectorAll('[data-question]').forEach((q,idx)=>{
+  const list=q.querySelector('.options');
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+  const feedback=q.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      const isCorrect=li.dataset.correct==='true';
+      list.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));
+      li.classList.add(isCorrect?'picked-good':'picked-bad');
+      feedback.hidden=false;
+      feedback.innerHTML=(isCorrect?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      feedback.style.color=isCorrect?'var(--good)':'var(--bad)';
+      if(!answered.has(idx)){answered.add(idx);if(isCorrect)correctCount++;refreshScore();}
+    });
+  });
+});
+refreshScore();
+</script>
+</body>
+</html>

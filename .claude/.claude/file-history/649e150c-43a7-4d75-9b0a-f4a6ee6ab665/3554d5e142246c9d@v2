@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0021 — AI Preprocessing</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}pre .kw{color:var(--code-kw)}pre .str{color:var(--code-str)}pre .num{color:var(--code-num)}pre .com{color:var(--code-com);font-style:italic}pre .fn{color:var(--code-fn)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0021</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>AI Preprocessing</h1>
+<p class="lead">Why this matters: the four-lesson AI mini-arc (preprocessing → object detection → segmentation → geometric calculus) prepares you to read modern CV/ML papers and tie them back to alt-data and HFT use cases. We start with the unsexy but load-bearing first step: preprocessing.</p>
+
+<h2>1. Why preprocessing is half the job</h2>
+<p>A common saying among ML engineers: <em>"the model is 20% of the work; the data and preprocessing are 80%."</em> Models are commoditized; getting clean, normalized, well-shaped inputs is where most of the real engineering happens. Preprocessing covers six operations, applied in roughly this order:</p>
+
+<table>
+<tr><th>Step</th><th>Why</th></tr>
+<tr><td>1. Cleaning</td><td>Drop NaN/Inf, fix dtypes, handle outliers, fix obvious errors (negative prices, dates in the future).</td></tr>
+<tr><td>2. Normalization / scaling</td><td>Get features onto comparable scales so gradient-based optimizers converge.</td></tr>
+<tr><td>3. Encoding</td><td>Turn non-numeric data (text, categories) into numbers the model can consume.</td></tr>
+<tr><td>4. Augmentation</td><td>Synthetic perturbations of training data to improve generalization (CV mostly).</td></tr>
+<tr><td>5. Batching / sharding</td><td>Group examples into batches; shuffle for SGD; pad/truncate sequences.</td></tr>
+<tr><td>6. Splitting</td><td>Train / val / test splits — chronological for time series; stratified for class imbalance.</td></tr>
+</table>
+
+<h2>2. Cleaning — small fixes, big impact</h2>
+<pre><span class="com"># In this repo's spirit: cleaning the OHLCV panel before training</span>
+<span class="kw">def</span> <span class="fn">clean</span>(df):
+    df = df.<span class="fn">dropna</span>(subset=[<span class="str">"Close"</span>])             <span class="com"># drop rows missing the target driver</span>
+    df = df[df[<span class="str">"Close"</span>] &gt; <span class="num">0</span>]                     <span class="com"># reject impossible prices</span>
+    df = df[df[<span class="str">"Volume"</span>] &gt;= <span class="num">0</span>]
+    df = df[df.<span class="fn">index</span>.<span class="fn">duplicated</span>(keep=<span class="str">"last"</span>) == <span class="kw">False</span>]  <span class="com"># dedupe</span>
+    <span class="kw">return</span> df
+</pre>
+<p>The repo already does some of this via <code>dropna()</code> in <code>build_features</code>. Missed cases (negative volume, duplicates from data-vendor merges, dtype confusion when a column is loaded as string) are the ones that bite.</p>
+
+<h2>3. Normalization — the four common flavors</h2>
+<div class="grid2">
+<div class="card"><h4>Min-max scaling</h4><p><code>x_norm = (x - min) / (max - min)</code><br>Output ∈ [0,1]. Sensitive to outliers — one outlier crushes the rest of the range. Use only when bounds are known.</p></div>
+<div class="card"><h4>Standardization (z-score)</h4><p><code>x_std = (x - mean) / std</code><br>Output has mean 0, std 1. Default for most tabular ML. Less outlier-sensitive than min-max.</p></div>
+<div class="card"><h4>Robust scaling</h4><p><code>x_rob = (x - median) / IQR</code><br>Uses median and interquartile range. Resistant to outliers. Common for financial data with heavy tails.</p></div>
+<div class="card"><h4>Log transform</h4><p><code>x_log = log(x + ε)</code><br>For strictly positive variables with right-skewed distributions (volume, price). Compresses tails before any other scaling.</p></div>
+</div>
+
+<div class="callout warn"><strong>The cardinal preprocessing sin in time-series ML:</strong> computing the normalization statistics (mean, std, max) using the <em>entire</em> dataset. This leaks future information into the training set. Always fit the scaler on training data only, then apply to validation/test/live. The repo's <code>walkforward_sim.py</code> structure (refit periodically using only past data) is the right shape.</p></div>
+
+<h2>4. Encoding categorical features</h2>
+<ul>
+<li><strong>One-hot</strong>: <code>sector="Tech"</code> → <code>[0,0,1,0,0,...]</code>. Simple, works with any model, but expands dimensionality.</li>
+<li><strong>Target encoding</strong>: replace each category with the mean target value for that category. Powerful for high-cardinality features (e.g. ticker symbols) but introduces leakage if computed naively.</li>
+<li><strong>Embedding</strong>: learn a dense d-dimensional vector per category. The standard NN approach.</li>
+<li><strong>Ordinal</strong>: simple integer mapping. Useful only when categories have a meaningful order.</li>
+</ul>
+
+<h2>5. Augmentation — the CV staple</h2>
+<p>For image-based alt-data (satellite imagery, parking lots, oil tanks), augmentation creates synthetic training examples by perturbing real ones:</p>
+<ul>
+<li><strong>Geometric</strong>: rotate, flip, crop, scale. Teaches the model rotation invariance — important for satellite images where there's no canonical orientation.</li>
+<li><strong>Photometric</strong>: brightness, contrast, hue shifts. Handles different times of day, atmospheric conditions.</li>
+<li><strong>Cutout / mixup</strong>: mask random regions or blend two examples. Reduces overfitting on backgrounds.</li>
+<li><strong>Domain-specific</strong>: cloud occlusion for satellite imagery; SAR-vs-optical pairings.</li>
+</ul>
+<p>For tabular data (this repo's GBM), augmentation is rare — the standard trick is feature engineering instead (lagged returns, rolling windows). Boosting models tend to overfit augmentation patterns more easily than NNs.</p>
+
+<h2>6. Batching, sharding, time-series splitting</h2>
+<p>NN training requires batches of fixed shape. For sequences (LOB snapshots, NLP):</p>
+<ul>
+<li><strong>Pad</strong>: short sequences padded to max length; masking tells the model to ignore padding.</li>
+<li><strong>Truncate</strong>: long sequences cut to max length.</li>
+<li><strong>Bucket</strong>: group sequences of similar length to minimize padding waste.</li>
+</ul>
+<p>For time series, splits MUST be chronological:</p>
+<pre><span class="kw">def</span> <span class="fn">walkforward_split</span>(df, train_end, test_end):
+    train = df.<span class="fn">loc</span>[:train_end]
+    test  = df.<span class="fn">loc</span>[train_end:test_end]
+    <span class="kw">return</span> train, test
+</pre>
+<p>Random shuffles or k-fold are wrong for time series — they leak future into the past. The repo's <code>walkforward_sim.py</code> is the correct shape.</p>
+
+<h2>7. In this project</h2>
+<p><code>paper_trading_sim.py:build_features</code> already does a small preprocessing pipeline: <code>pct_change</code> (transformation), <code>rolling</code> stats (feature engineering), <code>dropna</code> (cleaning), implicit scaling because gradient-boosted trees are scale-invariant (which is why the repo doesn't need a StandardScaler). The <code>_rsi</code> normalization by /100.0 is a manual range-shift to roughly [0,1].</p>
+<p>What's missing for production: explicit outlier handling on returns (a single 200% jump from a data-vendor glitch can poison features for days), and chronological refit of any computed statistic. The <code>walkforward_sim.py:--rolling_retrain</code> path does the latter.</p>
+
+<h2>8. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Preprocessing vs Feature engineering</h4><p><strong>Preprocessing</strong>: mechanical transformations (scale, encode, clean). <strong>Feature engineering</strong>: domain-driven creation of new features (rolling vol, RSI, moving averages). Different skill sets; overlapping in practice.</p></div>
+<div class="card"><h4>Normalization vs Standardization</h4><p>Loose terms used interchangeably. Strictly: <strong>normalization</strong> = min-max to [0,1]; <strong>standardization</strong> = z-score to mean 0/std 1. Always check what the speaker means.</p></div>
+<div class="card"><h4>Augmentation vs Synthetic data</h4><p><strong>Augmentation</strong>: small perturbations of real examples. <strong>Synthetic data</strong>: entirely generated examples (GAN, simulator). Augmentation is mainstream; synthetic data is controversial in finance because the distribution it generates is itself a modeling choice.</p></div>
+<div class="card"><h4>Leakage vs Look-ahead bias</h4><p><strong>Leakage</strong>: features include information they shouldn't (e.g. target itself in features, computed scaler stats from test set). <strong>Look-ahead</strong>: target is shifted incorrectly so today's row uses tomorrow's information. Both result in optimistic backtests.</p></div>
+</div>
+
+<h2>9. Practice</h2>
+<div class="question" data-question><p class="q">Q1. You fit a <code>StandardScaler</code> on the entire 10-year dataset, then split into train/test chronologically. What did you just do wrong?</p><ul class="options">
+<li data-correct="false" data-why="StandardScaler is fine on its own; the mistake is when the fit happened relative to the train/test split.">You should have used min-max scaling instead.</li>
+<li data-correct="true" data-why="Right. The scaler's mean and std were computed using future (test) data, so test-set information leaked into the training transformation. Live, you wouldn't know the future mean. Fit on train only, then apply (transform) to test.">You leaked future statistics (mean, std) into the training set via the scaler — the model's training-time transformation used information from the test period.</li>
+<li data-correct="false" data-why="StandardScaler is well-defined for non-Gaussian data; this isn't about distribution shape.">StandardScaler assumes Gaussian data, which financial returns aren't.</li>
+<li data-correct="false" data-why="Computing scaler stats is microseconds, not a performance issue at this scale. The error is methodological.">You spent compute on something the model already does internally.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. Which preprocessing is LEAST relevant for the repo's GBM (gradient-boosted trees)?</p><ul class="options">
+<li data-correct="false" data-why="Cleaning is universal — NaN and dtype issues break any pipeline including trees.">Cleaning NaN and dtype issues.</li>
+<li data-correct="true" data-why="Right. Decision trees are invariant to monotone transformations of features — they pick split thresholds that respect ordering. Scaling/normalizing features doesn't change which thresholds the tree picks. The repo's GBM doesn't need a StandardScaler. Critical for NNs; irrelevant for trees.">Standardization (z-scoring) of input features.</li>
+<li data-correct="false" data-why="Categorical features still need encoding into numbers — trees can't consume raw strings.">Encoding categorical features.</li>
+<li data-correct="false" data-why="Time-series splits matter regardless of model — the look-ahead bias issue is methodological, not model-specific.">Chronological train/test splitting.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. You have satellite imagery for crop NDVI prediction. What's the right augmentation strategy?</p><ul class="options">
+<li data-correct="true" data-why="Right. Geometric augmentation (rotation, flip, crop, scale) handles the lack of canonical orientation in satellite imagery. Photometric augmentation (brightness, contrast) handles different times of day, seasons, atmospheric conditions. Cloud-occlusion simulation handles a common real-world failure mode.">Geometric (rotation, flip) + photometric (brightness, contrast) + cloud-occlusion simulation.</li>
+<li data-correct="false" data-why="No augmentation is a defensible choice with enormous datasets but typical commercial satellite training sets are small enough that augmentation helps significantly.">No augmentation — it would distort the NDVI signal.</li>
+<li data-correct="false" data-why="Augmentation should be applied at training time only and unaffect at test time. Flipping at test time would give inconsistent predictions.">Apply the augmentations at test time too for consistency.</li>
+<li data-correct="false" data-why="That's mixup/synthetic, which can hurt for low-level pixel-prediction tasks. Standard CV augmentations are the right starting point.">Mixup — blend two random crop images for every training example.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. The cardinal preprocessing sin in time-series ML is:</p><ul class="options">
+<li data-correct="false" data-why="Log transform on prices is good practice — it doesn't introduce leakage. The cardinal sin is about leakage.">Applying log transform to prices.</li>
+<li data-correct="true" data-why="Right. Computing mean, std, max, etc. across the full dataset (train + future) leaks future information into the training transformation. Live, the scaler doesn't know the future. Always fit transformations on train only, then apply to test/live.">Computing normalization statistics (mean, std, max) across the entire dataset rather than train-only.</li>
+<li data-correct="false" data-why="Outlier handling at the cleaning stage is fine. The error is in how scaling statistics are computed.">Removing outliers before training.</li>
+<li data-correct="false" data-why="One-hot encoding is a legitimate technique. Choice of encoder isn't a cardinal sin; leakage in transformation fitting is.">Using one-hot encoding instead of embeddings.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>10. Scenarios</h2>
+<details class="scenario"><summary>S1. Your NN training loss plateaus at a suspiciously high value. You discover one feature has range [0, 1e6] while others are [0, 1]. What happened?</summary>
+<p>The unscaled feature dominated the gradient signal. NNs do not naturally handle feature scale disparity — the loss landscape becomes a very thin elongated valley along the dominant feature, and gradient descent struggles to navigate it. Fix: standardize all features (z-score) so they're roughly the same scale. After scaling, retrain — the loss should drop significantly with no other changes. This is why <em>standardization is mandatory for NNs but optional for trees</em>.</p></details>
+
+<details class="scenario"><summary>S2. A teammate adds 50 lagged features (return_1d, return_2d, ..., return_50d) to the GBM. Out-of-sample R² doesn't improve. Why?</summary>
+<p>Two likely causes. (1) Most of those lagged returns are highly correlated with each other (autocorrelation in returns is small but the features themselves are nearly redundant), so the model gets little new information. (2) The total feature count went from 7 to 57, multiplying the search space the GBM has to explore; on a small dataset (~10k rows) the model may not fit cleanly. The fix is feature selection: use feature_importances_ or SHAP to identify which lags contribute, drop the rest. Often a small set of strategically chosen lags (1, 5, 21) beats 50 of them.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><p class="small">This lesson distills standard ML preprocessing practice — see scikit-learn's preprocessing docs (<a href="https://scikit-learn.org/stable/modules/preprocessing.html">scikit-learn.org/stable/modules/preprocessing.html</a>) and PyTorch's data tutorials for canonical implementations. Time-series leakage discussion follows Marcos López de Prado's <em>Advances in Financial Machine Learning</em> (Wiley 2018).</p></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

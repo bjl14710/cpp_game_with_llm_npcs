@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Drill 0003 — Levels of Algorithmic Trading</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07090f;--sur:#0d1220;--sur2:#131929;--sur3:#1c2537;
+  --brd:#1e2d47;--txt:#dde6f0;--mut:#5a7299;
+  --l0:#94a3b8;--l1:#60a5fa;--l2:#4ade80;--l3:#facc15;--l4:#fb923c;--l5:#f87171;
+  --acc:#58a6ff;--grn:#22c55e;--red:#ef4444;
+  --hit:#166534;--hit-t:#bbf7d0;--mis:#7f1d1d;--mis-t:#fecaca;
+  --mono:'JetBrains Mono','Cascadia Code','Fira Code',monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+body{background:var(--bg);color:var(--txt);font-family:var(--sans);
+  font-size:15px;line-height:1.7;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;padding:1.5rem 1rem}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ── spectrum accent strip ── */
+.strip{width:100%;max-width:700px;height:4px;border-radius:2px;margin-bottom:1.8rem;
+  background:linear-gradient(to right,var(--l0),var(--l1),var(--l2),var(--l3),var(--l4),var(--l5))}
+
+.shell{width:100%;max-width:700px}
+h1{font-family:var(--mono);font-size:1.3rem;font-weight:600;margin-bottom:.25rem}
+.sub{font-size:.82rem;color:var(--mut);margin-bottom:1.5rem}
+
+/* ── chips ── */
+.chips{display:flex;flex-wrap:wrap;gap:.45rem;margin-bottom:1.1rem}
+.chip{font-family:var(--mono);font-size:.72rem;font-weight:600;
+  padding:.25rem .75rem;border-radius:9999px;cursor:pointer;
+  border:1px solid var(--brd);background:var(--sur2);color:var(--mut);
+  transition:border-color .15s,background .15s,color .15s}
+.chip:hover{border-color:var(--acc);color:var(--txt)}
+.chip.on{border-color:var(--acc);background:#0d1f38;color:var(--acc)}
+.chip[data-ch="Strategy Levels"].on{border-color:var(--l1);background:#071330;color:var(--l1)}
+.chip[data-ch="Edge & Alpha"].on{border-color:var(--l2);background:#07200f;color:var(--l2)}
+.chip[data-ch="Alpha Decay"].on{border-color:var(--l3);background:#1c1500;color:var(--l3)}
+.chip[data-ch="Repo Files"].on{border-color:var(--l4);background:#1c0d00;color:var(--l4)}
+.chip[data-ch="Capacity & Infra"].on{border-color:var(--l5);background:#1c0505;color:var(--l5)}
+.chip[data-ch="Latency vs Horizon"].on{border-color:#c084fc;background:#0f0920;color:#c084fc}
+
+.opt-row{display:flex;align-items:center;gap:.75rem;margin-bottom:1.1rem}
+.tog{font-family:var(--mono);font-size:.72rem;padding:.25rem .75rem;
+  border-radius:9999px;border:1px solid var(--brd);background:var(--sur2);color:var(--mut);
+  cursor:pointer;transition:border-color .15s,color .15s}
+.tog.on{border-color:var(--grn);color:var(--grn)}
+
+.btn{font-family:var(--mono);font-weight:600;font-size:.85rem;
+  padding:.55rem 1.6rem;border-radius:.4rem;cursor:pointer;
+  border:none;background:var(--acc);color:#07090f;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:default}
+.btn-sm{font-family:var(--mono);font-size:.78rem;padding:.35rem .85rem;border-radius:.35rem;
+  cursor:pointer;border:1px solid var(--brd);background:var(--sur2);color:var(--txt);
+  transition:opacity .15s}
+.btn-sm:hover{opacity:.8}
+.btn-sm.g{border-color:var(--grn);color:var(--grn)}
+.btn-sm.r{border-color:var(--red);color:var(--red)}
+.btn-sm.y{border-color:var(--l3);color:var(--l3)}
+
+/* ── progress bar ── */
+.pbar-wrap{margin-bottom:1.2rem}
+.pbar-row{display:flex;justify-content:space-between;font-family:var(--mono);
+  font-size:.7rem;color:var(--mut);margin-bottom:.3rem}
+.pbar{height:4px;background:var(--sur3);border-radius:2px}
+.pfill{height:4px;border-radius:2px;width:0%;transition:width .25s;
+  background:linear-gradient(to right,var(--acc),var(--l2))}
+
+/* ── question card ── */
+.qcard{background:var(--sur);border:1px solid var(--brd);border-radius:.75rem;
+  padding:1.4rem 1.5rem;margin-bottom:1rem}
+.qtags{display:flex;gap:.5rem;margin-bottom:.85rem;flex-wrap:wrap}
+.qtag{font-family:var(--mono);font-size:.65rem;font-weight:600;
+  padding:.15rem .55rem;border-radius:9999px;border:1px solid}
+.qtag.ch{border-color:var(--brd);color:var(--mut)}
+.qtag.mc{border-color:var(--l1);color:var(--l1)}
+.qtag.wr{border-color:var(--l3);color:var(--l3)}
+.qstem{font-size:.95rem;font-weight:500;line-height:1.6;margin-bottom:1rem;color:var(--txt)}
+pre{background:var(--sur2);border:1px solid var(--brd);border-radius:.4rem;
+  padding:.8rem 1rem;overflow-x:auto;font-family:var(--mono);font-size:.78rem;
+  line-height:1.7;margin:.75rem 0;color:#c9d1d9}
+pre .kw{color:#ff7b72}pre .cm{color:#5a7299;font-style:italic}
+pre .fn{color:#d2a8ff}pre .str{color:#a5d6ff}pre .num{color:#79c0ff}
+
+/* MC options */
+.opts{list-style:none;display:flex;flex-direction:column;gap:.4rem;margin-top:.25rem}
+.opts li{padding:.55rem .85rem;border:1px solid var(--brd);border-radius:.35rem;
+  cursor:pointer;font-size:.88rem;line-height:1.5;
+  transition:border-color .15s,background .15s}
+.opts li:hover:not(.lkd){border-color:var(--acc);background:#0d1f38}
+.opts li.cor{border-color:var(--grn)!important;background:#071a0e!important}
+.opts li.wrg{border-color:var(--red)!important;background:#1c0505!important}
+.opts li.rcor{border-color:var(--grn)!important;background:#071a0e!important;opacity:.55}
+.mc-fb{margin-top:.6rem;font-size:.83rem;padding:.45rem .75rem;border-radius:.3rem;display:none}
+.mc-fb.ok{background:#071a0e;border:1px solid var(--grn);color:var(--grn)}
+.mc-fb.bad{background:#1c0505;border:1px solid var(--red);color:var(--red)}
+
+/* WR */
+textarea{width:100%;min-height:100px;background:var(--sur2);border:1px solid var(--brd);
+  border-radius:.4rem;padding:.65rem .85rem;font-family:var(--mono);font-size:.82rem;
+  color:var(--txt);resize:vertical;line-height:1.65;outline:none;
+  transition:border-color .15s}
+textarea:focus{border-color:var(--acc)}
+.wr-btns{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+.kw-result{margin-top:.7rem;font-size:.82rem;display:none}
+.kw-tally{font-family:var(--mono);font-size:.8rem;margin-bottom:.4rem}
+.kw-list{display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem}
+.kw-hit{background:var(--hit);color:var(--hit-t);font-family:var(--mono);
+  font-size:.7rem;padding:.1rem .45rem;border-radius:.25rem}
+.kw-mis{background:var(--mis);color:var(--mis-t);font-family:var(--mono);
+  font-size:.7rem;padding:.1rem .45rem;border-radius:.25rem}
+.rough{font-size:.73rem;color:var(--mut);margin-bottom:.35rem}
+.model-ans{margin-top:.65rem;background:var(--sur2);border:1px solid var(--brd);
+  border-radius:.35rem;padding:.7rem .9rem;font-size:.85rem;line-height:1.7;display:none}
+.model-ans .label{font-family:var(--mono);font-size:.65rem;color:var(--mut);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.self-rate{display:flex;gap:.5rem;margin-top:.6rem;align-items:center;
+  font-size:.8rem;color:var(--mut)}
+
+/* nav */
+.nav{display:flex;justify-content:space-between;align-items:center;margin-top:.8rem}
+.nav-mid{font-family:var(--mono);font-size:.75rem;color:var(--mut)}
+
+/* results */
+.results{display:none;background:var(--sur);border:1px solid var(--brd);
+  border-radius:.75rem;padding:1.6rem 1.5rem}
+.results h2{font-family:var(--mono);font-size:1.1rem;margin-bottom:1rem}
+.res-row{display:flex;justify-content:space-between;padding:.4rem 0;
+  border-bottom:1px solid var(--brd);font-size:.88rem}
+.res-row:last-child{border-bottom:none}
+.res-lbl{color:var(--mut)}
+.res-val{font-family:var(--mono);font-weight:600}
+.res-val.g{color:var(--grn)}
+.res-val.y{color:var(--l3)}
+.res-val.r{color:var(--red)}
+.ch-breakdown{margin:1rem 0;display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
+.ch-row{background:var(--sur2);border-radius:.3rem;padding:.45rem .65rem;font-size:.78rem}
+.ch-row .cn{color:var(--mut);margin-bottom:.1rem}
+.ch-row .cv{font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<div class="strip"></div>
+<div class="shell">
+
+<!-- ═══════════════ START SCREEN ═══════════════ -->
+<div id="start">
+  <h1>DRILL 0003</h1>
+  <div class="sub">Different Levels of Algorithmic Trading · 20 questions · 7 MC · 13 WR</div>
+
+  <div class="chips" id="chips">
+    <div class="chip on" data-ch="ALL">ALL</div>
+    <div class="chip" data-ch="Strategy Levels">Strategy Levels</div>
+    <div class="chip" data-ch="Edge & Alpha">Edge &amp; Alpha</div>
+    <div class="chip" data-ch="Alpha Decay">Alpha Decay</div>
+    <div class="chip" data-ch="Repo Files">Repo Files</div>
+    <div class="chip" data-ch="Capacity & Infra">Capacity &amp; Infra</div>
+    <div class="chip" data-ch="Latency vs Horizon">Latency vs Horizon</div>
+  </div>
+
+  <div class="opt-row">
+    <div class="tog on" id="shuffleTog">⇄ Shuffle ON</div>
+    <span style="font-size:.78rem;color:var(--mut)">Randomises question order and MC option order</span>
+  </div>
+
+  <button class="btn" id="startBtn">Begin drill →</button>
+</div>
+
+<!-- ═══════════════ DRILL SCREEN ═══════════════ -->
+<div id="drill" style="display:none">
+  <div class="pbar-wrap">
+    <div class="pbar-row"><span id="qnum">Q 1 / 20</span><span id="chname"></span></div>
+    <div class="pbar"><div class="pfill" id="pfill"></div></div>
+  </div>
+  <div class="qcard" id="qcard"></div>
+  <div class="nav">
+    <button class="btn-sm" id="prevBtn">← Prev</button>
+    <span class="nav-mid" id="navMid"></span>
+    <button class="btn-sm" id="nextBtn">Next →</button>
+  </div>
+</div>
+
+<!-- ═══════════════ RESULTS SCREEN ═══════════════ -->
+<div class="results" id="results">
+  <h2>Results</h2>
+  <div class="res-row"><span class="res-lbl">MC score</span><span class="res-val" id="mcScore"></span></div>
+  <div class="res-row"><span class="res-lbl">Written recall — "knew it"</span><span class="res-val" id="wrScore"></span></div>
+  <div class="res-row"><span class="res-lbl">Written recall — "needs review"</span><span class="res-val" id="wrMiss"></span></div>
+  <div class="res-row"><span class="res-lbl">Unattempted</span><span class="res-val" id="wrSkip"></span></div>
+
+  <div style="margin-top:.75rem;font-family:var(--mono);font-size:.72rem;
+    color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-bottom:.4rem">By channel</div>
+  <div class="ch-breakdown" id="chBreakdown"></div>
+
+  <div style="display:flex;gap:.6rem;margin-top:1.1rem;flex-wrap:wrap">
+    <button class="btn-sm y" id="reviewBtn">Review missed →</button>
+    <button class="btn-sm" id="restartBtn">Restart</button>
+  </div>
+</div>
+
+</div><!-- .shell -->
+
+<script>
+/* ══════════════════════════════════════════════
+   QUESTION BANK
+══════════════════════════════════════════════ */
+const BANK = [
+
+/* ── STRATEGY LEVELS ── */
+{id:1,ch:"Strategy Levels",type:"mc",
+stem:"Which level label best describes <code>walkforward_sim.py</code>? It trains a GBM on daily OHLCV features, retrains on a rolling window, and makes one rebalancing decision per trading day.",
+opts:[
+  {t:"L0 — Daily quant. One prediction per day; edge comes from a better ML model and walk-forward discipline.",cor:true,w:"Correct. Daily cadence + ML signal = L0. Edge is model quality, not latency."},
+  {t:"L2 — Market making. It posts bids and asks using the GBM's predicted fair value each day.",cor:false,w:"Market making posts both sides continuously at per-tick speed. walkforward_sim.py selects a basket and holds — no quoting."},
+  {t:"L3 — Low-latency arb. The rolling retrain keeps the model fresh enough to exploit millisecond mispricings.",cor:false,w:"L3 requires sub-millisecond infrastructure. Rolling retrain is a methodology improvement, not an infrastructure upgrade."},
+  {t:"L1 — Intraday stat-arb. The walk-forward splits carve intraday windows for mean-reversion trades.",cor:false,w:"Walk-forward splits are an OOS evaluation methodology, not intraday trading. The strategy still operates at daily frequency."},
+]},
+
+{id:2,ch:"Strategy Levels",type:"mc",
+stem:"Place these in ascending level order (L0 → L5):\n(A) <code>fpga/market_maker.vhd</code>&nbsp;&nbsp;(B) <code>paper_trading_sim.py</code>&nbsp;&nbsp;(C) <code>gradient_boosting/main.cpp</code>",
+opts:[
+  {t:"B → C → A",cor:true,w:"paper_trading_sim (L0 daily) → main.cpp (L3 infra, L0 signal) → market_maker.vhd (L5 FPGA). Infrastructure level, not signal level, places C above B."},
+  {t:"A → C → B",cor:false,w:"This is descending order. A (FPGA) is the fastest; B (Python daily) is the slowest. Order is reversed."},
+  {t:"C → B → A",cor:false,w:"main.cpp has faster infrastructure than paper_trading_sim.py, so C > B is correct — but A (FPGA) is faster than C (C++ CPU), so A should be last."},
+  {t:"B → A → C",cor:false,w:"FPGA (A) sits above CPU C++ (C) in the latency hierarchy. A and C are swapped here."},
+]},
+
+{id:3,ch:"Strategy Levels",type:"wr",
+stem:"Name all six strategy levels (L0–L5), their typical decision cadence, and one representative repo file or folder for each.",
+concepts:[
+  {name:"L0 daily / quant",terms:["l0","daily","once per day"]},
+  {name:"L1 intraday stat-arb",terms:["l1","intraday","stat-arb","stat arb","hours"]},
+  {name:"L2 market making",terms:["l2","market mak","market-mak"]},
+  {name:"L3 low-latency / arb",terms:["l3","low-latency","millisecond","arbitrage"]},
+  {name:"L4 ultra-low-latency CPU",terms:["l4","dpdk","kernel bypass","microsecond"]},
+  {name:"L5 FPGA / ASIC",terms:["l5","fpga","nanosecond","vhdl"]},
+],
+ans:`L0 — Daily quant: one decision per day (close of market). Rep: paper_trading_sim.py, walkforward_sim.py, predict_next.py.
+L1 — Intraday stat-arb: minutes to hours during market hours. Rep: solutions/03_stat_arb_risk/ (pairs, CUSUM, OTR) — daily version of L1 logic.
+L2 — Market making: per tick (microseconds to milliseconds, continuous). Rep: exercises/01_order_book/, exercises/02_market_maker/, fpga/market_maker.vhd (strategy logic).
+L3 — Low-latency / arbitrage: sub-millisecond (100 µs – 1 ms). Rep: gradient_boosting/main.cpp (infrastructure), exercises/04–08 (building blocks).
+L4 — Ultra-low-latency CPU: 1–100 µs tick-to-trade via kernel bypass (DPDK, SCHED_FIFO, CPU pinning). No production repo file yet — the building blocks are exercises 06–08.
+L5 — FPGA/ASIC: 4–50 ns deterministic pipeline. Rep: fpga/linear_regression_predictor.vhd, fpga/moving_average_trader.vhd, fpga/market_maker.vhd.`
+},
+
+{id:4,ch:"Strategy Levels",type:"wr",
+stem:"A hedge fund labels itself 'HFT'. Regulators and academics disagree on the exact definition. Using lesson 0031's framework, what is the defining property — and does <code>paper_trading_sim.py</code> qualify?",
+concepts:[
+  {name:"holding period < 1 day",terms:["holding period","intraday","sub-day","overnight"]},
+  {name:"latency sensitive",terms:["latency","speed","fast","millisecond"]},
+  {name:"high order rate",terms:["order rate","many orders","high-frequency","order per"]},
+  {name:"paper_trading_sim does not qualify",terms:["does not qualify","not hft","daily","not qualify","l0"]},
+],
+ans:`HFT strictest definition: sub-day holding periods, latency-sensitive execution, high order rate (many orders per second). paper_trading_sim.py does NOT qualify: it rebalances once per day at close, is not latency-sensitive (orders submit after market hours), and generates O(1) orders per day. It is a daily quant (L0) strategy. The repo is named 'HFT_practice' but only its VHDL and C++ exercises are genuinely HFT-style.`
+},
+
+/* ── EDGE & ALPHA ── */
+{id:5,ch:"Edge & Alpha",type:"mc",
+stem:"At L5 (FPGA market making), the strategy logic is often simpler than at L0. Why does simpler logic still generate higher Sharpe ratios?",
+opts:[
+  {t:"L5 takes fewer positions so variance is lower, mechanically raising Sharpe without needing a better model.",cor:false,w:"Fewer positions raises per-position variance, not lowers it. High Sharpe at L5 comes from many small independent bets, not fewer."},
+  {t:"L5 makes thousands of uncorrelated bets per second; the central limit theorem averages returns into a high Sharpe even with a thin per-trade edge.",cor:true,w:"Correct. Many small, nearly-independent bets → high information ratio. The edge per trade is tiny; the repetition is the strategy."},
+  {t:"L5 uses fixed-point arithmetic which avoids floating-point rounding losses that inflate L0 Sharpe artificially.",cor:false,w:"Fixed-point vs float is an implementation detail. It does not affect the statistical Sharpe of the strategy."},
+  {t:"L5 strategies run with larger position sizes, so returns are higher in absolute dollar terms, improving Sharpe.",cor:false,w:"Sharpe is dimensionless (return / volatility). Larger position sizes scale both numerator and denominator equally and don't change Sharpe."},
+]},
+
+{id:6,ch:"Edge & Alpha",type:"wr",
+stem:"What is <em>adverse selection</em> in market making? How does <code>fpga/market_maker.vhd</code> fail to defend against it, and what would exercise 09 (the proposed inventory-aware VHDL) add?",
+concepts:[
+  {name:"adverse selection definition",terms:["adverse select","informed","better information","pick off","stale quote"]},
+  {name:"market_maker.vhd is inventory-blind",terms:["inventory","symmetric","blind","no skew","does not skew","inventory-blind"]},
+  {name:"reservation price / skew",terms:["reservation","skew","avellaneda","skew quote","q*gamma","gamma*sigma"]},
+  {name:"exercise 09 adds skew",terms:["exercise 09","inv_market_maker","09","skew formula","fixed-point"]},
+],
+ans:`Adverse selection: an informed counterparty (who knows the price is about to move against you) deliberately fills your stale quote right before that move, leaving you with a losing inventory position. Defense is to cancel and re-post quotes when the market shifts, or skew quotes to avoid accumulating inventory.
+
+fpga/market_maker.vhd always quotes symmetrically around mid_price — no inventory input. If a large seller repeatedly hits your bids, you accumulate a long position you cannot automatically hedge; every new quote still centers on mid and offers the same spread, accelerating your losses.
+
+Exercise 09 (inv_market_maker.vhd) adds the Avellaneda-Stoikov reservation price: r = mid − q·γ·σ²·T, shifting the quote center in the direction that reduces inventory (sell-skew when long, buy-skew when short). This is the standard defense against inventory risk from adverse selection.`
+},
+
+{id:7,ch:"Edge & Alpha",type:"wr",
+stem:"What is the <em>edge</em> at L0 (daily quant)? Name two specific things in this repo that, if done badly, would destroy that edge even with a mathematically correct model.",
+concepts:[
+  {name:"model quality / prediction",terms:["model","predict","feature","gbm","signal"]},
+  {name:"look-ahead bias",terms:["look-ahead","lookahead","future data","leakage","shift(-1)","shift("]},
+  {name:"overfitting",terms:["overfit","in-sample","train on full","memoriz"]},
+],
+ans:`L0 edge: a better prediction model than competitors — better features, less bias, better generalization.
+
+Two repo-specific ways to destroy it despite a mathematically correct model:
+1. Look-ahead bias: using future data in feature engineering (e.g. fwd_ret_1d via shift(-1) without using it only as a label) or training on the full dataset then testing in-sample. paper_trading_sim.py uses shift(-1) to create fwd_ret_1d as the label — correct; it's only the target, not a feature. A subtle bug would be if any feature referenced future values.
+2. Overfitting: GradientBoostingRegressor(random_state=42) with no max_depth or min_samples cap will happily memorize training data. Without walk-forward OOS evaluation (walkforward_sim.py), you cannot distinguish real alpha from memorized noise.`
+},
+
+{id:8,ch:"Edge & Alpha",type:"wr",
+stem:"L2 market making earns the bid-ask spread. Name the two costs that eat into that gross spread, and explain which one <code>fpga/market_maker.vhd</code> currently ignores entirely.",
+concepts:[
+  {name:"adverse selection",terms:["adverse select","informed","stale","pick off"]},
+  {name:"inventory risk",terms:["inventory","position","accumulate","hedge","skew"]},
+  {name:"market_maker.vhd ignores inventory",terms:["ignore","blind","no inventory","symmetric","does not track"]},
+],
+ans:`Two costs for an L2 market maker:
+1. Adverse selection: informed traders fill your quotes right before a move, leaving you holding a losing position.
+2. Inventory risk: even without informed traders, random order imbalance builds up a directional position. Holding inventory costs capital and creates directional risk if the price moves.
+
+fpga/market_maker.vhd has no inventory port/signal and no skew logic — it ignores inventory risk entirely. The bid and ask are always symmetric around mid_price, regardless of how much inventory the MM has accumulated. Adverse selection is partially mitigated by low latency (fast cancel before the market moves), but the current VHDL has no cancel logic either.`
+},
+
+/* ── ALPHA DECAY ── */
+{id:9,ch:"Alpha Decay",type:"mc",
+stem:"A strategy returns 12% annualized alpha in year 1, 7% in year 2, 3% in year 3 — with no changes to the code or model. What phenomenon best explains this pattern at L0?",
+opts:[
+  {t:"Volatility drag: higher portfolio variance is compounding away arithmetic return faster each year.",cor:false,w:"Volatility drag explains why CAGR < APR for one portfolio. It doesn't explain why alpha itself shrinks across the industry year-over-year."},
+  {t:"Alpha decay from crowding: more funds independently discovered the same signal and now trade it simultaneously, pushing prices in the predicted direction before you can fill.",cor:true,w:"Correct. Crowding compresses the edge as competing capital absorbs the mispricing before you can. Classic L0 alpha decay."},
+  {t:"Model overfitting: the GBM memorised the training data and its in-sample alpha was never real; the decay is just mean reversion to zero.",cor:false,w:"Overfitting causes an immediate OOS gap (year 1 is already disappointing). Gradual linear decay over 3 years of live trading suggests crowding, not a one-time overfitting discovery."},
+  {t:"Feature staleness: the technical features (MA gap, RSI) stopped being predictive because market microstructure changed structurally.",cor:false,w:"Feature staleness is plausible but distinct from crowding. It would cause an abrupt regime shift, not a smooth linear decay. The question describes crowding's characteristic signature."},
+]},
+
+{id:10,ch:"Alpha Decay",type:"wr",
+stem:"Explain the <em>crowding mechanism</em> at L0: step by step, how does a signal that was profitable in 2019 become unprofitable by 2022 as more funds discover it?",
+concepts:[
+  {name:"multiple funds discover same signal",terms:["multiple fund","other fund","discover","same signal","independent"]},
+  {name:"they trade simultaneously",terms:["simultaneously","same day","same time","same stocks","same direction"]},
+  {name:"price impact / push price",terms:["price impact","push","price move","price toward","price up","pre-trade"]},
+  {name:"edge compresses",terms:["compress","compress","shrink","smaller","less alpha","decay","weaker"]},
+],
+ans:`Step-by-step crowding mechanism:
+1. In 2019, fund A publishes or uses a momentum/ML signal. It earns 12% alpha because few others are trading it.
+2. Academic papers (or leakage from researcher turnover) reveal the signal type. By 2020, 50 other funds run variants of it.
+3. On signal-entry days, all 50 funds buy the same predicted stocks at the same time. This demand pushes prices up before smaller funds can fill their orders.
+4. The stock price now partially reflects the predicted move before you enter. Your expected return shrinks from the signal value toward zero as competition absorbs the mispricing.
+5. By 2022, 200 funds run it. The price moves so aggressively on entry that transaction costs exceed the residual edge — the strategy loses money net of costs even though the raw statistical signal still exists.`
+},
+
+{id:11,ch:"Alpha Decay",type:"wr",
+stem:"Why do L5 (FPGA/ASIC) edges decay faster than L0 (daily quant) edges — even though L5 strategies are more complex and expensive to build?",
+concepts:[
+  {name:"latency is the moat",terms:["latency","speed","faster","moat","infra"]},
+  {name:"latency moat erodes as competitors match",terms:["competitor","match","copy","hardware","same speed"]},
+  {name:"L0 edge is harder to scale / copy",terms:["hard to scale","scale","capital","model","difficult to copy"]},
+  {name:"signal horizon",terms:["horizon","signal horizon","short","microsecond","nanosecond","narrow"]},
+],
+ans:`L5 edge is entirely latency: "be faster than everyone else at the same venue." This is binary — you're either faster or you're not. A competitor who buys the same FPGA card, co-locates in the same rack, and implements the same threshold logic matches your moat completely. Hardware improvements diffuse across the industry (FPGA vendors sell to everyone; firmware upgrades are deployable in months). Result: the L5 edge compresses as competitors catch up, often within months to 1-2 years.
+
+L0 edge is model quality: better features, better training data, better risk management. This is much harder to copy because: (1) the specific features are non-obvious, (2) crowding only compresses returns gradually — the signal still exists, just with smaller edge, and (3) the strategy can absorb billions in AUM before market impact destroys it, so capacity amplifies survival. A good L0 factor (momentum, quality) can stay profitable for decades even as it compresses from 2% to 0.3% monthly.`
+},
+
+{id:12,ch:"Alpha Decay",type:"mc",
+stem:"A trader argues: 'Adding the Alpha Vantage news sentiment features in this repo will permanently protect our L0 signal from decay.' Why is this claim overstated?",
+opts:[
+  {t:"News sentiment features are not legal to use in trading under SEC regulations, so they introduce compliance risk regardless of their predictive power.",cor:false,w:"News sentiment from financial news is legally usable alt-data. Illegality is not the issue here."},
+  {t:"Any novel signal eventually gets discovered, published, or replicated by competitors, so sentiment alpha will also decay as more funds buy similar news feeds and build similar models.",cor:true,w:"Correct. Alt-data signals are durable longer than pure price signals but still decay. Once a data vendor sells the same feed to 100 funds, the edge compresses."},
+  {t:"Alpha Vantage's sentiment scores use bag-of-words methods, which are definitionally less accurate than BERT-based models used by competing funds.",cor:false,w:"Model accuracy is relevant, but the claim is about permanence. Even a perfect sentiment model experiences crowding once discovered."},
+  {t:"Sentiment signals have higher volatility than price signals, so adding them will raise portfolio variance and actually lower Sharpe.",cor:false,w:"Whether sentiment raises or lowers Sharpe depends on correlation with existing features. The claim being debunked is about permanence, not Sharpe direction."},
+]},
+
+/* ── REPO FILES ── */
+{id:13,ch:"Repo Files",type:"wr",
+stem:"<code>gradient_boosting/main.cpp</code> uses ONNX inference in C++ with no heap allocation on the hot path. What <em>strategy level</em> does its infrastructure belong to, what level does its current <em>signal</em> belong to, and what would need to change to close the gap?",
+concepts:[
+  {name:"infrastructure is L3",terms:["l3","infrastructure","cpp","c++","onnx","no heap","no alloc"]},
+  {name:"signal is L0",terms:["l0","daily","signal","gbm","daily frequency","ohlcv"]},
+  {name:"signal horizon mismatch",terms:["horizon","mismatch","gap","daily signal","latency","sub-ms"]},
+  {name:"what would change",terms:["tick data","real-time","intraday","features","retrain","l3 signal","microstructure"]},
+],
+ans:`Infrastructure level: L3 (fast C++ ONNX inference, no heap on hot path — designed for sub-millisecond execution).
+Signal level: L0 (GBM trained on daily OHLCV features, predicting next-day return).
+
+The mismatch: L3 infrastructure executes in microseconds, but the signal's horizon is one trading day. You can't earn a sub-millisecond latency edge with a signal that resets at end-of-day — the speed advantage is wasted.
+
+To close the gap (move to a genuine L3 signal): switch to real-time tick data (LOB snapshots, trade prints), replace OHLCV features with microstructure features (order imbalance, spread, trade flow), shorten the prediction horizon to seconds or milliseconds, and retrain continuously on a rolling window of ticks. The C++ ONNX runtime stays — the model and features change entirely.`
+},
+
+{id:14,ch:"Repo Files",type:"wr",
+stem:"List the three VHDL files in <code>fpga/</code>, state which strategy <em>type</em> (L0–L5) each implements at the logic level, and identify which L5 production gap each has.",
+concepts:[
+  {name:"linear_regression_predictor.vhd",terms:["linear_regress","predictor.vhd","linear regression predictor"]},
+  {name:"moving_average_trader.vhd",terms:["moving_average","ma_trader","moving average trader"]},
+  {name:"market_maker.vhd",terms:["market_maker.vhd","market maker.vhd"]},
+  {name:"inventory / adverse selection gap",terms:["inventory","adverse","skew","symmetric","no inventory"]},
+  {name:"signal horizon / daily gap",terms:["daily","horizon","signal","ohlcv","l0 signal","daily signal"]},
+],
+ans:`1. fpga/linear_regression_predictor.vhd — 2-stage multiply-accumulate pipeline computing w₀+w₁f₁+w₂f₂+w₃f₃. Strategy type: L0 (linear regression on pre-computed features). L5 gap: features must be pre-loaded as constants; no real-time feature computation from tick data. Signal horizon is daily.
+
+2. fpga/moving_average_trader.vhd — shift-register MA + threshold crossover strategy. Strategy type: L1/L2 (intraday momentum rule). L5 gap: MA-crossover signals have well-known alpha decay and no adverse-selection defense. Practical only if fast enough to act before the trend is obvious to all participants.
+
+3. fpga/market_maker.vhd — mid-price + fixed spread quoting. Strategy type: L2 (market making). L5 gap: no inventory tracking, no skew logic, no adverse-selection defense (proposed fix: exercise 09 inv_market_maker.vhd with Avellaneda-Stoikov reservation price).`
+},
+
+{id:15,ch:"Repo Files",type:"mc",
+stem:"The exercise at <code>solutions/03_stat_arb_risk/</code> implements OLS hedge ratio, CUSUM, and walkforward splits. It runs on daily bars. What mismatch does this create, and what would be required to make it genuinely L1?",
+opts:[
+  {t:"It is already L1 because it uses a statistical model (OLS) and is market-neutral — those are the defining L1 characteristics.",cor:false,w:"Market neutrality and statistical models are L1 strategy ingredients, but the level is defined by decision frequency. Daily bars = L0 frequency, regardless of strategy type."},
+  {t:"The strategy logic is L1 (stat-arb pairs), but the frequency is L0 (daily bars). Moving to L1 requires intraday tick data, direct market access, and sub-second pair spread monitoring.",cor:true,w:"Correct. The algorithm is L1 in type, but daily bars create L0 frequency. Genuine L1 needs intraday quotes, DMA connectivity, and real-time spread tracking."},
+  {t:"The strategy is L3 because OLS is solved with lstsq, a numerical linear algebra routine that runs in microseconds.",cor:false,w:"Computation speed of the math doesn't determine strategy level — decision cadence does. lstsq is sub-millisecond but runs once per day."},
+  {t:"The exercise is L2 because it monitors the spread between two instruments and immediately arbs any deviation above a threshold.",cor:false,w:"L2 is market making (posting bid/ask simultaneously). This is stat-arb (directional spread trade on reversion). Different strategy type, and still at L0 frequency."},
+]},
+
+/* ── CAPACITY & INFRA ── */
+{id:16,ch:"Capacity & Infra",type:"mc",
+stem:"Two strategies both target 15% net annual return. Strategy A: L0 daily quant, Sharpe 0.9, $1B AUM. Strategy B: L5 FPGA market maker, Sharpe 22, $20M AUM. Which is harder to scale, and why?",
+opts:[
+  {t:"Strategy A is harder to scale because its low Sharpe means high volatility, which requires more capital as a cushion against drawdowns.",cor:false,w:"Capital cushion scales with AUM proportionally. Strategy A already runs $1B — it's clearly scalable. The Sharpe describes risk efficiency, not scalability."},
+  {t:"Strategy B is harder to scale: the edge is a market-impact-sensitive microstructure inefficiency that disappears as position sizes grow.",cor:true,w:"Correct. Market making Sharpe derives from many small trades. Doubling AUM means doubling order sizes, which moves prices against you and destroys the edge. L5 capacity is fundamentally limited by market depth."},
+  {t:"Strategy A is harder to scale because it needs more compute (larger GBM models, more features) as AUM grows.",cor:false,w:"Compute cost doesn't scale with AUM for a daily quant. You can run the same GBM on $100M or $10B — the strategy itself scales."},
+  {t:"Strategy B is harder to scale because FPGA hardware is expensive and there are only a limited number of co-location slots available at exchanges.",cor:false,w:"Hardware and colocation cost are real constraints, but the binding limit on L5 capacity is market impact (strategy-level), not physical rack space."},
+]},
+
+{id:17,ch:"Capacity & Infra",type:"wr",
+stem:"You have $500K and a 3-person team. Sketch the infrastructure cost difference between building an L0 strategy (like this repo's Python core) vs an L2 strategy (like the repo's market maker exercises). Which one should you start with and why?",
+concepts:[
+  {name:"L0 low infra cost",terms:["cloud","vm","laptop","free","cheap","yfinance","python","low cost"]},
+  {name:"L2 high infra cost",terms:["colo","colocation","co-location","dma","real-time","l2 data","market data","direct market"]},
+  {name:"L0 recommended first",terms:["l0 first","start with l0","daily first","prove","track record","recommend"]},
+],
+ans:`L0 infrastructure: a cloud VM ($50–200/month), free data (yfinance), and Python. Total infra cost: < $5K/year. $500K almost entirely allocated to trading capital.
+
+L2 infrastructure: co-location ($2–10K/month), direct market access (DMA) fees ($1–5K/month), L2 market data subscription (full order book: $1–5K/month), low-latency server hardware ($20–50K upfront), and engineering time to build a real-time execution system. Total: $50–150K/year minimum — eating 10–30% of capital just in fixed costs before a single trade.
+
+Recommendation: L0 first. With $500K, L2 infra costs would consume a dangerous fraction of capital without a proven edge. Build L0, prove you generate consistent OOS alpha (use walkforward_sim.py discipline), get a track record, raise more capital, then invest in L2 infrastructure. Many successful market-making firms started as L0/L1 quant shops.`
+},
+
+{id:18,ch:"Capacity & Infra",type:"wr",
+stem:"Explain the tradeoff between Sharpe ratio and <em>capacity</em> across the strategy levels. Why do L5 strategies have higher Sharpe but lower capacity, while L0 strategies have lower Sharpe but higher capacity?",
+concepts:[
+  {name:"L5 high Sharpe",terms:["l5","high sharpe","many bets","uncorrelated","thousands"]},
+  {name:"L5 low capacity / market impact",terms:["l5","capacity","market impact","small","limited","destroys edge","depth"]},
+  {name:"L0 lower Sharpe",terms:["l0","lower sharpe","fewer bets","daily","volatility","drawdown"]},
+  {name:"L0 high capacity / scalable",terms:["l0","scalable","billion","large","absorb","capital"]},
+],
+ans:`L5 (FPGA market making):
+- High Sharpe because: thousands of small, mostly uncorrelated bets per day → by central limit theorem, variance of sum is much smaller than sum of variances → high return per unit of risk.
+- Low capacity because: the edge is micro-structural (spread capture from uninformed flow). As order sizes grow, each trade has bigger market impact — moving prices against you. Double the bet size → halve the spread you capture. The edge compresses to zero well below $100M.
+
+L0 (daily quant):
+- Lower Sharpe because: one bet per day per ticker → each bet's P&L has high individual variance → portfolio volatility is higher relative to expected return.
+- High capacity because: daily momentum and ML signals apply to thousands of stocks across all market hours. The price impact of a $1B fund trading 200 names across a full day is spread thin across enormous daily volume. The edge degrades slowly, and capacity can reach billions before crowding destroys it.`
+},
+
+/* ── LATENCY vs HORIZON ── */
+{id:19,ch:"Latency vs Horizon",type:"mc",
+stem:"A strategy's <em>signal horizon</em> is 200 milliseconds. Its current tick-to-trade latency is 150 ms. A hardware upgrade reduces latency to 300 ms. What happens to profitability?",
+opts:[
+  {t:"Profitability increases because lower latency always beats higher latency in markets.",cor:false,w:"300 ms is HIGHER (worse) latency than 150 ms. The question describes a hardware degradation, not an upgrade."},
+  {t:"Profitability collapses: latency (300 ms) now exceeds signal horizon (200 ms), so the strategy is always acting on a signal that has already expired.",cor:true,w:"Correct. The rule is latency < signal horizon. Once latency > horizon, competitors who are faster have already traded away the mispricing before your order arrives."},
+  {t:"Profitability is unchanged: signal horizon (200 ms) and latency (150 ms or 300 ms) are measured on different timescales and don't interact.",cor:false,w:"Signal horizon and latency absolutely interact. The signal horizon is how long the mispricing persists; latency is how long before you can act. If latency > horizon, you're always too late."},
+  {t:"Profitability increases: higher latency means the strategy waits longer before submitting, allowing the signal to strengthen before acting.",cor:false,w:"Latency is not a deliberate wait — it's the unavoidable delay between receiving market data and having your order arrive at the exchange. Slower latency means arriving after the mispricing is gone."},
+]},
+
+{id:20,ch:"Latency vs Horizon",type:"wr",
+stem:"Distinguish <em>latency</em> from <em>signal horizon</em>. For each of the three repo examples below, estimate whether the current infrastructure's latency is well-matched to its signal horizon:\n\n(A) paper_trading_sim.py — daily GBM predictions submitted via robin-stocks end-of-day\n(B) gradient_boosting/main.cpp — ONNX inference in C++ (~1 ms), same daily GBM model\n(C) fpga/market_maker.vhd — 4-cycle pipeline at 250 MHz (~16 ns), fixed spread quoting",
+concepts:[
+  {name:"latency definition",terms:["tick-to-trade","tick to trade","time from","latency is","market data to order"]},
+  {name:"signal horizon definition",terms:["horizon","how long","prediction valid","mispricing","signal lasts","persists"]},
+  {name:"paper_trading_sim.py well matched",terms:["well-matched","well matched","paper_trading","daily","eod","end-of-day"]},
+  {name:"main.cpp infrastructure mismatched",terms:["mismatch","main.cpp","l3","daily","overkill","overbuilt","wasted"]},
+  {name:"market_maker.vhd horizon very short",terms:["market_maker","nanosecond","microsecond","very short","horizon short"]},
+],
+ans:`Latency: the elapsed time from a market data event arriving to your order reaching the exchange matching engine.
+Signal horizon: how long a mispricing or predictive signal remains valid (i.e., how long after you observe it can you still profitably act on it?).
+
+Rule: you must have latency < signal horizon to capture the edge.
+
+(A) paper_trading_sim.py: latency is irrelevant (orders submit at end of day, no time-sensitive competition). Signal horizon is ~1 trading day (next-day return prediction). Infrastructure latency (seconds at EOD via robin-stocks) is vastly below signal horizon. Well-matched — in fact, overbuilt in the opposite direction (could use an even slower order method and not care).
+
+(B) gradient_boosting/main.cpp: infrastructure latency is ~1 ms (ONNX C++ inference). But the signal is the same daily GBM — horizon is 1 trading day. You could wait 86,399 seconds after the market close and still fill the next-day position on time. The 1 ms latency is massively over-engineered for this signal. Mismatch: L3 infra carrying an L0 signal.
+
+(C) fpga/market_maker.vhd: latency is ~16 ns (4 cycles × 4 ns at 250 MHz). Market-making spread opportunities have a horizon measured in microseconds to milliseconds at best before the market reprices. 16 ns latency is well within that window — assuming wire-rate feed parsing is also implemented. Well-matched in speed, though the strategy has the inventory-blindness gap noted separately.`
+},
+];
+
+/* ══════════════════════════════════════════════
+   ENGINE
+══════════════════════════════════════════════ */
+const CHANNELS = ["Strategy Levels","Edge & Alpha","Alpha Decay","Repo Files","Capacity & Infra","Latency vs Horizon"];
+let activeChannels = new Set(CHANNELS);
+let doShuffle = true;
+let queue = [];
+let pos = 0;
+let states = {}; // id -> {mcCorrect?, wrText, wrKnew?, wrShown}
+let reviewMode = false;
+
+function fisherYates(arr){
+  for(let i=arr.length-1;i>0;i--){const j=0|Math.random()*(i+1);[arr[i],arr[j]]=[arr[j],arr[i]];}
+  return arr;
+}
+function buildQueue(reviewIds){
+  let pool = BANK.filter(q => activeChannels.has(q.ch));
+  if(reviewIds){
+    pool = pool.filter(q => reviewIds.has(q.id));
+  }
+  queue = doShuffle ? fisherYates([...pool]) : [...pool];
+  pos = 0;
+  states = {};
+}
+
+/* chips */
+document.querySelectorAll('.chip[data-ch]').forEach(chip=>{
+  chip.addEventListener('click',()=>{
+    const ch = chip.dataset.ch;
+    if(ch==="ALL"){
+      activeChannels = new Set(CHANNELS);
+      document.querySelectorAll('.chip:not([data-ch="ALL"])').forEach(c=>c.classList.remove('on'));
+      chip.classList.add('on');
+    } else {
+      document.querySelector('.chip[data-ch="ALL"]').classList.remove('on');
+      if(chip.classList.contains('on')){
+        chip.classList.remove('on');
+        activeChannels.delete(ch);
+        if(activeChannels.size===0){activeChannels=new Set(CHANNELS);
+          document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+          document.querySelector('.chip[data-ch="ALL"]').classList.add('on');}
+      } else {
+        chip.classList.add('on');
+        activeChannels.add(ch);
+      }
+    }
+  });
+});
+
+const shuffleTog = document.getElementById('shuffleTog');
+shuffleTog.addEventListener('click',()=>{
+  doShuffle = !doShuffle;
+  shuffleTog.textContent = doShuffle ? '⇄ Shuffle ON' : '⇄ Shuffle OFF';
+  shuffleTog.classList.toggle('on', doShuffle);
+});
+
+document.getElementById('startBtn').addEventListener('click',()=>{
+  buildQueue(null);
+  document.getElementById('start').style.display='none';
+  document.getElementById('drill').style.display='block';
+  renderQ();
+});
+
+document.getElementById('prevBtn').addEventListener('click',()=>{if(pos>0){pos--;renderQ();}});
+document.getElementById('nextBtn').addEventListener('click',()=>{
+  if(pos < queue.length-1){pos++;renderQ();}
+  else {showResults();}
+});
+document.getElementById('reviewBtn').addEventListener('click',()=>{
+  const missed = new Set([
+    ...Object.entries(states)
+      .filter(([,s])=>(s.mcCorrect===false)||(s.wrKnew===false))
+      .map(([id])=>Number(id))
+  ]);
+  if(missed.size===0){alert('Nothing to review — all correct!');return;}
+  reviewMode=true;
+  buildQueue(missed);
+  document.getElementById('results').style.display='none';
+  document.getElementById('drill').style.display='block';
+  renderQ();
+});
+document.getElementById('restartBtn').addEventListener('click',()=>{
+  reviewMode=false;
+  document.getElementById('results').style.display='none';
+  document.getElementById('start').style.display='block';
+});
+
+function updateBar(){
+  const pct=((pos+1)/queue.length*100).toFixed(1);
+  document.getElementById('pfill').style.width=pct+'%';
+  document.getElementById('qnum').textContent=`Q ${pos+1} / ${queue.length}`;
+  document.getElementById('chname').textContent=queue[pos].ch;
+  document.getElementById('navMid').textContent='';
+  document.getElementById('prevBtn').disabled=(pos===0);
+  document.getElementById('nextBtn').textContent=(pos===queue.length-1)?'Finish →':'Next →';
+}
+
+function renderQ(){
+  updateBar();
+  const q = queue[pos];
+  const s = states[q.id] || (states[q.id]={});
+  const card = document.getElementById('qcard');
+
+  const chColor = {
+    "Strategy Levels":"var(--l1)","Edge & Alpha":"var(--l2)",
+    "Alpha Decay":"var(--l3)","Repo Files":"var(--l4)",
+    "Capacity & Infra":"var(--l5)","Latency vs Horizon":"#c084fc"
+  }[q.ch] || "var(--mut)";
+
+  let html = `<div class="qtags">
+    <span class="qtag ch" style="border-color:${chColor};color:${chColor}">${q.ch}</span>
+    <span class="qtag ${q.type}">${q.type==='mc'?'Multiple Choice':'Written Recall'}</span>
+  </div>
+  <div class="qstem">${q.stem}</div>`;
+
+  if(q.type==='mc'){
+    html += `<ul class="opts" id="opts">`;
+    const shuffled = doShuffle ? fisherYates([...q.opts]) : [...q.opts];
+    shuffled.forEach((o,i)=>{
+      let cls = '';
+      if(s.mcCorrect !== undefined){
+        if(o.cor) cls = s.mcChosen===i ? 'cor' : 'rcor';
+        else if(s.mcChosen===i) cls = 'wrg';
+        cls += ' lkd';
+      }
+      html += `<li data-i="${i}" data-cor="${o.cor}" data-why="${o.w}" class="${cls}">${o.t}</li>`;
+    });
+    html += `</ul><div class="mc-fb" id="mcfb">${s.mcFb||''}</div>`;
+    // store shuffled order ref
+    card.innerHTML = html;
+    card.dataset.shuffled = JSON.stringify(shuffled.map(o=>o.cor));
+    if(s.mcCorrect!==undefined){
+      const fb=document.getElementById('mcfb');
+      fb.style.display='block';
+      fb.className='mc-fb '+(s.mcCorrect?'ok':'bad');
+    }
+    document.querySelectorAll('#opts li:not(.lkd)').forEach(li=>{
+      li.addEventListener('click',()=>{
+        const cor = li.dataset.cor==='true';
+        s.mcCorrect = cor;
+        s.mcChosen = Number(li.dataset.i);
+        s.mcFb = (cor?'✓ Correct. ':'✗ Not quite. ') + li.dataset.why;
+        const fb=document.getElementById('mcfb');
+        fb.style.display='block'; fb.className='mc-fb '+(cor?'ok':'bad');
+        fb.textContent=s.mcFb;
+        document.querySelectorAll('#opts li').forEach(el=>{
+          el.classList.add('lkd'); el.style.cursor='default';
+          if(el.dataset.cor==='true') el.classList.add(el===li?'cor':'rcor');
+          else if(el===li) el.classList.add('wrg');
+        });
+      });
+    });
+  } else {
+    // written recall
+    html += `<div class="rough">⚠ Keyword check is rough — always self-judge against the model answer.</div>
+    <textarea id="wrtxt" placeholder="Type your answer here…">${s.wrText||''}</textarea>
+    <div class="wr-btns">
+      <button class="btn-sm" id="checkBtn">Check keywords</button>
+      <button class="btn-sm y" id="showBtn">Show answer</button>
+    </div>
+    <div class="kw-result" id="kwRes"></div>
+    <div class="model-ans" id="modAns">
+      <div class="label">Model answer</div>
+      <div id="modTxt"></div>
+      <div class="self-rate">Rate yourself:
+        <button class="btn-sm g" id="knewBtn">✓ Knew it</button>
+        <button class="btn-sm r" id="missBtn">✗ Needs review</button>
+      </div>
+    </div>`;
+    card.innerHTML = html;
+    const wrtxt = document.getElementById('wrtxt');
+    wrtxt.addEventListener('input',()=>{ s.wrText=wrtxt.value; });
+
+    document.getElementById('checkBtn').addEventListener('click',()=>{
+      const text=(wrtxt.value||'').toLowerCase();
+      const hits=q.concepts.map(c=>({c,hit:c.terms.some(t=>text.includes(t.toLowerCase()))}));
+      const got=hits.filter(h=>h.hit).length;
+      const kwRes=document.getElementById('kwRes');
+      kwRes.style.display='block';
+      kwRes.innerHTML=`<div class="kw-tally">${got} / ${q.concepts.length} concepts detected</div>
+        <div class="kw-list">${hits.map(h=>`<span class="${h.hit?'kw-hit':'kw-mis'}">${h.c.name}</span>`).join('')}</div>`;
+    });
+
+    const showBtn=document.getElementById('showBtn');
+    const modAns=document.getElementById('modAns');
+    const modTxt=document.getElementById('modTxt');
+    showBtn.addEventListener('click',()=>{
+      s.wrShown=true;
+      modAns.style.display='block';
+      modTxt.innerHTML=q.ans.replace(/\n/g,'<br>');
+    });
+    if(s.wrShown){ modAns.style.display='block'; modTxt.innerHTML=q.ans.replace(/\n/g,'<br>'); }
+    if(s.wrKnew!==undefined){
+      document.getElementById('knewBtn').style.opacity=s.wrKnew?'1':'0.4';
+      document.getElementById('missBtn').style.opacity=s.wrKnew?'0.4':'1';
+    }
+    document.getElementById('knewBtn').addEventListener('click',()=>{ s.wrKnew=true; renderQ(); });
+    document.getElementById('missBtn').addEventListener('click',()=>{ s.wrKnew=false; renderQ(); });
+  }
+  if(q.type==='mc') return; // already written above
+}
+
+function showResults(){
+  document.getElementById('drill').style.display='none';
+  const res=document.getElementById('results');
+  res.style.display='block';
+
+  let mcTot=0,mcCor=0,wrTot=0,wrKnew=0,wrMiss=0,wrSkip=0;
+  BANK.filter(q=>activeChannels.has(q.ch)).forEach(q=>{
+    const s=states[q.id]||{};
+    if(q.type==='mc'){
+      mcTot++;
+      if(s.mcCorrect===true)mcCor++;
+    } else {
+      wrTot++;
+      if(s.wrKnew===true)wrKnew++;
+      else if(s.wrKnew===false)wrMiss++;
+      else wrSkip++;
+    }
+  });
+
+  const mc=document.getElementById('mcScore');
+  const pct=mcTot?Math.round(mcCor/mcTot*100):0;
+  mc.textContent=`${mcCor}/${mcTot} (${pct}%)`;
+  mc.className='res-val '+(pct>=80?'g':pct>=60?'y':'r');
+  document.getElementById('wrScore').textContent=wrKnew+'/'+wrTot;
+  document.getElementById('wrMiss').textContent=wrMiss+'/'+wrTot;
+  document.getElementById('wrSkip').textContent=wrSkip+'/'+wrTot;
+
+  // per-channel breakdown
+  const breakdown=document.getElementById('chBreakdown');
+  breakdown.innerHTML='';
+  CHANNELS.forEach(ch=>{
+    const qs=BANK.filter(q=>q.ch===ch&&activeChannels.has(q.ch));
+    if(!qs.length)return;
+    const mc2=qs.filter(q=>q.type==='mc');
+    const wr2=qs.filter(q=>q.type==='wr');
+    const mcC=mc2.filter(q=>states[q.id]?.mcCorrect===true).length;
+    const wrK=wr2.filter(q=>states[q.id]?.wrKnew===true).length;
+    const chEl=document.createElement('div');
+    chEl.className='ch-row';
+    chEl.innerHTML=`<div class="cn">${ch}</div>
+      <div class="cv">${mc2.length?`MC ${mcC}/${mc2.length} · `:''}WR ${wrK}/${wr2.length} knew</div>`;
+    breakdown.appendChild(chEl);
+  });
+}
+</script>
+</body>
+</html>

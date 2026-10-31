@@ -1,0 +1,119 @@
+// Demo driver: replay a filtered ITCH file through the parser at a chosen
+// speed. Plan: .claude/plans/itch-replay-clock.md, step 3.
+//
+// Usage: replay_main <file> <maxspeed|wallclock|step> [speed]
+//   maxspeed   drain as fast as possible (batch)
+//   wallclock  pace by the messages' own ITCH timestamps * 1/speed
+//   step       drain one message at a time via ReplayClock::step()
+//
+// The sink re-frames each delivered message and runs it through
+// itch::parse_buffer, so this exercises the exact parser path a live signal
+// loop would. On the committed AAPL fixture (269,742 messages) maxspeed
+// replays the full day in well under a second on an M-series laptop.
+
+#include "replay_clock.hpp"
+#include "itch_parser.hpp"
+
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+int main(int argc, char** argv) {
+    if (argc < 3) {
+        std::fprintf(stderr,
+            "usage: %s <file> <maxspeed|wallclock|step> [speed]\n"
+            "  maxspeed   batch drain, no pacing\n"
+            "  wallclock  pace by ITCH timestamps / speed (speed default 1.0)\n"
+            "  step       one message per step() call\n",
+            argv[0]);
+        return 2;
+    }
+    const std::string path = argv[1];
+    const std::string mode_arg = argv[2];
+    const double speed = argc >= 4 ? std::atof(argv[3]) : 1.0;
+
+    itch::ReplayMode mode;
+    if (mode_arg == "maxspeed") mode = itch::ReplayMode::MaxSpeed;
+    else if (mode_arg == "wallclock") mode = itch::ReplayMode::WallClock;
+    else if (mode_arg == "step") mode = itch::ReplayMode::SingleStep;
+    else {
+        std::fprintf(stderr, "unknown mode '%s'\n", mode_arg.c_str());
+        return 2;
+    }
+
+    itch::ReplayClock clock = [&] {
+        try {
+            return itch::ReplayClock::from_file(path);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "%s\n", e.what());
+            std::exit(2);
+        }
+    }();
+
+    // Accumulate parser stats across per-message re-framed parses. The 2-byte
+    // length prefix is stripped by the clock, so we restore it in a single
+    // reusable buffer (ITCH message lengths fit in uint16 -> <= 65535 bytes).
+    std::vector<uint8_t> framed(2 + 65535);
+    itch::ParseStats parse_total;
+    itch::MessageVisitor visitor;  // empty: parse_buffer still counts by type
+
+    auto sink = [&](const uint8_t* msg, uint16_t len, uint64_t /*ts*/) {
+        framed[0] = static_cast<uint8_t>(len >> 8);
+        framed[1] = static_cast<uint8_t>(len & 0xFF);
+        std::memcpy(framed.data() + 2, msg, len);
+        const itch::ParseStats s =
+            itch::parse_buffer(framed.data(), 2u + len, visitor);
+        parse_total.add_count     += s.add_count;
+        parse_total.execute_count += s.execute_count;
+        parse_total.cancel_count  += s.cancel_count;
+        parse_total.delete_count  += s.delete_count;
+        parse_total.replace_count += s.replace_count;
+        parse_total.skipped_count += s.skipped_count;
+        parse_total.error_count   += s.error_count;
+    };
+
+    const auto t0 = std::chrono::steady_clock::now();
+    try {
+        if (mode == itch::ReplayMode::SingleStep) {
+            while (clock.step(sink)) { /* one message per iteration */ }
+        } else {
+            clock.run(sink, mode, speed);
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "replay error: %s\n", e.what());
+        return 2;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    const double wall_ms =
+        std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    const itch::ReplayStats& rs = clock.stats();
+    if (mode == itch::ReplayMode::WallClock)
+        std::printf("=== ITCH Replay (wallclock @%.4gx) ===\n", speed);
+    else
+        std::printf("=== ITCH Replay (%s) ===\n", mode_arg.c_str());
+    std::printf("Messages delivered: %llu   bytes: %llu   zero-len skipped: %llu\n",
+                (unsigned long long)rs.messages_delivered,
+                (unsigned long long)rs.bytes_delivered,
+                (unsigned long long)rs.zero_len_frames_skipped);
+    std::printf("ITCH span (ns): first=%llu  last=%llu\n",
+                (unsigned long long)rs.first_timestamp_ns,
+                (unsigned long long)rs.last_timestamp_ns);
+    std::printf("Parsed:  add=%llu execute=%llu cancel=%llu delete=%llu "
+                "replace=%llu skipped=%llu errors=%llu\n",
+                (unsigned long long)parse_total.add_count,
+                (unsigned long long)parse_total.execute_count,
+                (unsigned long long)parse_total.cancel_count,
+                (unsigned long long)parse_total.delete_count,
+                (unsigned long long)parse_total.replace_count,
+                (unsigned long long)parse_total.skipped_count,
+                (unsigned long long)parse_total.error_count);
+    std::printf("Wall time: %.1f ms", wall_ms);
+    if (rs.messages_delivered > 0 && wall_ms > 0.0)
+        std::printf("  (%.2f M msg/s)",
+                    rs.messages_delivered / wall_ms / 1000.0);
+    std::printf("\n");
+    return 0;
+}

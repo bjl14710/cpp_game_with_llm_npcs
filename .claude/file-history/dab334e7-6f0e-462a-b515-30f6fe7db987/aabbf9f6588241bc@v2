@@ -1,0 +1,118 @@
+# Plan: Live-vs-Backtest Divergence Metric & Alert
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: S
+
+## The Idea (one paragraph)
+When a strategy passes the arena's backtest screen, persist the statistical
+fingerprint of its backtest daily returns (mean, std, sample size). As live
+paper-trading days accumulate, test whether the live daily returns are
+consistent with that fingerprint. When live performance falls below what the
+backtest promised — beyond what sampling noise can explain — flag the strategy
+as DIVERGED in the report, log an alert event with the numbers, and print a
+loud warning during the live run. Divergence is the canonical symptom of an
+overfit strategy: it looked great on the data it was tuned on and ordinary on
+data it wasn't.
+
+## Goal
+The report answers "is this strategy performing the way its backtest said it
+would?" with a statistically-grounded yes/no plus the evidence, instead of
+eyeballing two Sharpe numbers from different eras.
+
+## Decisions Made (were open questions)
+- **Statistical expectation test** (user decision) — NOT a same-period shadow
+  backtest: live and backtest share one deterministic code path today, so a
+  same-period re-run reproduces the live ledger exactly and measures nothing.
+  Instead: z = (live_mean_daily − bt_mean_daily) / (bt_std_daily / √n_live),
+  flag when z < −z_threshold (one-sided — only *under*performance signals
+  overfitting; outperformance is luck, not an alarm).
+- Defaults: `--divergence_z 2.0`, `--min_live_days 20` (no evaluation before
+  20 live trading days — early flags would be pure noise). Both are `live`
+  subcommand flags.
+- **Transition-based alerting**: an event row on entering DIVERGED and another
+  on RECOVERY — not one row per day it stays diverged. Current state lives on
+  the strategy row.
+- Divergence **flags, never pauses** (user's wording): the drawdown circuit
+  breaker is the pausing mechanism; this is a diagnostic. The two are
+  independent signals that can both be true.
+- The existing `sharpe_divergence` report column stays (cross-era context);
+  the new `divergence_z` is the same-noise-model test alongside it, plus a
+  `vol_ratio` (live std / backtest std) column — no alert on it, but a live
+  volatility far above backtest is the other overfit tell and costs one line.
+
+## Out of Scope (this version)
+- Shadow backtest / execution-quality tracking (becomes meaningful when live
+  fills come from real dry-run Robinhood executions instead of close-to-close)
+- Alerting channels beyond stdout + event table + report (no email/push)
+- Auto-pausing on divergence (circuit breaker's job, human decides here)
+- Multiple-testing corrections across many strategies (documented caveat)
+- Non-iid-robust tests (Lo-adjusted Sharpe SEs etc.) — documented caveat;
+  the flag is a research signal, not a publication
+
+## Affected Areas
+- `strategy_arena.py`
+  - `_SCHEMA`: `strategies` gains `bt_mean_daily REAL`, `bt_std_daily REAL`,
+    `bt_n_days INTEGER`, `diverged INTEGER DEFAULT 0` (guarded `ALTER TABLE`
+    in-place migration, same pattern as the circuit-breaker plan — NOTE:
+    whichever of the two plans lands second rebases its migration on the
+    first's schema). New `divergence_events` table (strategy, date, event
+    DIVERGED|RECOVERED, z, live_mean, bt_mean, n_live, threshold —
+    PK (strategy, date, event)).
+  - `record_backtest`: also persist daily-return stats computed from the
+    screening equity series (`pct_change().dropna()` → mean/std/n).
+  - `ArenaState`: `divergence_z(name) -> (z, n_live, live_mean, vol_ratio) |
+    None` (None when stats missing or n_live < min), `set_diverged(...)`,
+    `log_divergence_event(...)`.
+  - `cmd_live`: after each successful tick, evaluate; on state transition log
+    the event, update the flag, and print a prominent warning with the
+    numbers.
+- `analyze_equity.py` — `compare_strategies`: new columns `divergence_z`,
+  `vol_ratio`, `diverged` (with `diverged_since` from the latest DIVERGED
+  event).
+- New tests: `tests/test_divergence.py` (+ migration continuity test).
+
+## Implementation Order
+1. Schema migration + backtest daily-stats persistence in `record_backtest`
+   + `ArenaState.divergence_z` math — unit-tested against hand-computed z on
+   synthetic series (no behavior change to live yet).
+2. Live-loop evaluation with transition events + stdout alert; tests: a live
+   series engineered below the backtest mean by > z×SE flips the flag and
+   writes exactly one DIVERGED event; recovery writes one RECOVERED event;
+   fewer than min_live_days ⇒ no evaluation.
+3. Report columns + `diverged_since`; test that DIVERGED strategies stay
+   fully visible with their evidence.
+
+## Acceptance Criteria
+- [ ] `arena-run backtest` persists bt_mean_daily / bt_std_daily / bt_n_days
+      for every screened strategy
+- [ ] Given a strategy whose live mean daily return is more than z×SE below
+      its backtest mean after ≥ min_live_days, the next `arena-run live`
+      marks it diverged, logs one DIVERGED event with (z, live_mean, bt_mean,
+      n_live, threshold), and prints a warning
+- [ ] Staying diverged on subsequent runs adds no duplicate events; crossing
+      back logs exactly one RECOVERED event and clears the flag
+- [ ] No evaluation before min_live_days live rows (no flag, no events)
+- [ ] Report shows divergence_z, vol_ratio, diverged, diverged_since; a
+      diverged strategy keeps trading (no pause from this feature)
+- [ ] Pre-existing arena DBs upgrade in place with data intact
+- [ ] Hand-computed z on a synthetic case matches `divergence_z` to 1e-9
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Strategy backtested before this feature (no stored daily stats) | divergence_z returns None; report shows blank; hint printed once to re-run backtest |
+| bt_std_daily ≈ 0 (degenerate flat backtest) | No test possible — z undefined ⇒ None, never a divide-by-zero |
+| Live ledger has a pause hole (circuit breaker) | Daily returns computed across the hole treat it as one period — acceptable noise, documented; n_live counts actual rows |
+| Strategy re-screened (`backtest` re-run) mid-live | Stats overwrite via upsert; divergence re-evaluates against the new fingerprint on next tick |
+| z threshold or min_live_days changed between runs | Events store the threshold used at trip time; state re-evaluates under the new settings (may flip) |
+| Strategy outperforms wildly (z ≫ 0) | No alert — one-sided by design; vol_ratio still visible |
+| Both diverged and drawdown-paused | Independent: report shows both; no interaction |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(arena): persist backtest daily-return fingerprint + divergence_z math` — schema migration, record_backtest, unit tests
+2. `feat(arena): divergence alert in live loop with transition events` — evaluation, DIVERGED/RECOVERED events, stdout warning, flags
+3. `feat(reporting): divergence_z, vol_ratio, diverged_since in comparison report` — report columns + visibility test

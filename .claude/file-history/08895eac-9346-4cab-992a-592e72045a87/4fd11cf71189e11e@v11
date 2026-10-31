@@ -1,0 +1,144 @@
+# Plan: Avellaneda-Stoikov Market-Making Sim vs a Replayed Real Book
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: XL
+
+## The Idea (one paragraph)
+Everything in the repo so far *measures* the market; this milestone
+*trades against it* (in simulation). A toy market maker quotes both sides of
+the replayed AAPL golden day using the Avellaneda-Stoikov inventory-aware
+rule, and its passive quotes fill through a **deterministic price-time
+FIFO queue model** — our shadow order sits at a real position in the real
+level's queue, executions consume the actual orders ahead of it, and cancels
+ahead move it up exactly as ITCH order-level data records. Quote decisions
+take effect after a configurable latency (default 1 ms). Output: simulated
+PnL and inventory paths over the session, plus the two lesson-bearing
+experiments this design enables: what queue position is worth, and how PnL
+decays with latency.
+
+## Goal
+A user can run one command that replays the golden day through the strategy
+and produces a PnL curve, an inventory path, and fill statistics that
+honestly reflect queue priority and reaction latency.
+
+## Resolved Decisions
+1. **Queue model: deterministic FIFO** (user choice). A queue-aware book
+   variant tracks per-level FIFO order queues from the ITCH stream; the
+   simulated order's queue position is ground truth, not a statistical
+   allocation. Requoting cancels and rejoins at the back — losing queue
+   position is a real, modeled cost.
+2. **Latency: fixed decision+action delay, default 1 ms** (user choice).
+   Strategy actions triggered by the event at tape-time t take effect at
+   tape-time t + delay (deterministic, replayable). The delay is a CLI
+   parameter so "PnL vs latency" is a runnable experiment.
+3. **No market impact (shadow fills).** Our orders are infinitesimal: fills
+   consume tape executions' priority but do not alter the subsequent
+   message stream (the real order that actually traded still trades). This
+   is the standard toy-sim assumption and must be stated in the writeup.
+4. **Quoting rule: standard A-S closed-form approximation.** Reservation
+   price r = m − q·γ·σ²·(T−t); total spread δ = γ·σ²·(T−t) +
+   (2/γ)·ln(1 + γ/κ); quotes at r ± δ/2, rounded to ticks, clamped to
+   never cross the touch (pure passive). σ² from rolling realized microprice
+   variance (reuses the engine's microprice); T = session end. γ, κ, size,
+   inventory cap are CLI knobs with sane toy defaults.
+5. **Language split per repo convention:** C++ simulates (per-event loop
+   over 1.5M messages — perf/02 taught us why), Python analyzes/plots via a
+   columnar bridge, mirroring `signals_cpp`.
+6. **Data: AAPL golden day** (staged; fixture-driven tests). No dependency
+   on the ReplayClock plan: a backtest consumes events at max speed via the
+   existing visitor pattern; wall-clock replay composes later if wanted.
+
+## Out of Scope (this version)
+- Any live or paced execution (ReplayClock integration is a follow-up).
+- Market impact / counterfactual tape modification.
+- Multi-symbol, multi-day, or parameter optimization/calibration sweeps
+  beyond the single latency experiment.
+- Statistical queue models (the FIFO model supersedes; an interface note
+  keeps the door open for comparison later).
+- Dashboard panel (CLI + saved plotly HTML this version).
+- Hidden/non-displayed liquidity ('P' messages) interacting with our quotes.
+
+## Affected Areas
+- New: `cpp/itch/order_book_queue.hpp/.cpp` — FIFO queue-aware book:
+  per-level `std::deque`-style queues of `{order_ref, shares}` plus a
+  ref → (side, level, position) locator; visitor-compatible add/execute/
+  cancel/delete/replace maintaining queue order; `top_of_book()` parity
+  with `OrderBookFlat` (asserted by test on the same sequence).
+- New: `cpp/itch/shadow_order.hpp` — our resting order: level index, size,
+  live count of shares queued AHEAD (decremented deterministically by
+  executions at the level and by cancels/deletes of specific ahead orders);
+  emits fills when executions arrive with zero queue ahead.
+- New: `cpp/itch/mm_simulator.hpp/.cpp` — the event loop: book + queues +
+  A-S quoter + pending-action queue keyed by tape time (latency model) +
+  cash/inventory accounting + per-decision time series recording.
+- New: `cpp/signals_py/` gains `run_mm_sim(path, params...) -> columnar
+  dict` in the existing `signals_cpp` module (same install rule; columnar
+  per the perf lesson).
+- New: `src/oil_alpha/microstructure/mm_analysis.py` — PnL decomposition
+  (spread capture vs inventory mark-to-market), fill stats (fill rate,
+  average queue wait, requote count), plot functions per plots.py
+  conventions, `__main__` CLI.
+- New: `cpp/tests/test_order_book_queue.cpp`, `cpp/tests/test_mm_sim.cpp` —
+  hand-computed sequences (see Acceptance Criteria).
+- New: `tests/test_mm_analysis.py` — bridge smoke on the committed fixture +
+  determinism check (identical params ⇒ identical PnL) + A-S sanity
+  (positive inventory skews quotes down).
+- New: `docs/perf/<next-free>-mm-queue-latency.md` — the writeup: fill-rate
+  and PnL vs latency (e.g. 0 / 1 / 5 / 20 ms), and the queue-position value
+  demonstrated by comparing front-of-queue vs back-of-queue fills.
+- `docs/learning/PROGRESS.md` — flag A-S + queue priority as /teach targets.
+
+## Implementation Order
+1. `OrderBookQueue` + parity/gtests — committable alone (it's also a better
+   oracle for future book work).
+2. `ShadowOrder` queue-position mechanics + gtests (execution consumes
+   ahead-orders first; cancel-ahead promotes; requote rejoins at back).
+3. A-S quoter (pure function of state → desired quotes) + unit tests on the
+   closed form (skew sign, spread widens with γ and σ, T−t decay).
+4. `mm_simulator` event loop with the latency-delayed action queue +
+   determinism and hand-computed micro-scenario gtests.
+5. Bridge function + Python analysis/plots/CLI + fixture smoke tests.
+6. Full-day run + the latency-sweep experiment + `docs/perf/` writeup +
+   PROGRESS note.
+
+## Acceptance Criteria
+- [ ] Given the same message sequence, `OrderBookQueue.top_of_book()`
+      matches `OrderBookFlat` exactly (parity test), and queue order within
+      a level is FIFO by arrival.
+- [ ] Given a hand-built scenario (our 100-sh bid behind 300 sh; executions
+      of 250 then 100), the shadow order fills exactly 50 after the ahead
+      queue empties — and a cancel of 100 ahead shares before the trades
+      makes it fill 100 instead (hand-computed gtests).
+- [ ] Given a positive inventory, the A-S quoter's reservation price sits
+      below the mid (and symmetric for negative) — sign test pinning the
+      inventory-aversion convention.
+- [ ] Given actions with delay d, no action takes effect before its trigger
+      event's tape time + d (gtest on the pending-action queue ordering).
+- [ ] Given identical parameters, two runs over the fixture produce
+      bit-identical PnL series (determinism).
+- [ ] Given the full golden day, the CLI produces PnL + inventory paths and
+      fill stats; the writeup reports the latency sweep with concrete
+      numbers.
+- [ ] `pytest` and `ctest` pass in full.
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|--------------------|
+| Inventory hits the cap | Quote on the risk-increasing side is pulled until inventory recedes |
+| A-S quotes would cross the touch | Clamped one tick inside; clamp count reported |
+| Our quote's level empties of real orders | Our order remains resting alone at the level (front of queue) |
+| Requote while a fill is in flight within the latency window | Actions are applied in tape-time order; fills that occur before the cancel takes effect stand |
+| Delayed action lands after session end | Dropped and counted |
+| Session ends with open inventory | Marked to the final mid; terminal inventory and its mark reported separately from realized PnL |
+| Tape execution larger than ahead-queue + our size | Ahead consumed, we fill fully, remainder passes through (shadow assumption) |
+| Malformed/unknown messages | Same paranoia as everywhere: skip and count via the existing parser |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `FIFO queue-aware order book + parity tests` — step 1.
+2. `Shadow order queue-position fill mechanics` — step 2.
+3. `Avellaneda-Stoikov quoter + latency-delayed action queue` — steps 3–4.
+4. `mm sim bridge, Python analysis/CLI, fixture tests` — step 5.
+5. `Golden-day run, latency sweep, docs/perf writeup` — step 6.

@@ -1,0 +1,846 @@
+#!/usr/bin/env python3
+"""SCPI compliance audit for ``silmulator/devices/msp430.py``.
+
+Scores every SCPI command family the simulated MSP430 implements against the
+TI MSP430FR5994 documentation shipped in ``hardware_docs/ti/MSP430FR5994/``:
+
+- SLAU367P  — MSP430FR58xx/59xx/6xx Family User's Guide
+- SLASE54D  — MSP430FR599x datasheet
+
+The audit is a curated findings database plus live behavioral probes.
+Probes re-execute the questionable behavior against a fresh ``MSP430()``
+instance every run, so the report stays honest as the device model evolves:
+
+- a command added to msp430.py without an audit entry is reported UNSCORED;
+- a finding whose probe no longer reproduces is reported STALE (the model
+  changed; the audit entry needs review).
+
+Usage:
+    python scripts/audit_msp430.py [--output docs/audits/msp430-compliance-report.md]
+
+Exit code is 0 when the audit itself ran cleanly (findings are data, not
+failures); 1 when there are UNSCORED commands or STALE findings.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from silmulator.devices.msp430 import MSP430  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Scoring categories
+# ---------------------------------------------------------------------------
+
+COMPLIANT = "COMPLIANT"              # matches doc for typical use and boundaries
+PARTIAL = "PARTIAL"                  # right concept, misses documented edge cases
+NON_COMPLIANT = "NON_COMPLIANT"      # behavior contradicts the doc for typical use
+ACCEPTS_INVALID = "ACCEPTS_INVALID"  # silently accepts states the doc says cannot exist
+UNDOCUMENTED = "UNDOCUMENTED"        # simulator convenience with no doc basis
+FRAMEWORK = "FRAMEWORK"              # IEEE-488.2/SCPI plumbing from BaseDevice, not TI-doc scoped
+
+# Categories that count toward the compliance score. UNDOCUMENTED and
+# FRAMEWORK sit outside it (decision recorded in the umbrella plan).
+SCORED = (COMPLIANT, PARTIAL, NON_COMPLIANT, ACCEPTS_INVALID)
+
+UG = "SLAU367P"
+DS = "SLASE54D"
+
+
+@dataclass
+class Finding:
+    """One audited command family."""
+
+    subsystem: str
+    score: str
+    citation: str          # document + section, e.g. "SLAU367P §25.2.1.1"
+    text: str              # what was checked and what was found
+    probe: Optional[str] = None  # name of the probe that re-verifies this
+
+
+@dataclass
+class Missing:
+    """Doc-described behavior with no corresponding command."""
+
+    subsystem: str
+    citation: str
+    text: str
+
+
+# ---------------------------------------------------------------------------
+# Family normalization: collapse indexed paths (PORT3, CHANNEL7, TIMERA1, CC2)
+# into one auditable family. Order matters: longer prefixes first.
+# ---------------------------------------------------------------------------
+
+_FAMILY_SUBS = [
+    (re.compile(r"\bPORT\d+"), "PORTn"),
+    (re.compile(r"\bCHANNEL\d+"), "CHANNELn"),
+    (re.compile(r"\bTIMERA\d+"), "TIMERAn"),
+    (re.compile(r"\bTIMERB\d+"), "TIMERBn"),
+    (re.compile(r"\bUART\d+"), "UARTn"),
+    (re.compile(r"\bSPI\d+"), "SPIn"),
+    (re.compile(r"\bI2C\d+"), "I2Cn"),
+    (re.compile(r"\bCC\d+"), "CCn"),
+    (re.compile(r"\bCH\d+"), "CHn"),
+    (re.compile(r"\bTA\d+"), "TAn"),
+    (re.compile(r"\bTB\d+"), "TBn"),
+    (re.compile(r"\bP\d+"), "Pn"),
+    (re.compile(r"\bA\d+"), "An"),
+    (re.compile(r"\bB\d+"), "Bn"),
+]
+
+
+def family(path: str) -> str:
+    """Collapse an indexed SCPI path into its command family."""
+    out = path
+    for rx, repl in _FAMILY_SUBS:
+        out = rx.sub(repl, out)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Probes — each re-verifies one recorded behavior against a fresh device.
+# A probe returns True when the finding still reproduces.
+# ---------------------------------------------------------------------------
+
+def _errors(dev: MSP430) -> int:
+    """Number of queued SCPI errors on the device."""
+    return len(dev._error_queue)
+
+
+def probe_timer_divider_128(dev: MSP430) -> bool:
+    """ID×TAIDEX tops out at /64 (SLAU367P §25.2.1.1); /128 must not exist."""
+    dev.process("TIMERA0:CLOCK:DIVIDER 128")
+    return _errors(dev) == 0 and dev.timer_a[0].clock_divider == 128
+
+
+def probe_adc_ignores_reference(dev: MSP430) -> bool:
+    """Raw conversion divides by 3.3 V regardless of selected reference."""
+    dev.process("ADC:REFERENCE VREF")
+    dev.inject_adc(0, 1.2)
+    raw = int(dev.process("ADC:CHANNEL0:RAW?"))
+    return raw == int(1.2 / 3.3 * 4095)  # 1.2 V vs 1.2-V VREF should be full scale
+
+
+def probe_adc_convert_invalid_channel(dev: MSP430) -> bool:
+    """Conversion on a nonexistent channel returns '0' instead of an error."""
+    resp = dev.process("ADC:CONVERT 99")
+    return resp == "0" and _errors(dev) == 0
+
+
+def probe_adc_reference_unvalidated(dev: MSP430) -> bool:
+    """Any string is accepted as a reference source."""
+    dev.process("ADC:REFERENCE BANANA")
+    return _errors(dev) == 0 and dev.adc[0].reference == "BANANA"
+
+
+def probe_adc_converts_without_enable(dev: MSP430) -> bool:
+    """Conversion succeeds with the channel disabled (no ADC12ENC gate)."""
+    dev.inject_adc(0, 1.0)
+    raw = int(dev.process("ADC:CONVERT 0"))
+    return raw > 0 and not dev.adc[0].enabled
+
+
+def probe_adc_oversample_unvalidated(dev: MSP430) -> bool:
+    """Oversample accepts arbitrary values (feature has no ADC12_B basis)."""
+    dev.process("ADC:OVERSAMPLE 12345")
+    return _errors(dev) == 0 and dev.adc[0].oversample == 12345
+
+
+def probe_cpu_reg_16bit(dev: MSP430) -> bool:
+    """CPUX registers are 20-bit; the model masks writes to 16 bits."""
+    dev.process("CPU:REGISTER 4,0x12345")
+    return dev.process("CPU:REGISTER? 4") == "0x2345"
+
+
+def probe_cpu_pc_unvalidated(dev: MSP430) -> bool:
+    """PC accepts odd and >20-bit values that cannot exist in hardware."""
+    dev.process("CPU:PC 0x123457")
+    return _errors(dev) == 0 and dev._pc == 0x123457
+
+
+def probe_cpu_reset_pc(dev: MSP430) -> bool:
+    """CPU:RESET forces PC to the constant 0xC000, not a reset-vector fetch."""
+    dev.process("CPU:RESET")
+    return dev._pc == 0xC000
+
+
+def probe_dco_freq_continuous(dev: MSP430) -> bool:
+    """DCO accepts arbitrary frequencies; hardware has discrete DCOFSEL steps."""
+    dev.process("CLOCK:DCO:FREQUENCY 3141592")
+    return _errors(dev) == 0 and dev.clock.dco_frequency == 3141592.0
+
+
+def probe_lpm35_rejected(dev: MSP430) -> bool:
+    """LPM3.5 exists on FR5994 (SLAU367P §2.2.4) but the model rejects it."""
+    dev.process("POWER:MODE LPM3.5")
+    return _errors(dev) == 1 and dev.pm.mode != "LPM3.5"
+
+
+def probe_mclk_source_set(dev: MSP430) -> bool:
+    """MCLK accepts REFO (absent on FR5994) and rejects MODCLK (present)."""
+    dev.process("CLOCK:MCLK:SOURCE REFO")
+    accepted_refo = _errors(dev) == 0 and dev.clock.mclk_source == "REFO"
+    dev.process("CLOCK:MCLK:SOURCE MODCLK")
+    rejected_modclk = _errors(dev) == 1
+    return accepted_refo and rejected_modclk
+
+
+def probe_mclk_divider_64(dev: MSP430) -> bool:
+    """DIVM stops at /32 (SLAU367P §3.3.3 CSCTL3); /64 must not exist."""
+    dev.process("CLOCK:MCLK:DIVIDER 64")
+    return _errors(dev) == 0 and dev.clock.mclk_div == 64
+
+
+def probe_smclk_source_unvalidated(dev: MSP430) -> bool:
+    """SMCLK source accepts any string."""
+    dev.process("CLOCK:SMCLK:SOURCE BANANA")
+    return _errors(dev) == 0 and dev.clock.smclk_source == "BANANA"
+
+
+def probe_aclk_divider_unvalidated(dev: MSP430) -> bool:
+    """ACLK divider accepts any integer."""
+    dev.process("CLOCK:ACLK:DIVIDER 7")
+    return _errors(dev) == 0 and dev.clock.aclk_div == 7
+
+
+def probe_mclk_freq_ignores_source(dev: MSP430) -> bool:
+    """MCLK:FREQUENCY? is DCO/div even when MCLK is sourced from LFXT."""
+    dev.process("CLOCK:MCLK:SOURCE LFXT")
+    freq = float(dev.process("CLOCK:MCLK:FREQUENCY?"))
+    return freq == dev.clock.dco_frequency / dev.clock.mclk_div
+
+
+def probe_i2c_frequency_unvalidated(dev: MSP430) -> bool:
+    """I2C clock accepts non-standard values (validation is dead code)."""
+    dev.process("I2C0:FREQUENCY 12345")
+    return _errors(dev) == 0 and dev.i2c[0].clock_frequency == 12345
+
+
+def probe_i2c_transfer_ignores_address(dev: MSP430) -> bool:
+    """I2C TRANSFER parses a target address, then never uses it."""
+    r1 = dev.process('I2C0:TRANSFER 0x50,"AB"')
+    dev.reset()
+    r2 = dev.process('I2C0:TRANSFER 0x77,"AB"')
+    return r1 == r2 == "00" and _errors(dev) == 0
+
+
+def probe_i2c_write_always_acks(dev: MSP430) -> bool:
+    """I2C WRITE returns ACK unconditionally; no NACK path exists."""
+    return dev.process('I2C0:WRITE "DEADBEEF"') == "ACK"
+
+
+def probe_wdt_stub(dev: MSP430) -> bool:
+    """WDT state cannot change and a wrong password does not cause a PUC."""
+    dev.process("WDT:PASSWORD 0x1234")  # wrong password: real part resets
+    state = dev.process("WDT:STATE?")
+    return state == "RUNNING" and _errors(dev) == 0 and dev._pc == 0xC000
+
+
+def probe_interrupt_stub(dev: MSP430) -> bool:
+    """Interrupt system is a stub: vector is a constant, flags always 0."""
+    return (
+        dev.process("INTERRUPT:VECTOR?") == "0xFFFF"
+        and dev.process("INTERRUPT:FLAG?") == "0"
+    )
+
+
+def probe_memory_unmapped(dev: MSP430) -> bool:
+    """Reads of vacant/impossible addresses return 0x00 with no error."""
+    resp = dev.process("MEMORY:READ 0x999999")
+    return resp == "0x00" and _errors(dev) == 0
+
+
+def probe_timer_count_over_16bit(dev: MSP430) -> bool:
+    """TAxR is a 16-bit counter; the model stores 0x12345 verbatim."""
+    dev.process("TIMERA0:COUNT 0x12345")
+    return _errors(dev) == 0 and dev.timer_a[0].count == 0x12345
+
+
+def probe_timer_cc_capture_ignored(dev: MSP430) -> bool:
+    """CC mode ignores writes and always reads back COMPARE."""
+    dev.process("TIMERA0:CC1:MODE CAPTURE")
+    return dev.process("TIMERA0:CC1:MODE?") == "COMPARE" and _errors(dev) == 0
+
+
+def probe_gpio_pin_index_unvalidated(dev: MSP430) -> bool:
+    """Pin numbers beyond 7 are accepted on an 8-bit port."""
+    dev.process("GPIO:PORT1:PIN:VALUE 12,1")
+    return _errors(dev) == 0 and dev.ports[1].output == (1 << 12)
+
+
+def probe_gpio_pull_both(dev: MSP430) -> bool:
+    """Pull-up and pull-down can be enabled simultaneously on one pin."""
+    dev.process("GPIO:PORT1:PULLUP 0x01")
+    dev.process("GPIO:PORT1:PULLDOWN 0x01")
+    return dev.ports[1].pullup & dev.ports[1].pulldown & 0x01 == 0x01
+
+
+def probe_gpio_input_ignores_pulls(dev: MSP430) -> bool:
+    """Input reads ignore enabled pull resistors (no PxREN semantics)."""
+    dev.process("GPIO:PORT1:DIRECTION 0x00")
+    dev.process("GPIO:PORT1:PULLUP 0xFF")
+    return dev.process("GPIO:PORT1:INPUT?") == "0x00"
+
+
+def probe_uart_send_while_disabled(dev: MSP430) -> bool:
+    """UART SEND works with the module disabled (no UCSWRST gate)."""
+    dev.process('UART0:SEND "HI"')
+    return not dev.uart[0].enabled and bytes(dev.uart[0].tx_buffer) == b"HI"
+
+
+def probe_spi_transfer_while_disabled(dev: MSP430) -> bool:
+    """SPI TRANSFER works with the module disabled."""
+    resp = dev.process('SPI0:TRANSFER "AA"')
+    return resp == "00" and not dev.spi[0].enabled
+
+
+PROBES: Dict[str, Callable[[MSP430], bool]] = {
+    name[len("probe_"):]: fn
+    for name, fn in sorted(globals().items())
+    if name.startswith("probe_") and callable(fn)
+}
+
+
+# ---------------------------------------------------------------------------
+# Findings database — one entry per command family (see family()).
+# ---------------------------------------------------------------------------
+
+F = Finding
+
+FINDINGS: Dict[str, Finding] = {
+    # --- IEEE-488.2 / SCPI framework (BaseDevice) --------------------------
+    "*IDN": F("Framework", FRAMEWORK, "IEEE 488.2", "Identification string; TI docs do not define a SCPI surface for this part."),
+    "*RST": F("Framework", FRAMEWORK, "IEEE 488.2; " + UG + " §1.2", "Restores simulator defaults. Diverges from a real PUC in the CPU:RESET/WDT findings (PC constant, WDT unaffected)."),
+    "*CLS": F("Framework", FRAMEWORK, "IEEE 488.2", "Clears error queue and event status register."),
+    "*ESE": F("Framework", FRAMEWORK, "IEEE 488.2", "Event status enable register plumbing."),
+    "*ESR": F("Framework", FRAMEWORK, "IEEE 488.2", "Event status register read-and-clear."),
+    "*OPC": F("Framework", FRAMEWORK, "IEEE 488.2", "Operation-complete flag."),
+    "*SRE": F("Framework", FRAMEWORK, "IEEE 488.2", "Service request enable register."),
+    "*STB": F("Framework", FRAMEWORK, "IEEE 488.2", "Status byte composition."),
+    "*TST": F("Framework", FRAMEWORK, "IEEE 488.2", "Self-test always passes."),
+    "*WAI": F("Framework", FRAMEWORK, "IEEE 488.2", "No-op; simulation has no pending operations."),
+    "SYSTEM:ERROR": F("Framework", FRAMEWORK, "SCPI-99 §21.8", "FIFO error queue."),
+    "SYSTEM:ERROR:NEXT": F("Framework", FRAMEWORK, "SCPI-99 §21.8", "Alias of SYSTEM:ERROR."),
+    "SYSTEM:ERROR:COUNT": F("Framework", FRAMEWORK, "SCPI-99 §21.8", "Error queue depth."),
+    "SYSTEM:VERSION": F("Framework", FRAMEWORK, "SCPI-99 §21.21", "Reports SCPI version 1999.0."),
+
+    # --- CPU ---------------------------------------------------------------
+    "CPU:RESET": F("CPU", NON_COMPLIANT, UG + " §1.2, §4.3.1",
+                   "Reset forces PC to the constant 0xC000. A real BOR/POR/PUC loads PC from the reset "
+                   "vector at 0xFFFE; 0xC000 is not FR5994-specific (code FRAM starts at 0x4000).",
+                   probe="cpu_reset_pc"),
+    "CPU:HALT": F("CPU", UNDOCUMENTED, "—", "Debug-style halt; the User's Guide models this via the EEM debug logic, not a device command."),
+    "CPU:RUN": F("CPU", UNDOCUMENTED, "—", "Counterpart of CPU:HALT; simulator convenience."),
+    "CPU:STATE": F("CPU", UNDOCUMENTED, "—", "RUNNING/HALTED/STOPPED status of the simulated core."),
+    "CPU:PC": F("CPU", ACCEPTS_INVALID, UG + " §4.3.1",
+                "PC is a 20-bit register whose bit 0 is always 0. The model accepts odd values and values "
+                "beyond 20 bits without error or masking.",
+                probe="cpu_pc_unvalidated"),
+    "CPU:REGISTER": F("CPU", NON_COMPLIANT, UG + " §4.3",
+                      "CPUX registers R0–R15 are 20-bit; writes are masked to 16 bits (0xFFFF), silently "
+                      "truncating any 20-bit value.",
+                      probe="cpu_reg_16bit"),
+    "CPU:REG": F("CPU", NON_COMPLIANT, UG + " §4.3", "Alias of CPU:REGISTER; same 16-bit truncation."),
+    "CPU:SPEED": F("CPU", ACCEPTS_INVALID, UG + " §3.3.1 (CSCTL1); " + DS + " §8.12.3",
+                   "Alias for DCO frequency; accepts any float. Hardware DCO offers discrete DCOFSEL/DCORSEL "
+                   "steps (1, 2.667, 3.5, 4, 5.333, 7, 8, 16, 21, 24 MHz).",
+                   probe="dco_freq_continuous"),
+    "CPU:VCC": F("CPU", COMPLIANT, DS + " §8.3",
+                 "Validates 1.8–3.6 V, matching the datasheet supply range."),
+
+    # --- GPIO ---------------------------------------------------------------
+    "GPIO:PORTn:DIRECTION": F("GPIO", COMPLIANT, UG + " §12.2.3",
+                              "PxDIR read/write as an 8-bit mask, 0=input/1=output; matches the register model."),
+    "GPIO:Pn:DIR": F("GPIO", COMPLIANT, UG + " §12.2.3", "Short-form alias of PORTn:DIRECTION."),
+    "GPIO:PORTn:OUTPUT": F("GPIO", COMPLIANT, UG + " §12.2.2",
+                           "PxOUT read/write as an 8-bit mask. (Pull-direction role of PxOUT is not modeled; "
+                           "see PULLUP/PULLDOWN.)"),
+    "GPIO:Pn:OUT": F("GPIO", COMPLIANT, UG + " §12.2.2", "Short-form alias of PORTn:OUTPUT."),
+    "GPIO:PORTn:INPUT": F("GPIO", PARTIAL, UG + " §12.2.1, §12.2.4",
+                          "Reads combine driven outputs and injected inputs correctly, but enabled pull "
+                          "resistors never influence undriven input pins as PxREN semantics require.",
+                          probe="gpio_input_ignores_pulls"),
+    "GPIO:Pn:IN": F("GPIO", PARTIAL, UG + " §12.2.1", "Short-form alias of PORTn:INPUT."),
+    "GPIO:PORTn:TOGGLE": F("GPIO", UNDOCUMENTED, "—",
+                           "MSP430 has no set/clear/toggle registers; PxOUT is modified read-modify-write. "
+                           "Harmless simulator convenience."),
+    "GPIO:Pn:TOG": F("GPIO", UNDOCUMENTED, "—", "Short-form alias of PORTn:TOGGLE."),
+    "GPIO:PORTn:SET": F("GPIO", UNDOCUMENTED, "—", "See PORTn:TOGGLE — no hardware equivalent register."),
+    "GPIO:PORTn:CLEAR": F("GPIO", UNDOCUMENTED, "—", "See PORTn:TOGGLE — no hardware equivalent register."),
+    "GPIO:PORTn:PIN:DIRECTION": F("GPIO", ACCEPTS_INVALID, UG + " §12.2.3",
+                                  "Per-pin direction works, but the pin index is unvalidated: pin numbers "
+                                  "beyond 7 shift outside the 8-bit port without error."),
+    "GPIO:PORTn:PIN:VALUE": F("GPIO", ACCEPTS_INVALID, UG + " §12.2.1–12.2.3",
+                              "Per-pin read/write works, but pin indexes beyond 7 are accepted and corrupt "
+                              "the output mask (e.g. pin 12 sets bit 12 of an 8-bit register).",
+                              probe="gpio_pin_index_unvalidated"),
+    "GPIO:Pn:PIN": F("GPIO", ACCEPTS_INVALID, UG + " §12.2.1–12.2.3", "Short-form alias of PORTn:PIN:VALUE."),
+    "GPIO:PORTn:PULLUP": F("GPIO", NON_COMPLIANT, UG + " §12.2.4, Table 12-1",
+                           "Hardware has one PxREN enable per pin with PxOUT selecting pull-up vs pull-down. "
+                           "Independent PULLUP/PULLDOWN masks allow both pulls on one pin — a state the part "
+                           "cannot express — and PxOUT changes never retarget the pull.",
+                           probe="gpio_pull_both"),
+    "GPIO:PORTn:PULLDOWN": F("GPIO", NON_COMPLIANT, UG + " §12.2.4, Table 12-1",
+                             "See PULLUP — same PxREN divergence."),
+    "GPIO:PORTn:INTERRUPT:ENABLE": F("GPIO", PARTIAL, UG + " §12.2.6; " + DS + " Table 9-4",
+                                     "PxIE exists on all 8 ports (correct for FR5994), but enabling an "
+                                     "interrupt has no observable effect — no flag is ever raised by pin edges."),
+    "GPIO:PORTn:INTERRUPT:FLAG": F("GPIO", PARTIAL, UG + " §12.2.5",
+                                   "PxIFG is a manually written bitmask; injected input transitions never set "
+                                   "it, so interrupt-driven code cannot be exercised."),
+    "GPIO:PORTn:INTERRUPT:EDGE": F("GPIO", PARTIAL, UG + " §12.2.7",
+                                   "PxIES stored but unused (no edge detection). The documented caution that "
+                                   "writing PxIES can set PxIFG spuriously is not modeled."),
+
+    # --- ADC (ADC12_B) ------------------------------------------------------
+    "ADC:CHANNELn:VALUE": F("ADC12_B", UNDOCUMENTED, "—",
+                            "Returns the injected voltage in volts; test-harness introspection, not an "
+                            "ADC12_B register."),
+    "ADC:CHn:VAL": F("ADC12_B", UNDOCUMENTED, "—", "Short-form alias of CHANNELn:VALUE."),
+    "ADC:CHANNELn:RAW": F("ADC12_B", NON_COMPLIANT, UG + " §34.2.1 (Eq. 13)",
+                          "NADC = 4095 × (Vin − VR−)/(VR+ − VR−), but the model always divides by a "
+                          "hardcoded 3.3 V. Selecting VREF (1.2/2.0/2.5 V) or changing AVCC via CPU:VCC "
+                          "never rescales conversions.",
+                          probe="adc_ignores_reference"),
+    "ADC:CHn:RAW": F("ADC12_B", NON_COMPLIANT, UG + " §34.2.1", "Short-form alias of CHANNELn:RAW."),
+    "ADC:CHANNELn:INJECT": F("ADC12_B", UNDOCUMENTED, "—",
+                             "Voltage injection for tests; simulator feature by design."),
+    "ADC:CHn:INJ": F("ADC12_B", UNDOCUMENTED, "—", "Short-form alias of CHANNELn:INJECT."),
+    "ADC:CHANNELn:ENABLE": F("ADC12_B", PARTIAL, UG + " §34.2.7",
+                             "Real channel selection is via conversion memory (ADC12MCTLx.INCH) with a "
+                             "global ADC12ENC gate, not per-channel enables — and the flag is never "
+                             "enforced: conversions succeed on disabled channels.",
+                             probe="adc_converts_without_enable"),
+    "ADC:CONVERT": F("ADC12_B", NON_COMPLIANT, UG + " §34.2.1, §34.2.7",
+                     "Same hardcoded 3.3-V full scale as CHANNELn:RAW; also runs without ADC12ENC and "
+                     "returns '0' for nonexistent channels instead of raising an error.",
+                     probe="adc_convert_invalid_channel"),
+    "ADC:REFERENCE": F("ADC12_B", NON_COMPLIANT, UG + " §34.2.4 (ADC12VRSEL); §33 (REF_A)",
+                       "Accepts any string as a reference (no VRSEL validation) and the stored value never "
+                       "affects conversion scaling. REF_A's 1.2/2.0/2.5-V selection is absent.",
+                       probe="adc_reference_unvalidated"),
+    "ADC:RESOLUTION": F("ADC12_B", COMPLIANT, UG + " §34.3 (ADC12CTL2.ADC12RES)",
+                        "8/10/12-bit modes accepted, everything else rejected with -224 — matches ADC12RES."),
+    "ADC:TRIGGER": F("ADC12_B", NON_COMPLIANT, UG + " §34.2.5, §34.2.7",
+                     "No-op. Real conversions require ADC12SC/SHS trigger and ADC12ENC; in the model, "
+                     "results are readable at any time without a trigger, so trigger/read ordering bugs in "
+                     "user code go undetected."),
+    "ADC:OVERSAMPLE": F("ADC12_B", UNDOCUMENTED, UG + " §34",
+                        "ADC12_B has no hardware oversampling. Parameter is stored, unvalidated, and unused.",
+                        probe="adc_oversample_unvalidated"),
+
+    # --- Timer_A / Timer_B --------------------------------------------------
+    "TIMERAn:MODE": F("Timer_A", COMPLIANT, UG + " §25.2.3, §25.3.1 (MC bits)",
+                      "STOP/UP/CONTINUOUS/UPDOWN (+CONT short form) match the four MC modes; invalid modes "
+                      "rejected with -224."),
+    "TAn:MODE": F("Timer_A", COMPLIANT, UG + " §25.2.3", "Short-form alias of TIMERAn:MODE."),
+    "TIMERAn:COUNT": F("Timer_A", ACCEPTS_INVALID, UG + " §25.2.1",
+                       "TAxR is a 16-bit counter; the model stores any integer (e.g. 0x12345) unmasked. The "
+                       "counter also never advances — time does not pass in the simulation — so count is a "
+                       "static register.",
+                       probe="timer_count_over_16bit"),
+    "TAn:COUNT": F("Timer_A", ACCEPTS_INVALID, UG + " §25.2.1", "Short-form alias of TIMERAn:COUNT."),
+    "TIMERAn:PERIOD": F("Timer_A", PARTIAL, UG + " §25.2.3.1",
+                        "In up mode the period register IS TAxCCR0; the model keeps an independent period "
+                        "value, so writing PERIOD and CC0:VALUE produce two different states where hardware "
+                        "has one."),
+    "TIMERAn:CLOCK:SOURCE": F("Timer_A", COMPLIANT, UG + " §25.2.1, §25.3.1 (TASSEL)",
+                              "TACLK/ACLK/SMCLK/INCLK accepted, others rejected — matches TASSEL."),
+    "TIMERAn:CLOCK:DIVIDER": F("Timer_A", ACCEPTS_INVALID, UG + " §25.2.1.1 (ID, TAIDEX)",
+                               "Hardware divides by ID (1/2/4/8) × TAIDEX (1–8), max /64. The model's valid "
+                               "set includes /128, which no ID×TAIDEX combination can produce.",
+                               probe="timer_divider_128"),
+    "TIMERAn:INTERRUPT:ENABLE": F("Timer_A", PARTIAL, UG + " §25.2.6",
+                                  "TAIE stored but no interrupt is ever generated (timer never counts/rolls "
+                                  "over)."),
+    "TIMERAn:INTERRUPT:FLAG": F("Timer_A", PARTIAL, UG + " §25.2.6, §25.3.5 (TAxIV)",
+                                "Query clears the flag (TAxIV-like read-to-clear), but the flag is only ever "
+                                "set manually — never by timer rollover as documented."),
+    "TIMERAn:CCn:VALUE": F("Timer_A", PARTIAL, UG + " §25.2.4; " + DS + " Table 6-1",
+                           "CCR read/write works but every instance exposes CCR0–3; the FR5994's Timer_A "
+                           "instances have 3, 3, 2, 2, 2 CC registers respectively, so CCR3 does not exist "
+                           "on any of them. Values are also not masked to 16 bits."),
+    "TIMERAn:CCn:MODE": F("Timer_A", NON_COMPLIANT, UG + " §25.2.4 (CAP, CM, CCIS, SCS)",
+                          "Always reads COMPARE and silently ignores writes. Capture mode — the entire "
+                          "capture half of capture/compare — is absent.",
+                          probe="timer_cc_capture_ignored"),
+    "TIMERBn:MODE": F("Timer_B", COMPLIANT, UG + " §26.2.3", "Same MC modes as Timer_A; matches."),
+    "TBn:MODE": F("Timer_B", COMPLIANT, UG + " §26.2.3", "Short-form alias."),
+    "TIMERBn:COUNT": F("Timer_B", ACCEPTS_INVALID, UG + " §26.2.1 (CNTL)",
+                       "Same unmasked-write issue as Timer_A, plus Timer_B's selectable 8/10/12/16-bit "
+                       "counter length (CNTL) is not modeled."),
+    "TBn:COUNT": F("Timer_B", ACCEPTS_INVALID, UG + " §26.2.1", "Short-form alias of TIMERBn:COUNT."),
+    "TIMERBn:PERIOD": F("Timer_B", PARTIAL, UG + " §26.2.3.1", "Same CCR0-duplication as Timer_A PERIOD."),
+    "TIMERBn:CLOCK:SOURCE": F("Timer_B", COMPLIANT, UG + " §26.2.1, §26.3.1 (TBSSEL)",
+                              "TACLK/ACLK/SMCLK/INCLK accepted; TBSSEL uses TBCLK naming but the source set "
+                              "is equivalent."),
+    "TIMERBn:CLOCK:DIVIDER": F("Timer_B", ACCEPTS_INVALID, UG + " §26.2.1.1 (ID, TBIDEX)",
+                               "Same /128 impossibility as Timer_A."),
+    "TIMERBn:INTERRUPT:ENABLE": F("Timer_B", PARTIAL, UG + " §26.2.6", "Same as Timer_A — stored, never fires."),
+    "TIMERBn:INTERRUPT:FLAG": F("Timer_B", PARTIAL, UG + " §26.2.6", "Same as Timer_A."),
+    "TIMERBn:CCn:VALUE": F("Timer_B", PARTIAL, UG + " §26.2.4; " + DS + " Table 6-1",
+                           "TB0 has CCR0–6 (seven CC registers) on the FR5994; the model exposes only "
+                           "CCR0–3, hiding TB0.4–TB0.6. Compare latches (TBxCLn) are not modeled."),
+    "TIMERBn:CCn:MODE": F("Timer_B", NON_COMPLIANT, UG + " §26.2.4", "Capture mode absent, as in Timer_A."),
+
+    # --- UART (eUSCI_A) -----------------------------------------------------
+    "UARTn:BAUD": F("eUSCI_A UART", PARTIAL, UG + " §30.3.10",
+                    "Baud is an arbitrary integer with no relation to BRCLK/UCBRx modulation; real "
+                    "achievable rates depend on the clock source."),
+    "EUSCI:An:BAUD": F("eUSCI_A UART", PARTIAL, UG + " §30.3.10", "Alias of UARTn:BAUD."),
+    "UARTn:DATABITS": F("eUSCI_A UART", COMPLIANT, UG + " §30.3 (UC7BIT)", "7 or 8 data bits, matching UC7BIT."),
+    "UARTn:PARITY": F("eUSCI_A UART", COMPLIANT, UG + " §30.3 (UCPEN/UCPAR)", "NONE/ODD/EVEN matches."),
+    "UARTn:STOPBITS": F("eUSCI_A UART", COMPLIANT, UG + " §30.3 (UCSPB)", "1 or 2 stop bits matches."),
+    "UARTn:ENABLE": F("eUSCI_A UART", PARTIAL, UG + " §30.3.1 (UCSWRST)",
+                      "Models the UCSWRST release conceptually, but SEND/RECEIVE work while disabled, so "
+                      "the reset-held state is not enforced.",
+                      probe="uart_send_while_disabled"),
+    "UARTn:SEND": F("eUSCI_A UART", PARTIAL, UG + " §30.3.14 (UCAxTXBUF)",
+                    "Unbounded TX buffering; hardware has a one-byte TXBUF with UCTXIFG handshake. No "
+                    "framing/parity error injection (UCFE/UCPE) exists."),
+    "EUSCI:An:TXDATA": F("eUSCI_A UART", PARTIAL, UG + " §30.3.14", "Alias of UARTn:SEND."),
+    "UARTn:RECEIVE": F("eUSCI_A UART", PARTIAL, UG + " §30.3.13 (UCAxRXBUF)",
+                       "Unbounded RX buffering; no overrun (UCOE) modeling — a real RXBUF overwrite is "
+                       "silent data loss the simulator never reproduces."),
+    "EUSCI:An:RXDATA": F("eUSCI_A UART", PARTIAL, UG + " §30.3.13", "Alias of UARTn:RECEIVE."),
+    "UARTn:RXCOUNT": F("eUSCI_A UART", UNDOCUMENTED, "—", "Buffer introspection; no hardware equivalent."),
+    "UARTn:TXCOUNT": F("eUSCI_A UART", UNDOCUMENTED, "—", "Buffer introspection; no hardware equivalent."),
+    "UARTn:FLUSH": F("eUSCI_A UART", UNDOCUMENTED, "—", "Drains the simulated TX buffer to the caller."),
+
+    # --- SPI (eUSCI_B) --------------------------------------------------------
+    "SPIn:BITRATE": F("eUSCI SPI", PARTIAL, UG + " §31.3.5 (UCBRx)",
+                      "Arbitrary integer; real bit clock is BRCLK/UCBRx."),
+    "EUSCI:Bn:BITRATE": F("eUSCI SPI", PARTIAL, UG + " §31.3.5", "Alias of SPIn:BITRATE."),
+    "SPIn:CPOL": F("eUSCI SPI", COMPLIANT, UG + " §31.3 (UCCKPL)", "Clock polarity 0/1 matches UCCKPL."),
+    "SPIn:CPHA": F("eUSCI SPI", COMPLIANT, UG + " §31.3 (UCCKPH)", "Clock phase 0/1 matches UCCKPH."),
+    "SPIn:MASTER": F("eUSCI SPI", COMPLIANT, UG + " §31.3.2–31.3.3 (UCMST)", "Master/slave select matches UCMST."),
+    "SPIn:ENABLE": F("eUSCI SPI", PARTIAL, UG + " §31.3.1 (UCSWRST)",
+                     "Enable flag never enforced — transfers succeed while disabled.",
+                     probe="spi_transfer_while_disabled"),
+    "SPIn:TRANSFER": F("eUSCI SPI", PARTIAL, UG + " §31.3.3–31.3.4",
+                       "Full-duplex byte exchange with 00-fill is a fair SPI model, but it ignores "
+                       "enable/master state and models no UCTXIFG/UCRXIFG handshake."),
+    "SPIn:TXDATA": F("eUSCI SPI", PARTIAL, UG + " §31.4/31.5 (UCxxTXBUF)", "Byte enqueue without TXIFG semantics."),
+    "EUSCI:Bn:TXDATA": F("eUSCI SPI", PARTIAL, UG + " §31.5", "Alias of SPIn:TXDATA."),
+    "SPIn:RXDATA": F("eUSCI SPI", PARTIAL, UG + " §31.4/31.5 (UCxxRXBUF)",
+                     "Returns 0x00 when the RX buffer is empty instead of the last received byte/overrun "
+                     "semantics."),
+    "EUSCI:Bn:RXDATA": F("eUSCI SPI", PARTIAL, UG + " §31.5", "Alias of SPIn:RXDATA."),
+
+    # --- I2C (eUSCI_B) --------------------------------------------------------
+    "I2Cn:ADDRESS": F("eUSCI_B I2C", PARTIAL, UG + " §32.3.1 (UCSLA10/UCA10)",
+                      "Masks addresses to 7 bits; eUSCI_B supports 10-bit own and slave addressing, which "
+                      "silently truncates here."),
+    "I2Cn:FREQUENCY": F("eUSCI_B I2C", ACCEPTS_INVALID, DS + " §8.12.8; " + UG + " §32.3",
+                        "Contains dead validation code (an if-not-in-(100k,400k,1M) branch that does "
+                        "nothing), so any frequency is accepted silently.",
+                        probe="i2c_frequency_unvalidated"),
+    "I2Cn:MASTER": F("eUSCI_B I2C", COMPLIANT, UG + " §32.3 (UCMST)", "Master/slave select matches UCMST."),
+    "I2Cn:ENABLE": F("eUSCI_B I2C", PARTIAL, UG + " §32.3 (UCSWRST)", "Stored but never enforced on transfers."),
+    "I2Cn:WRITE": F("eUSCI_B I2C", PARTIAL, UG + " §32.3.4 (UCNACKIFG)",
+                    "Always returns ACK; a real bus NACKs on missing/busy slaves and the model has no NACK "
+                    "path at all.",
+                    probe="i2c_write_always_acks"),
+    "I2Cn:READ": F("eUSCI_B I2C", PARTIAL, UG + " §32.3.4",
+                   "Returns zero-fill when no data has been injected rather than any bus-level error."),
+    "I2Cn:TRANSFER": F("eUSCI_B I2C", NON_COMPLIANT, UG + " §32.3.4",
+                       "Parses a target address parameter and then never uses it — transfers behave "
+                       "identically for every address, so multi-slave code cannot be exercised.",
+                       probe="i2c_transfer_ignores_address"),
+
+    # --- Clock system (CS) ----------------------------------------------------
+    "CLOCK:MCLK:SOURCE": F("Clock (CS)", NON_COMPLIANT, UG + " §3.3.2 (CSCTL2.SELM)",
+                           "Valid set is {DCO, LFXT, HFXT, VLO, REFO, DCOCLKDIV}. REFO and DCOCLKDIV do not "
+                           "exist on FR59xx CS; MODCLK and LFMODCLK (SELM=4/2) do exist and are rejected.",
+                           probe="mclk_source_set"),
+    "CLOCK:SMCLK:SOURCE": F("Clock (CS)", ACCEPTS_INVALID, UG + " §3.3.2 (CSCTL2.SELS)",
+                            "No validation at all — any string becomes the SMCLK source.",
+                            probe="smclk_source_unvalidated"),
+    "CLOCK:ACLK:SOURCE": F("Clock (CS)", ACCEPTS_INVALID, UG + " §3.3.2 (CSCTL2.SELA)",
+                           "No validation; real ACLK sources are only LFXTCLK, VLOCLK, and LFMODCLK."),
+    "CLOCK:MCLK:DIVIDER": F("Clock (CS)", ACCEPTS_INVALID, UG + " §3.3.3 (CSCTL3.DIVM)",
+                            "DIVM stops at /32; the model accepts /64 and /128.",
+                            probe="mclk_divider_64"),
+    "CLOCK:SMCLK:DIVIDER": F("Clock (CS)", ACCEPTS_INVALID, UG + " §3.3.3 (CSCTL3.DIVS)",
+                             "No validation at all (any integer accepted); real DIVS is /1–/32."),
+    "CLOCK:ACLK:DIVIDER": F("Clock (CS)", ACCEPTS_INVALID, UG + " §3.3.3 (CSCTL3.DIVA)",
+                            "No validation at all; real DIVA is /1–/32.",
+                            probe="aclk_divider_unvalidated"),
+    "CLOCK:DCO:FREQUENCY": F("Clock (CS)", ACCEPTS_INVALID, UG + " §3.3.1 (CSCTL1.DCOFSEL/DCORSEL); " + DS + " §8.12.3",
+                             "Continuous float where hardware has ten discrete steps (1–24 MHz)."),
+    "CLOCK:MCLK:FREQUENCY": F("Clock (CS)", NON_COMPLIANT, UG + " §3.2",
+                              "Computed as DCO/divider regardless of the selected source — an LFXT-sourced "
+                              "MCLK still reports a DCO-derived frequency.",
+                              probe="mclk_freq_ignores_source"),
+    "CLOCK:SMCLK:FREQUENCY": F("Clock (CS)", NON_COMPLIANT, UG + " §3.2",
+                               "Same source-blind computation as MCLK:FREQUENCY."),
+    "CLOCK:ACLK:FREQUENCY": F("Clock (CS)", NON_COMPLIANT, UG + " §3.2",
+                              "Always LFXT/divider; a VLO-sourced ACLK (~9.4 kHz) still reports 32768-based "
+                              "frequencies."),
+
+    # --- Power management ------------------------------------------------------
+    "POWER:MODE": F("PMM", PARTIAL, UG + " §1.4, §2.2.4",
+                    "LPM0–LPM4 and LPM4.5 are accepted but LPM3.5 — a documented FR5994 mode — is rejected. "
+                    "Modes also have no effect on clocks (SMCLK keeps 'running' in LPM3+).",
+                    probe="lpm35_rejected"),
+    "POWER:VCC": F("PMM", COMPLIANT, DS + " §8.3", "Alias of CPU:VCC with the correct 1.8–3.6-V validation."),
+    "POWER:WAKEUP": F("PMM", PARTIAL, UG + " §2.2.4 (LOCKLPM5)",
+                      "Wakeup jumps straight back to AM; real LPMx.5 wakeup is a reset-like sequence gated "
+                      "by LOCKLPM5, with I/O state held until unlocked."),
+
+    # --- Memory -----------------------------------------------------------------
+    "MEMORY:READ": F("Memory", ACCEPTS_INVALID, UG + " §1.9; " + DS + " §9.2",
+                     "Flat byte map with no memory-map validation: vacant and impossible addresses read as "
+                     "0x00 where real vacant-memory access triggers SYSNMI/reset.",
+                     probe="memory_unmapped"),
+    "MEM:READ": F("Memory", ACCEPTS_INVALID, UG + " §1.9", "Short-form alias of MEMORY:READ."),
+    "MEMORY:WRITE": F("Memory", ACCEPTS_INVALID, UG + " §1.9; " + DS + " §9.2",
+                      "Writes anywhere succeed — FRAM/SRAM/peripheral/vacant regions are indistinguishable."),
+    "MEM:WRITE": F("Memory", ACCEPTS_INVALID, UG + " §1.9", "Short-form alias of MEMORY:WRITE."),
+    "MEMORY:FILL": F("Memory", ACCEPTS_INVALID, UG + " §1.9", "Same unvalidated address space as WRITE."),
+
+    # --- Watchdog -----------------------------------------------------------------
+    "WDT:STATE": F("WDT_A", NON_COMPLIANT, UG + " §24.2",
+                   "Always reports RUNNING and ignores writes. The post-PUC watchdog-active default is "
+                   "right, but WDTHOLD (stopping the dog) and expiry-induced PUC are absent.",
+                   probe="wdt_stub"),
+    "WDT:PASSWORD": F("WDT_A", NON_COMPLIANT, UG + " §24.2 (WDTPW)",
+                      "No-op. Real WDTCTL writes need 0x5A in the upper byte and a wrong password causes an "
+                      "immediate PUC — the model accepts anything silently."),
+
+    # --- Interrupt system ------------------------------------------------------------
+    "INTERRUPT:ENABLE": F("Interrupts", NON_COMPLIANT, UG + " §4.3.3 (SR.GIE)",
+                          "Stub — GIE state is not even stored."),
+    "INTERRUPT:DISABLE": F("Interrupts", NON_COMPLIANT, UG + " §4.3.3 (SR.GIE)", "Stub, see INTERRUPT:ENABLE."),
+    "INTERRUPT:VECTOR": F("Interrupts", NON_COMPLIANT, DS + " Table 9-4",
+                          "Always returns 0xFFFF; the FR5994 vector table spans 0xFF90–0xFFFF with the reset "
+                          "vector at 0xFFFE, and no per-source vectors are modeled.",
+                          probe="interrupt_stub"),
+    "INTERRUPT:FLAG": F("Interrupts", NON_COMPLIANT, DS + " Table 9-4", "Always 0; no interrupt source is wired up."),
+}
+
+# ---------------------------------------------------------------------------
+# Doc-described behavior with no corresponding command (MISSING)
+# ---------------------------------------------------------------------------
+
+MISSING: List[Missing] = [
+    Missing("Timer_A", DS + " Table 6-1",
+            "TA3 and TA4 do not exist in the model — the FR5994 has five Timer_A instances "
+            "(3, 3, 2, 2, 2 capture/compare registers); the model instantiates three."),
+    Missing("Timer_A", UG + " §25.2.5 (OUTMOD)",
+            "Timer output modes 0–7 (PWM generation: set/reset, toggle, etc.) are absent."),
+    Missing("Timer_A", UG + " §25.2.4.1",
+            "Capture inputs (CCIxA/CCIxB, CM edge select, SCS sync, COV overflow) are absent."),
+    Missing("Timer_B", UG + " §26.2.4 / " + DS + " Table 6-1",
+            "TB0's CCR4–CCR6 and the compare-latch (TBxCLn/CLLD) mechanism are absent."),
+    Missing("eUSCI SPI", DS + " Table 6-1",
+            "SPI2/SPI3 missing: the FR5994 has four eUSCI_B instances (plus SPI mode on all four "
+            "eUSCI_A); the model instantiates two SPI ports."),
+    Missing("ADC12_B", UG + " §34.2.8 (ADC12CONSEQ)",
+            "Conversion modes beyond single-channel-single-conversion (sequence, repeat-single, "
+            "repeat-sequence) are absent, as are the 32 conversion-memory registers (ADC12MEMx)."),
+    Missing("ADC12_B", UG + " §34.2.2, §34.2.3",
+            "Differential-input mode (ADC12DIF), internal temperature and battery channels, and the "
+            "window comparator (ADC12HI/LO) are absent."),
+    Missing("REF_A", UG + " §33",
+            "The shared reference module (1.2/2.0/2.5-V REFVSEL) is entirely absent; ADC:REFERENCE "
+            "stores a free-form string instead."),
+    Missing("GPIO", UG + " §12.2.8 (PxSEL0/PxSEL1)",
+            "Peripheral function selection is absent — pins cannot be routed to timers/eUSCI, so pin-mux "
+            "configuration bugs in user code are invisible."),
+    Missing("GPIO", DS + " §7.3",
+            "Port PJ (JTAG-shared GPIO) is absent; the model stops at P8."),
+    Missing("WDT_A", UG + " §24.2 (WDTIS, WDTHOLD, WDTTMSEL)",
+            "Interval selection, hold control, and interval-timer mode are absent."),
+    Missing("Clock (CS)", UG + " §3.2.7 (OFIFG)",
+            "Oscillator-fault detection and fail-safe fallback (LFXT fault → VLO substitution) are absent."),
+    Missing("Clock (CS)", UG + " §3.3.4 (CSCTL4.HFFREQ)",
+            "HFXT configuration (frequency-range selection) is absent; HFXT is selectable as a source "
+            "but has no frequency of its own."),
+]
+
+# Subsystems the model does not claim at all (listed for completeness; not
+# scored because the device model never advertises them).
+UNMODELED = [
+    "DMA (SLAU367P §11)", "MPU (SLAU367P §10)", "CRC (SLAU367P §9)",
+    "AES256 accelerator (SLAU367P §Ch. AES)", "RTC_C (SLAU367P §29)",
+    "Comp_E (SLAU367P §Ch. Comp_E)", "LEA (SLASE54D §10)",
+    "Capacitive Touch I/O (SLAU367P §13)",
+]
+
+
+# ---------------------------------------------------------------------------
+# Audit engine
+# ---------------------------------------------------------------------------
+
+def run_audit() -> Tuple[Dict[str, List[str]], List[str], List[str]]:
+    """Map handler paths to families; run probes.
+
+    Returns (family → concrete paths, unscored families, stale probe names).
+    """
+    dev = MSP430()
+    fam_paths: Dict[str, List[str]] = {}
+    for path in sorted(dev._handlers):
+        fam_paths.setdefault(family(path), []).append(path)
+
+    unscored = sorted(f for f in fam_paths if f not in FINDINGS)
+
+    stale: List[str] = []
+    for name, probe in PROBES.items():
+        if not probe(MSP430()):
+            stale.append(name)
+    return fam_paths, unscored, stale
+
+
+def render_report(fam_paths: Dict[str, List[str]], unscored: List[str],
+                  stale: List[str]) -> str:
+    """Render the Markdown compliance report."""
+    scored = {f: v for f, v in FINDINGS.items() if v.score in SCORED and f in fam_paths}
+    tally = {s: sum(1 for v in scored.values() if v.score == s) for s in SCORED}
+    total_scored = sum(tally.values())
+    pct = 100.0 * tally[COMPLIANT] / total_scored if total_scored else 0.0
+
+    by_subsystem: Dict[str, List[Tuple[str, Finding]]] = {}
+    for fam, finding in FINDINGS.items():
+        if fam in fam_paths:
+            by_subsystem.setdefault(finding.subsystem, []).append((fam, finding))
+
+    lines: List[str] = []
+    a = lines.append
+    a("# MSP430 SCPI Compliance Report")
+    a("")
+    a("Audit of `silmulator/devices/msp430.py` against TI documentation.")
+    a("")
+    a("| Ground truth | Revision |")
+    a("|---|---|")
+    a("| MSP430FR58xx/59xx/6xx Family User's Guide | **SLAU367P** |")
+    a("| MSP430FR599x datasheet | **SLASE54D** |")
+    a("")
+    a("Generated by `scripts/audit_msp430.py` — re-run it after changing "
+      "`msp430.py`; probes verify each mechanical finding still reproduces.")
+    a("")
+    a("## Scope and method")
+    a("")
+    a("Every registered SCPI path is collapsed into a command family "
+      f"({sum(len(p) for p in fam_paths.values())} paths → {len(fam_paths)} families) "
+      "and each family is scored:")
+    a("")
+    a("- **COMPLIANT** — matches the doc for typical use and boundary values")
+    a("- **PARTIAL** — right concept, misses documented edge cases or side effects")
+    a("- **NON_COMPLIANT** — contradicts the doc for typical use")
+    a("- **ACCEPTS_INVALID** — silently accepts states the doc says cannot exist "
+      "(own category per the audit plan)")
+    a("- **UNDOCUMENTED** — simulator convenience with no doc basis (outside the score)")
+    a("- **FRAMEWORK** — IEEE-488.2/SCPI plumbing from `BaseDevice` (outside the score)")
+    a("")
+    a("A global caveat that shapes many PARTIAL scores: **time does not pass** in "
+      "the simulation. Timers never count, so every documented behavior that "
+      "depends on elapsed time (rollover interrupts, capture, WDT expiry, baud "
+      "timing) is structurally absent.")
+    a("")
+    a("## Score")
+    a("")
+    a(f"**{pct:.1f}% compliant** — {tally[COMPLIANT]} of {total_scored} scored families.")
+    a("")
+    a("| Category | Families |")
+    a("|---|---|")
+    for s in SCORED:
+        a(f"| {s} | {tally[s]} |")
+    n_undoc = sum(1 for f, v in FINDINGS.items() if v.score == UNDOCUMENTED and f in fam_paths)
+    n_frame = sum(1 for f, v in FINDINGS.items() if v.score == FRAMEWORK and f in fam_paths)
+    a(f"| UNDOCUMENTED (outside score) | {n_undoc} |")
+    a(f"| FRAMEWORK (outside score) | {n_frame} |")
+    a("")
+
+    if stale:
+        a("## ⚠ STALE findings (model changed since audit — review these entries)")
+        a("")
+        for s in stale:
+            a(f"- probe `{s}` no longer reproduces")
+        a("")
+    if unscored:
+        a("## ⚠ UNSCORED commands (added to msp430.py without an audit entry)")
+        a("")
+        for f in unscored:
+            a(f"- `{f}`")
+        a("")
+
+    a("## Findings by subsystem")
+    for subsystem in sorted(by_subsystem):
+        a("")
+        a(f"### {subsystem}")
+        a("")
+        a("| Family | Score | Citation | Finding |")
+        a("|---|---|---|---|")
+        for fam, v in sorted(by_subsystem[subsystem]):
+            n = len(fam_paths[fam])
+            fam_disp = f"`{fam}`" + (f" ({n} paths)" if n > 1 else "")
+            text = v.text.replace("|", "\\|")
+            probe_note = f" *(probe: `{v.probe}`)*" if v.probe else ""
+            a(f"| {fam_disp} | {v.score} | {v.citation} | {text}{probe_note} |")
+
+    a("")
+    a("## MISSING — documented behavior with no corresponding command")
+    a("")
+    a("| Subsystem | Citation | Gap |")
+    a("|---|---|---|")
+    for m in MISSING:
+        a(f"| {m.subsystem} | {m.citation} | {m.text} |")
+    a("")
+    a("## Unmodeled subsystems (not scored)")
+    a("")
+    a("The device model never claims these FR5994 modules; listed so their "
+      "absence is a recorded decision rather than an oversight:")
+    a("")
+    for u in UNMODELED:
+        a(f"- {u}")
+    a("")
+    a("## Appendix — every registered path and its family score")
+    a("")
+    a("| Path | Family | Score |")
+    a("|---|---|---|")
+    for fam in sorted(fam_paths):
+        score = FINDINGS[fam].score if fam in FINDINGS else "UNSCORED"
+        for path in fam_paths[fam]:
+            a(f"| `{path}` | `{fam}` | {score} |")
+    a("")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    """Run the audit and write the Markdown report."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        default=str(REPO_ROOT / "docs" / "audits" / "msp430-compliance-report.md"),
+        help="Report destination (default: docs/audits/msp430-compliance-report.md)",
+    )
+    args = parser.parse_args()
+
+    fam_paths, unscored, stale = run_audit()
+    report = render_report(fam_paths, unscored, stale)
+
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report)
+
+    print(f"report: {out}")
+    print(f"families: {len(fam_paths)}  unscored: {len(unscored)}  stale probes: {len(stale)}")
+    for f in unscored:
+        print(f"  UNSCORED: {f}")
+    for s in stale:
+        print(f"  STALE: {s}")
+    return 1 if (unscored or stale) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

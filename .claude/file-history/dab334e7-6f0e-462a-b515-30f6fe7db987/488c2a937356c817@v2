@@ -1,0 +1,47 @@
+"""Native Streamlit research console — scaffold (presentation only).
+
+Run (after `uv sync --extra dashboard`):
+
+    uv run streamlit run streamlit_app/dashboard.py
+
+Three tabs mirroring the HFT learning app's oil dashboard patterns
+(wide layout, sidebar controls, st.metric columns, tabs):
+  ① Arena — standings from arena_state/arena.db, read-only
+  ② Equity — metrics + chart for any equity CSV
+  ③ Live signals — manual-refresh tape via live_watch
+
+All data access goes through streamlit_app/data.py (pure, testable,
+no-streamlit imports). This file is deliberately thin.
+"""
+from __future__ import annotations
+
+import sys
+
+
+def _require_streamlit():
+    """Lazy import with a friendly exit — core installs don't carry streamlit."""
+    try:
+        import streamlit as st  # noqa: F401
+        return st
+    except ImportError:
+        sys.exit("streamlit is not installed — run: uv sync --extra dashboard")
+
+
+def main() -> None:
+    """TODO(implement): per the plan —
+    st = _require_streamlit()
+    st.set_page_config(page_title="AlgoTrade Research Console", layout="wide")
+    Sidebar: arena DB path (default arena_state/arena.db), equity CSV path,
+             live-tape controls (tickers, interval from VALID_INTERVALS,
+             strategy from intraday_sim.STRATEGIES), ↻ Refresh button.
+    Tabs ①②③ wired to data.arena_rows/arena_headline, data.equity_metrics
+    (st.metric columns + st.line_chart; crimson dashed reference line for
+    the drawdown peak — the oil app's chart signature), data.live_tape
+    (st.code block of tape lines). FriendlyDashboardError -> st.error /
+    st.info empty states, never tracebacks.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/streamlit-dashboard.md")
+
+
+if __name__ == "__main__":
+    main()

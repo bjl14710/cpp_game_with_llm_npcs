@@ -1,0 +1,15 @@
+# pybind11 bridge exposing the microstructure signal stream to Python.
+# Plan: .claude/plans/microstructure-signals.md, step 4.
+#
+# itch_parser.cpp is compiled directly into the module (instead of linking
+# the static itch_lib) so the shared module doesn't depend on itch_lib being
+# built position-independent. MicrostructureEngine itself is header-only.
+pybind11_add_module(signals_cpp
+    bindings.cpp
+    ${CMAKE_SOURCE_DIR}/cpp/itch/itch_parser.cpp
+)
+target_include_directories(signals_cpp PRIVATE ${CMAKE_SOURCE_DIR}/cpp/itch)
+
+# Required for `pip install -e .` / wheel builds: without an install rule,
+# scikit-build-core packages no compiled code and `import signals_cpp` fails.
+install(TARGETS signals_cpp LIBRARY DESTINATION .)

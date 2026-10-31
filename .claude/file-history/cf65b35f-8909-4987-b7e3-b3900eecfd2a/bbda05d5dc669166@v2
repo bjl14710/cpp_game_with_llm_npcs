@@ -1,0 +1,113 @@
+"""Intraday oil-leads-energy study on real ITCH ticks (Hayashi-Yoshida).
+
+The daily pipeline asks "does CL=F lead XLE?" on daily bars. This module
+re-asks it at intraday resolution on the golden ITCH day. CL=F itself is a
+CME future and does not exist in Nasdaq ITCH, so the oil leg is proxied by
+USO (the WTI-tracking ETF, present in the sample): the intraday question
+becomes **does USO lead XLE tick-by-tick?**
+
+Each leg's tick series is the per-event microprice from the C++ engine
+(:mod:`oil_alpha.microstructure.events`), restricted to regular trading
+hours, deduplicated per timestamp, and fed to
+:func:`oil_alpha.analysis.hayashi_yoshida.hy_leadlag_scan` on a log-spaced
+shift grid (1 ms .. 30 s by default).
+
+Run (after ``gunzip -c <day>.gz | itch_filter USO/XLE`` staged the files):
+
+    PYTHONPATH=src python -m oil_alpha.analysis.hy_study
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+
+import numpy as np
+import pandas as pd
+
+from oil_alpha.analysis.hayashi_yoshida import (
+    HYLeadLagResult,
+    default_lag_grid_ns,
+    hy_leadlag_scan,
+)
+from oil_alpha.microstructure.events import load_micro_events
+
+#: Regular trading hours, ns since midnight ET.
+RTH_START_NS = int(9.5 * 3600 * 1e9)
+RTH_END_NS = int(16 * 3600 * 1e9)
+
+#: Golden-day (2019-12-30) fixed-point price bounds per symbol, generous
+#: around the traded range (USO pre-reverse-split ~$12.8; XLE ~$60.3).
+GOLDEN_BOUNDS: dict[str, tuple[int, int]] = {
+    "USO": (110_000, 150_000),   # $11.00 - $15.00
+    "XLE": (550_000, 660_000),   # $55.00 - $66.00
+    "AAPL": (2_800_000, 3_000_000),
+}
+
+
+def microprice_ticks(
+    path: str, min_price_raw: int, max_price_raw: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """RTH microprice tick series (times_ns, prices) from a filtered ITCH file."""
+    df = load_micro_events(path, min_price_raw, max_price_raw)
+    df = df[(df["timestamp_ns"] >= RTH_START_NS) & (df["timestamp_ns"] < RTH_END_NS)]
+    if df.empty:
+        raise ValueError(f"no RTH events in {path!r} — wrong symbol bounds or file")
+    return df["timestamp_ns"].to_numpy(np.int64), df["microprice"].to_numpy(float)
+
+
+def run_hy_study(
+    x_path: str, x_bounds: tuple[int, int], x_name: str,
+    y_path: str, y_bounds: tuple[int, int], y_name: str,
+    max_lag_s: float = 30.0,
+) -> HYLeadLagResult:
+    """HY lead-lag scan between two filtered ITCH days. Positive => x leads."""
+    tx, px = microprice_ticks(x_path, *x_bounds)
+    ty, py = microprice_ticks(y_path, *y_bounds)
+    grid = default_lag_grid_ns(max_lag_s=max_lag_s)
+    return hy_leadlag_scan(tx, px, ty, py, grid, x_name=x_name, y_name=y_name)
+
+
+def _main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--x", default="USO", help="leading-candidate symbol (default USO)")
+    ap.add_argument("--y", default="XLE", help="lagging-candidate symbol (default XLE)")
+    ap.add_argument("--date", default="12302019", help="golden day (default 12302019)")
+    ap.add_argument("--cache", default="data_cache/itch", help="filtered-file directory")
+    ap.add_argument("--max-lag-s", type=float, default=30.0)
+    args = ap.parse_args()
+
+    paths = {}
+    for sym in (args.x, args.y):
+        p = os.path.join(args.cache, f"{sym}-{args.date}.itch")
+        if not os.path.exists(p):
+            raise SystemExit(
+                f"{p} not found — stage it with:\n"
+                f"  gunzip -c {args.cache}/{args.date}.NASDAQ_ITCH50.gz | "
+                f"./_build/cpp/itch/itch_filter {sym} > {p}"
+            )
+        if sym not in GOLDEN_BOUNDS:
+            raise SystemExit(f"no price bounds known for {sym} — add to GOLDEN_BOUNDS")
+        paths[sym] = p
+
+    print(f"HY intraday lead-lag: {args.x} vs {args.y}, {args.date}, RTH only")
+    res = run_hy_study(
+        paths[args.x], GOLDEN_BOUNDS[args.x], args.x,
+        paths[args.y], GOLDEN_BOUNDS[args.y], args.y,
+        max_lag_s=args.max_lag_s,
+    )
+
+    rows = pd.DataFrame({"lag_ms": res.lags_ns / 1e6, "rho_HY": res.corr})
+    with pd.option_context("display.float_format", lambda v: f"{v:10.4f}"):
+        print(rows.to_string(index=False))
+    print(
+        f"\npeak: rho_HY = {res.peak_corr:.4f} at {res.peak_lag_ns / 1e6:.1f} ms "
+        f"-> leader: {res.leader}"
+        f"\nticks: {res.n_x:,} {args.x} returns, {res.n_y:,} {args.y} returns"
+        "\nconvention: positive lag => "
+        f"{args.x} leads (pinned by tests/test_hayashi_yoshida.py)"
+    )
+
+
+if __name__ == "__main__":
+    _main()

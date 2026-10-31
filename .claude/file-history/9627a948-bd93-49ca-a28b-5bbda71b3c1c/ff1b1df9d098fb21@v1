@@ -1,0 +1,367 @@
+"""Drag-and-drop canvas for hardware blocks."""
+
+from __future__ import annotations
+from typing import Optional, Dict, List, Tuple
+import uuid
+import json
+
+from PyQt6.QtWidgets import (
+    QGraphicsScene, QGraphicsView, QGraphicsLineItem,
+    QGraphicsItem, QSizePolicy, QMenu, QApplication,
+)
+from PyQt6.QtCore import Qt, QPointF, QRectF, QLineF, QSizeF, pyqtSignal, QObject
+from PyQt6.QtGui import (
+    QPainter, QColor, QPen, QBrush, QWheelEvent,
+    QMouseEvent, QKeyEvent,
+)
+
+from silmulator.gui.blocks.base_block import BaseBlock, ConnectionPort
+from silmulator.gui.blocks.oscilloscope_block import OscilloscopeBlock
+from silmulator.gui.blocks.power_supply_block import PowerSupplyBlock
+from silmulator.gui.blocks.function_generator_block import FunctionGeneratorBlock
+from silmulator.gui.blocks.multimeter_block import MultimeterBlock
+from silmulator.gui.blocks.msp430_block import MSP430Block
+from silmulator.gui.blocks.code_input_block import CodeInputBlock
+from silmulator.gui.blocks.custom_block import register_custom_blocks
+
+
+BLOCK_REGISTRY = {
+    "Oscilloscope": OscilloscopeBlock,
+    "Power Supply": PowerSupplyBlock,
+    "Function Generator": FunctionGeneratorBlock,
+    "Multimeter": MultimeterBlock,
+    "MSP430": MSP430Block,
+    "Code Input": CodeInputBlock,
+}
+
+# Auto-discover and register user-authored JSON spec blocks. Failures here
+# are non-fatal — built-in blocks are still available even if a spec is
+# malformed.
+try:
+    register_custom_blocks(BLOCK_REGISTRY)
+except Exception:
+    pass
+
+
+class WireItem(QGraphicsLineItem):
+    """A connection wire between two ports."""
+
+    def __init__(self, src: ConnectionPort, dst: ConnectionPort) -> None:
+        super().__init__()
+        self.src_port = src
+        self.dst_port = dst
+        self.wire_id = str(uuid.uuid4())[:8]
+        pen = QPen(QColor(255, 200, 50), 2, Qt.PenStyle.SolidLine,
+                   Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        self.setPen(pen)
+        self.setZValue(-1)
+        self.update_position()
+
+    def update_position(self) -> None:
+        src_pos = self.src_port.scenePos()
+        dst_pos = self.dst_port.scenePos()
+        self.setLine(QLineF(src_pos, dst_pos))
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        # Draw with anti-aliasing
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        super().paint(painter, option, widget)
+
+
+class CanvasScene(QGraphicsScene):
+    """Scene that holds hardware blocks and wires."""
+
+    block_added = pyqtSignal(str, str)    # block_id, device_type
+    block_removed = pyqtSignal(str)       # block_id
+    wire_added = pyqtSignal(str, str, str, str)   # src_block, src_port, dst_block, dst_port
+    wire_removed = pyqtSignal(str)        # wire_id
+    command_executed = pyqtSignal(str, str, str)  # block_id, cmd, response
+
+    GRID_SIZE = 20
+    BACKGROUND_COLOR = QColor(28, 32, 40)
+    GRID_COLOR = QColor(45, 52, 65)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._blocks: Dict[str, BaseBlock] = {}
+        self._wires: Dict[str, WireItem] = {}
+        self._connecting: Optional[ConnectionPort] = None
+        self._temp_wire: Optional[QGraphicsLineItem] = None
+        self.setBackgroundBrush(QBrush(self.BACKGROUND_COLOR))
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+
+    # ------------------------------------------------------------------
+    # Block management
+    # ------------------------------------------------------------------
+
+    def add_block(self, device_type: str, pos: QPointF = QPointF(0, 0)) -> Optional[BaseBlock]:
+        cls = BLOCK_REGISTRY.get(device_type)
+        if cls is None:
+            return None
+        block = cls()
+        block.setPos(self._snap_to_grid(pos))
+        self.addItem(block)
+        self._blocks[block.block_id] = block
+        self.block_added.emit(block.block_id, device_type)
+        return block
+
+    def remove_block(self, block: BaseBlock) -> None:
+        # Remove connected wires first
+        wires_to_remove = [
+            w for w in self._wires.values()
+            if (w.src_port.parent_block is block or
+                w.dst_port.parent_block is block)
+        ]
+        for wire in wires_to_remove:
+            self._remove_wire(wire)
+        self._blocks.pop(block.block_id, None)
+        self.removeItem(block)
+        self.block_removed.emit(block.block_id)
+
+    def get_block(self, block_id: str) -> Optional[BaseBlock]:
+        return self._blocks.get(block_id)
+
+    @property
+    def blocks(self) -> List[BaseBlock]:
+        return list(self._blocks.values())
+
+    def selectAll(self) -> None:
+        for item in self.items():
+            if item.flags() & item.GraphicsItemFlag.ItemIsSelectable:
+                item.setSelected(True)
+
+    # ------------------------------------------------------------------
+    # Wire management
+    # ------------------------------------------------------------------
+
+    def connect_ports(self, src: ConnectionPort, dst: ConnectionPort) -> Optional[WireItem]:
+        if src.parent_block is dst.parent_block:
+            return None  # Don't connect a block to itself
+        if src.connected_to or dst.connected_to:
+            return None  # Already connected
+
+        wire = WireItem(src, dst)
+        self.addItem(wire)
+        self._wires[wire.wire_id] = wire
+        src.connect_to(dst)
+        self.wire_added.emit(
+            src.parent_block.block_id, src.port_id,
+            dst.parent_block.block_id, dst.port_id
+        )
+        return wire
+
+    def disconnect_ports(self, wire: WireItem) -> None:
+        self._remove_wire(wire)
+
+    def _remove_wire(self, wire: WireItem) -> None:
+        wire.src_port.disconnect()
+        wire.dst_port.disconnect()
+        self._wires.pop(wire.wire_id, None)
+        self.removeItem(wire)
+        self.wire_removed.emit(wire.wire_id)
+
+    # ------------------------------------------------------------------
+    # Wire drawing interaction
+    # ------------------------------------------------------------------
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            port = self._port_at(event.scenePos())
+            if port is not None:
+                self._start_wire(port, event.scenePos())
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._connecting and self._temp_wire:
+            self._temp_wire.setLine(
+                QLineF(self._connecting.scenePos(), event.scenePos())
+            )
+        for wire in self._wires.values():
+            wire.update_position()
+        if self._connecting:
+            # Don't let the scene start a rubber-band / item drag while wiring.
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._connecting and event.button() == Qt.MouseButton.LeftButton:
+            target = self._port_at(event.scenePos())
+            if target is not None and target is not self._connecting:
+                self.connect_ports(self._connecting, target)
+            self._cancel_wire()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _port_at(self, pos: QPointF) -> Optional[ConnectionPort]:
+        """Return the topmost ConnectionPort at the given scene pos, ignoring
+        the in-progress temp wire and any other non-port items above it."""
+        for item in self.items(pos):
+            if item is self._temp_wire:
+                continue
+            if isinstance(item, ConnectionPort):
+                return item
+        return None
+
+    def _start_wire(self, port: ConnectionPort, pos: QPointF) -> None:
+        self._connecting = port
+        pen = QPen(QColor(255, 200, 50), 2, Qt.PenStyle.DashLine)
+        self._temp_wire = self.addLine(QLineF(pos, pos), pen)
+        self._temp_wire.setZValue(100)
+        # Keep the rubber-line out of hit testing so itemAt-style lookups
+        # at the cursor still resolve to the destination port underneath.
+        self._temp_wire.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._temp_wire.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False
+        )
+
+    def _cancel_wire(self) -> None:
+        if self._temp_wire:
+            self.removeItem(self._temp_wire)
+            self._temp_wire = None
+        self._connecting = None
+
+    # ------------------------------------------------------------------
+    # Grid snap
+    # ------------------------------------------------------------------
+
+    def _snap_to_grid(self, pos: QPointF) -> QPointF:
+        g = self.GRID_SIZE
+        return QPointF(
+            round(pos.x() / g) * g,
+            round(pos.y() / g) * g,
+        )
+
+    # ------------------------------------------------------------------
+    # Grid drawing
+    # ------------------------------------------------------------------
+
+    def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawBackground(painter, rect)
+        painter.setPen(QPen(self.GRID_COLOR, 0.5))
+        g = self.GRID_SIZE
+        left = int(rect.left() - (rect.left() % g))
+        top = int(rect.top() - (rect.top() % g))
+        x = left
+        while x < rect.right():
+            painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
+            x += g
+        y = top
+        while y < rect.bottom():
+            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+            y += g
+
+    # ------------------------------------------------------------------
+    # Layout persistence
+    # ------------------------------------------------------------------
+
+    def to_dict(self) -> dict:
+        blocks = []
+        for block in self._blocks.values():
+            blocks.append({
+                "id": block.block_id,
+                "type": block.device_type,
+                "name": block.name,
+                "x": block.x(),
+                "y": block.y(),
+            })
+        wires = []
+        for wire in self._wires.values():
+            wires.append({
+                "id": wire.wire_id,
+                "src_block": wire.src_port.parent_block.block_id,
+                "src_port": wire.src_port.port_id,
+                "dst_block": wire.dst_port.parent_block.block_id,
+                "dst_port": wire.dst_port.port_id,
+            })
+        return {"blocks": blocks, "wires": wires}
+
+    def from_dict(self, data: dict) -> None:
+        self.clear()
+        self._blocks = {}
+        self._wires = {}
+        port_map: Dict[Tuple[str, str], ConnectionPort] = {}
+        for bdata in data.get("blocks", []):
+            block = self.add_block(bdata["type"], QPointF(bdata["x"], bdata["y"]))
+            if block:
+                block.name = bdata.get("name", block.name)
+                for port in block.ports:
+                    port_map[(bdata["id"], port.port_id)] = port
+        for wdata in data.get("wires", []):
+            src = port_map.get((wdata["src_block"], wdata["src_port"]))
+            dst = port_map.get((wdata["dst_block"], wdata["dst_port"]))
+            if src and dst:
+                self.connect_ports(src, dst)
+
+
+class CanvasView(QGraphicsView):
+    """Zoomable, pannable view for the canvas scene."""
+
+    def __init__(self, scene: CanvasScene) -> None:
+        super().__init__(scene)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._panning = False
+        self._pan_start = QPointF()
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+        current = self.transform().m11()
+        if (factor < 1 and current > 0.1) or (factor > 1 and current < 8.0):
+            self.scale(factor, factor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = True
+            self._pan_start = event.position()
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._panning:
+            delta = event.position() - self._pan_start
+            self._pan_start = event.position()
+            self.horizontalScrollBar().setValue(
+                int(self.horizontalScrollBar().value() - delta.x())
+            )
+            self.verticalScrollBar().setValue(
+                int(self.verticalScrollBar().value() - delta.y())
+            )
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._panning = False
+            self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Delete:
+            for item in self.scene().selectedItems():
+                if isinstance(item, BaseBlock):
+                    self.scene().remove_block(item)
+        elif event.key() == Qt.Key.Key_Escape:
+            if isinstance(self.scene(), CanvasScene):
+                self.scene()._cancel_wire()
+        elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_0:
+                self.resetTransform()
+            elif event.key() == Qt.Key.Key_A:
+                self.scene().selectAll()
+        else:
+            super().keyPressEvent(event)
+
+    def fit_all(self) -> None:
+        if self.scene().items():
+            self.fitInView(self.scene().itemsBoundingRect().adjusted(-20, -20, 20, 20),
+                           Qt.AspectRatioMode.KeepAspectRatio)

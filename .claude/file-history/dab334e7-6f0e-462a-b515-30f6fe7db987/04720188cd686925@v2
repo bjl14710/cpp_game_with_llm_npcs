@@ -1,0 +1,84 @@
+"""Track-record-weighted ensemble meta-strategy.
+
+Combines several DailyStrategy constituents via weighted voting. This class
+is a pure function of (constituents, weights) -> DailySignal — it must NOT
+import strategy_arena or touch any database (that would create a circular
+import and couple the DailyStrategy contract to storage). Weight
+computation from live track records lives in strategy_arena.ensemble_weights
+and is done by the caller before construction, each tick.
+
+See .claude/plans/ensemble-strategy.md.
+"""
+from __future__ import annotations
+
+from typing import Dict
+
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class EnsembleStrategy(DailyStrategy):
+    """Weighted vote over constituent strategies' signals.
+
+    Combination rule: ``score = Σ weight_i * position_i * confidence_i``;
+    the ensemble's position is ``sign(score)`` with ``confidence = |score|``
+    (already weight-normalized when weights sum to 1). Exact disagreement
+    (score == 0) is a hold. This keeps the output in the same units the
+    arena already uses for top-N ranking — no new semantics invented.
+
+    Not registered in strategies/registry.py: constituents and weights are
+    dynamic, so ensembles are constructed via ``arena-run ensemble``, not by
+    a static name -> class map. Nested ensembles are rejected this version.
+    """
+
+    name = "ensemble"
+
+    def __init__(self, constituents: Dict[str, DailyStrategy],
+                 weights: Dict[str, float]) -> None:
+        """
+        Args:
+            constituents: {name: strategy}. Must be non-empty, and no member
+                may itself be an EnsembleStrategy (no nesting this version).
+            weights: {name: weight}, same keys as constituents. Should sum
+                to ~1 (the caller normalizes); enforced non-negative here.
+
+        Raises:
+            ValueError: Empty constituents, key mismatch, negative weight,
+                or a nested ensemble.
+        """
+        if not constituents:
+            raise ValueError("EnsembleStrategy needs at least one constituent")
+        if set(constituents) != set(weights):
+            raise ValueError(f"constituents/weights key mismatch: "
+                             f"{sorted(constituents)} vs {sorted(weights)}")
+        for key, member in constituents.items():
+            if isinstance(member, EnsembleStrategy):
+                raise ValueError(f"nested ensembles are not supported ('{key}')")
+            if weights[key] < 0:
+                raise ValueError(f"negative weight for '{key}'")
+        self.constituents = dict(constituents)
+        self.weights = dict(weights)
+
+    @property
+    def warmup_bars(self) -> int:
+        """The slowest constituent sets the pace — every member must be ready."""
+        return max(s.warmup_bars for s in self.constituents.values())
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Weighted vote across all constituents on the same history."""
+        score = 0.0
+        votes = []
+        for key, strategy in self.constituents.items():
+            sig = strategy.generate_signal(df)
+            if sig.position != 0:
+                score += self.weights[key] * sig.position * sig.confidence
+                votes.append(f"{key}:{'+' if sig.position > 0 else '-'}{sig.confidence:.2g}")
+        if score == 0.0:
+            return HOLD
+        return DailySignal(position=1 if score > 0 else -1,
+                           confidence=abs(score),
+                           reason=f"vote[{', '.join(votes)}]")
+
+
+__all__ = ["EnsembleStrategy"]

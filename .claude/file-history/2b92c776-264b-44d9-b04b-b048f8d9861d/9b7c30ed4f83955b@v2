@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Session 3 setup: read the ready-for-ai queue and open-PR state."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+label = retry(lambda: repo.get_label("ready-for-ai"), "label")
+print("=== ready-for-ai queue ===")
+for i in retry(lambda: list(repo.get_issues(state="open", labels=[label])), "issues"):
+    if not i.pull_request:
+        print(f"#{i.number}: {i.title}")
+        print(i.body)
+        print("-" * 60)
+
+print("\n=== open PRs ===")
+for pr in retry(lambda: list(repo.get_pulls(state="open")), "prs"):
+    print(f"#{pr.number} [{'draft' if pr.draft else 'ready'}] "
+          f"{pr.head.ref} -> {pr.base.ref}: {pr.title}")

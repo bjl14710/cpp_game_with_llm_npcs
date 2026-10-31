@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Queue verification + planning summary for the raylib milestone."""
+import os
+from datetime import datetime
+from pathlib import Path
+
+from github import Github
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+label = repo.get_label("ready-for-ai")
+queue = [i for i in repo.get_issues(state="open", labels=[label]) if not i.pull_request]
+print("=== ready-for-ai queue ===")
+for i in queue:
+    print(f"  #{i.number:3} {i.title}")
+print(f"Total: {len(queue)} issues queued")
+
+created = sorted((i for i in queue if 35 <= i.number <= 42), key=lambda x: x.number)
+summary = (
+    "# Issue Planning Summary\n"
+    f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    f"Repo: {repo.full_name}\n"
+    "Focus: improve looks and engine (raylib overhaul)\n"
+    "Milestone: #3 Renderer: raylib and low-poly visual overhaul\n\n"
+    "## Issues Created\n"
+)
+for i in created:
+    concept = ""
+    body = i.body or ""
+    if "## Concept for learning materials" in body:
+        tail = body.split("## Concept for learning materials", 1)[1].strip()
+        concept = tail.splitlines()[0] if tail else ""
+    summary += f"- #{i.number}: {i.title}\n  Concept: {concept}\n  URL: {i.html_url}\n\n"
+summary += (
+    "\n## What Was NOT Planned\n"
+    "- Godot/Unreal migration: rejected in /idea Q&A (raylib keeps the C++ core and tests).\n"
+    "- Post-processing/shadows, animation blending, custom art: plan out-of-scope list.\n"
+    "- Ordering: issues 35-42 are SEQUENTIAL, each branch stacks on the previous, and\n"
+    "  the milestone stacks on the Multiplayer v1 PR stack (28-34) - merge that first.\n"
+    "- The ready-for-ai queue also still contains multiplayer issues 21-27, which are\n"
+    "  ALREADY IMPLEMENTED (draft PRs open). An overnight session must not pick them\n"
+    "  up again; they close when their PRs merge. Consider relabeling them ai-completed.\n"
+)
+Path(".claude/memory/planning-session.md").write_text(summary)
+print("\nPlan saved to .claude/memory/planning-session.md")

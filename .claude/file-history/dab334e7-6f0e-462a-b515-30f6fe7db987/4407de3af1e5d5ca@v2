@@ -1,0 +1,120 @@
+# Plan: Transaction Cost & Slippage Model
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Backtests currently subtract a flat 1bp haircut once per pick-day, ignoring how
+much actually traded, how big the positions are, and how liquid the tickers are —
+so reported returns are closer to gross than to anything achievable. This adds a
+realistic cost model (commission + bid-ask spread + size/liquidity-dependent
+slippage) charged on traded notional, shared by all three backtest loops, with
+gross and net equity tracked side by side in every run so the cost drag of a
+strategy is always visible.
+
+## Goal
+Every backtest reports both gross and net equity (plus total cost drag), with
+net computed from per-trade costs that scale with turnover, position size, and
+ticker liquidity — and the old flat model still available for comparison.
+
+## Decisions Made (were open questions)
+- **Cost basis: traded notional.** Daily cost = Σ over tickers of
+  |Δweight| × equity × one_way_cost(ticker, trade_notional). Holding is free;
+  churn is expensive. Target-weight deltas are used (drift between rebalances is
+  ignored — documented approximation, see Edge Cases).
+- **Impact model: square-root.** one_way_bps = commission_bps + half_spread_bps
+  + impact_coeff_bps × √(trade_notional / ADV$), where ADV$ = 20-day rolling
+  mean of Volume × Close (min_periods=5). Defaults: commission 0 (Robinhood),
+  half-spread 2.5bps, impact_coeff 30bps (≈0.3bps at 0.01% participation —
+  every coefficient is a CLI flag; defaults are starting points, not gospel).
+- **Output: dual-track.** One run produces `equity` (net), `equity_gross`, and
+  `cost` columns; summaries print both CAGRs and cumulative cost drag.
+  `--cost_model none` = pure gross; `flat` = legacy behavior; `realistic` = new
+  model. **Default stays `flat`** so existing results don't silently change.
+
+## Out of Scope (this version)
+- Intraday `PaperEngine` / `intraday_sim` — different mechanics (SL/TP fills),
+  own cost story later
+- Borrowing costs / short rebate for short positions (cost magnitude is applied
+  to |notional| both directions; financing is not modeled)
+- Drift-adjusted turnover (target-weight deltas only)
+- Spread estimation from data (e.g. Corwin-Schultz) — half-spread is a parameter
+- Calibrating impact_coeff against real fills from `rh-exec` logs
+
+## Affected Areas
+- New: `costs.py` (root py-module, registered in pyproject) —
+  `CostModel` dataclass (`mode`, `commission_bps`, `half_spread_bps`,
+  `impact_coeff_bps`, `fallback_adv`, plus legacy `flat_bps`),
+  `adv_dollars(df) -> pd.Series` (20-day rolling Volume×Close),
+  `one_way_cost_bps(model, trade_notional, adv) -> float`,
+  `day_cost(model, equity, weight_changes: {ticker: (dw, adv)}) -> float`.
+  Pure functions, no I/O — trivially testable.
+- `walkforward_sim.py` — `simulate_walkforward`: track previous target weights
+  per ticker, compute Δweights each day, charge via `day_cost`; emit
+  `equity_gross`/`cost` columns. `run_strategy_walkforward`: same (prev
+  positions are the last bar's picks; the one-bar holding model means full
+  round-trips unless the same ticker+direction repeats). Legacy `trade_cost_bps`
+  flag maps to `CostModel(mode="flat")`.
+- `paper_trading_sim.py` — `simulate`: picks are equal-weight, so Δweights come
+  from pick-set changes day over day; same dual-track columns; `BacktestConfig`
+  gains a `cost_model` field (default flat, back-compat).
+- `strategy_arena.py` — pass a `CostModel` through backtest/live (CLI flags);
+  `live_tick`'s chaining is unaffected (factors stay scale-free). Net equity is
+  what goes in the ledger; report unchanged.
+- `analyze_equity.py` — no change required (metrics run on whichever column
+  they're given); `main` prints cost drag when the CSV has the new columns.
+- New tests: `tests/test_costs.py`, plus cost cases appended to
+  `tests/test_strategy_walkforward.py` and `tests/test_paper_trading.py`.
+
+## Implementation Order
+1. `costs.py` + `tests/test_costs.py` — the model in isolation: bps math,
+   square-root scaling, ADV computation, fallbacks, flat/none modes.
+2. Wire into `run_strategy_walkforward` (smallest, freshest loop) — dual-track
+   columns + turnover tracking; tests: zero-cost equals gross; a churning
+   strategy pays more than buy-and-hold at identical gross returns.
+3. Wire into `simulate_walkforward` (GBM loop) — same pattern with meanvar
+   weights; regression test: `--cost_model flat` reproduces today's numbers
+   exactly.
+4. Wire into `paper_trading_sim.simulate` + `BacktestConfig`.
+5. CLI flags everywhere (`--cost_model`, `--commission_bps`, `--half_spread_bps`,
+   `--impact_coeff_bps`) + arena passthrough + summary printing (both CAGRs,
+   total drag).
+6. Docs: CLAUDE.md conventions note + lesson candidate ("why square-root
+   impact") queued in PROGRESS.md suggestions.
+
+## Acceptance Criteria
+- [ ] `costs.py`: one_way_cost_bps(0 notional) == commission+spread only;
+      quadrupling trade_notional exactly doubles the impact term
+- [ ] A strategy that holds the same position pays ~zero ongoing cost under
+      `realistic`; a daily-churn strategy with identical gross return shows
+      strictly lower net equity
+- [ ] `--cost_model flat` produces byte-identical equity to current main for
+      the same inputs (regression-pinned in a test)
+- [ ] `--cost_model none` ⇒ equity == equity_gross for all three loops
+- [ ] Every equity CSV/frame from the three loops contains `equity`,
+      `equity_gross`, `cost`; summary prints gross CAGR, net CAGR, total drag
+- [ ] Less-liquid ticker (lower ADV$) ⇒ higher cost than a liquid one for the
+      same trade size (test with synthetic volumes)
+- [ ] Arena `live_tick` idempotency/backfill tests still pass with a
+      realistic model active
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Volume column missing or zero for a ticker | Use `fallback_adv` (conservative, configurable, default $1M) — cost is overstated, never understated; log once per ticker |
+| ADV window not yet warmed up (first ~5 bars) | min_periods=5, then fallback_adv before that |
+| trade_notional > ADV$ (participation > 100%) | No cap — √ model keeps growing; a warning is emitted since the fill is unrealistic |
+| Short positions | Costs charged on |Δweight| symmetric to longs; financing explicitly out of scope |
+| Same ticker held two consecutive days (arena one-bar model) | Δweight = |w_new − w_prev| per ticker+direction — a repeated pick is a hold, not a round-trip |
+| Zero-equity/empty backtest | cost columns present and zero; no division by zero (ADV guard) |
+| Legacy callers passing only trade_cost_bps | Behave exactly as today (mode="flat") |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(costs): costs.py CostModel — commission + spread + sqrt impact` — pure model + unit tests
+2. `feat(costs): turnover-based costs in run_strategy_walkforward` — dual-track equity, arena passthrough
+3. `feat(costs): wire CostModel into simulate_walkforward with flat-mode regression pin` — GBM loop
+4. `feat(costs): paper_trading_sim cost model + CLI flags + gross/net summary` — last loop + UX

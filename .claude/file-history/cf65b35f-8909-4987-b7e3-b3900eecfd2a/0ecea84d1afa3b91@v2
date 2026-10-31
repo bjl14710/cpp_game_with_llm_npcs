@@ -1,0 +1,67 @@
+// pybind11 bridge: microstructure signal stream -> Python.
+// Plan: .claude/plans/microstructure-signals.md, step 4.
+//
+// SCAFFOLD — the module compiles and imports, but events_from_file() is not
+// implemented yet. The overnight session / /develop fills it in.
+//
+// Intended contract (mirrors src/oil_alpha/microstructure/events.py):
+//   events_from_file(path, min_price_raw, max_price_raw, tick_size=1)
+//     -> dict of equal-length columnar lists:
+//        {"timestamp_ns": [...], "ofi": [...], "microprice": [...],
+//         "best_bid": [...], "best_ask": [...],
+//         "bid_size": [...], "ask_size": [...],
+//         "skipped_one_sided": int, "book_error_count": int}
+//   Columnar output keeps the boundary cheap: one list per field instead of
+//   1.5M tiny Python objects, DataFrame-ready via pd.DataFrame(result).
+//
+// TODO(micro-3): implement by
+//   1. reading the (already symbol-filtered) framed ITCH file into a buffer,
+//   2. running itch::parse_buffer with MicrostructureEngine::visitor(),
+//   3. copying engine.events() into per-field std::vectors and returning them.
+// Read the file in one gulp — the filtered AAPL day is ~45 MB, well within
+// memory; do NOT hand the unfiltered multi-GB day to this function.
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#include "microstructure_signals.hpp"
+
+#include <stdexcept>
+#include <string>
+
+namespace py = pybind11;
+
+namespace {
+
+// TODO(micro-3): replace the throw with the real implementation.
+py::dict events_from_file(const std::string& path,
+                          uint32_t min_price_raw,
+                          uint32_t max_price_raw,
+                          uint32_t tick_size) {
+    (void)min_price_raw;
+    (void)max_price_raw;
+    (void)tick_size;
+    throw std::runtime_error(
+        "signals_cpp.events_from_file is scaffolded but not implemented yet "
+        "(plan: .claude/plans/microstructure-signals.md step 4); requested: " + path);
+}
+
+}  // namespace
+
+PYBIND11_MODULE(signals_cpp, m) {
+    m.doc() = "C++ microstructure signal stream (OFI, microprice) for oil_alpha "
+              "(pybind11 bridge; see cpp/itch/microstructure_signals.hpp)";
+
+    m.def(
+        "events_from_file",
+        &events_from_file,
+        py::arg("path"),
+        py::arg("min_price_raw"),
+        py::arg("max_price_raw"),
+        py::arg("tick_size") = 1,
+        "Parse a symbol-filtered framed ITCH 5.0 file and return the per-update\n"
+        "microstructure event stream as columnar lists (DataFrame-ready dict).\n"
+        "Prices are ITCH fixed-point (dollars * 10000); the [min, max] bounds\n"
+        "must cover the symbol's session range or events are dropped as errors."
+    );
+}

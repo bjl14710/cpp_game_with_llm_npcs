@@ -1,0 +1,62 @@
+# Four New Lessons: Gradient Boosting, Linear Regression, Logistic vs Linear, Alpha & Beta
+
+## Context
+
+The user queued four /teach topics: **ML (Gradient Boosting)**, **ML (Linear Regression)**, **Logistic Regression and difference from Linear Regression**, and **Alpha and Beta in finance**. The teaching workspace (`docs/learning/`) has 24 lessons; these become **0025–0028**, following the established format (self-contained HTML, inline CSS/JS, Fisher-Yates-shuffled quizzes with `data-correct` attributes, section-complete checkboxes, no localStorage).
+
+Lesson 0003 already covers ML algorithms broadly (boosting mechanics at intro level, the three-model split, look-ahead bias). The new lessons go **deeper on each model** and ground in code that didn't exist when 0003 was written — notably the new `solutions/03_stat_arb_risk/pairs.py` OLS implementation from the exercises batch.
+
+## Exploration findings (grounding facts, verified)
+
+- Highest lesson is 0024; GLOSSARY.md exists; **alpha/beta/CAPM are nowhere** in lessons or glossary (0006 covers Sharpe/CAGR/drawdown/covariance only; `analyze_equity.py` computes no benchmark-relative metrics — Sharpe with rf=0 is the repo convention).
+- `paper_trading_sim.py:123` — `GradientBoostingRegressor(random_state=42)` all-default hyperparams (100 trees, depth 3, lr 0.1, squared error); `build_features` (lines 48–69): close, ret_1d, ma_5, ma_10, ma_gap, vol_10, rsi_14; target `fwd_ret_1d` via `shift(-1)`.
+- `walkforward_sim.py:224` — same model but optional `--rolling_retrain` (756-day window, monthly).
+- **No logistic regression anywhere** (only `gm.predict_proba` at walkforward_sim.py:307 — a GaussianMixture regime filter, a useful "often confused with" hook).
+- `solutions/03_stat_arb_risk/pairs.py:24` — `hedge_ratio` is textbook OLS via `np.linalg.lstsq` (the hedge ratio IS a beta — perfect bridge to lesson 0028).
+- `fpga/linear_regression_predictor.vhd` — 4 hardcoded ×1000 fixed-point weights (W0=50, W=[300,−100,200]), inference-only linear model in silicon.
+
+## The four lessons
+
+### 0025-gradient-boosting-deep-dive.html
+- **Concept:** stagewise additive modeling — each tree fits the *negative gradient of the loss* (residuals, for squared error); why shallow trees + small learning rate + many trees beats one deep tree (bias/variance, shrinkage as regularization).
+- **Worked example:** tiny 5-point numeric walkthrough of 3 boosting rounds (initial prediction = mean, residuals, tree fits, shrinkage) — hand-computable numbers.
+- **In this project:** `paper_trading_sim.py` train_model (defaults are sklearn's, untuned — discuss what tuning n_estimators/max_depth/learning_rate would trade off on noisy financial data); `walkforward_sim.py` rolling retrain as the answer to non-stationarity; the model bundle format (features list ordering).
+- **Often confused with:** gradient boosting vs random forest (sequential residual-fitting vs parallel bagging); boosting vs gradient descent (descent in *function space* vs parameter space).
+
+### 0026-linear-regression.html
+- **Concept:** OLS from first principles — minimize Σ(y−Xβ)², normal equations β=(XᵀX)⁻¹Xᵀy, why lstsq is preferred numerically; residuals, R², standard errors of coefficients.
+- **In this project (three real call sites):** `solutions/03_stat_arb_risk/pairs.py` `_ols`/`hedge_ratio` (walk the lstsq + SE code line by line); `fpga/linear_regression_predictor.vhd` (a trained linear model is just 4 numbers → trivially synthesizable, ×1000 fixed point); `pairs.py` `dickey_fuller_stat` as regression reused for hypothesis testing.
+- **Often confused with:** correlation vs regression slope; interpolation vs extrapolation risk in trading features.
+
+### 0027-logistic-vs-linear-regression.html
+- **Concept:** logistic regression = linear model pushed through a sigmoid, output is P(class); log-loss vs squared error; decision boundaries; why there's no closed form (iterative MLE).
+- **The contrast (core of the lesson, per the request):** what they share (linear in parameters, same feature vector, both "regression" by name) vs where they diverge (continuous target vs probability of a label; loss function; output range; calibration). When each fails in finance: thresholding returns into up/down labels throws away magnitude — exactly why this repo uses *regression* for ranking (ties back to 0003's argument, now with the math).
+- **In this project:** honest framing — the repo deliberately has **no** logistic regression; show illustratively (tagged as such, per standing convention) what classifying `fwd_ret_1d > 0` would look like and what's lost. Contrast with the one real `predict_proba` in the repo (`walkforward_sim.py:307`, GaussianMixture regimes) — probability output ≠ logistic regression.
+
+### 0028-alpha-and-beta-in-finance.html
+- **Concept:** CAPM — r_strategy = α + β·r_market + ε estimated by OLS; β = cov(r_s, r_m)/var(r_m); alpha as benchmark-adjusted skill; market-neutral as β≈0; beta-hedging.
+- **Bridge from 0026:** beta is literally the OLS slope the user just learned — and `hedge_ratio` in the stat-arb exercise is a beta between two assets (pairs trading = betting on α of the spread with β hedged out).
+- **In this project:** `analyze_equity.py` computes Sharpe with rf=0 but **no alpha/beta** — show the ~10-line addition that would regress the equity-curve returns against SPY (illustrative, tagged); the model bundle's "27.19% annualized" claim needs a beta to know how much is market exposure vs alpha.
+- **Often confused with:** alpha vs total return; beta (CAPM) vs beta (hedge ratio) — same math, different question; Sharpe vs alpha (volatility-adjusted vs benchmark-adjusted).
+
+## Cross-cutting work
+
+1. **Web grounding** (teach skill step 2): verify sklearn `GradientBoostingRegressor` current defaults/docs and standard CAPM/Jensen's-alpha references; footnote sources in lessons (existing convention).
+2. **Quiz mechanics:** each lesson gets 4–5 shuffled questions (`data-correct` + per-option `data-why`, Fisher-Yates on load) + scenario "check your understanding" + per-section complete buttons with score display — copy the structural pattern from lesson 0024 (latest).
+3. **GLOSSARY.md:** add OLS / normal equations, R², sigmoid / log-loss, CAPM, alpha, beta, shrinkage (learning rate) — definitions consistent with existing entries.
+4. **PROGRESS.md:** append the four lessons to the completed table (Grasp: TBD), note the lesson 0026 ↔ exercise 03 cross-link, suggest next concept.
+5. **Open commands:** print `xdg-open docs/learning/lessons/0025-...` lines (Linux).
+6. **In-chat knowledge check:** close with 2–3 questions spanning the four lessons (e.g. "your backtest returns 20%/yr with β=1.3 to SPY which did 15% — what's your alpha, roughly?").
+
+## Files to create / modify
+
+- Create: `docs/learning/lessons/0025-gradient-boosting-deep-dive.html`, `0026-linear-regression.html`, `0027-logistic-vs-linear-regression.html`, `0028-alpha-and-beta-in-finance.html`
+- Edit: `docs/learning/GLOSSARY.md`, `docs/learning/PROGRESS.md`
+
+## Verification
+
+- Each HTML file: open-able standalone (no external refs — grep for `http` in src/href attributes other than footnote links), quiz JS shuffles on load and grades via `data-correct` (not position), section progress + quiz score render.
+- Quick numeric sanity on every worked example (boosting-round arithmetic, CAPM alpha example) — hand-check the numbers shown.
+- GLOSSARY/PROGRESS diffs are append-only and consistent with the existing format.
+
+*(Unrelated carry-over: the practice-exercises verification (task #8) remains blocked by the Bash classifier outage — retry `HFT_EXERCISE_TARGET=solutions uv run pytest tests/exercises/ -v` when it recovers; not part of this plan.)*

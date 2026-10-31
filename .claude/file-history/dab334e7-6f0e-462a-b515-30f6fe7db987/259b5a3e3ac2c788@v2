@@ -1,0 +1,121 @@
+# Plan: Concept Drift Monitoring for GBM Feature Inputs
+Date: 2026-07-07
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Right now nothing checks whether the GBM model's live inputs still resemble
+what it was trained on — only its outputs get scrutinized (via the
+live-vs-backtest divergence plan). This adds a Population Stability Index
+(PSI) drift check per feature: at training time, `paper_trading_sim.py`
+additively stores a reference distribution (quantile bin edges) for each
+feature alongside the model bundle; at prediction time, `predict_next.py`
+bins the live feature values against that reference and flags any feature
+(or the model overall) whose distribution has shifted meaningfully — the
+model's inputs moving out of its training regime, independent of whether its
+predictions currently look right or wrong.
+
+## Goal
+Before trusting a day's predictions, the operator can see "this input has
+drifted materially from training" per feature, not just guess from output
+performance after the fact.
+
+## Design Decisions
+- **Metric: PSI (Population Stability Index)**, the standard, well-understood
+  drift metric — `Σ (live_pct_i - ref_pct_i) * ln(live_pct_i / ref_pct_i)`
+  over deciles. Industry convention: PSI < 0.1 = no significant shift,
+  0.1–0.25 = moderate, > 0.25 = significant. This plan flags at the
+  conventional `> 0.25` significant-shift line, configurable.
+- **Reference stored additively in the bundle.** The joblib bundle format
+  `{"model", "features"}` gains an optional third key, `"feature_reference"`:
+  `{feature_name: [10 decile edges from training data]}`, computed once at
+  `paper_trading_sim.py`'s existing `--save_model` step from the same
+  training frame already in memory — no extra fetch, no retraining, no
+  separate artifact to keep in sync. Bundles saved before this change simply
+  lack the key; drift checks degrade to "no reference available, skipped"
+  rather than erroring — full backward compatibility with every bundle in
+  `models/`.
+- **MVP scope is `predict_next.py` + the bundle-save path**, matching the
+  idea's exact wording ("the live feature distributions the GBM model is
+  seeing"). Wiring the same check into `GBMStrategy`/`arena-run live` is a
+  natural fast-follow (the bundle format is already shared) but is listed as
+  a suggested follow-up issue rather than bundled here, to keep this plan a
+  single reviewable unit.
+
+## Out of Scope (this version)
+- Wiring drift checks into `strategies/gbm_adapter.py` / `arena-run live`
+  (fast-follow issue, same reference format, no format changes needed later)
+- Automatic retraining triggers on drift (this is a flag, not an action —
+  matches the project's existing pattern of circuit-breaker/divergence being
+  human-in-the-loop signals, not autonomous responses)
+- Drift on the target distribution (`fwd_ret_1d`) — inputs only, per the
+  idea's explicit framing ("the model's own inputs — not just its outputs")
+- Multivariate drift detection (per-feature PSI only; feature-interaction
+  drift is a known limitation, documented)
+
+## Affected Areas
+- New: `drift.py` — `compute_reference(train_df: pd.DataFrame, feat_cols:
+  List[str], n_bins=10) -> Dict[str, List[float]]` (quantile edges per
+  feature from the training frame); `psi(ref_edges: List[float],
+  live_values: pd.Series) -> float`; `check_drift(feature_reference: dict,
+  live_feats: pd.DataFrame, threshold=0.25) -> DriftReport` (dataclass:
+  per-feature PSI dict, `flagged: List[str]`, `overall_flagged: bool`).
+- `paper_trading_sim.py` — at the existing `--save_model` bundle-write site,
+  add `bundle["feature_reference"] = compute_reference(train_frame,
+  feat_cols)` using the training-split frame already constructed by
+  `simulate()`.
+- `predict_next.py` — `--check_drift` flag: after building each ticker's
+  feature row, accumulate the day's live feature values across tickers,
+  call `drift.check_drift` once per day (not per ticker — PSI needs a
+  distribution, not a single point) against `bundle.get("feature_reference")`,
+  print a per-feature PSI table and an overall flag; if the bundle predates
+  this feature, print one clear "no reference stored in this bundle" notice
+  and skip.
+- New tests: `tests/test_drift.py` (PSI math against a hand-computed case,
+  identical-distribution ⇒ PSI≈0, shifted distribution ⇒ PSI above
+  threshold), a `paper_trading_sim` test asserting the bundle gains
+  `feature_reference` with the right keys, a `predict_next` test with a
+  bundle missing the key ⇒ graceful skip.
+
+## Implementation Order
+1. `drift.py` — `compute_reference`, `psi`, `check_drift` + unit tests
+   (hand-computed PSI on synthetic reference vs. shifted/identical samples).
+2. `paper_trading_sim.py` — persist `feature_reference` at save time; test
+   that a freshly saved bundle contains correctly-shaped decile edges for
+   every feature column.
+3. `predict_next.py` — `--check_drift` flag, day-pooled live values, printed
+   report, graceful skip for legacy bundles without the key.
+
+## Acceptance Criteria
+- [ ] `psi()` on two identical samples returns ≈0; on a sample shifted
+      entirely outside the reference's range returns a large value that
+      exceeds the default 0.25 threshold
+- [ ] A bundle saved via `--save_model` after this change contains
+      `feature_reference` with one 10-edge list per feature in
+      `bundle["features"]`
+- [ ] `predict-next --check_drift` against that bundle prints a per-feature
+      PSI table and an overall flagged/not-flagged verdict
+- [ ] `predict-next --check_drift` against a pre-existing bundle lacking
+      `feature_reference` prints a clear skip notice and does not crash
+- [ ] Feeding live values drawn from the same distribution as training
+      produces no flagged features; feeding values shifted by several
+      standard deviations flags every affected feature
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Bundle has no `feature_reference` key | Skip with a one-line notice, never an exception |
+| Fewer than ~10 distinct live values on a given day (few tickers) | PSI still computable (deciles just get sparse); no special-case needed, binning handles small N |
+| A feature present in training but absent from live features that day | Feature excluded from that day's report with a note, not a crash |
+| Reference bin edges have duplicate values (degenerate/constant training feature) | Edges deduplicated before binning; a fully constant feature reports PSI=0 by convention (no distribution to shift) |
+| `--check_drift` with zero tickers producing valid rows | Report prints "no data to check" and exits cleanly |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(drift): drift.py PSI reference + check functions` — pure math + unit tests
+2. `feat(paper-trading): persist feature_reference in saved model bundles` — additive bundle field, backward compatible
+3. `feat(predict-next): --check_drift flag with per-feature PSI report` — day-pooled check, graceful legacy-bundle skip
+4. `feat(arena): wire drift checks into GBMStrategy live ticks (fast-follow)` — reuses the reference format, deferred from this plan

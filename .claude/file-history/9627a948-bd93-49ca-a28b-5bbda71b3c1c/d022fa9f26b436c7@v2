@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0001 — How to Use Silmulator</title>
+<style>
+  :root {
+    --bg: #1a1f2e;
+    --surface: #252b3b;
+    --surface2: #2e3650;
+    --accent: #5b8df6;
+    --accent2: #ffc94d;
+    --text: #d4daf0;
+    --text-dim: #8a94b8;
+    --success: #3dd68c;
+    --error: #f46a6a;
+    --code-bg: #161b28;
+    --border: #3a4265;
+    --port-blue: #64b4ff;
+    --wire-gold: #ffc832;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 16px;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+
+  /* Header */
+  header { border-bottom: 2px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+  .lesson-num { font-size: 0.8rem; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+  h1 { font-size: 2rem; margin: 0.4rem 0 0.6rem; color: #fff; }
+  .tagline { color: var(--accent); font-size: 1.05rem; }
+
+  /* Progress tracker */
+  .progress-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 2.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .progress-bar span { font-size: 0.85rem; color: var(--text-dim); }
+  .section-check {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    cursor: pointer; font-size: 0.85rem; color: var(--text-dim);
+    user-select: none; border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.2rem 0.6rem;
+    transition: all 0.2s;
+  }
+  .section-check.done { color: var(--success); border-color: var(--success); }
+  .section-check .box { font-size: 1rem; }
+
+  /* Sections */
+  section { margin-bottom: 3rem; }
+  h2 {
+    font-size: 1.35rem; margin-bottom: 1rem;
+    padding-bottom: 0.4rem; border-bottom: 1px solid var(--border);
+    color: var(--accent2);
+  }
+  h3 { font-size: 1.1rem; margin: 1.5rem 0 0.6rem; color: #c8d4ff; }
+  p { margin-bottom: 0.9rem; }
+  ul, ol { margin: 0.5rem 0 1rem 1.4rem; }
+  li { margin-bottom: 0.4rem; }
+  strong { color: #fff; }
+  a { color: var(--accent); }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    margin: 1rem 0 1.2rem;
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+  code { font-family: 'Consolas', 'Cascadia Code', 'Fira Mono', monospace; }
+  p code, li code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.15em 0.4em;
+    font-size: 0.9em;
+  }
+
+  /* Syntax colours */
+  .kw  { color: #c792ea; }
+  .str { color: #c3e88d; }
+  .cm  { color: #546e7a; font-style: italic; }
+  .fn  { color: #82aaff; }
+  .num { color: #f78c6c; }
+  .cls { color: #ffcb6b; }
+
+  /* Callout boxes */
+  .callout {
+    border-left: 4px solid var(--accent);
+    background: var(--surface);
+    border-radius: 0 6px 6px 0;
+    padding: 0.8rem 1.1rem;
+    margin: 1rem 0;
+  }
+  .callout.tip  { border-color: var(--success); }
+  .callout.warn { border-color: var(--accent2); }
+  .callout-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.3rem; }
+  .callout.tip  .callout-label { color: var(--success); }
+  .callout.warn .callout-label { color: var(--accent2); }
+
+  /* Canvas diagram */
+  .canvas-demo {
+    background: #1c2030;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1.2rem 0;
+    font-family: 'Consolas', monospace;
+    font-size: 0.85rem;
+  }
+  .block-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: 0.6rem 0; }
+  .block-box {
+    background: var(--surface2);
+    border: 2px solid #3a5080;
+    border-radius: 6px;
+    min-width: 140px;
+  }
+  .block-title {
+    background: #2a4080;
+    border-radius: 4px 4px 0 0;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.78rem;
+    color: #fff;
+    font-weight: bold;
+  }
+  .block-body { padding: 0.5rem 0.7rem; }
+  .port { color: var(--port-blue); font-size: 0.78rem; margin: 0.15rem 0; }
+  .wire { color: var(--wire-gold); font-size: 1.5rem; }
+  .wire-label { color: var(--wire-gold); font-size: 0.75rem; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th { background: var(--surface2); padding: 0.6rem 0.9rem; text-align: left; color: #fff; border: 1px solid var(--border); }
+  td { padding: 0.5rem 0.9rem; border: 1px solid var(--border); }
+  tr:nth-child(even) td { background: var(--surface); }
+
+  /* Quiz */
+  .quiz-section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin: 1rem 0; }
+  .question { margin-bottom: 2rem; }
+  .question p.q-text { font-weight: 600; margin-bottom: 0.7rem; color: #fff; }
+  .question p.q-text .q-num { color: var(--accent); margin-right: 0.4rem; }
+  .options { list-style: none; margin: 0; padding: 0; }
+  .options li {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.5rem 0.9rem;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    user-select: none;
+  }
+  .options li:hover { border-color: var(--accent); background: #2e3a5a; }
+  .options li.correct { border-color: var(--success); background: #1a3a2a; color: var(--success); }
+  .options li.wrong   { border-color: var(--error);   background: #3a1a1a; color: var(--error); }
+  .options li.locked  { cursor: default; }
+  .feedback { margin-top: 0.6rem; font-size: 0.9rem; padding: 0.5rem 0.8rem; border-radius: 4px; }
+  .feedback.ok  { background: #1a3a2a; color: var(--success); border: 1px solid var(--success); }
+  .feedback.bad { background: #3a1a1a; color: var(--error);   border: 1px solid var(--error); }
+
+  .score-box {
+    text-align: center; padding: 1.2rem;
+    border-radius: 6px; margin-top: 1rem;
+    font-size: 1.1rem; display: none;
+    border: 1px solid var(--border);
+  }
+
+  .btn {
+    display: inline-block; padding: 0.55rem 1.2rem;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 5px; cursor: pointer;
+    font-size: 0.95rem; margin-top: 0.8rem;
+    transition: opacity 0.2s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn.secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
+
+  /* Scenario */
+  .scenario {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem 1.4rem;
+    margin: 1rem 0;
+  }
+  .scenario-q { font-weight: 600; color: #fff; margin-bottom: 0.7rem; }
+  .scenario details { margin-top: 0.5rem; }
+  .scenario summary { cursor: pointer; color: var(--accent); font-size: 0.9rem; }
+  .scenario summary:hover { text-decoration: underline; }
+  .scenario .answer { margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-dim); }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="lesson-num">Lesson 0001 · Silmulator</div>
+  <h1>How to Use Silmulator</h1>
+  <p class="tagline">Why this matters: you built the simulator — now learn to drive it.</p>
+</header>
+
+<!-- Progress tracker -->
+<div class="progress-bar">
+  <span>Sections:</span>
+  <div class="section-check" id="chk-1" onclick="toggleCheck('chk-1')">
+    <span class="box">☐</span> 1. What it is
+  </div>
+  <div class="section-check" id="chk-2" onclick="toggleCheck('chk-2')">
+    <span class="box">☐</span> 2. The workflow
+  </div>
+  <div class="section-check" id="chk-3" onclick="toggleCheck('chk-3')">
+    <span class="box">☐</span> 3. In the project
+  </div>
+  <div class="section-check" id="chk-4" onclick="toggleCheck('chk-4')">
+    <span class="box">☐</span> 4. SIL vs HIL vs CIL
+  </div>
+  <div class="section-check" id="chk-5" onclick="toggleCheck('chk-5')">
+    <span class="box">☐</span> 5. Quiz
+  </div>
+  <div class="section-check" id="chk-6" onclick="toggleCheck('chk-6')">
+    <span class="box">☐</span> 6. Scenarios
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<section id="sec-1">
+<h2>1. What Silmulator Is (and What Problem It Solves)</h2>
+
+<p>Embedded firmware talks to lab instruments — oscilloscopes, power supplies, function generators — using a language called <strong>SCPI</strong> (Standard Commands for Programmable Instruments, pronounced "skippy"). A real SCPI session looks like this:</p>
+
+<pre><code><span class="cm">// C firmware — send command over VISA/GPIB/USB-TMC</span>
+<span class="fn">visa_write</span>(handle, <span class="str">"VOLT 5.0"</span>);    <span class="cm">// set PSU to 5 V</span>
+<span class="fn">visa_write</span>(handle, <span class="str">"OUTP ON"</span>);     <span class="cm">// enable output</span>
+<span class="kw">char</span>* resp = <span class="fn">visa_query</span>(handle, <span class="str">"MEAS:VOLT:DC?"</span>);  <span class="cm">// read back</span></code></pre>
+
+<p>The problem: <strong>you can't run that code without the hardware present</strong>. Silmulator replaces the physical rack with virtual blocks that respond to the same SCPI commands the real instruments would, so you can develop and debug your firmware at a laptop, on a plane, or in CI.</p>
+
+<div class="callout tip">
+  <div class="callout-label">💡 Key insight</div>
+  The simulated instruments in Silmulator are spec-faithful. <code>VOLT 5.0</code> sent to the virtual Power Supply actually changes its internal state, and <code>MEAS:VOLT:DC?</code> returns a numeric string just like the real Keysight E36312A would.
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="sec-2">
+<h2>2. The Three-Step Workflow</h2>
+
+<p>Every Silmulator session follows the same loop:</p>
+
+<ol>
+  <li><strong>Place</strong> — drag hardware blocks onto the canvas</li>
+  <li><strong>Connect</strong> — draw wires between ports</li>
+  <li><strong>Drive</strong> — send SCPI commands (manually via console, or by loading your source code)</li>
+</ol>
+
+<h3>Step 1 — Place blocks</h3>
+<p>Open the <strong>Library panel</strong> on the left. Double-click any instrument name, or hit the <strong>Add Selected Block</strong> button. You can also use the toolbar buttons across the top or the <strong>Add</strong> menu. The block appears on the canvas; subsequent blocks auto-place so they never stack.</p>
+
+<div class="canvas-demo">
+  <div><span style="color:var(--text-dim)">Canvas</span></div>
+  <br>
+  <div class="block-row">
+    <div class="block-box">
+      <div class="block-title">⚡ Power Supply</div>
+      <div class="block-body">
+        <div class="port">○ +1  ○ -1</div>
+        <div class="port">○ +2  ○ -2</div>
+        <div class="port">○ +3  ○ -3</div>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <div class="wire">─────</div>
+      <div class="wire-label">wire (click-drag port to port)</div>
+    </div>
+    <div class="block-box">
+      <div class="block-title">🖥 MSP430</div>
+      <div class="block-body">
+        <div class="port">○ VCC  ○ GND</div>
+        <div class="port">○ P1.0 … P1.7</div>
+        <div class="port">○ UART TX / RX</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>Step 2 — Connect ports</h3>
+<p>Each block has <strong>connection ports</strong> — the small blue circles on its edges. To wire two ports:</p>
+<ol>
+  <li>Click and hold on the source port. A dashed gold line appears.</li>
+  <li>Drag to the destination port on another block.</li>
+  <li>Release. The wire turns solid gold when connected.</li>
+</ol>
+<p>The connection is bidirectional in the sense that SCPI commands flow along it based on which block is "driving" the conversation.</p>
+
+<div class="callout warn">
+  <div class="callout-label">⚠ Ports</div>
+  You can only connect a port to one other port at a time. A green port dot means connected; blue means free; a gold hover highlight shows where a wire would land.
+</div>
+
+<h3>Step 3 — Drive with SCPI</h3>
+<p>Two ways to send commands:</p>
+
+<ul>
+  <li><strong>SCPI Console</strong> (bottom panel) — select a block on the canvas, type a command, hit <strong>Send</strong> or <code>Ctrl+Enter</code>. Response appears immediately.</li>
+  <li><strong>Code Input block</strong> — paste C, C++, or Python source code. Silmulator extracts every <code>visa_write / visa_query</code> call and can replay them to the connected hardware blocks in order.</li>
+</ul>
+
+<pre><code><span class="cm">-- SCPI Console example session --</span>
+
+<span class="cm">> Select the Power Supply block, then type:</span>
+<span class="fn">VOLT</span> <span class="num">3.3</span>          <span class="cm">→ (no response — write command)</span>
+<span class="fn">VOLT?</span>             <span class="cm">→  3.3000000E+00</span>
+<span class="fn">OUTP ON</span>           <span class="cm">→ (no response)</span>
+<span class="fn">MEAS:VOLT:DC?</span>     <span class="cm">→  3.3000000E+00</span></code></pre>
+</section>
+
+<!-- ================================================================ -->
+<section id="sec-3">
+<h2>3. In This Project — Where Each Piece Lives</h2>
+
+<p>Now that you know the workflow, here is the exact file behind each step:</p>
+
+<table>
+  <tr><th>UI element</th><th>Source file</th><th>Key class / function</th></tr>
+  <tr>
+    <td>Library panel (left dock)</td>
+    <td><code>silmulator/gui/main_window.py</code></td>
+    <td><code>BlockLibraryPanel</code></td>
+  </tr>
+  <tr>
+    <td>Canvas (drag-and-drop area)</td>
+    <td><code>silmulator/gui/canvas.py</code></td>
+    <td><code>CanvasScene</code> / <code>CanvasView</code></td>
+  </tr>
+  <tr>
+    <td>Block placement</td>
+    <td><code>silmulator/gui/canvas.py</code></td>
+    <td><code>CanvasScene.add_block()</code> → <code>find_free_position()</code></td>
+  </tr>
+  <tr>
+    <td>Port + wire</td>
+    <td><code>silmulator/gui/blocks/base_block.py</code></td>
+    <td><code>ConnectionPort</code> / <code>WireItem</code></td>
+  </tr>
+  <tr>
+    <td>SCPI Console</td>
+    <td><code>silmulator/gui/main_window.py</code></td>
+    <td><code>ConsolePanel._send()</code></td>
+  </tr>
+  <tr>
+    <td>Code Input block (paste / folder)</td>
+    <td><code>silmulator/gui/blocks/code_input_block.py</code></td>
+    <td><code>CodeInputBlock.load_project()</code></td>
+  </tr>
+  <tr>
+    <td>Power Supply device logic</td>
+    <td><code>silmulator/devices/power_supply.py</code></td>
+    <td><code>PowerSupply</code> (inherits <code>BaseDevice</code>)</td>
+  </tr>
+  <tr>
+    <td>Save / load layout</td>
+    <td><code>silmulator/gui/canvas.py</code></td>
+    <td><code>CanvasScene.to_dict()</code> / <code>from_dict()</code></td>
+  </tr>
+</table>
+
+<h3>How a SCPI command travels through the code</h3>
+
+<p>When you type <code>VOLT 3.3</code> in the console and press Send, here is the exact path:</p>
+
+<pre><code><span class="cm">1. ConsolePanel._send()                      main_window.py:123</span>
+   <span class="cm">→ selected block.send_command("VOLT 3.3")</span>
+
+<span class="cm">2. BaseBlock.send_command()                  base_block.py:203</span>
+   <span class="cm">→ self.device.process("VOLT 3.3")</span>
+
+<span class="cm">3. BaseDevice.process()                      base_device.py</span>
+   <span class="cm">→ ScpiParser.parse("VOLT 3.3")</span>
+   <span class="cm">→ looks up handler in self._handlers["VOLT"]</span>
+
+<span class="cm">4. PowerSupply._set_voltage()                power_supply.py</span>
+   <span class="cm">→ channel.voltage = 3.3</span>
+
+<span class="cm">5. Response string returns back up the chain</span>
+   <span class="cm">→ ConsolePanel logs it</span></code></pre>
+
+<div class="callout tip">
+  <div class="callout-label">💡 The big picture</div>
+  The <em>wire on the canvas</em> represents a potential connection but doesn't route SCPI in the Python layer — the command goes directly from the Console to whichever block is currently selected. Wires matter when the <strong>Code Input block</strong> runs parsed commands: it fans them out to whatever blocks its output ports are connected to.
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="sec-4">
+<h2>4. Often Confused: SIL vs HIL vs CIL</h2>
+
+<p>Silmulator's full name is "SIL/HIL/CIL Hardware Simulator." These three terms are often used interchangeably but mean different things:</p>
+
+<table>
+  <tr>
+    <th>Acronym</th><th>Full name</th><th>What runs on real hardware</th><th>What is simulated</th><th>Typical use case</th>
+  </tr>
+  <tr>
+    <td><strong>SIL</strong></td>
+    <td>Software-in-the-Loop</td>
+    <td>Nothing — everything is software</td>
+    <td>Both the ECU/MCU <em>and</em> the instruments</td>
+    <td>Pure algorithm correctness; no hardware at all</td>
+  </tr>
+  <tr>
+    <td><strong>HIL</strong></td>
+    <td>Hardware-in-the-Loop</td>
+    <td>The real embedded controller (MCU/ECU)</td>
+    <td>The instruments / plant it connects to</td>
+    <td>Real-time controller testing; firmware timing matters</td>
+  </tr>
+  <tr>
+    <td><strong>CIL</strong></td>
+    <td>Code-in-the-Loop</td>
+    <td>Nothing; the <em>source code</em> is the input</td>
+    <td>Both the MCU and the instruments</td>
+    <td>Checking measurement code logic before flashing</td>
+  </tr>
+</table>
+
+<p><strong>How Silmulator fits:</strong></p>
+
+<ul>
+  <li>When you paste a C file into the Code Input block and run its SCPI calls against simulated instruments — that is <strong>CIL</strong>.</li>
+  <li>When you run compiled firmware on a real MSP430 and use Silmulator's simulated oscilloscope/PSU over a real VISA connection — that would be <strong>HIL</strong> (Silmulator is the "plant").</li>
+  <li>When both the code and hardware are simulated as Python objects — that is <strong>SIL</strong>.</li>
+</ul>
+
+<div class="callout">
+  <div class="callout-label">📌 The key distinction</div>
+  <strong>SIL</strong> = algorithm correctness, no timing guarantees<br>
+  <strong>HIL</strong> = real hardware runs in real time<br>
+  <strong>CIL</strong> = source code is the unit under test; instruments are simulated
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="sec-5">
+<h2>5. Quiz — Test Yourself</h2>
+
+<div class="quiz-section">
+  <!-- Q1 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q1.</span> You want to test how your embedded firmware responds when a power supply delivers exactly 3.3 V. You have no physical instruments. What should you do first in Silmulator?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="You need a block on the canvas before you can use the console — there's nothing to send commands to yet.">Open the SCPI Console and type VOLT 3.3</li>
+      <li data-correct="true"  data-why="Correct! You always start by adding blocks to the canvas. Then you can connect ports and send commands to the virtual instrument.">Add a Power Supply block to the canvas from the Library panel</li>
+      <li data-correct="false" data-why="Layouts are for saving an existing setup, not the first step when starting fresh.">File → Open a saved layout file</li>
+      <li data-correct="false" data-why="The Code Input block sends commands to connected hardware blocks — there are none yet. Place instruments first.">Add a Code Input block and paste your firmware source</li>
+    </ul>
+    <div class="feedback" hidden></div>
+  </div>
+
+  <!-- Q2 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q2.</span> Which Python class is responsible for auto-placing new blocks so they don't overlap?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="BaseBlock is the abstract parent of every hardware block; it doesn't know about scene layout.">BaseBlock</li>
+      <li data-correct="false" data-why="CanvasView is the Qt widget you zoom and pan; it doesn't manage item placement.">CanvasView</li>
+      <li data-correct="true"  data-why="Correct! CanvasScene.find_free_position() scans grid slots and returns the first spot that doesn't intersect existing blocks.">CanvasScene</li>
+      <li data-correct="false" data-why="BlockLibraryPanel lists available block types; it calls canvas.add_block() but doesn't compute positions itself.">BlockLibraryPanel</li>
+    </ul>
+    <div class="feedback" hidden></div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q3.</span> You type <code>MEAS:VOLT:DC?</code> into the SCPI Console while the Power Supply block is selected. Which file actually handles this command?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="canvas.py manages blocks and wires; it doesn't process SCPI commands.">silmulator/gui/canvas.py</li>
+      <li data-correct="false" data-why="code_input_block.py parses source code — it's not involved in a direct console send.">silmulator/gui/blocks/code_input_block.py</li>
+      <li data-correct="false" data-why="main_window.py's ConsolePanel sends the command to the block, but the block delegates to the device layer — not main_window's job to answer.">silmulator/gui/main_window.py</li>
+      <li data-correct="true"  data-why="Correct! power_supply.py contains the PowerSupply device class whose _setup_handlers registers the MEAS:VOLT:DC handler.">silmulator/devices/power_supply.py</li>
+    </ul>
+    <div class="feedback" hidden></div>
+  </div>
+
+  <!-- Q4 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q4.</span> What type of testing is it when you paste C firmware source into the Code Input block and run its SCPI calls against simulated instruments — without using any real hardware?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="HIL (Hardware-in-the-Loop) requires real embedded hardware running in real-time — the controller, not the instruments, is real.">HIL — Hardware-in-the-Loop</li>
+      <li data-correct="false" data-why="Unit testing is language-level testing of functions or classes; it doesn't involve SCPI or instrument simulation.">Unit testing</li>
+      <li data-correct="true"  data-why="Correct! CIL (Code-in-the-Loop) treats the source code itself as the unit under test, running it against simulated instruments without flashing any hardware.">CIL — Code-in-the-Loop</li>
+      <li data-correct="false" data-why="Integration testing is a general term; CIL is the precise term for running source code against simulated instruments.">Integration testing</li>
+    </ul>
+    <div class="feedback" hidden></div>
+  </div>
+
+  <!-- Q5 -->
+  <div class="question" data-question>
+    <p class="q-text"><span class="q-num">Q5.</span> Why did the wire-drag connection fail in the GUI before the recent bug fix?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="ConnectionPort._update_color() changes the dot colour but doesn't affect whether the wire is created.">ConnectionPort._update_color() wasn't called</li>
+      <li data-correct="false" data-why="connect_ports() has always been correct — the problem was that it was never reached.">connect_ports() had a logic error checking parent_block</li>
+      <li data-correct="true"  data-why="Correct! mousePressEvent didn't call event.accept(), so QGraphicsView (in RubberBandDrag mode) intercepted the press and started a rubber-band selection instead of the wire drag. The fix adds event.accept() so the view ignores the drag.">The scene's mousePressEvent didn't accept the event, so the view started a rubber-band selection over the drag</li>
+      <li data-correct="false" data-why="_port_at() was added as part of a previous fix and correctly skips the temp wire — it's not the culprit here.">_port_at() returned the temporary wire instead of the target port</li>
+    </ul>
+    <div class="feedback" hidden></div>
+  </div>
+
+  <div id="quiz-score" class="score-box"></div>
+  <button class="btn" onclick="checkQuiz()">See my score</button>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<section id="sec-6">
+<h2>6. Check Your Understanding — Scenarios</h2>
+
+<div class="scenario">
+  <div class="scenario-q">Scenario A: A teammate says "Silmulator crashed when I clicked File → New after wiring up a big layout." Why did this happen before the recent fix, and how is it fixed now?</div>
+  <details>
+    <summary>Show answer</summary>
+    <div class="answer">
+      <code>MainWindow._new_canvas()</code> called <code>QGraphicsScene.clear()</code>, which deleted the C++ Qt items. But <code>CanvasScene._blocks</code> and <code>_wires</code> dictionaries still held Python references to those deleted objects. The next call to <code>to_dict()</code> or <code>reset_all()</code> touched the deleted items → RuntimeError.
+      <br><br>
+      The fix: <code>CanvasScene.clear()</code> is now overridden. It calls <code>super().clear()</code> and then resets <code>_blocks = {}</code>, <code>_wires = {}</code>, <code>_connecting = None</code>, <code>_temp_wire = None</code>. Everything in <code>from_dict()</code> that manually reset those dicts was also removed to avoid duplication.
+    </div>
+  </details>
+</div>
+
+<div class="scenario">
+  <div class="scenario-q">Scenario B: You build a layout with a Function Generator, save it as <code>my_bench.sil</code>, and reopen it. The Function Generator is gone and its wires disappeared. What was the bug?</div>
+  <details>
+    <summary>Show answer</summary>
+    <div class="answer">
+      <code>FunctionGeneratorBlock.__init__</code> passed <code>device_type = "Function Gen"</code>, but the registry key in <code>BLOCK_REGISTRY</code> is <code>"Function Generator"</code>. When <code>to_dict()</code> saved the block it stored the string <code>"Function Gen"</code>. When <code>from_dict()</code> loaded it, <code>BLOCK_REGISTRY.get("Function Gen")</code> returned <code>None</code> — so the block was silently skipped, and all wires referencing its port IDs were dropped.
+      <br><br>
+      Fix: the device_type argument is now <code>"Function Generator"</code> to match the registry exactly.
+    </div>
+  </details>
+</div>
+
+<div class="scenario">
+  <div class="scenario-q">Scenario C: You want to test a large firmware project (a full RTOS tree with dozens of .c files). Walk through the steps in Silmulator.</div>
+  <details>
+    <summary>Show answer</summary>
+    <div class="answer">
+      1. Add the hardware blocks the firmware talks to (e.g. Power Supply + Oscilloscope).<br>
+      2. Add a <strong>Code Input</strong> block and connect its OUT1/OUT2/OUT3 ports to the hardware blocks.<br>
+      3. Right-click the Code Input block → <strong>Load project folder…</strong> and point it at the RTOS root. Silmulator walks the tree, parses every <code>.c/.cpp/.py</code> file, extracts all <code>visa_write / visa_query</code> calls, and shows how many SCPI calls were found.<br>
+      4. Right-click → <strong>Run parsed commands</strong> to replay the calls in file/line order to the connected hardware blocks.<br>
+      5. Open each hardware block's <strong>View command log</strong> to see what it received and responded.
+    </div>
+  </details>
+</div>
+</section>
+
+<hr>
+<p style="color:var(--text-dim);font-size:0.85rem;">
+  Lesson 0001 · Silmulator · Created 2026-06-20<br>
+  Next: <em>SCPI command structure</em> — the IEEE 488.2 tree syntax, grounded in <code>silmulator/scpi/parser.py</code>
+</p>
+
+</div><!-- .page -->
+
+<script>
+// ---------------------------------------------------------------
+// Section checkboxes
+// ---------------------------------------------------------------
+function toggleCheck(id) {
+  const el = document.getElementById(id);
+  el.classList.toggle('done');
+  const box = el.querySelector('.box');
+  box.textContent = el.classList.contains('done') ? '✓' : '☐';
+}
+
+// ---------------------------------------------------------------
+// Quiz: shuffle + score
+// ---------------------------------------------------------------
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Shuffle options on load
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  const items = [...list.children];
+  shuffle(items).forEach(li => list.appendChild(li));
+
+  const feedback = q.querySelector('.feedback');
+  items.forEach(li => {
+    li.addEventListener('click', () => {
+      // Lock all options once answered
+      list.querySelectorAll('li').forEach(opt => opt.classList.add('locked'));
+      const correct = li.dataset.correct === 'true';
+      li.classList.add(correct ? 'correct' : 'wrong');
+      if (!correct) {
+        // Highlight the right answer
+        list.querySelectorAll('li[data-correct="true"]').forEach(opt => opt.classList.add('correct'));
+      }
+      feedback.hidden = false;
+      feedback.className = 'feedback ' + (correct ? 'ok' : 'bad');
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+    });
+  });
+});
+
+function checkQuiz() {
+  const questions = document.querySelectorAll('[data-question]');
+  let answered = 0, correct = 0;
+  questions.forEach(q => {
+    const chosen = q.querySelector('li.correct, li.wrong');
+    if (!chosen) return;
+    answered++;
+    if (chosen.classList.contains('correct')) correct++;
+  });
+  const scoreBox = document.getElementById('quiz-score');
+  scoreBox.style.display = 'block';
+  const pct = answered === 0 ? 0 : Math.round((correct / answered) * 100);
+  if (answered < questions.length) {
+    scoreBox.style.background = '#2a2a40';
+    scoreBox.style.borderColor = '#5b8df6';
+    scoreBox.innerHTML = `<strong>${correct}/${answered}</strong> answered correctly (${questions.length - answered} question(s) skipped)`;
+  } else if (pct === 100) {
+    scoreBox.style.background = '#1a3a2a';
+    scoreBox.style.borderColor = '#3dd68c';
+    scoreBox.innerHTML = `🎉 <strong>5/5</strong> — Perfect score! Mark section 5 complete above.`;
+  } else if (pct >= 60) {
+    scoreBox.style.background = '#2a2a1a';
+    scoreBox.style.borderColor = '#ffc94d';
+    scoreBox.innerHTML = `<strong>${correct}/5</strong> (${pct}%) — Good start. Review the questions you missed.`;
+  } else {
+    scoreBox.style.background = '#3a1a1a';
+    scoreBox.style.borderColor = '#f46a6a';
+    scoreBox.innerHTML = `<strong>${correct}/5</strong> (${pct}%) — Re-read sections 2–3, then try again.`;
+  }
+}
+</script>
+</body>
+</html>

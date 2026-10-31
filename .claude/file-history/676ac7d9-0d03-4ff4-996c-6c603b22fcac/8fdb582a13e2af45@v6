@@ -1,0 +1,1555 @@
+"""MSP430 microcontroller simulator — TI MSP430 SCPI-style interface."""
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+import struct
+
+from silmulator.devices.base_device import BaseDevice, ScpiError, ScpiCommand
+from silmulator.devices.msp430_faults import FaultState, NOMINAL, PROFILES
+
+
+# ---------------------------------------------------------------------------
+# ADC12_B voltage reference selection (SLAU367P §34.2.4 ADC12VRSEL; §33 REF_A)
+# ---------------------------------------------------------------------------
+
+# REF_A's three internal reference outputs (SLAU367P §33.3.1, REFVSEL field).
+# Bare "VREF" maps to REFVSEL's reset value (00b = 1.2 V).
+ADC_INTERNAL_REF_V: Dict[str, float] = {
+    "VREF": 1.2,
+    "VREF1.2": 1.2,
+    "VREF2.0": 2.0,
+    "VREF2.5": 2.5,
+}
+
+# The fixed set ADC:REFERENCE accepts: AVCC (tracks CPU:VCC), REF_A's internal
+# outputs, and VEREF (the external VeREF+ pin, SLASE54D Table 7-1). Anything
+# else has no ADC12VRSEL encoding and is rejected with -224.
+VALID_ADC_REFERENCES = frozenset({"AVCC", "VEREF"} | set(ADC_INTERNAL_REF_V))
+
+
+# ---------------------------------------------------------------------------
+# Clock system (CS) source and divider validation (SLAU367P §3.3.2 CSCTL2,
+# §3.3.3 CSCTL3)
+# ---------------------------------------------------------------------------
+
+# CSCTL2.SELM/SELS: MCLK and SMCLK share one source mux. REFO and DCOCLKDIV
+# have no encoding on the FR59xx CS; MODCLK and LFMODCLK do.
+VALID_MCLK_SMCLK_SOURCES = frozenset({"LFXT", "VLO", "LFMODCLK", "DCO", "MODCLK", "HFXT"})
+# CSCTL2.SELA: ACLK's source mux is a narrower subset of the above.
+VALID_ACLK_SOURCES = frozenset({"LFXT", "VLO", "LFMODCLK"})
+# CSCTL3.DIVM/DIVS/DIVA: all three dividers share the same 3-bit, power-of-two
+# encoding that tops out at /32 (values above /32 have no encoding).
+VALID_CLOCK_DIVIDERS = frozenset({1, 2, 4, 8, 16, 32})
+
+# Fixed-frequency clock sources with no configurable register (SLAU367P
+# §3.2.5 MODCLK, ~4.8 MHz typical; §3.2.6 VLOCLK, ~9.4 kHz typical).
+# LFMODCLK is MODCLK divided by 128 (SLAU367P §3.2.5).
+MODCLK_FREQUENCY_HZ = 4.8e6
+VLO_FREQUENCY_HZ = 9400.0
+LFMODCLK_FREQUENCY_HZ = MODCLK_FREQUENCY_HZ / 128
+
+
+# ---------------------------------------------------------------------------
+# MSP430 peripheral state
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GPIOPort:
+    direction: int = 0x00       # 0=input, 1=output (bitmask)
+    output: int = 0x00          # output register value (PxOUT)
+    input: int = 0x00           # input register value (injected)
+    # PxREN (SLAU367P §12.2.4, Table 12-1): one pull resistor enable bit per
+    # pin. There is no independent pullup/pulldown register in hardware —
+    # while a bit here is set, the matching PxOUT bit selects the pull
+    # direction (0=pulldown, 1=pullup).
+    resistor_enable: int = 0x00
+    interrupt_enable: int = 0x00
+    interrupt_flag: int = 0x00
+    interrupt_edge: int = 0x00  # 0=rising, 1=falling
+
+    @property
+    def pullup(self) -> int:
+        """Deprecated read-only view: REN-enabled bits with OUT selecting pull-up."""
+        return self.resistor_enable & self.output & 0xFF
+
+    @property
+    def pulldown(self) -> int:
+        """Deprecated read-only view: REN-enabled bits with OUT selecting pull-down."""
+        return self.resistor_enable & ~self.output & 0xFF
+
+
+@dataclass
+class ADCChannel:
+    value: float = 0.0          # Injected voltage (V)
+    reference: str = "AVCC"     # AVCC | VREF | EXT
+    resolution: int = 12        # 12-bit
+    oversample: int = 1
+    enabled: bool = False
+
+
+@dataclass
+class TimerState:
+    mode: str = "STOP"          # STOP | UP | CONTINUOUS | UPDOWN
+    clock_source: str = "SMCLK"
+    clock_divider: int = 1
+    count: int = 0
+    # TAxCCR0-3 (SLAU367P §25.2.4). PERIOD is not a separate register — in up
+    # mode the period register IS TAxCCR0 (§25.2.3.1), so TIMERn:PERIOD reads
+    # and writes capture_compare[0] directly; there is no independent store.
+    capture_compare: Dict[int, int] = field(default_factory=lambda: {0: 0, 1: 0, 2: 0, 3: 0})
+    # Per-CC-unit CAP bit (SLAU367P §25.2.4): COMPARE or CAPTURE. Stored state
+    # only — the simulator does not model edge-triggered capture latching
+    # since time does not pass in this simulation.
+    cc_mode: Dict[int, str] = field(default_factory=lambda: {0: "COMPARE", 1: "COMPARE", 2: "COMPARE", 3: "COMPARE"})
+    interrupt_enable: bool = False
+    interrupt_flag: bool = False
+
+
+@dataclass
+class UARTState:
+    baud_rate: int = 9600
+    data_bits: int = 8
+    parity: str = "NONE"        # NONE | ODD | EVEN
+    stop_bits: int = 1
+    enabled: bool = False
+    rx_buffer: List[int] = field(default_factory=list)
+    tx_buffer: List[int] = field(default_factory=list)
+
+
+@dataclass
+class SPIState:
+    clock_polarity: int = 0
+    clock_phase: int = 0
+    bit_rate: int = 1000000
+    master: bool = True
+    enabled: bool = False
+    rx_buffer: List[int] = field(default_factory=list)
+    tx_buffer: List[int] = field(default_factory=list)
+
+
+@dataclass
+class I2CState:
+    address: int = 0x50
+    # UCSLA10/UCA10 (SLAU367P §32.3.1): 0 = 7-bit addressing (0-0x7F, the
+    # eUSCI_B reset default), 1 = 10-bit addressing (0-0x3FF).
+    address_10bit: bool = False
+    master: bool = True
+    clock_frequency: int = 100000
+    enabled: bool = False
+    rx_buffer: List[int] = field(default_factory=list)
+    tx_buffer: List[int] = field(default_factory=list)
+    # Per-address rx/tx queues (SLAU367P §32.3.4): models one simulated slave
+    # per populated address on the bus. WRITE/TRANSFER route through this map
+    # keyed by target address; an address with no entry has no simulated
+    # device present and NACKs (UCNACKIFG), matching a real bus where only
+    # devices physically present acknowledge. The device's own configured
+    # address (I2Cn:ADDRESS, default 0x50) is pre-populated so a fresh
+    # instance behaves like a single point-to-point slave connection.
+    addr_buffers: Dict[int, Dict[str, List[int]]] = field(
+        default_factory=lambda: {0x50: {"rx": [], "tx": []}}
+    )
+
+
+@dataclass
+class ClockState:
+    mclk_source: str = "DCO"   # DCO | LFXT | HFXT | VLO | MODCLK | LFMODCLK
+    mclk_div: int = 1
+    smclk_source: str = "DCO"  # same source set as MCLK (CSCTL2.SELS)
+    smclk_div: int = 1
+    aclk_source: str = "LFXT"  # LFXT | VLO | LFMODCLK (CSCTL2.SELA)
+    aclk_div: int = 1
+    dco_frequency: float = 1e6  # Hz
+    lfxt_frequency: float = 32768.0
+    # HFXT has no fixed nominal in hardware — it is an external crystal whose
+    # range is configured via CSCTL4.HFFREQ (SLAU367P §3.3.4, not modeled).
+    # This is a simulator-only default so HFXT-sourced clocks resolve to a
+    # concrete frequency.
+    hfxt_frequency: float = 4e6  # Hz
+    vcc: float = 3.3
+
+
+@dataclass
+class PMState:
+    mode: str = "AM"            # AM | LPM0 | LPM1 | LPM2 | LPM3 | LPM4
+    wakeup_source: str = "NONE"
+
+
+@dataclass
+class WDTState:
+    """WDT_A control state (SLAU367P §24.2, WDTCTL).
+
+    ``hold`` mirrors WDTHOLD (bit 7): 0 = watchdog started/running (the PUC
+    default), 1 = held/stopped. No interval countdown is modeled — time does
+    not pass in this simulation — so the watchdog never expires on its own;
+    only a password violation on a WDTCTL-style write causes a PUC.
+    """
+    hold: bool = False
+
+
+# ---------------------------------------------------------------------------
+# MSP430 device
+# ---------------------------------------------------------------------------
+
+class MSP430(BaseDevice):
+    """TI MSP430 microcontroller simulator.
+
+    Exposes GPIO, ADC, Timer_A/B, UART, SPI, I2C, and clock system
+    via a SCPI-like command interface. Real MSP430 code running on a host
+    can interact with simulated peripherals through this interface.
+    """
+
+    MANUFACTURER = "TEXAS INSTRUMENTS"
+    MODEL = "MSP430FR5994"
+    SERIAL = "TI00000001"
+    FIRMWARE = "1.0.0"
+
+    NUM_PORTS = 8       # P1-P8 (10 on larger devices)
+    NUM_ADC_CH = 12     # ADC12 channels
+    NUM_TIMER_A = 3     # Timer_A instances
+    NUM_TIMER_B = 1
+    NUM_UART = 4        # eUSCI_A instances
+    NUM_SPI = 2         # eUSCI_B instances
+    NUM_I2C = 4
+
+    def __init__(self) -> None:
+        self.ports: Dict[int, GPIOPort] = {i: GPIOPort() for i in range(1, self.NUM_PORTS + 1)}
+        self.adc: Dict[int, ADCChannel] = {i: ADCChannel() for i in range(self.NUM_ADC_CH)}
+        self.timer_a: Dict[int, TimerState] = {i: TimerState() for i in range(self.NUM_TIMER_A)}
+        self.timer_b: Dict[int, TimerState] = {i: TimerState() for i in range(self.NUM_TIMER_B)}
+        self.uart: Dict[int, UARTState] = {i: UARTState() for i in range(self.NUM_UART)}
+        self.spi: Dict[int, SPIState] = {i: SPIState() for i in range(self.NUM_SPI)}
+        self.i2c: Dict[int, I2CState] = {i: I2CState() for i in range(self.NUM_I2C)}
+        self.clock = ClockState()
+        self.pm = PMState()
+        self.wdt = WDTState()
+        self.faults = FaultState()  # datasheet-grounded drift/fault profiles
+        # External VeREF+ pin voltage (SLASE54D Table 7-1: this analog input has
+        # no defined reset state after BOR, since it is board-supplied); used as
+        # VR+ only when ADC:REFERENCE selects VEREF, and settable via a second
+        # parameter e.g. "ADC:REFERENCE VEREF,2.1".
+        self._veref_v: float = 1.2
+        self._memory: Dict[int, int] = {}  # Simulated memory map
+        self._running: bool = False
+        self._halted: bool = False
+        self._pc: int = 0xC000  # Program counter
+        self._registers: List[int] = [0] * 16  # R0-R15
+        self._gie: bool = False  # SR.GIE (SLAU367P §4.3.3): clear after a PUC
+        super().__init__()
+
+    def inject_gpio(self, port: int, pin: int, value: int) -> None:
+        """Inject a GPIO input value (for input pins)."""
+        if port in self.ports:
+            if value:
+                self.ports[port].input |= (1 << pin)
+            else:
+                self.ports[port].input &= ~(1 << pin)
+
+    def inject_adc(self, channel: int, voltage: float) -> None:
+        """Inject a voltage on an ADC channel."""
+        if channel in self.adc:
+            self.adc[channel].value = voltage
+
+    def inject_uart_rx(self, instance: int, data: bytes) -> None:
+        """Inject data into UART receive buffer."""
+        if instance in self.uart:
+            self.uart[instance].rx_buffer.extend(data)
+
+    def inject_spi_rx(self, instance: int, data: bytes) -> None:
+        """Inject data into SPI receive buffer."""
+        if instance in self.spi:
+            self.spi[instance].rx_buffer.extend(data)
+
+    def inject_i2c_rx(self, instance: int, data: bytes, address: Optional[int] = None) -> None:
+        """Inject data into an I2C receive queue.
+
+        With ``address`` omitted, data queues on the flat legacy buffer read
+        by I2Cn:READ. With ``address`` given, the data populates that
+        address's per-address queue (SLAU367P §32.3.4) used by
+        I2Cn:TRANSFER, and marks the address as a responding slave present
+        on the simulated bus.
+        """
+        if instance in self.i2c:
+            ii = self.i2c[instance]
+            if address is None:
+                ii.rx_buffer.extend(data)
+            else:
+                buf = ii.addr_buffers.setdefault(address, {"rx": [], "tx": []})
+                buf["rx"].extend(data)
+
+    # ------------------------------------------------------------------
+    # Handler registration
+    # ------------------------------------------------------------------
+
+    def _setup_handlers(self) -> None:
+        # CPU control
+        self._register("CPU:RESET", self._cpu_reset)
+        self._register("CPU:HALT", self._cpu_halt)
+        self._register("CPU:RUN", self._cpu_run)
+        self._register("CPU:STATE", self._cpu_state)
+        self._register("CPU:PC", self._cpu_pc)
+        self._register("CPU:REGISTER", self._cpu_reg)
+        self._register("CPU:REG", self._cpu_reg)
+        self._register("CPU:SPEED", self._cpu_speed)
+        self._register("CPU:VCC", self._cpu_vcc)
+
+        # GPIO
+        for p in range(1, self.NUM_PORTS + 1):
+            self._reg_gpio(p)
+
+        # ADC
+        for ch in range(self.NUM_ADC_CH):
+            self._reg_adc(ch)
+        self._register("ADC:CONVERT", self._adc_convert)
+        self._register("ADC:REFERENCE", self._adc_ref)
+        self._register("ADC:RESOLUTION", self._adc_resolution)
+        self._register("ADC:TRIGGER", self._adc_trigger)
+        self._register("ADC:OVERSAMPLE", self._adc_oversample)
+
+        # Timer_A
+        for t in range(self.NUM_TIMER_A):
+            self._reg_timer("A", t, self.timer_a[t])
+        # Timer_B
+        for t in range(self.NUM_TIMER_B):
+            self._reg_timer("B", t, self.timer_b[t])
+
+        # UART (eUSCI_A)
+        for u in range(self.NUM_UART):
+            self._reg_uart(u)
+
+        # SPI (eUSCI_B)
+        for s in range(self.NUM_SPI):
+            self._reg_spi(s)
+
+        # I2C
+        for i in range(self.NUM_I2C):
+            self._reg_i2c(i)
+
+        # Clock system
+        self._register("CLOCK:MCLK:SOURCE", self._clk_mclk_src)
+        self._register("CLOCK:MCLK:DIVIDER", self._clk_mclk_div)
+        self._register("CLOCK:SMCLK:SOURCE", self._clk_smclk_src)
+        self._register("CLOCK:SMCLK:DIVIDER", self._clk_smclk_div)
+        self._register("CLOCK:ACLK:SOURCE", self._clk_aclk_src)
+        self._register("CLOCK:ACLK:DIVIDER", self._clk_aclk_div)
+        self._register("CLOCK:DCO:FREQUENCY", self._clk_dco_freq)
+        self._register("CLOCK:MCLK:FREQUENCY", self._clk_mclk_freq)
+        self._register("CLOCK:SMCLK:FREQUENCY", self._clk_smclk_freq)
+        self._register("CLOCK:ACLK:FREQUENCY", self._clk_aclk_freq)
+
+        # Power management
+        self._register("POWER:MODE", self._pm_mode)
+        self._register("POWER:VCC", self._cpu_vcc)
+        self._register("POWER:WAKEUP", self._pm_wakeup)
+
+        # Memory access
+        self._register("MEMORY:READ", self._mem_read)
+        self._register("MEM:READ", self._mem_read)
+        self._register("MEMORY:WRITE", self._mem_write)
+        self._register("MEM:WRITE", self._mem_write)
+        self._register("MEMORY:FILL", self._mem_fill)
+
+        # WDT
+        self._register("WDT:STATE", self._wdt_state)
+        self._register("WDT:PASSWORD", self._wdt_password)
+
+        # Fault/drift profiles (simulator feature; tolerances from SLASE54D)
+        self._register("FAULT:PROFILE", self._fault_profile_all)
+        self._register("FAULT:ADC:PROFILE", lambda cmd: self._fault_profile(cmd, "adc_profile"))
+        self._register("FAULT:CLOCK:PROFILE", lambda cmd: self._fault_profile(cmd, "clock_profile"))
+        self._register("FAULT:TIMER:PROFILE", lambda cmd: self._fault_profile(cmd, "timer_profile"))
+
+        # Interrupt
+        self._register("INTERRUPT:GIE", self._int_gie)
+        self._register("INTERRUPT:ENABLE", self._int_enable)
+        self._register("INTERRUPT:DISABLE", self._int_disable)
+        self._register("INTERRUPT:VECTOR", self._int_vector)
+        self._register("INTERRUPT:FLAG", self._int_flag)
+
+    # ------------------------------------------------------------------
+    # GPIO registration
+    # ------------------------------------------------------------------
+
+    def _reg_gpio(self, port: int) -> None:
+        p = f"GPIO:PORT{port}"
+        pp = self.ports[port]
+        self._register(f"{p}:DIRECTION", lambda cmd, s=pp: self._gpio_dir(cmd, s))
+        self._register(f"GPIO:P{port}:DIR", lambda cmd, s=pp: self._gpio_dir(cmd, s))
+        self._register(f"{p}:OUTPUT", lambda cmd, s=pp: self._gpio_out(cmd, s))
+        self._register(f"GPIO:P{port}:OUT", lambda cmd, s=pp: self._gpio_out(cmd, s))
+        self._register(f"{p}:INPUT", lambda cmd, s=pp: self._gpio_inp(cmd, s))
+        self._register(f"GPIO:P{port}:IN", lambda cmd, s=pp: self._gpio_inp(cmd, s))
+        self._register(f"{p}:TOGGLE", lambda cmd, s=pp: self._gpio_toggle(cmd, s))
+        self._register(f"GPIO:P{port}:TOG", lambda cmd, s=pp: self._gpio_toggle(cmd, s))
+        self._register(f"{p}:SET", lambda cmd, s=pp: self._gpio_set(cmd, s))
+        self._register(f"{p}:CLEAR", lambda cmd, s=pp: self._gpio_clear(cmd, s))
+        self._register(f"{p}:PIN:DIRECTION", lambda cmd, s=pp: self._gpio_pin_dir(cmd, s))
+        self._register(f"{p}:PIN:VALUE", lambda cmd, s=pp: self._gpio_pin_val(cmd, s))
+        self._register(f"GPIO:P{port}:PIN", lambda cmd, s=pp: self._gpio_pin_val(cmd, s))
+        self._register(f"{p}:RESISTOR:ENABLE", lambda cmd, s=pp: self._gpio_ren(cmd, s))
+        self._register(f"{p}:PULLUP", lambda cmd, s=pp: self._gpio_pullup(cmd, s))
+        self._register(f"{p}:PULLDOWN", lambda cmd, s=pp: self._gpio_pulldown(cmd, s))
+        self._register(f"{p}:INTERRUPT:ENABLE", lambda cmd, s=pp: self._gpio_int_en(cmd, s))
+        self._register(f"{p}:INTERRUPT:FLAG", lambda cmd, s=pp: self._gpio_int_flag(cmd, s))
+        self._register(f"{p}:INTERRUPT:EDGE", lambda cmd, s=pp: self._gpio_int_edge(cmd, s))
+
+    def _gpio_dir(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.is_query:
+            return f"0x{p.direction:02X}"
+        if cmd.params:
+            p.direction = int(cmd.params[0], 0) & 0xFF
+        return ""
+
+    def _gpio_out(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.is_query:
+            return f"0x{p.output:02X}"
+        if cmd.params:
+            p.output = int(cmd.params[0], 0) & 0xFF
+        return ""
+
+    def _gpio_inp(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        """PxIN (SLAU367P §12.2.1, §12.2.4): combines driven, pulled, and injected bits.
+
+        Output pins read back PxOUT. Undriven input pins read the pull level
+        (PxOUT's bit) when PxREN enables a resistor on that pin; input pins
+        with no pull enabled read the externally injected value, as today.
+        """
+        driven = p.output & p.direction
+        undriven_mask = ~p.direction & 0xFF
+        pulled = p.output & p.resistor_enable & undriven_mask
+        injected = p.input & undriven_mask & ~p.resistor_enable
+        effective = driven | pulled | injected
+        return f"0x{effective & 0xFF:02X}"
+
+    def _gpio_toggle(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.params:
+            mask = int(cmd.params[0], 0) & 0xFF
+            p.output ^= mask
+        return ""
+
+    def _gpio_set(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.params:
+            mask = int(cmd.params[0], 0) & 0xFF
+            p.output |= mask
+        return ""
+
+    def _gpio_clear(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.params:
+            mask = int(cmd.params[0], 0) & 0xFF
+            p.output &= ~mask
+        return ""
+
+    @staticmethod
+    def _validate_pin(pin: int) -> None:
+        """Reject pin indexes outside an 8-bit port's 8 I/O lines (SLAU367P §12.2)."""
+        if not 0 <= pin <= 7:
+            raise ScpiError(-222, f"Pin index out of range (0-7): {pin}")
+
+    def _gpio_pin_dir(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if not cmd.params:
+            raise ScpiError(-109, "Missing parameter: pin number")
+        pin = int(cmd.params[0])
+        self._validate_pin(pin)
+        if len(cmd.params) < 2:
+            return "OUTPUT" if p.direction & (1 << pin) else "INPUT"
+        val = cmd.params[1].upper()
+        if val in ("OUTPUT", "1", "OUT"):
+            p.direction |= (1 << pin)
+        elif val in ("INPUT", "0", "IN"):
+            p.direction &= ~(1 << pin)
+        else:
+            raise ScpiError(-224, f"Illegal pin mode: {val}")
+        return ""
+
+    def _gpio_pin_val(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if not cmd.params:
+            raise ScpiError(-109, "Missing parameter: pin number")
+        pin = int(cmd.params[0])
+        self._validate_pin(pin)
+        if len(cmd.params) < 2:
+            if p.direction & (1 << pin):
+                return "1" if p.output & (1 << pin) else "0"
+            else:
+                return "1" if p.input & (1 << pin) else "0"
+        val = int(cmd.params[1])
+        if val:
+            p.output |= (1 << pin)
+        else:
+            p.output &= ~(1 << pin)
+        return ""
+
+    def _gpio_ren(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        """PxREN (SLAU367P §12.2.4, Table 12-1): per-pin pull resistor enable.
+
+        One enable bit per pin; while set, PxOUT's matching bit selects the
+        pull direction (0=pulldown, 1=pullup).
+        """
+        if cmd.is_query:
+            return f"0x{p.resistor_enable:02X}"
+        if cmd.params:
+            p.resistor_enable = int(cmd.params[0], 0) & 0xFF
+        return ""
+
+    def _gpio_pullup(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        """Deprecated alias of RESISTOR:ENABLE (SLAU367P §12.2.4, Table 12-1).
+
+        Hardware has one PxREN enable per pin with PxOUT selecting the pull
+        direction, so pull-up and pull-down are mutually exclusive per pin.
+        A write here sets REN and OUT together for the given mask (pull-up);
+        the query derives the pull-up subset of REN (REN & OUT).
+        """
+        if cmd.is_query:
+            return f"0x{p.pullup:02X}"
+        if cmd.params:
+            mask = int(cmd.params[0], 0) & 0xFF
+            p.resistor_enable |= mask
+            p.output |= mask
+        return ""
+
+    def _gpio_pulldown(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        """Deprecated alias of RESISTOR:ENABLE — see PULLUP.
+
+        A write here sets REN and clears OUT together for the given mask
+        (pull-down); the query derives the pull-down subset of REN
+        (REN & ~OUT).
+        """
+        if cmd.is_query:
+            return f"0x{p.pulldown:02X}"
+        if cmd.params:
+            mask = int(cmd.params[0], 0) & 0xFF
+            p.resistor_enable |= mask
+            p.output &= ~mask
+        return ""
+
+    def _gpio_int_en(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.is_query:
+            return f"0x{p.interrupt_enable:02X}"
+        if cmd.params:
+            p.interrupt_enable = int(cmd.params[0], 0) & 0xFF
+        return ""
+
+    def _gpio_int_flag(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.is_query:
+            return f"0x{p.interrupt_flag:02X}"
+        if cmd.params:
+            p.interrupt_flag = int(cmd.params[0], 0) & 0xFF
+        return ""
+
+    def _gpio_int_edge(self, cmd: ScpiCommand, p: GPIOPort) -> str:
+        if cmd.is_query:
+            return f"0x{p.interrupt_edge:02X}"
+        if cmd.params:
+            p.interrupt_edge = int(cmd.params[0], 0) & 0xFF
+        return ""
+
+    # ------------------------------------------------------------------
+    # ADC registration
+    # ------------------------------------------------------------------
+
+    def _reg_adc(self, ch: int) -> None:
+        ac = self.adc[ch]
+        p = f"ADC:CHANNEL{ch}"
+        self._register(f"{p}:VALUE", lambda cmd, s=ac: self._adc_ch_value(cmd, s))
+        self._register(f"{p}:RAW", lambda cmd, s=ac: self._adc_ch_raw(cmd, s))
+        self._register(f"{p}:INJECT", lambda cmd, s=ac: self._adc_ch_inject(cmd, s))
+        self._register(f"{p}:ENABLE", lambda cmd, s=ac: self._adc_ch_enable(cmd, s))
+        self._register(f"ADC:CH{ch}:VAL", lambda cmd, s=ac: self._adc_ch_value(cmd, s))
+        self._register(f"ADC:CH{ch}:RAW", lambda cmd, s=ac: self._adc_ch_raw(cmd, s))
+        self._register(f"ADC:CH{ch}:INJ", lambda cmd, s=ac: self._adc_ch_inject(cmd, s))
+
+    def _adc_ch_value(self, cmd: ScpiCommand, ac: ADCChannel) -> str:
+        return f"{ac.value:.6f}"
+
+    def _adc_ch_raw(self, cmd: ScpiCommand, ac: ADCChannel) -> str:
+        return str(self.faults.adc_code(ac.value, self._adc_reference_voltage(), ac.resolution))
+
+    def _adc_ch_inject(self, cmd: ScpiCommand, ac: ADCChannel) -> str:
+        if cmd.params:
+            ac.value = float(cmd.params[0])
+        return ""
+
+    def _adc_ch_enable(self, cmd: ScpiCommand, ac: ADCChannel) -> str:
+        if cmd.is_query:
+            return "1" if ac.enabled else "0"
+        if cmd.params:
+            ac.enabled = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _adc_convert(self, cmd: ScpiCommand) -> str:
+        if cmd.params:
+            ch = int(cmd.params[0])
+            if ch in self.adc:
+                ref_v = self._adc_reference_voltage()
+                return str(self.faults.adc_code(self.adc[ch].value, ref_v, self.adc[ch].resolution))
+        return "0"
+
+    def _adc_ref(self, cmd: ScpiCommand) -> str:
+        """Get/set the ADC12_B voltage reference (SLAU367P §34.2.4; §33 REF_A).
+
+        Accepts a fixed set: AVCC (tracks CPU:VCC), REF_A's internal 1.2/2.0/
+        2.5-V outputs ("VREF" defaults to the REFVSEL reset value of 1.2 V;
+        "VREF1.2"/"VREF2.0"/"VREF2.5" select explicitly), and VEREF (the
+        external VeREF+ pin — an optional second parameter sets its voltage,
+        e.g. ``ADC:REFERENCE VEREF,2.1``). Anything outside this set has no
+        ADC12VRSEL encoding and is rejected with -224.
+        """
+        if cmd.is_query:
+            return self.adc[0].reference
+        if cmd.params:
+            ref = cmd.params[0].upper()
+            if ref not in VALID_ADC_REFERENCES:
+                raise ScpiError(-224, f"Illegal ADC reference: {ref}")
+            if ref == "VEREF" and len(cmd.params) > 1:
+                try:
+                    self._veref_v = float(cmd.params[1])
+                except ValueError:
+                    raise ScpiError(-104, f"Invalid VEREF voltage: {cmd.params[1]}")
+            for ch in self.adc.values():
+                ch.reference = ref
+        return ""
+
+    def _adc_reference_voltage(self) -> float:
+        """VR+ in volts for the selected ADC reference (SLAU367P §34.2.1 Eq. 13).
+
+        VR- is AVSS (0 V) in this model — the simulator does not expose the
+        VR- half of ADC12VRSEL's combinations, only which source drives VR+.
+        """
+        ref = self.adc[0].reference
+        if ref == "AVCC":
+            return self.clock.vcc
+        if ref == "VEREF":
+            return self._veref_v
+        return ADC_INTERNAL_REF_V.get(ref, self.clock.vcc)
+
+    def _adc_resolution(self, cmd: ScpiCommand) -> str:
+        if cmd.is_query:
+            return str(self.adc[0].resolution)
+        if cmd.params:
+            res = int(cmd.params[0])
+            if res not in (8, 10, 12):
+                raise ScpiError(-224, "Illegal resolution: must be 8, 10, or 12")
+            for ch in self.adc.values():
+                ch.resolution = res
+        return ""
+
+    def _adc_trigger(self, cmd: ScpiCommand) -> str:
+        return ""  # Software trigger — initiate a conversion
+
+    def _adc_oversample(self, cmd: ScpiCommand) -> str:
+        if cmd.is_query:
+            return str(self.adc[0].oversample)
+        if cmd.params:
+            n = int(cmd.params[0])
+            for ch in self.adc.values():
+                ch.oversample = n
+        return ""
+
+    # ------------------------------------------------------------------
+    # Timer registration
+    # ------------------------------------------------------------------
+
+    def _reg_timer(self, kind: str, idx: int, ts: TimerState) -> None:
+        p = f"TIMER{kind}{idx}"
+        self._register(f"{p}:MODE", lambda cmd, s=ts: self._timer_mode(cmd, s))
+        self._register(f"{p}:COUNT", lambda cmd, s=ts: self._timer_count(cmd, s))
+        self._register(f"{p}:PERIOD", lambda cmd, s=ts: self._timer_period(cmd, s))
+        self._register(f"{p}:CLOCK:SOURCE", lambda cmd, s=ts: self._timer_clk_src(cmd, s))
+        self._register(f"{p}:CLOCK:DIVIDER", lambda cmd, s=ts: self._timer_clk_div(cmd, s))
+        self._register(f"{p}:INTERRUPT:ENABLE", lambda cmd, s=ts: self._timer_int_en(cmd, s))
+        self._register(f"{p}:INTERRUPT:FLAG", lambda cmd, s=ts: self._timer_int_flag(cmd, s))
+        self._register(f"{p}:INTERVAL", lambda cmd, s=ts: self._timer_interval(cmd, s))
+        for cc in range(4):
+            self._register(f"{p}:CC{cc}:VALUE", lambda cmd, s=ts, c=cc: self._timer_cc_val(cmd, s, c))
+            self._register(f"{p}:CC{cc}:MODE", lambda cmd, s=ts, c=cc: self._timer_cc_mode(cmd, s, c))
+        # Short forms
+        self._register(f"T{kind}{idx}:MODE", lambda cmd, s=ts: self._timer_mode(cmd, s))
+        self._register(f"T{kind}{idx}:COUNT", lambda cmd, s=ts: self._timer_count(cmd, s))
+
+    def _timer_mode(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        VALID = {"STOP", "UP", "CONTINUOUS", "UPDOWN", "CONT"}
+        if cmd.is_query:
+            return ts.mode
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v == "CONT":
+                v = "CONTINUOUS"
+            if v not in VALID:
+                raise ScpiError(-224, f"Illegal timer mode: {v}")
+            ts.mode = v
+        return ""
+
+    def _timer_count(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        """TAxR/TBxR count register (SLAU367P §25.2.1/§26.2.1): 16-bit counter."""
+        if cmd.is_query:
+            return str(ts.count)
+        if cmd.params:
+            v = int(cmd.params[0], 0)
+            if not 0 <= v <= 0xFFFF:
+                raise ScpiError(-222, "Timer count out of range (0-0xFFFF)")
+            ts.count = v
+        return ""
+
+    def _timer_period(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        """PERIOD — alias of TAxCCR0/TBxCCR0 (SLAU367P §25.2.3.1/§26.2.3.1).
+
+        In up mode the period register IS CCR0; hardware has one register, so
+        PERIOD is not an independent store — it reads/writes capture_compare[0].
+        """
+        return self._timer_cc_val(cmd, ts, 0)
+
+    def _timer_clk_src(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        VALID = {"ACLK", "SMCLK", "INCLK", "TACLK"}
+        if cmd.is_query:
+            return ts.clock_source
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID:
+                raise ScpiError(-224, f"Illegal clock source: {v}")
+            ts.clock_source = v
+        return ""
+
+    def _timer_clk_div(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        """Timer clock divider (SLAU367P §25.2.1.1/§26.2.1.1): ID x TAIDEX, max /64."""
+        VALID = {1, 2, 4, 8, 16, 32, 64}
+        if cmd.is_query:
+            return str(ts.clock_divider)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in VALID:
+                raise ScpiError(-224, f"Illegal divider: {v}")
+            ts.clock_divider = v
+        return ""
+
+    def _timer_int_en(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        if cmd.is_query:
+            return "1" if ts.interrupt_enable else "0"
+        if cmd.params:
+            ts.interrupt_enable = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _timer_int_flag(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        if cmd.is_query:
+            flag = ts.interrupt_flag
+            ts.interrupt_flag = False
+            return "1" if flag else "0"
+        if cmd.params:
+            ts.interrupt_flag = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _timer_cc_val(self, cmd: ScpiCommand, ts: TimerState, cc: int) -> str:
+        """TAxCCRn/TBxCCRn (SLAU367P §25.2.4/§26.2.4): 16-bit compare register."""
+        if cmd.is_query:
+            return str(ts.capture_compare.get(cc, 0))
+        if cmd.params:
+            v = int(cmd.params[0], 0)
+            if not 0 <= v <= 0xFFFF:
+                raise ScpiError(-222, "CCR value out of range (0-0xFFFF)")
+            ts.capture_compare[cc] = v
+        return ""
+
+    def _timer_cc_mode(self, cmd: ScpiCommand, ts: TimerState, cc: int) -> str:
+        """CAP bit (SLAU367P §25.2.4/§26.2.4): COMPARE or CAPTURE mode.
+
+        Stored state only — no waveform capture is simulated (no edge inputs
+        latch TAxCCRn) since time does not pass in this simulation.
+        """
+        VALID = {"COMPARE", "CAPTURE"}
+        if cmd.is_query:
+            return ts.cc_mode.get(cc, "COMPARE")
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID:
+                raise ScpiError(-224, f"Illegal CC mode: {v}")
+            ts.cc_mode[cc] = v
+        return ""
+
+    def _timer_tick_frequency(self, ts: TimerState) -> float:
+        """Effective timer tick rate: selected clock source through the divider.
+
+        SMCLK/ACLK are resolved through the effective clock tree, i.e. their
+        currently configured CS source (DCO-derived sources carry the clock
+        fault profile's drift); external sources (TACLK/INCLK) have no
+        defined frequency in the simulation and raise a settings conflict.
+        """
+        if ts.clock_source == "SMCLK":
+            src = self._clock_source_frequency(self.clock.smclk_source) / self.clock.smclk_div
+        elif ts.clock_source == "ACLK":
+            src = self._clock_source_frequency(self.clock.aclk_source) / self.clock.aclk_div
+        else:
+            raise ScpiError(-221, f"No simulated frequency for clock source {ts.clock_source}")
+        return src / ts.clock_divider
+
+    def _timer_interval(self, cmd: ScpiCommand, ts: TimerState) -> str:
+        """INTERVAL? <ticks> — seconds spanned by <ticks> timer counts.
+
+        Simulator measurement helper (no hardware equivalent): exposes
+        clock-drift and capture-jitter effects on timer-derived durations.
+        """
+        if not cmd.params:
+            raise ScpiError(-109, "Missing parameter: tick count")
+        ticks = int(cmd.params[0], 0)
+        seconds = self.faults.timer_interval_s(ticks, self._timer_tick_frequency(ts))
+        return f"{seconds:.9E}"
+
+    # ------------------------------------------------------------------
+    # UART registration
+    # ------------------------------------------------------------------
+
+    def _reg_uart(self, idx: int) -> None:
+        us = self.uart[idx]
+        p = f"UART{idx}"
+        self._register(f"{p}:BAUD", lambda cmd, s=us: self._uart_baud(cmd, s))
+        self._register(f"{p}:DATABITS", lambda cmd, s=us: self._uart_databits(cmd, s))
+        self._register(f"{p}:PARITY", lambda cmd, s=us: self._uart_parity(cmd, s))
+        self._register(f"{p}:STOPBITS", lambda cmd, s=us: self._uart_stopbits(cmd, s))
+        self._register(f"{p}:ENABLE", lambda cmd, s=us: self._uart_enable(cmd, s))
+        self._register(f"{p}:SEND", lambda cmd, s=us: self._uart_send(cmd, s))
+        self._register(f"{p}:RECEIVE", lambda cmd, s=us: self._uart_receive(cmd, s))
+        self._register(f"{p}:RXCOUNT", lambda cmd, s=us: self._uart_rxcount(cmd, s))
+        self._register(f"{p}:TXCOUNT", lambda cmd, s=us: self._uart_txcount(cmd, s))
+        self._register(f"{p}:FLUSH", lambda cmd, s=us: self._uart_flush(cmd, s))
+        self._register(f"{p}:BAUD:ACTUAL", lambda cmd, s=us: self._uart_baud_actual(cmd, s))
+        # eUSCI_A naming
+        a_p = f"EUSCI:A{idx}"
+        self._register(f"{a_p}:BAUD", lambda cmd, s=us: self._uart_baud(cmd, s))
+        self._register(f"{a_p}:TXDATA", lambda cmd, s=us: self._uart_send(cmd, s))
+        self._register(f"{a_p}:RXDATA", lambda cmd, s=us: self._uart_receive(cmd, s))
+
+    def _uart_baud(self, cmd: ScpiCommand, us: UARTState) -> str:
+        if cmd.is_query:
+            return str(us.baud_rate)
+        if cmd.params:
+            us.baud_rate = int(cmd.params[0])
+        return ""
+
+    def _uart_databits(self, cmd: ScpiCommand, us: UARTState) -> str:
+        if cmd.is_query:
+            return str(us.data_bits)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in (7, 8):
+                raise ScpiError(-224, "Illegal data bits: must be 7 or 8")
+            us.data_bits = v
+        return ""
+
+    def _uart_parity(self, cmd: ScpiCommand, us: UARTState) -> str:
+        VALID = {"NONE", "ODD", "EVEN"}
+        if cmd.is_query:
+            return us.parity
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID:
+                raise ScpiError(-224, f"Illegal parity: {v}")
+            us.parity = v
+        return ""
+
+    def _uart_stopbits(self, cmd: ScpiCommand, us: UARTState) -> str:
+        if cmd.is_query:
+            return str(us.stop_bits)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in (1, 2):
+                raise ScpiError(-224, "Illegal stop bits: must be 1 or 2")
+            us.stop_bits = v
+        return ""
+
+    def _uart_enable(self, cmd: ScpiCommand, us: UARTState) -> str:
+        if cmd.is_query:
+            return "1" if us.enabled else "0"
+        if cmd.params:
+            us.enabled = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _uart_send(self, cmd: ScpiCommand, us: UARTState) -> str:
+        if cmd.params:
+            data_str = cmd.params[0].strip('"\'')
+            us.tx_buffer.extend(data_str.encode())
+        return ""
+
+    def _uart_receive(self, cmd: ScpiCommand, us: UARTState) -> str:
+        n = int(cmd.params[0]) if cmd.params else len(us.rx_buffer)
+        data = bytes(us.rx_buffer[:n])
+        us.rx_buffer = us.rx_buffer[n:]
+        return data.hex() if data else ""
+
+    def _uart_rxcount(self, cmd: ScpiCommand, us: UARTState) -> str:
+        return str(len(us.rx_buffer))
+
+    def _uart_txcount(self, cmd: ScpiCommand, us: UARTState) -> str:
+        return str(len(us.tx_buffer))
+
+    def _uart_flush(self, cmd: ScpiCommand, us: UARTState) -> str:
+        sent = bytes(us.tx_buffer)
+        us.tx_buffer = []
+        return sent.hex() if sent else ""
+
+    def _uart_baud_actual(self, cmd: ScpiCommand, us: UARTState) -> str:
+        """BAUD:ACTUAL? — the baud rate the drifted BRCLK actually produces.
+
+        BRCLK is DCO-derived, so a CORNER clock profile shifts the real bit
+        rate away from the configured nominal (SLASE54D §8.12.3.3 tolerance).
+        """
+        return f"{us.baud_rate * self.faults.dco_factor():.3f}"
+
+    # ------------------------------------------------------------------
+    # SPI registration
+    # ------------------------------------------------------------------
+
+    def _reg_spi(self, idx: int) -> None:
+        ss = self.spi[idx]
+        p = f"SPI{idx}"
+        self._register(f"{p}:BITRATE", lambda cmd, s=ss: self._spi_bitrate(cmd, s))
+        self._register(f"{p}:CPOL", lambda cmd, s=ss: self._spi_cpol(cmd, s))
+        self._register(f"{p}:CPHA", lambda cmd, s=ss: self._spi_cpha(cmd, s))
+        self._register(f"{p}:MASTER", lambda cmd, s=ss: self._spi_master(cmd, s))
+        self._register(f"{p}:ENABLE", lambda cmd, s=ss: self._spi_enable(cmd, s))
+        self._register(f"{p}:TRANSFER", lambda cmd, s=ss: self._spi_transfer(cmd, s))
+        self._register(f"{p}:TXDATA", lambda cmd, s=ss: self._spi_txdata(cmd, s))
+        self._register(f"{p}:RXDATA", lambda cmd, s=ss: self._spi_rxdata(cmd, s))
+        # eUSCI_B naming
+        b_p = f"EUSCI:B{idx}"
+        self._register(f"{b_p}:BITRATE", lambda cmd, s=ss: self._spi_bitrate(cmd, s))
+        self._register(f"{b_p}:TXDATA", lambda cmd, s=ss: self._spi_txdata(cmd, s))
+        self._register(f"{b_p}:RXDATA", lambda cmd, s=ss: self._spi_rxdata(cmd, s))
+
+    def _spi_bitrate(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.is_query:
+            return str(ss.bit_rate)
+        if cmd.params:
+            ss.bit_rate = int(cmd.params[0])
+        return ""
+
+    def _spi_cpol(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.is_query:
+            return str(ss.clock_polarity)
+        if cmd.params:
+            ss.clock_polarity = int(cmd.params[0]) & 1
+        return ""
+
+    def _spi_cpha(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.is_query:
+            return str(ss.clock_phase)
+        if cmd.params:
+            ss.clock_phase = int(cmd.params[0]) & 1
+        return ""
+
+    def _spi_master(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.is_query:
+            return "1" if ss.master else "0"
+        if cmd.params:
+            ss.master = cmd.params[0].upper() in ("1", "ON", "MASTER")
+        return ""
+
+    def _spi_enable(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.is_query:
+            return "1" if ss.enabled else "0"
+        if cmd.params:
+            ss.enabled = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _spi_transfer(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.params:
+            data_hex = cmd.params[0].strip('"\'')
+            try:
+                data = bytes.fromhex(data_hex)
+                ss.tx_buffer.extend(data)
+                response = bytes(ss.rx_buffer[:len(data)])
+                ss.rx_buffer = ss.rx_buffer[len(data):]
+                return response.hex() if response else ("00" * len(data))
+            except ValueError:
+                raise ScpiError(-151, "Invalid hex string")
+        return ""
+
+    def _spi_txdata(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if cmd.params:
+            byte_val = int(cmd.params[0], 0) & 0xFF
+            ss.tx_buffer.append(byte_val)
+        return ""
+
+    def _spi_rxdata(self, cmd: ScpiCommand, ss: SPIState) -> str:
+        if ss.rx_buffer:
+            return f"0x{ss.rx_buffer.pop(0):02X}"
+        return "0x00"
+
+    # ------------------------------------------------------------------
+    # I2C registration
+    # ------------------------------------------------------------------
+
+    def _reg_i2c(self, idx: int) -> None:
+        ii = self.i2c[idx]
+        p = f"I2C{idx}"
+        self._register(f"{p}:ADDRESS", lambda cmd, s=ii: self._i2c_addr(cmd, s))
+        self._register(f"{p}:FREQUENCY", lambda cmd, s=ii: self._i2c_freq(cmd, s))
+        self._register(f"{p}:MASTER", lambda cmd, s=ii: self._i2c_master(cmd, s))
+        self._register(f"{p}:ENABLE", lambda cmd, s=ii: self._i2c_enable(cmd, s))
+        self._register(f"{p}:WRITE", lambda cmd, s=ii: self._i2c_write(cmd, s))
+        self._register(f"{p}:READ", lambda cmd, s=ii: self._i2c_read(cmd, s))
+        self._register(f"{p}:TRANSFER", lambda cmd, s=ii: self._i2c_transfer(cmd, s))
+
+    def _i2c_addr(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        """I2Cn:ADDRESS — own/target address (SLAU367P §32.3.1 I2CSA/UCBxI2COA0).
+
+        An optional second parameter selects addressing width: "10BIT" for
+        10-bit addressing (UCSLA10/UCA10, 0-0x3FF); omitted or "7BIT" keeps
+        the default 7-bit addressing (0-0x7F). A value outside the selected
+        mode's range is rejected with -222 instead of being silently
+        truncated. Setting an address registers it as a known slave on the
+        simulated bus (SLAU367P §32.3.4) so subsequent WRITE/TRANSFER calls
+        to it ACK.
+        """
+        if cmd.is_query:
+            return f"0x{ii.address:03X}" if ii.address_10bit else f"0x{ii.address:02X}"
+        if cmd.params:
+            mode_10bit = ii.address_10bit
+            if len(cmd.params) > 1:
+                mode = cmd.params[1].upper()
+                if mode in ("10BIT", "10"):
+                    mode_10bit = True
+                elif mode in ("7BIT", "7"):
+                    mode_10bit = False
+                else:
+                    raise ScpiError(-224, f"Illegal I2C address mode: {mode}")
+            addr = int(cmd.params[0], 0)
+            limit = 0x3FF if mode_10bit else 0x7F
+            if not 0 <= addr <= limit:
+                width = "10-bit" if mode_10bit else "7-bit"
+                raise ScpiError(-222, f"I2C address out of range for {width} mode (0-0x{limit:X})")
+            ii.address_10bit = mode_10bit
+            ii.address = addr
+            ii.addr_buffers.setdefault(addr, {"rx": [], "tx": []})
+        return ""
+
+    def _i2c_freq(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        """I2Cn:FREQUENCY — eUSCI_B I2C bit clock (SLAU367P §32.3; SLASE54D §8.12.8).
+
+        Only the three standard eUSCI_B I2C modes exist: 100 kHz (standard),
+        400 kHz (fast), and 1 MHz (fast-plus). Anything else is rejected
+        with -222.
+        """
+        VALID_FREQUENCIES = (100000, 400000, 1000000)
+        if cmd.is_query:
+            return str(ii.clock_frequency)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in VALID_FREQUENCIES:
+                raise ScpiError(-222, f"Illegal I2C frequency (must be 100000, 400000, or 1000000 Hz): {v}")
+            ii.clock_frequency = v
+        return ""
+
+    def _i2c_master(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        if cmd.is_query:
+            return "1" if ii.master else "0"
+        if cmd.params:
+            ii.master = cmd.params[0].upper() in ("1", "ON", "MASTER")
+        return ""
+
+    def _i2c_enable(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        if cmd.is_query:
+            return "1" if ii.enabled else "0"
+        if cmd.params:
+            ii.enabled = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _i2c_write(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        """I2Cn:WRITE — write bytes to the currently configured address (SLAU367P §32.3.4).
+
+        Real hardware sets UCNACKIFG when the addressed slave does not
+        acknowledge. This model NACKs when no slave is registered at the
+        configured address (never set via I2Cn:ADDRESS or an addressed
+        injection) and ACKs otherwise.
+        """
+        if ii.address not in ii.addr_buffers:
+            return "NACK"
+        if cmd.params:
+            data_hex = cmd.params[0].strip('"\'')
+            try:
+                data = bytes.fromhex(data_hex)
+            except ValueError:
+                raise ScpiError(-151, "Invalid hex string")
+            ii.tx_buffer.extend(data)
+            ii.addr_buffers[ii.address]["tx"].extend(data)
+        return "ACK"
+
+    def _i2c_read(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        n = int(cmd.params[0]) if cmd.params else 1
+        data = bytes(ii.rx_buffer[:n])
+        ii.rx_buffer = ii.rx_buffer[n:]
+        return data.hex() if data else ("00" * n)
+
+    def _i2c_transfer(self, cmd: ScpiCommand, ii: I2CState) -> str:
+        """I2Cn:TRANSFER <address>,<hex> — addressed exchange (SLAU367P §32.3.4).
+
+        Routes through the per-address queue named by ``address`` instead of
+        the instance's flat buffers, so different target addresses see
+        independent data — a real bus has independent slaves at each
+        address. An address with no populated queue has no simulated device
+        present and NACKs (UCNACKIFG).
+        """
+        if len(cmd.params) < 2:
+            raise ScpiError(-109, "Missing parameters: address, data")
+        addr = int(cmd.params[0], 0)
+        if addr not in ii.addr_buffers:
+            return "NACK"
+        data_hex = cmd.params[1].strip('"\'')
+        try:
+            data = bytes.fromhex(data_hex)
+        except ValueError:
+            raise ScpiError(-151, "Invalid hex string")
+        buf = ii.addr_buffers[addr]
+        buf["tx"].extend(data)
+        response = bytes(buf["rx"][:len(data)])
+        buf["rx"] = buf["rx"][len(data):]
+        return response.hex() if response else ("00" * len(data))
+
+    # ------------------------------------------------------------------
+    # CPU handlers
+    # ------------------------------------------------------------------
+
+    def _cpu_reset(self, cmd: ScpiCommand) -> str:
+        self._running = False
+        self._halted = False
+        self._pc = self._reset_vector_pc()
+        self._registers = [0] * 16
+        return ""
+
+    def _reset_vector_pc(self) -> int:
+        """PC on reset (SLAU367P §4.3, §1.2): fetched from the reset vector at
+        0xFFFE/0xFFFF (little-endian word). Defaults to 0x4000 — FRAM code
+        start (SLASE54D memory map) — when the vector has not been written.
+        """
+        lo = self._memory.get(0xFFFE)
+        hi = self._memory.get(0xFFFF)
+        if lo is None and hi is None:
+            return 0x4000
+        return ((hi or 0) << 8) | (lo or 0)
+
+    def _cpu_halt(self, cmd: ScpiCommand) -> str:
+        self._halted = True
+        self._running = False
+        return ""
+
+    def _cpu_run(self, cmd: ScpiCommand) -> str:
+        self._running = True
+        self._halted = False
+        return ""
+
+    def _cpu_state(self, cmd: ScpiCommand) -> str:
+        if self._halted:
+            return "HALTED"
+        if self._running:
+            return "RUNNING"
+        return "STOPPED"
+
+    def _cpu_pc(self, cmd: ScpiCommand) -> str:
+        """Program counter (SLAU367P §4.3.1): 20-bit, bit 0 always 0 (word-aligned)."""
+        if cmd.is_query:
+            return f"0x{self._pc:04X}"
+        if cmd.params:
+            v = int(cmd.params[0], 0)
+            if not 0 <= v <= 0xFFFFF:
+                raise ScpiError(-222, "PC out of range (0-0xFFFFF)")
+            if v & 1:
+                raise ScpiError(-222, "PC must be word-aligned (bit 0 is always 0)")
+            self._pc = v
+        return ""
+
+    def _cpu_reg(self, cmd: ScpiCommand) -> str:
+        """R0-R15 (SLAU367P §4.3): CPUX registers are 20-bit, masked accordingly."""
+        if not cmd.params:
+            raise ScpiError(-109, "Missing register number")
+        reg = int(cmd.params[0])
+        if not 0 <= reg <= 15:
+            raise ScpiError(-222, "Register number out of range (0-15)")
+        if cmd.is_query or len(cmd.params) < 2:
+            return f"0x{self._registers[reg]:04X}"
+        self._registers[reg] = int(cmd.params[1], 0) & 0xFFFFF
+        return ""
+
+    def _cpu_speed(self, cmd: ScpiCommand) -> str:
+        if cmd.is_query:
+            return f"{self._dco_actual():.0f}"
+        if cmd.params:
+            self.clock.dco_frequency = float(cmd.params[0])
+        return ""
+
+    def _cpu_vcc(self, cmd: ScpiCommand) -> str:
+        if cmd.is_query:
+            return f"{self.clock.vcc:.3f}"
+        if cmd.params:
+            v = float(cmd.params[0])
+            if not 1.8 <= v <= 3.6:
+                raise ScpiError(-222, "VCC out of range (1.8-3.6V)")
+            self.clock.vcc = v
+        return ""
+
+    # ------------------------------------------------------------------
+    # Clock handlers
+    # ------------------------------------------------------------------
+
+    def _clk_mclk_src(self, cmd: ScpiCommand) -> str:
+        """MCLK source (SLAU367P §3.3.2 CSCTL2.SELM): DCO/LFXT/HFXT/VLO/MODCLK/LFMODCLK."""
+        if cmd.is_query:
+            return self.clock.mclk_source
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID_MCLK_SMCLK_SOURCES:
+                raise ScpiError(-224, f"Illegal clock source: {v}")
+            self.clock.mclk_source = v
+        return ""
+
+    def _clk_mclk_div(self, cmd: ScpiCommand) -> str:
+        """MCLK divider (SLAU367P §3.3.3 CSCTL3.DIVM): /1-/32, powers of two only."""
+        if cmd.is_query:
+            return str(self.clock.mclk_div)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in VALID_CLOCK_DIVIDERS:
+                raise ScpiError(-222, f"Illegal divider: {v}")
+            self.clock.mclk_div = v
+        return ""
+
+    def _clk_smclk_src(self, cmd: ScpiCommand) -> str:
+        """SMCLK source (SLAU367P §3.3.2 CSCTL2.SELS): same mux as MCLK."""
+        if cmd.is_query:
+            return self.clock.smclk_source
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID_MCLK_SMCLK_SOURCES:
+                raise ScpiError(-224, f"Illegal clock source: {v}")
+            self.clock.smclk_source = v
+        return ""
+
+    def _clk_smclk_div(self, cmd: ScpiCommand) -> str:
+        """SMCLK divider (SLAU367P §3.3.3 CSCTL3.DIVS): /1-/32, powers of two only."""
+        if cmd.is_query:
+            return str(self.clock.smclk_div)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in VALID_CLOCK_DIVIDERS:
+                raise ScpiError(-222, f"Illegal divider: {v}")
+            self.clock.smclk_div = v
+        return ""
+
+    def _clk_aclk_src(self, cmd: ScpiCommand) -> str:
+        """ACLK source (SLAU367P §3.3.2 CSCTL2.SELA): LFXT/VLO/LFMODCLK only."""
+        if cmd.is_query:
+            return self.clock.aclk_source
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID_ACLK_SOURCES:
+                raise ScpiError(-224, f"Illegal clock source: {v}")
+            self.clock.aclk_source = v
+        return ""
+
+    def _clk_aclk_div(self, cmd: ScpiCommand) -> str:
+        """ACLK divider (SLAU367P §3.3.3 CSCTL3.DIVA): /1-/32, powers of two only."""
+        if cmd.is_query:
+            return str(self.clock.aclk_div)
+        if cmd.params:
+            v = int(cmd.params[0])
+            if v not in VALID_CLOCK_DIVIDERS:
+                raise ScpiError(-222, f"Illegal divider: {v}")
+            self.clock.aclk_div = v
+        return ""
+
+    def _clk_dco_freq(self, cmd: ScpiCommand) -> str:
+        if cmd.is_query:
+            return f"{self._dco_actual():.0f}"
+        if cmd.params:
+            self.clock.dco_frequency = float(cmd.params[0])
+        return ""
+
+    def _dco_actual(self) -> float:
+        """Effective DCO frequency: nominal setting × fault-profile drift."""
+        return self.clock.dco_frequency * self.faults.dco_factor()
+
+    def _clock_source_frequency(self, source: str) -> float:
+        """Effective frequency (Hz) of one clock-system source, pre-divider.
+
+        SLAU367P §3.2: DCO is the drift-affected trimmed oscillator
+        (``_dco_actual()``); LFXT/HFXT read the crystal fields on
+        ``ClockState``; VLO and MODCLK are fixed-frequency internal
+        oscillators with no configurable register; LFMODCLK is MODCLK/128.
+        """
+        if source == "DCO":
+            return self._dco_actual()
+        if source == "LFXT":
+            return self.clock.lfxt_frequency
+        if source == "HFXT":
+            return self.clock.hfxt_frequency
+        if source == "VLO":
+            return VLO_FREQUENCY_HZ
+        if source == "MODCLK":
+            return MODCLK_FREQUENCY_HZ
+        if source == "LFMODCLK":
+            return LFMODCLK_FREQUENCY_HZ
+        raise ScpiError(-221, f"No simulated frequency for clock source {source}")
+
+    def _clk_mclk_freq(self, cmd: ScpiCommand) -> str:
+        freq = self._clock_source_frequency(self.clock.mclk_source) / self.clock.mclk_div
+        return f"{freq:.0f}"
+
+    def _clk_smclk_freq(self, cmd: ScpiCommand) -> str:
+        freq = self._clock_source_frequency(self.clock.smclk_source) / self.clock.smclk_div
+        return f"{freq:.0f}"
+
+    def _clk_aclk_freq(self, cmd: ScpiCommand) -> str:
+        freq = self._clock_source_frequency(self.clock.aclk_source) / self.clock.aclk_div
+        return f"{freq:.0f}"
+
+    # ------------------------------------------------------------------
+    # Power management
+    # ------------------------------------------------------------------
+
+    def _pm_mode(self, cmd: ScpiCommand) -> str:
+        """Power mode (SLAU367P §1.4, §2.2.4): AM, LPM0-4, and LPMx.5 (LPM3.5, LPM4.5)."""
+        VALID = {"AM", "LPM0", "LPM1", "LPM2", "LPM3", "LPM4", "LPM3.5", "LPM4.5"}
+        if cmd.is_query:
+            return self.pm.mode
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in VALID:
+                raise ScpiError(-224, f"Illegal power mode: {v}")
+            self.pm.mode = v
+        return ""
+
+    def _pm_wakeup(self, cmd: ScpiCommand) -> str:
+        if cmd.is_query:
+            return self.pm.wakeup_source
+        if cmd.params:
+            self.pm.wakeup_source = cmd.params[0].upper()
+            self.pm.mode = "AM"
+        return ""
+
+    # ------------------------------------------------------------------
+    # Memory access
+    # ------------------------------------------------------------------
+
+    def _mem_read(self, cmd: ScpiCommand) -> str:
+        if not cmd.params:
+            raise ScpiError(-109, "Missing address parameter")
+        addr = int(cmd.params[0], 0)
+        n = int(cmd.params[1]) if len(cmd.params) > 1 else 1
+        result = []
+        for i in range(n):
+            result.append(f"0x{self._memory.get(addr + i, 0):02X}")
+        return ",".join(result)
+
+    def _mem_write(self, cmd: ScpiCommand) -> str:
+        if len(cmd.params) < 2:
+            raise ScpiError(-109, "Missing parameters: address, value")
+        addr = int(cmd.params[0], 0)
+        value = int(cmd.params[1], 0)
+        self._memory[addr] = value & 0xFF
+        return ""
+
+    def _mem_fill(self, cmd: ScpiCommand) -> str:
+        if len(cmd.params) < 3:
+            raise ScpiError(-109, "Missing parameters: address, count, value")
+        addr = int(cmd.params[0], 0)
+        count = int(cmd.params[1])
+        value = int(cmd.params[2], 0) & 0xFF
+        for i in range(count):
+            self._memory[addr + i] = value
+        return ""
+
+    # ------------------------------------------------------------------
+    # WDT (Watchdog Timer)
+    # ------------------------------------------------------------------
+
+    # WDTCTL (SLAU367P §24.2, Figure 24-2): bits 15-8 are the write password
+    # (WDTPW, must be 0x5A), bit 7 is WDTHOLD.
+    WDT_PASSWORD = 0x5A
+    WDT_HOLD_BIT = 0x80
+
+    def _wdt_state(self, cmd: ScpiCommand) -> str:
+        """WDT:STATE HOLD|START — stored WDTHOLD state (SLAU367P §24.2).
+
+        A convenience surface for exercising WDTHOLD directly, independent
+        of the password-gated WDTCTL write modeled by WDT:PASSWORD. No
+        interval countdown or expiry-induced PUC is simulated — time does
+        not pass, so the watchdog never fires on its own.
+        """
+        if cmd.is_query:
+            return "HOLD" if self.wdt.hold else "START"
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v == "HOLD":
+                self.wdt.hold = True
+            elif v == "START":
+                self.wdt.hold = False
+            else:
+                raise ScpiError(-224, f"Illegal WDT state: {v}")
+        return ""
+
+    def _wdt_password(self, cmd: ScpiCommand) -> str:
+        """WDT:PASSWORD <value> — emulated WDTCTL write (SLAU367P §24.2, WDTPW).
+
+        ``value``'s upper byte must equal the watchdog password (0x5A); any
+        other value performs an immediate PUC (device reset, reusing
+        ``_do_reset``) exactly as writing WDTCTL with a bad password does on
+        real hardware. On a correct password, bit 7 of the lower byte
+        (WDTHOLD) updates the stored hold/start state.
+        """
+        if not cmd.params:
+            raise ScpiError(-109, "Missing parameter: password value")
+        value = int(cmd.params[0], 0) & 0xFFFF
+        if (value >> 8) != self.WDT_PASSWORD:
+            self._do_reset()  # wrong password: immediate PUC
+            return ""
+        self.wdt.hold = bool(value & self.WDT_HOLD_BIT)
+        return ""
+
+    # ------------------------------------------------------------------
+    # Fault/drift profiles (tolerances from SLASE54D; see msp430_faults)
+    # ------------------------------------------------------------------
+
+    def _fault_profile(self, cmd: ScpiCommand, attr: str) -> str:
+        """Get/set one peripheral's fault profile (NOMINAL or CORNER)."""
+        if cmd.is_query:
+            return getattr(self.faults, attr)
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in PROFILES:
+                raise ScpiError(-224, f"Illegal fault profile: {v}")
+            setattr(self.faults, attr, v)
+        return ""
+
+    def _fault_profile_all(self, cmd: ScpiCommand) -> str:
+        """Get/set every peripheral's fault profile at once."""
+        if cmd.is_query:
+            profiles = {self.faults.adc_profile, self.faults.clock_profile,
+                        self.faults.timer_profile}
+            return profiles.pop() if len(profiles) == 1 else "MIXED"
+        if cmd.params:
+            v = cmd.params[0].upper()
+            if v not in PROFILES:
+                raise ScpiError(-224, f"Illegal fault profile: {v}")
+            self.faults.adc_profile = v
+            self.faults.clock_profile = v
+            self.faults.timer_profile = v
+        return ""
+
+    # ------------------------------------------------------------------
+    # Interrupt system (SLAU367P §4.3.3 SR.GIE; SLASE54D §9.5 Table 9-4)
+    # ------------------------------------------------------------------
+
+    # Word addresses from SLASE54D Table 9-4 ("Interrupt Sources, Flags, and
+    # Vectors"), highest to lowest priority, restricted to the sources this
+    # model tracks enable/flag state for (Timer_B0, Timer_A0-2, GPIO P1-P8).
+    # Every other row of Table 9-4 (WDT, eUSCI_A/B, ADC12_B, DMA, RTC_C, AES,
+    # Comp_E, LEA, the NMIs, and reset) has no interrupt_enable/interrupt_flag
+    # modeled in this simulator and never contributes a pending vector here.
+    # For Timer_A/B, the shared "CCn (n>0)/rollover" vector is used (TAxIV/
+    # TBxIV) since this model has one interrupt_flag per timer instance, not
+    # a separate CCR0 flag.
+    _TIMERB_VECTOR: int = 0xFFF4   # TB0IV: TB0CCR1-6 CCIFG / TB0CTL.TBIFG
+    _TIMERA_VECTORS: Dict[int, int] = {0: 0xFFE8, 1: 0xFFE0, 2: 0xFFDA}  # TAxIV
+    _GPIO_PORT_VECTORS: Dict[int, int] = {
+        1: 0xFFDE, 2: 0xFFD8, 3: 0xFFD2, 4: 0xFFD0,
+        5: 0xFFC6, 6: 0xFFC4, 7: 0xFFB8, 8: 0xFFB6,
+    }
+    # Priority order (highest first), interleaving timers and ports exactly
+    # as Table 9-4 lists them.
+    _INTERRUPT_PRIORITY: Tuple[str, ...] = (
+        "TB0", "TA0", "TA1", "P1", "TA2", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
+    )
+
+    def _source_pending(self, source: str) -> bool:
+        """True when ``source``'s modeled enable and flag are both set."""
+        if source == "TB0":
+            ts = self.timer_b[0]
+            return ts.interrupt_enable and ts.interrupt_flag
+        if source.startswith("TA"):
+            ts = self.timer_a[int(source[2:])]
+            return ts.interrupt_enable and ts.interrupt_flag
+        if source.startswith("P"):
+            p = self.ports[int(source[1:])]
+            return bool(p.interrupt_enable & p.interrupt_flag)
+        return False
+
+    def _source_vector(self, source: str) -> int:
+        """Table 9-4 word address for ``source``."""
+        if source == "TB0":
+            return self._TIMERB_VECTOR
+        if source.startswith("TA"):
+            return self._TIMERA_VECTORS[int(source[2:])]
+        return self._GPIO_PORT_VECTORS[int(source[1:])]
+
+    def _pending_interrupt_vector(self) -> int:
+        """Highest-priority pending vector among modeled sources, else 0x0000.
+
+        0x0000 mirrors a real IV register (TAxIV, P1IV, ...) reading 0 when
+        nothing is pending — there is no vector 0 in Table 9-4 itself.
+        """
+        for source in self._INTERRUPT_PRIORITY:
+            if self._source_pending(source):
+                return self._source_vector(source)
+        return 0x0000
+
+    def _int_gie(self, cmd: ScpiCommand) -> str:
+        """INTERRUPT:GIE — general interrupt enable (SLAU367P §4.3.3, SR bit 3)."""
+        if cmd.is_query:
+            return "1" if self._gie else "0"
+        if cmd.params:
+            self._gie = cmd.params[0].upper() in ("1", "ON")
+        return ""
+
+    def _int_enable(self, cmd: ScpiCommand) -> str:
+        """INTERRUPT:ENABLE — sets GIE, mirroring __enable_interrupt()/EINT."""
+        self._gie = True
+        return ""
+
+    def _int_disable(self, cmd: ScpiCommand) -> str:
+        """INTERRUPT:DISABLE — clears GIE, mirroring __disable_interrupt()/DINT."""
+        self._gie = False
+        return ""
+
+    def _int_vector(self, cmd: ScpiCommand) -> str:
+        """INTERRUPT:VECTOR? — highest-priority pending vector, gated by GIE.
+
+        Returns 0x0000 when GIE is clear (no maskable interrupt would be
+        serviced) or when no modeled source is pending. This is minimal
+        wiring: flags reflect stored state only, never fired asynchronously.
+        """
+        if cmd.is_query:
+            if not self._gie:
+                return "0x0000"
+            return f"0x{self._pending_interrupt_vector():04X}"
+        return ""
+
+    def _int_flag(self, cmd: ScpiCommand) -> str:
+        """INTERRUPT:FLAG? — 1 when any modeled source's enable and flag are both set.
+
+        Unlike VECTOR?, this reflects raw pending state regardless of GIE —
+        real IFG bits are set independent of the general interrupt enable.
+        """
+        if cmd.is_query:
+            return "1" if self._pending_interrupt_vector() != 0 else "0"
+        return ""
+
+    # ------------------------------------------------------------------
+    # Reset
+    # ------------------------------------------------------------------
+
+    def _do_reset(self) -> None:
+        self.ports = {i: GPIOPort() for i in range(1, self.NUM_PORTS + 1)}
+        self.adc = {i: ADCChannel() for i in range(self.NUM_ADC_CH)}
+        self.timer_a = {i: TimerState() for i in range(self.NUM_TIMER_A)}
+        self.timer_b = {i: TimerState() for i in range(self.NUM_TIMER_B)}
+        self.uart = {i: UARTState() for i in range(self.NUM_UART)}
+        self.spi = {i: SPIState() for i in range(self.NUM_SPI)}
+        self.i2c = {i: I2CState() for i in range(self.NUM_I2C)}
+        self.clock = ClockState()
+        self.pm = PMState()
+        self.wdt = WDTState()
+        self.faults.reset_profiles()
+        self.faults.resample()  # part-to-part signs re-sampled per *RST, not per read
+        self._veref_v = 1.2
+        self._memory = {}
+        self._running = False
+        self._halted = False
+        self._pc = self._reset_vector_pc()
+        self._registers = [0] * 16
+        self._gie = False  # SR.GIE is cleared on a PUC (SLAU367P §4.3.3)
+        self._setup_handlers()

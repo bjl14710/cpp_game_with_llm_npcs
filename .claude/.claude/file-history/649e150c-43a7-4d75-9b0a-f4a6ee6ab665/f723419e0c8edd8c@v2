@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0018 — Statistical Arbitrage</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0018</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Statistical Arbitrage</h1>
+<p class="lead">Why this matters: this repo's GBM strategy is closer to stat arb than to anything else — it ranks tickers cross-sectionally and bets on the top-N. This lesson formalizes the family: pairs trading, cointegration, mean-reversion, and what makes a stat-arb strategy "statistical" rather than "arbitrage."</p>
+
+<h2>1. The definition</h2>
+<p><strong>Statistical arbitrage</strong>: a strategy that exploits statistical patterns in price relationships, expecting profits over a large number of trades on average even if individual trades can lose. <em>Not</em> arbitrage in the textbook sense (which is risk-free profit from a price mismatch). The "statistical" qualifier means: relies on the law of large numbers, not on a strict mispricing.</p>
+
+<h2>2. The canonical example: pairs trading</h2>
+<p>Coca-Cola (KO) and Pepsi (PEP) sell similar products to similar customers under similar economic conditions. Their prices tend to move together. Over a 1-year window, the ratio <code>price(KO) / price(PEP)</code> has some long-run mean — say 1.5. When the ratio deviates significantly (say to 1.7), the strategy bets it will revert: <strong>short KO, long PEP</strong>, with sizes chosen so the position is dollar-neutral.</p>
+
+<pre><span style="color:var(--code-com);font-style:italic"># Toy pairs strategy (illustrative)</span>
+spread = np.log(price_KO) - beta * np.log(price_PEP)
+z      = (spread - spread.rolling(60).mean()) / spread.rolling(60).std()
+
+<span style="color:var(--code-com);font-style:italic"># Trade signals:</span>
+<span style="color:var(--code-com);font-style:italic"># z > +2  → short KO, long PEP (spread too high, expect mean reversion)</span>
+<span style="color:var(--code-com);font-style:italic"># z < -2  → long  KO, short PEP</span>
+<span style="color:var(--code-com);font-style:italic"># |z| < 0.5 → close</span></pre>
+
+<p>The profit doesn't require KO or PEP to move in any particular direction — only for the <em>spread between them</em> to revert. That's the "market-neutral" property.</p>
+
+<h2>3. Cointegration — the math behind "they move together"</h2>
+<p>Two price series are <strong>cointegrated</strong> if a linear combination of them is stationary (mean-reverting), even though each individual series is non-stationary (random walk). Formally: there exists a <code>β</code> such that <code>log(P_KO) - β·log(P_PEP)</code> is a stationary process.</p>
+<p>This is testable. The standard procedure (Engle-Granger):</p>
+<ol>
+<li>Regress <code>log(P_KO)</code> on <code>log(P_PEP)</code> to estimate β.</li>
+<li>Compute residuals.</li>
+<li>Test residuals for stationarity using an Augmented Dickey-Fuller (ADF) test.</li>
+<li>If ADF rejects the unit-root hypothesis at the desired significance level → pair is cointegrated.</li>
+</ol>
+
+<div class="callout warn"><strong>Cointegration breaks.</strong> The relationship between two companies can shift permanently (M&amp;A, business model change, regulatory shock). What was a tradable pair becomes a one-way bet on a permanent regime change. Re-test cointegration regularly; have rules to retire pairs that break.</div>
+
+<h2>4. The broader family</h2>
+<p>Pairs trading is the textbook example, but modern stat arb runs at much larger scale:</p>
+<div class="grid2">
+<div class="card"><h4>Pairs trading</h4><p>Two related assets, one spread, mean reversion. Capacity is small but risk profile is clean.</p></div>
+<div class="card"><h4>Basket / sector arb</h4><p>Long one stock, short an ETF or basket of competitors. Removes the broad sector risk while keeping idiosyncratic alpha.</p></div>
+<div class="card"><h4>Cross-sectional momentum</h4><p>Rank N stocks by recent performance; long top decile, short bottom decile. The dominant equity quant strategy globally. Closely related to this repo's GBM ranking.</p></div>
+<div class="card"><h4>Index arbitrage</h4><p>S&amp;P 500 futures vs the cash basket of constituents — when prices diverge, trade both legs. The classic Chicago↔NJ trade from Lesson 0012.</p></div>
+<div class="card"><h4>Convertible / Capital-structure arb</h4><p>Trade equity vs bonds vs convertibles of the same issuer. Hedges out company risk, captures pricing inefficiency between instruments.</p></div>
+<div class="card"><h4>ML-driven cross-sectional</h4><p>Train a model to rank tickers by predicted return. <strong>This repo's GBM</strong>. Mechanically the same as cross-sectional momentum, just with a more flexible signal.</p></div>
+</div>
+
+<h2>5. Stat arb vs Market making — the same toolbox, different P&amp;L drivers</h2>
+<table>
+<tr><th>Property</th><th>Market making (Lesson 0017)</th><th>Statistical arbitrage</th></tr>
+<tr><td>Directional?</td><td>No — earns spread, neutral on price direction</td><td>Yes — bets that A goes up relative to B</td></tr>
+<tr><td>Horizon</td><td>Microseconds–seconds</td><td>Minutes–days, sometimes weeks</td></tr>
+<tr><td>P&amp;L source</td><td>Spread + rebates</td><td>Mean reversion of price relationships</td></tr>
+<tr><td>Main risk</td><td>Adverse selection + inventory</td><td>Persistent regime change (cointegration breaks)</td></tr>
+<tr><td>Number of bets</td><td>Millions/day, small</td><td>10s–1000s/day, larger</td></tr>
+<tr><td>Latency tier</td><td>Tier 4–6 (ULL essential)</td><td>Tier 1–3 typically; some flavors push lower</td></tr>
+</table>
+
+<h2>6. In this project</h2>
+<p>The repo's setup is a cross-sectional stat-arb scaffold dressed in ML clothing. <code>paper_trading_sim.py</code> ranks tickers by predicted next-day return and takes the top-N — that's the mechanics of cross-sectional momentum / mean-reversion stat arb. The fact that the predictor is a GBM rather than a hand-coded ratio doesn't change the strategy family; it just makes the signal flexible.</p>
+<p>Things missing for true production stat arb:</p>
+<ul>
+<li><strong>Short side</strong>: a real stat arb book is long-short, not long-only. The repo's <code>meanvar_long_only</code> enforces long-only — half the dispersion-capturing power is left on the table.</li>
+<li><strong>Factor neutrality</strong>: ensuring the portfolio is neutral to market, sector, and size factors (so the alpha is idiosyncratic stock-picking, not just market timing). Not done here.</li>
+<li><strong>Risk model</strong>: BARRA-style factor risk decomposition. Not done; the <code>--risk_overlay</code> in <code>walkforward_sim.py</code> is a much simpler stress detector.</li>
+</ul>
+
+<h2>7. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Statistical arbitrage vs True arbitrage</h4><p><strong>True arbitrage</strong>: risk-free profit from a guaranteed mispricing (e.g. triangular FX). Rare. <strong>Stat arb</strong>: probabilistic profit from a statistical pattern. Loss is possible on any individual trade.</p></div>
+<div class="card"><h4>Stat arb vs Macro</h4><p><strong>Stat arb</strong>: many small bets driven by statistical patterns, holding period of days. <strong>Macro</strong>: few large bets driven by economic narratives, holding period of months. Different shops, different talent.</p></div>
+<div class="card"><h4>Cointegration vs Correlation</h4><p><strong>Correlation</strong>: linear association of returns. Two random walks can be highly correlated yet diverge forever. <strong>Cointegration</strong>: their <em>levels</em> stay tethered — the spread is mean-reverting. Stat arb uses cointegration, not raw correlation.</p></div>
+<div class="card"><h4>Stat arb vs HFT</h4><p>Overlapping but not synonymous. Some stat arb is HFT (Tier 3+), most is not. The repo's GBM is stat arb but not HFT — daily horizon, Tier 0–1 latency.</p></div>
+</div>
+
+<h2>8. Practice</h2>
+<div class="question" data-question><p class="q">Q1. Why does pairs trading work even if both KO and PEP are random walks?</p><ul class="options">
+<li data-correct="false" data-why="That's a property of one series, not the relationship between two. The pair works because of the joint property — cointegration.">Because both KO and PEP are mean-reverting individually.</li>
+<li data-correct="true" data-why="Right. Even when each series is non-stationary, a linear combination can be stationary (mean-reverting) — that's cointegration. The trade isn't on either price; it's on the spread, which IS mean-reverting.">Because the spread between them is cointegrated and mean-reverting, even though each price is a random walk.</li>
+<li data-correct="false" data-why="High correlation alone is insufficient — two correlated random walks can still drift apart forever. Cointegration is the stronger property.">Because their daily returns are highly correlated.</li>
+<li data-correct="false" data-why="Industry overlap is what motivates testing the pair, but it doesn't guarantee a tradable spread. Cointegration is what makes the strategy work.">Because they're in the same industry and that automatically makes them tradable.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. The biggest single risk in pairs trading is:</p><ul class="options">
+<li data-correct="false" data-why="Transaction costs are real but bounded and known. The structural risk is regime change in the relationship.">Transaction costs eating the spread profit.</li>
+<li data-correct="true" data-why="Right. If the underlying economic relationship changes (one company acquires the other, one diversifies into a new business, regulation reshuffles the industry), the cointegration breaks permanently and the strategy bleeds. Re-testing cointegration and retiring broken pairs is the operational discipline.">The pair's cointegration breaking due to a permanent regime change in one company, leaving the strategy long a one-way bet.</li>
+<li data-correct="false" data-why="Volatility affects the spread's distribution but doesn't break the strategy. Persistent regime change does.">An overnight increase in market volatility.</li>
+<li data-correct="false" data-why="Margin requirements are a cost-of-capital concern but not the structural strategy risk.">Margin requirements doubling overnight.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. The repo's <code>paper_trading_sim.py</code> picks the top-N predicted returns and goes long equal-weight. Why is that a stat-arb strategy?</p><ul class="options">
+<li data-correct="false" data-why="It's not HFT — daily horizon, tier 0–1 latency, no LOB awareness. The HFT label is wrong.">Because it operates at HFT speeds and earns spread on every fill.</li>
+<li data-correct="true" data-why="Right. Stat arb's defining property is exploiting statistical patterns across many bets (each long position is one bet of many) where the model's predicted ranking is correct on average. The GBM's cross-sectional ranking is mechanically the same as the cross-sectional momentum family of stat-arb strategies.">It places many bets based on the statistical ranking of a cross-section of tickers, relying on the model being right on average rather than on any single bet.</li>
+<li data-correct="false" data-why="Risk-free profit is true arbitrage, which is rare and not what this repo does. The GBM strategy can and does lose on individual days.">Because each individual trade is risk-free.</li>
+<li data-correct="false" data-why="That's true arbitrage (the textbook idea), not statistical arbitrage. The repo's strategy is statistical — probabilistic, not guaranteed.">Because it exploits a guaranteed mispricing.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. A teammate suggests "make the GBM strategy market-neutral by shorting the index." What's the benefit?</p><ul class="options">
+<li data-correct="false" data-why="Shorting the index doesn't increase the absolute returns of the long book — it offsets them when the market moves. The benefit is risk decomposition, not return enhancement.">It doubles the gross returns of the strategy.</li>
+<li data-correct="true" data-why="Right. By shorting an equivalent dollar amount of SPY (or the relevant index), the portfolio P&L is decomposed into market-driven P&L (which is zero by construction) plus the GBM's cross-sectional alpha (which is what you actually want). Now the strategy isn't just 'market goes up'; you can measure pure stock-picking skill.">It isolates the strategy's cross-sectional alpha from broad market moves, so you can measure stock-picking skill independent of market timing.</li>
+<li data-correct="false" data-why="Shorting requires margin and locate, which has real cost. The benefit is conceptual, not operational simplicity.">It reduces operational complexity by removing the need for a risk model.</li>
+<li data-correct="false" data-why="Market-neutral strategies still have risk — sector, factor, single-stock risk all remain. 'Neutral' here means market-beta neutral specifically.">It makes the strategy completely risk-free.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>9. Scenarios</h2>
+<details class="scenario"><summary>S1. You test 4000 stock pairs for cointegration at 95% confidence and find 200 cointegrated pairs. Should you trade all of them?</summary>
+<p>No — that's exactly the number you'd expect from pure randomness. At 95% significance, 5% of pairs will appear cointegrated by chance alone, which is 200 out of 4000. This is the multiple-testing problem in disguise. Practical fix: use a much stricter significance level (e.g. 99.9%) and/or require multiple supporting tests (Engle-Granger + Johansen + economic rationale). Trading the raw 200 will produce a strategy that looks great in backtest and dies live as the spurious correlations decay.</p></details>
+
+<details class="scenario"><summary>S2. You add a short side to <code>paper_trading_sim.py</code> (short the bottom-N predictions). Backtest Sharpe goes UP but max drawdown also gets worse. Diagnose.</summary>
+<p>Probably a sector concentration effect. When the long and short sides are not factor-neutralized, both can be loading on the same underlying factor exposures (e.g. you accidentally are long growth and short value, or long mega-cap and short small-cap). When that factor reverses sharply you lose on both legs. Fix: add a constraint that the long and short books have matching sector weights and matching market-cap distributions, or use a proper risk model to decompose factor exposures. The Sharpe up + MaxDD up pattern is a classic signature of hidden factor concentration.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li><a href="https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf">High-frequency trading in a limit order book — Avellaneda &amp; Stoikov</a></li>
+<li><a href="https://databento.com/microstructure/dma">Databento Microstructure Guide</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

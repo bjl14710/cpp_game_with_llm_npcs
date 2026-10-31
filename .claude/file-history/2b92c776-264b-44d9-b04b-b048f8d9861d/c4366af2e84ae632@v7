@@ -1,0 +1,12 @@
+# CMake / make build outputs
+build/
+tests/build/
+
+# Downloaded CC0 asset packs (tools/fetch_assets.sh recreates them;
+# assets/LICENSES.md stays tracked)
+assets/models/
+assets/fonts/
+
+# Per-player NPC memory + benchmark outputs
+saves/
+bench/out/

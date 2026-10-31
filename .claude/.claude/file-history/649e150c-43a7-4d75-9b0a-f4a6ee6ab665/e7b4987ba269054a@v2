@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>0030 — Walk-Forward Backtesting</title>
+<style>
+/* ── reset + tokens ─────────────────────────────────────────── */
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--surface3:#30363d;
+  --border:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;
+  --green:#3fb950;--red:#f85149;--yellow:#d29922;--purple:#bc8cff;
+  --orange:#ffa657;--mono:'Cascadia Code','Fira Code','JetBrains Mono',monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);
+  font-size:16px;line-height:1.7;max-width:820px;margin:0 auto;padding:2rem 1.2rem}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ── typography ─────────────────────────────────────────────── */
+h1{font-size:2rem;font-weight:700;margin-bottom:.3rem;line-height:1.2}
+h2{font-size:1.35rem;font-weight:600;color:var(--accent);margin:2.4rem 0 .8rem;
+   padding-bottom:.4rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.05rem;font-weight:600;color:var(--orange);margin:1.4rem 0 .5rem}
+p{margin-bottom:.9rem}
+ul,ol{margin:.5rem 0 .9rem 1.4rem}
+li{margin-bottom:.3rem}
+strong{color:var(--text);font-weight:600}
+em{color:var(--yellow);font-style:normal;font-weight:500}
+a{color:var(--accent)}
+
+/* ── subtitle / meta ────────────────────────────────────────── */
+.lesson-meta{font-family:var(--mono);font-size:.78rem;color:var(--muted);
+  letter-spacing:.06em;margin-bottom:.5rem}
+.why{background:var(--surface);border-left:3px solid var(--accent);
+  padding:.75rem 1rem;border-radius:0 .4rem .4rem 0;margin:1rem 0 1.5rem;
+  font-size:.93rem;color:var(--muted)}
+.why strong{color:var(--accent)}
+
+/* ── section completion ─────────────────────────────────────── */
+.section-check{display:flex;align-items:center;gap:.5rem;
+  margin-bottom:.5rem;cursor:pointer;user-select:none;font-size:.85rem;color:var(--muted)}
+.section-check input{accent-color:var(--green);width:15px;height:15px}
+.section-check.done{color:var(--green)}
+.progress-row{display:flex;align-items:center;gap:.75rem;margin:1.5rem 0}
+.progress-bar{flex:1;height:6px;background:var(--surface2);border-radius:3px}
+.progress-fill{height:6px;background:var(--green);border-radius:3px;
+  width:0%;transition:width .3s}
+.progress-label{font-family:var(--mono);font-size:.78rem;color:var(--muted);white-space:nowrap}
+
+/* ── code ───────────────────────────────────────────────────── */
+code{font-family:var(--mono);font-size:.86em;background:var(--surface2);
+  padding:.1em .35em;border-radius:.25rem;color:var(--purple)}
+pre{background:var(--surface2);border:1px solid var(--border);border-radius:.5rem;
+  padding:1.1rem;overflow-x:auto;margin:1rem 0;font-family:var(--mono);
+  font-size:.82rem;line-height:1.75;tab-size:4}
+pre .kw{color:#ff7b72}
+pre .fn{color:#d2a8ff}
+pre .str{color:#a5d6ff}
+pre .cm{color:#8b949e;font-style:italic}
+pre .num{color:#79c0ff}
+pre .param{color:#ffa657}
+pre .hi{color:#e3b341;font-weight:600}
+
+/* ── callout boxes ──────────────────────────────────────────── */
+.box{border-radius:.5rem;padding:1rem 1.2rem;margin:1rem 0;font-size:.92rem}
+.box-warn{background:#2d1f06;border:1px solid var(--yellow);color:#e3b341}
+.box-info{background:#0d1f38;border:1px solid var(--accent);color:var(--text)}
+.box-green{background:#0d1f13;border:1px solid var(--green);color:var(--text)}
+.box-red{background:#2d0f0e;border:1px solid var(--red);color:var(--text)}
+.box h4{font-size:.8rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  margin-bottom:.4rem;opacity:.8}
+
+/* ── timeline diagrams ──────────────────────────────────────── */
+.timeline-wrap{overflow-x:auto;margin:1.2rem 0}
+.timeline{display:flex;align-items:center;gap:0;min-width:600px;font-size:.8rem;
+  font-family:var(--mono)}
+.tl-axis{height:1px;background:var(--border);flex:1;margin:0 .25rem;position:relative}
+.tl-label{color:var(--muted);white-space:nowrap;padding:0 .3rem}
+.tl-row{display:flex;align-items:stretch;min-width:600px;height:28px;margin:.3rem 0;
+  font-size:.75rem;font-family:var(--mono)}
+.tl-seg{display:flex;align-items:center;justify-content:center;border-radius:.2rem;
+  padding:0 .4rem;white-space:nowrap;border:1px solid transparent;flex-shrink:0}
+.tl-train{background:#0d2a14;border-color:var(--green)!important;color:var(--green)}
+.tl-test{background:#0d1f38;border-color:var(--accent)!important;color:var(--accent)}
+.tl-emb{background:#1f1509;border-color:var(--yellow)!important;color:var(--yellow)}
+.tl-gap{background:transparent;color:var(--muted);font-size:.7rem;
+  display:flex;align-items:center;padding:0 .25rem}
+.tl-label-row{display:flex;align-items:center;font-size:.72rem;
+  font-family:var(--mono);color:var(--muted);min-width:600px;margin-bottom:.2rem}
+
+.kfold-danger{background:#2d0f0e;border:1px dashed var(--red);color:#f85149;
+  border-radius:.2rem;padding:0 .4rem;display:flex;align-items:center;justify-content:center;
+  font-size:.75rem;font-family:var(--mono)}
+
+/* ── comparison table ───────────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-size:.88rem;margin:1rem 0}
+th{padding:.5rem .75rem;text-align:left;background:var(--surface2);
+  color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)}
+td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td:first-child{font-weight:500;color:var(--orange);white-space:nowrap}
+.yes{color:var(--green)}
+.no{color:var(--red)}
+
+/* ── quiz ───────────────────────────────────────────────────── */
+.quiz-section{background:var(--surface);border:1px solid var(--border);
+  border-radius:.75rem;padding:1.5rem;margin:1.5rem 0}
+.quiz-section h3{margin-top:0;color:var(--accent)}
+.question{margin:1.3rem 0;padding:1rem;background:var(--surface2);
+  border-radius:.5rem;border:1px solid var(--border)}
+.q-stem{font-weight:500;margin-bottom:.75rem}
+.q-stem code{font-size:.85em}
+.options{list-style:none;display:flex;flex-direction:column;gap:.45rem}
+.options li{padding:.55rem .85rem;border:1px solid var(--border);border-radius:.4rem;
+  cursor:pointer;font-size:.9rem;line-height:1.5;transition:border-color .15s,background .15s}
+.options li:hover:not(.locked){border-color:var(--accent);background:#0d1f38}
+.options li.correct-ans{border-color:var(--green)!important;background:#0d1f13!important}
+.options li.wrong-ans{border-color:var(--red)!important;background:#2d0f0e!important}
+.options li.reveal-correct{border-color:var(--green)!important;background:#0d1f13!important;opacity:.65}
+.feedback{margin-top:.6rem;font-size:.85rem;padding:.5rem .75rem;border-radius:.35rem;display:none}
+.feedback.correct{background:#0d1f13;border:1px solid var(--green);color:#3fb950}
+.feedback.wrong{background:#2d0f0e;border:1px solid var(--red);color:#f85149}
+.score-bar{margin-top:1.2rem;padding:.75rem 1rem;background:var(--surface3);
+  border-radius:.4rem;font-family:var(--mono);font-size:.9rem;display:none}
+
+/* ── scenarios ──────────────────────────────────────────────── */
+.scenario{background:var(--surface2);border-radius:.5rem;padding:1rem 1.2rem;
+  margin:.9rem 0;border:1px solid var(--border)}
+.scenario details summary{cursor:pointer;color:var(--accent);font-weight:500;
+  font-size:.9rem;padding:.2rem 0;user-select:none}
+.scenario details[open] summary{margin-bottom:.6rem}
+.scenario .ans{font-size:.88rem;line-height:1.7;color:var(--text)}
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────────────── -->
+<div class="lesson-meta">LESSON 0030 · 2026-06-15</div>
+<h1>Walk-Forward Backtesting</h1>
+<div class="why">
+  <strong>Why it matters for this project:</strong>
+  The flagship model in <code>paper_trading_sim.py</code> is trained once on all history and tested on the same data — a shortcut fine for prototyping, but it overfits.
+  <code>walkforward_sim.py</code> adds the production pattern: retrain on a rolling window, predict only into the strictly unseen future.
+  <code>solutions/03_stat_arb_risk/risk.py:walkforward_splits()</code> is the pure function behind that logic.
+  Understanding <em>why</em> k-fold CV fails on time series — and what walk-forward fixes — is the single most important statistical discipline in quant research.
+</div>
+
+<!-- ── PROGRESS ─────────────────────────────────────────────────── -->
+<div class="progress-row">
+  <div class="progress-bar"><div class="progress-fill" id="pbar"></div></div>
+  <div class="progress-label" id="plabel">0 / 7 sections</div>
+</div>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 1 — The core problem: look-ahead bias
+─────────────────────────────────────────────────────────────── -->
+<h2>1. The Core Problem: Look-Ahead Bias</h2>
+<label class="section-check" data-sec="0"><input type="checkbox">Mark section complete</label>
+
+<p>A backtest is a simulation run on historical data to estimate how a strategy <em>would have</em> performed. The cardinal sin is letting information from the future leak into a past decision. This is <strong>look-ahead bias</strong>, and it makes backtests look far better than live trading ever will.</p>
+
+<p>Look-ahead bias appears in two layers in an ML backtest:</p>
+
+<h3>Layer 1 — Feature/target leakage</h3>
+<p>The most obvious form. In <code>paper_trading_sim.py:build_features</code>:</p>
+
+<pre><span class="cm"># paper_trading_sim.py:62–68</span>
+out[<span class="str">"ret_1d"</span>]    = out[<span class="str">"close"</span>].<span class="fn">pct_change</span>()
+out[<span class="str">"fwd_ret_1d"</span>] = out[<span class="str">"ret_1d"</span>].<span class="fn">shift</span>(<span class="num">-1</span>)   <span class="cm"># tomorrow's return as today's label</span></pre>
+
+<p>The <code>shift(-1)</code> is the correct discipline. If you accidentally used <code>shift(0)</code> — attaching <em>today's</em> return as today's label — the model would predict the past and look spectacular in backtests.</p>
+
+<h3>Layer 2 — Model training leakage</h3>
+<p>Subtler and more common. If you train a model on all available data, <em>then</em> backtest it on that same data, the model has seen the future during training — it memorized the test period. Reported Sharpe is fictional.</p>
+
+<div class="box box-warn">
+  <h4>⚠ The standard bad pattern</h4>
+  <strong>Train on 2016–2024 → Backtest on 2016–2024</strong><br>
+  The model's training data includes the very days you're "testing." Any error signal in the training loss is from those same days. In-sample metrics are inflation, not performance.
+</div>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 2 — Why k-fold CV fails
+─────────────────────────────────────────────────────────────── -->
+<h2>2. Why Standard k-Fold Cross-Validation Fails</h2>
+<label class="section-check" data-sec="1"><input type="checkbox">Mark section complete</label>
+
+<p>In classic ML you use <strong>k-fold cross-validation</strong>: shuffle all data, split into k equal folds, hold each fold out in turn, train on the other k−1. This works when rows are independent (images, survey responses). It <em>breaks</em> on financial time series.</p>
+
+<h3>The problem: test folds before training data</h3>
+
+<div class="timeline-wrap">
+  <div style="font-size:.75rem;font-family:var(--mono);color:var(--muted);margin-bottom:.4rem">
+    5-fold CV on time-series data (rows: day 1 → day 250):
+  </div>
+  <!-- k-fold rows showing the problem -->
+  <div style="display:flex;flex-direction:column;gap:.3rem;min-width:600px">
+    <div style="display:flex;gap:1px;align-items:center;font-size:.7rem;font-family:var(--mono)">
+      <span style="width:60px;color:var(--muted)">Fold 1</span>
+      <div class="tl-seg kfold-danger" style="width:80px">TEST</div>
+      <div class="tl-seg tl-train" style="width:320px">TRAIN</div>
+      <span style="color:var(--red);margin-left:.5rem;font-size:.7rem">← test days 1-50, train on days 51-250 ✓ ok</span>
+    </div>
+    <div style="display:flex;gap:1px;align-items:center;font-size:.7rem;font-family:var(--mono)">
+      <span style="width:60px;color:var(--muted)">Fold 2</span>
+      <div class="tl-seg tl-train" style="width:80px">TRAIN</div>
+      <div class="tl-seg kfold-danger" style="width:80px">TEST</div>
+      <div class="tl-seg tl-train" style="width:240px">TRAIN</div>
+      <span style="color:var(--red);margin-left:.5rem;font-size:.7rem">← train on days 151-250 (future!) ✗ LEAK</span>
+    </div>
+    <div style="display:flex;gap:1px;align-items:center;font-size:.7rem;font-family:var(--mono)">
+      <span style="width:60px;color:var(--muted)">Fold 3</span>
+      <div class="tl-seg tl-train" style="width:160px">TRAIN</div>
+      <div class="tl-seg kfold-danger" style="width:80px">TEST</div>
+      <div class="tl-seg tl-train" style="width:160px">TRAIN</div>
+      <span style="color:var(--red);margin-left:.5rem;font-size:.7rem">← train on days 201-250 (future!) ✗ LEAK</span>
+    </div>
+  </div>
+</div>
+
+<p>For folds 2–5, the training set includes data <em>after</em> the test period. The model learns from the future. Cross-validation scores are inflated and rank models incorrectly.</p>
+
+<p>There's also an <strong>autocorrelation</strong> problem: adjacent days share features (rolling vol, MA, RSI all overlap). Even if you use strict time ordering, adjacent test/train splits contaminate each other through correlated features — which is why the <em>embargo</em> gap exists.</p>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 3 — Walk-forward: the correct pattern
+─────────────────────────────────────────────────────────────── -->
+<h2>3. Walk-Forward: Always Predict Only the Strict Future</h2>
+<label class="section-check" data-sec="2"><input type="checkbox">Mark section complete</label>
+
+<p>Walk-forward backtesting enforces one rule: <strong>the training window always ends before the test window begins</strong>. The window then rolls forward in steps equal to the test period size.</p>
+
+<div class="timeline-wrap">
+  <div style="font-size:.75rem;font-family:var(--mono);color:var(--muted);margin-bottom:.5rem">Walk-forward with 3 splits (train=200, embargo=5, test=50):</div>
+
+  <div style="display:flex;flex-direction:column;gap:.4rem;min-width:600px">
+    <div style="display:flex;gap:2px;align-items:center;font-size:.72rem;font-family:var(--mono)">
+      <span style="width:55px;color:var(--muted)">Split 1</span>
+      <div class="tl-seg tl-train" style="width:200px">TRAIN (200 days)</div>
+      <div class="tl-seg tl-emb" style="width:25px">GAP</div>
+      <div class="tl-seg tl-test" style="width:100px">TEST (50 days)</div>
+      <div style="width:175px;background:var(--surface2);border-radius:.2rem;opacity:.3"></div>
+    </div>
+    <div style="display:flex;gap:2px;align-items:center;font-size:.72rem;font-family:var(--mono)">
+      <span style="width:55px;color:var(--muted)">Split 2</span>
+      <div style="width:100px"></div>
+      <div class="tl-seg tl-train" style="width:200px">TRAIN (200 days)</div>
+      <div class="tl-seg tl-emb" style="width:25px">GAP</div>
+      <div class="tl-seg tl-test" style="width:100px">TEST (50 days)</div>
+      <div style="width:75px;background:var(--surface2);border-radius:.2rem;opacity:.3"></div>
+    </div>
+    <div style="display:flex;gap:2px;align-items:center;font-size:.72rem;font-family:var(--mono)">
+      <span style="width:55px;color:var(--muted)">Split 3</span>
+      <div style="width:200px"></div>
+      <div class="tl-seg tl-train" style="width:200px">TRAIN (200 days)</div>
+      <div class="tl-seg tl-emb" style="width:25px">GAP</div>
+      <div class="tl-seg tl-test" style="width:100px">TEST (50 days)</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:.75rem;margin-top:.75rem;font-size:.72rem;font-family:var(--mono)">
+    <span class="tl-seg tl-train" style="padding:.2rem .5rem">TRAIN</span>
+    <span class="tl-seg tl-emb" style="padding:.2rem .5rem">EMBARGO (gap)</span>
+    <span class="tl-seg tl-test" style="padding:.2rem .5rem">TEST (true OOS)</span>
+  </div>
+</div>
+
+<h3>Two variants: rolling vs. expanding window</h3>
+
+<table>
+  <tr>
+    <th>Property</th><th>Rolling (fixed-length) window</th><th>Expanding window</th>
+  </tr>
+  <tr>
+    <td>Training data</td>
+    <td>Always the last <em>N</em> days</td>
+    <td>All history up to now</td>
+  </tr>
+  <tr>
+    <td>Model assumed to be</td>
+    <td>Non-stationary — old data hurts</td>
+    <td>Stable over time — more data always helps</td>
+  </tr>
+  <tr>
+    <td>Used in <code>walkforward_sim.py</code></td>
+    <td class="yes">✓ default (<code>--train_window_days 756</code>)</td>
+    <td>Not directly, but remove the <code>sub.iloc[-train_window_days:]</code> cut</td>
+  </tr>
+  <tr>
+    <td>Risk</td>
+    <td>Forgets structural regime shifts if window is too long; overfits regime if too short</td>
+    <td>Early-period model dominates if the relationship changed</td>
+  </tr>
+</table>
+
+<h3>The embargo gap</h3>
+
+<p>Why leave a gap between train and test? The target is <code>fwd_ret_1d = ret.shift(-1)</code> — tomorrow's return at today's row. So the last training row "knows about" day <em>train+1</em>'s price. Rolling features (MA, vol, RSI) also use overlapping windows. Without an embargo, the first test row is directly contaminated by the last train label. A gap of ≥ 1 day (or ≥ feature window days for safety) breaks that contamination.</p>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 4 — In this project
+─────────────────────────────────────────────────────────────── -->
+<h2>4. In This Project</h2>
+<label class="section-check" data-sec="3"><input type="checkbox">Mark section complete</label>
+
+<h3><code>solutions/03_stat_arb_risk/risk.py:75–95</code> — <code>walkforward_splits()</code></h3>
+
+<pre><span class="kw">def</span> <span class="fn">walkforward_splits</span>(<span class="param">n</span>: int, <span class="param">train</span>: int, <span class="param">test</span>: int,
+                       <span class="param">embargo</span>: int = <span class="num">0</span>) -> list[tuple[np.ndarray, np.ndarray]]:
+    <span class="str">"""Chronological walk-forward splits over `n` samples.
+
+    Each split is (train_indices, test_indices): `train` consecutive samples,
+    an `embargo` gap (left out entirely), then `test` consecutive samples.
+    The window rolls forward by `test` so test windows tile without overlap.
+    """</span>
+    splits: list[tuple[np.ndarray, np.ndarray]] = []
+    start = <span class="num">0</span>
+    <span class="kw">while</span> start + train + embargo + test <= n:
+        tr = np.<span class="fn">arange</span>(start, start + train)                     <span class="cm"># ① indices of training rows</span>
+        te = np.<span class="fn">arange</span>(start + train + embargo,               <span class="cm"># ② skip the embargo gap</span>
+                        start + train + embargo + test)
+        splits.<span class="fn">append</span>((tr, te))
+        start += test                                          <span class="cm"># ③ roll forward by one test window</span>
+    <span class="kw">return</span> splits</pre>
+
+<p>Walk through it:</p>
+<ol>
+  <li><strong>① Train indices:</strong> rows <code>[start, start+train)</code> — always strictly in the past.</li>
+  <li><strong>② Skip embargo:</strong> rows <code>[start+train, start+train+embargo)</code> are thrown away — no train, no test.</li>
+  <li><strong>Test indices:</strong> rows <code>[start+train+embargo, start+train+embargo+test)</code> — true out-of-sample.</li>
+  <li><strong>③ Roll:</strong> <code>start += test</code> tiles the test windows end-to-end so the whole dataset gets evaluated exactly once.</li>
+</ol>
+
+<div class="box box-green">
+  <h4>Key property</h4>
+  Every test row is evaluated using a model that was fitted on <em>strictly earlier</em> data, separated by the embargo. This is the same discipline as live trading: you will never know the future.
+</div>
+
+<h3><code>walkforward_sim.py:207–228</code> — Rolling retrain in production</h3>
+
+<pre><span class="cm"># walkforward_sim.py — rolling retrain logic (simplified)</span>
+<span class="kw">if</span> rolling_retrain <span class="kw">and</span> <span class="fn">_should_retrain</span>(last_train_dt, dt):
+    tr_frames = []
+    <span class="kw">for</span> t, f <span class="kw">in</span> feats.<span class="fn">items</span>():
+        sub = f[f.index < dt]                        <span class="cm"># ← CRITICAL: strict past only</span>
+        <span class="kw">if</span> train_window_days > <span class="num">0</span> <span class="kw">and</span> <span class="fn">len</span>(sub) > train_window_days:
+            sub = sub.<span class="fn">iloc</span>[-train_window_days:]      <span class="cm"># rolling window (discard old data)</span>
+        tr_frames.<span class="fn">append</span>(sub)
+    train_df = pd.<span class="fn">concat</span>(tr_frames, axis=<span class="num">0</span>)
+    <span class="kw">if</span> <span class="fn">len</span>(train_df) >= min_train_days:
+        model.<span class="fn">fit</span>(X_train, y_train)
+        last_train_dt = dt</pre>
+
+<p>The key line is <code>f[f.index &lt; dt]</code> — strictly less than, not ≤. On date <code>dt</code> the model sees every day <em>before</em> <code>dt</code> but never <code>dt</code> itself. This is the code-level enforcement of the walk-forward discipline.</p>
+
+<h3>Contrast: <code>paper_trading_sim.py</code> — the single-split baseline</h3>
+
+<pre><span class="cm"># paper_trading_sim.py:backtest() — simple train/test split</span>
+split_idx = int(<span class="fn">len</span>(feat) * args.train_frac)   <span class="cm"># e.g. 70% train</span>
+train_feat, test_feat = <span class="fn">split_features</span>(feat, split_idx)
+model = <span class="fn">train_model</span>(train_feat)
+<span class="cm"># test on the remaining 30% — only evaluated once</span></pre>
+
+<p>This is the single hold-out split: train once, test once. Fine for a first check; misleading because the choice of <code>train_frac</code> has a large effect on the result and you only see one test period. Walk-forward gives you many non-overlapping test periods, making the aggregate statistics far more trustworthy.</p>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 5 — Often confused with
+─────────────────────────────────────────────────────────────── -->
+<h2>5. Often Confused With</h2>
+<label class="section-check" data-sec="4"><input type="checkbox">Mark section complete</label>
+
+<table>
+  <tr>
+    <th>Method</th><th>Time ordering respected?</th><th>Multiple test windows?</th><th>When to use</th>
+  </tr>
+  <tr>
+    <td>k-fold CV</td>
+    <td class="no">✗ shuffled</td>
+    <td class="yes">✓</td>
+    <td>i.i.d. data only (images, text, survey)</td>
+  </tr>
+  <tr>
+    <td>Single hold-out</td>
+    <td class="yes">✓</td>
+    <td class="no">✗ one only</td>
+    <td>Quick sanity check; high variance (one period may be special)</td>
+  </tr>
+  <tr>
+    <td>Walk-forward (rolling)</td>
+    <td class="yes">✓</td>
+    <td class="yes">✓</td>
+    <td>Default for trading ML; assumes non-stationary signal</td>
+  </tr>
+  <tr>
+    <td>Expanding window</td>
+    <td class="yes">✓</td>
+    <td class="yes">✓</td>
+    <td>When signal is stable and data efficiency matters</td>
+  </tr>
+  <tr>
+    <td>Combinatorial purged k-fold (CPCV)</td>
+    <td class="yes">✓</td>
+    <td class="yes">✓ many</td>
+    <td>Lopez de Prado's method for higher statistical power with embargo; not in this repo yet</td>
+  </tr>
+</table>
+
+<h3>Walk-forward ≠ Paper trading</h3>
+<p><em>Walk-forward backtesting</em> simulates the model retraining and prediction process on historical data to estimate live performance. <em>Paper trading</em> runs the strategy in real-time on live market data without placing orders. Walk-forward is retrospective; paper trading is prospective. Both are needed: walk-forward to design, paper trading to verify.</p>
+
+<h3>In-sample R² ≠ Out-of-sample R²</h3>
+<p>GBM can achieve in-sample R² > 0.5 on financial data (it memorizes). Walk-forward out-of-sample R² on daily equity returns is typically 0.01–0.05 — a few percent of variance explained. That small number is real alpha; the in-sample number is noise from overfitting. <em>Never report in-sample metrics as the backtest result.</em></p>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 6 — Quiz
+─────────────────────────────────────────────────────────────── -->
+<h2>6. Practice</h2>
+<label class="section-check" data-sec="5"><input type="checkbox">Mark section complete</label>
+
+<div class="quiz-section">
+  <h3>Quiz — 5 questions</h3>
+  <p style="font-size:.85rem;color:var(--muted);margin-bottom:.5rem">Options are shuffled on every page load.</p>
+
+  <!-- Q1 -->
+  <div class="question" data-question>
+    <div class="q-stem">1. In <code>walkforward_splits(n=300, train=200, embargo=5, test=50)</code>, how many splits are returned?</div>
+    <ul class="options">
+      <li data-correct="false" data-why="Wrong — start=0: split 1 uses rows 0-199 (train) and 205-254 (test). Rolling by 50: split 2 starts at 50, uses 50-249 and 255-304. But 50+200+5+50=305 > 300, so only 1 split fits. Let's recheck: split 1: start=0, end needs 0+200+5+50=255 ≤ 300 ✓; split 2: start=50, needs 50+200+5+50=305 > 300 ✗. Answer: 1 split.">3 splits</li>
+      <li data-correct="false" data-why="Wrong — let's compute: split 1 at start=0 needs 0+200+5+50=255 ≤ 300 ✓; split 2 at start=50 needs 305 > 300 ✗. Only 1 split fits.">2 splits</li>
+      <li data-correct="true"  data-why="Correct. start=0: need 0+200+5+50=255 ≤ 300 ✓ → one split. Then start+=50 → start=50: need 50+200+5+50=305 > 300 ✗ → loop exits. Total: 1 split.">1 split</li>
+      <li data-correct="false" data-why="Wrong — 0 splits would require the first window to not fit, but 255 ≤ 300 so the first iteration runs.">0 splits</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q2 -->
+  <div class="question" data-question>
+    <div class="q-stem">2. In <code>walkforward_sim.py</code>, what does <code>f[f.index &lt; dt]</code> enforce on each retraining day <code>dt</code>?</div>
+    <ul class="options">
+      <li data-correct="false" data-why="Wrong — f.index < dt excludes day dt itself, so the model never trains on the day it predicts. The model uses all available past strictly before dt.">The model trains on all dates including today, then predicts tomorrow.</li>
+      <li data-correct="true"  data-why="Correct. The strict less-than ensures the model has never seen date dt's features or label when making its prediction for dt. This is the code-level enforcement of the walk-forward rule.">The model trains only on data strictly before date <em>dt</em>, so it has never seen <em>dt</em> during fitting.</li>
+      <li data-correct="false" data-why="Wrong — the embargo in walkforward_sim is implicit (training ends before dt; dt itself is the first test day). The walkforward_splits() function has an explicit embargo; walkforward_sim uses the strict < condition instead.">The model applies a 5-day embargo gap before date <em>dt</em>, skipping the most recent 5 rows.</li>
+      <li data-correct="false" data-why="Wrong — rolling retrain uses train_window_days to limit how far back training data goes, not a fixed starting date.">The model is only trained on data within 252 calendar days of dt, regardless of earlier history.</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="question" data-question>
+    <div class="q-stem">3. You train a GBM on the full 2016–2024 dataset, report in-sample R² = 0.42, then run a walk-forward backtest and get OOS R² = 0.03. Which is the honest estimate of live performance, and what does this gap imply?</div>
+    <ul class="options">
+      <li data-correct="false" data-why="Wrong — R² = 0.42 comes from the model memorizing its own training data, not genuine generalization. This is overfitting, not skill.">In-sample R² = 0.42 is more reliable because it uses all available data, while OOS uses only partial history.</li>
+      <li data-correct="true"  data-why="Correct. OOS R² = 0.03 is the honest estimate: the model was never trained on those days. The gap (0.42 vs 0.03) reveals severe overfitting — the GBM memorized noise in the training period. A few percent OOS R² is actually normal for daily equity returns.">OOS R² = 0.03 is the honest estimate. The gap reveals overfitting: the model memorized training-period noise.</li>
+      <li data-correct="false" data-why="Wrong — both numbers mean something: the in-sample means overfitting is severe; the OOS means there is a small real signal. The OOS number is what you'd experience in live trading.">Neither is reliable; both must be averaged to get a true estimate.</li>
+      <li data-correct="false" data-why="Wrong — 0.03 OOS R² is normal and meaningful on daily equity returns. Even small OOS R² can be profitable if trades are well-sized. 0 OOS R² would mean no edge, not 0.03.">OOS R² = 0.03 is effectively zero and means the model has no real predictive power.</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q4 -->
+  <div class="question" data-question>
+    <div class="q-stem">4. Why does the target column <code>fwd_ret_1d = ret.shift(-1)</code> make an embargo necessary between training and test windows?</div>
+    <ul class="options">
+      <li data-correct="false" data-why="Wrong — the issue is specifically about the label (fwd_ret_1d), not the close price itself, contaminating the training boundary.">The close price on the last training day is used as a feature on the first test day, so one day's embargo is needed.</li>
+      <li data-correct="true"  data-why="Correct. fwd_ret_1d at row t = next-day return, i.e. it references day t+1's price. The last training row (day T) has a label derived from day T+1's price. Without an embargo, day T+1 is the first test row — but the model saw day T+1's price (embedded in fwd_ret_1d) during training.">The last training row's label <code>fwd_ret_1d</code> is computed from the next day's price — which is the first test row's close. Without embargo, that price leaks into training.</li>
+      <li data-correct="false" data-why="Wrong — RSI uses a rolling window of past data only; it doesn't look forward. The label (fwd_ret_1d) is what creates the forward contamination.">The RSI feature at row t uses future returns to compute its momentum signal, creating forward contamination.</li>
+      <li data-correct="false" data-why="Wrong — the GradientBoostingRegressor does not look at future rows during .fit(); it only processes what you pass in X_train. The contamination comes from the label column, not the model's algorithm.">The GradientBoostingRegressor's .fit() looks ahead in X_train during internal cross-validation for hyperparameter tuning.</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <!-- Q5 -->
+  <div class="question" data-question>
+    <div class="q-stem">5. The <code>--rolling_retrain --retrain_freq monthly --train_window_days 756</code> flags in <code>walkforward_sim.py</code> together describe what model behavior?</div>
+    <ul class="options">
+      <li data-correct="false" data-why="Wrong — daily retrain would have retrain_freq=daily. Monthly means the model is only refitted when the calendar month changes, saving computation.">The model retrains every day on the last 756 trading days of data.</li>
+      <li data-correct="true"  data-why="Correct. Monthly retrain: the model is refitted whenever dt is in a new month vs. last_train_dt. Rolling window: only the last 756 trading days (≈3 years) are used — older data is discarded. This balances recency with training stability.">The model retrains at the start of each calendar month, using only the most recent 756 days (~3 years) of history.</li>
+      <li data-correct="false" data-why="Wrong — the expanding window alternative would use all history from the beginning, not just the last N days. train_window_days=756 explicitly caps the lookback.">The model retrains monthly and uses all available history since the simulation start, growing the window over time.</li>
+      <li data-correct="false" data-why="Wrong — retrain_freq=monthly changes the retraining cadence, not the test period. Test windows tile at daily granularity in the simulation loop.">The model retrains on a 756-day window and tests on exactly one month of out-of-sample data before retraining again.</li>
+    </ul>
+    <div class="feedback"></div>
+  </div>
+
+  <div class="score-bar" id="score-bar">Score: <span id="score-text"></span></div>
+</div>
+
+<!-- ──────────────────────────────────────────────────────────────
+  SECTION 7 — Scenarios
+─────────────────────────────────────────────────────────────── -->
+<h2>7. Scenarios</h2>
+<label class="section-check" data-sec="6"><input type="checkbox">Mark section complete</label>
+
+<div class="scenario">
+  <p><strong>Scenario A.</strong> A colleague adds a MinMaxScaler step before training: they fit the scaler on all 2016–2024 data, then use it to transform features both in the training and test folds of their walk-forward. Is this correct?</p>
+  <details>
+    <summary>Show answer →</summary>
+    <div class="ans">
+      <strong>No — this is scaler leakage.</strong> Fitting the scaler on all data means the scaler's <code>min_</code> and <code>max_</code> are computed using future test rows. The scaler now "knows" the range of prices in periods the model hasn't trained on yet. The correct pattern: fit the scaler only on the current training window, then <code>transform</code> (not <code>fit_transform</code>) on the test window. In <code>walkforward_sim.py</code> there is currently no explicit scaler — this is the form of leakage to watch for if you add feature normalization.
+    </div>
+  </details>
+</div>
+
+<div class="scenario">
+  <p><strong>Scenario B.</strong> You call <code>walkforward_splits(n=500, train=250, test=50, embargo=0)</code>. How many splits? What would happen if you accidentally used the test rows from split 1 as part of the training data in split 2?</p>
+  <details>
+    <summary>Show answer →</summary>
+    <div class="ans">
+      <strong>Splits:</strong> start=0 → needs 0+250+0+50=300 ≤ 500 ✓; start=50 → 300 ≤ 500 ✓; ... continues every 50 rows. Splits at starts 0, 50, 100, 150, 200 → <strong>5 splits</strong> (start=250 needs 550 > 500 ✗).
+      <br><br>
+      <strong>If you used test rows from split 1 (250–299) in training for split 2:</strong> split 2's model would have been trained on data it later "predicts." The test Sharpe and R² for split 2 would be inflated. Across 5 splits, this contamination compounds. The walkforward_splits function avoids this by design: <code>start += test</code> means the next split's training starts at row 50, not row 0, so split 2's test window (350–399) has never appeared in training at start=50 (training rows 50–299, no embargo).
+    </div>
+  </details>
+</div>
+
+<div class="scenario">
+  <p><strong>Scenario C.</strong> Your walk-forward backtest shows Sharpe = 1.8 across 8 years of OOS test windows. A naive single hold-out split (70/30) on the same data shows Sharpe = 2.4. Which should you trust for estimating live performance, and why is the other number misleading?</p>
+  <details>
+    <summary>Show answer →</summary>
+    <div class="ans">
+      <strong>Trust the walk-forward Sharpe = 1.8.</strong>
+      <br><br>
+      The walk-forward result aggregates 8 years of independent monthly test windows — the model was refitted before each. It experienced bull markets, bear markets, and sideways periods as they actually arrived, using only past data to predict each. This is the closest simulation of live trading.
+      <br><br>
+      The single hold-out Sharpe = 2.4 is misleading because: (a) the 30% test window might coincide with a favorable period (e.g., a bull market), inflating the number; (b) the 70% training period was chosen by the analyst — any reasonable-sounding choice of <code>train_frac</code> produces a different number; (c) there is only one test estimate, so uncertainty is high. The walk-forward aggregate is a far more stable and honest estimate.
+    </div>
+  </details>
+</div>
+
+<!-- ── SCRIPTS ─────────────────────────────────────────────────── -->
+<script>
+/* ── progress tracking ─────────────────────────── */
+const checks = document.querySelectorAll('.section-check input');
+const TOTAL  = checks.length;
+
+function updateBar(){
+  const done = [...checks].filter(c=>c.checked).length;
+  document.getElementById('pbar').style.width = (done/TOTAL*100)+'%';
+  document.getElementById('plabel').textContent = `${done} / ${TOTAL} sections`;
+  checks.forEach(c=>{
+    const lbl = c.closest('.section-check');
+    if(c.checked) lbl.classList.add('done'); else lbl.classList.remove('done');
+  });
+}
+checks.forEach(c=>c.addEventListener('change',updateBar));
+updateBar();
+
+/* ── quiz ──────────────────────────────────────── */
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
+let quizScore = 0, quizAnswered = 0;
+const TOTAL_Q = document.querySelectorAll('[data-question]').length;
+
+document.querySelectorAll('[data-question]').forEach(q=>{
+  const list = q.querySelector('.options');
+  const fb   = q.querySelector('.feedback');
+  let answered = false;
+
+  // Shuffle options
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click', ()=>{
+      if(answered) return;
+      answered = true;
+      const correct = li.dataset.correct==='true';
+
+      // Mark chosen
+      li.classList.add(correct ? 'correct-ans' : 'wrong-ans');
+      // Reveal correct if wrong
+      if(!correct){
+        list.querySelectorAll('li[data-correct="true"]').forEach(el=>el.classList.add('reveal-correct'));
+      }
+      // Lock all
+      list.querySelectorAll('li').forEach(el=>{
+        el.classList.add('locked');
+        el.style.cursor='default';
+      });
+
+      // Show feedback
+      fb.style.display = 'block';
+      fb.className = 'feedback ' + (correct ? 'correct' : 'wrong');
+      fb.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+      // Track score
+      if(correct) quizScore++;
+      quizAnswered++;
+      if(quizAnswered === TOTAL_Q){
+        const sb = document.getElementById('score-bar');
+        sb.style.display = 'block';
+        const pct = Math.round(quizScore/TOTAL_Q*100);
+        document.getElementById('score-text').textContent =
+          `${quizScore} / ${TOTAL_Q} (${pct}%) — ${pct>=80?'Excellent!':pct>=60?'Good, review missed.':'Review sections 1–3.'}`;
+      }
+    });
+  });
+});
+</script>
+</body>
+</html>

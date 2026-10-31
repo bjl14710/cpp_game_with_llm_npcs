@@ -1,0 +1,187 @@
+"""Price/series fetchers for the free no-token stack (paper Part 1, Tier A).
+
+Each fetcher returns a tidy DataFrame indexed by date with a ``close`` column
+(and ``open/high/low/volume`` where available). Network libraries are imported
+lazily so the rest of the package (and the test suite) imports without them.
+"""
+
+from __future__ import annotations
+
+import io
+import urllib.request
+
+import pandas as pd
+
+from oil_alpha.config import FRED_SERIES, STOOQ_SUFFIX, SYMBOLS
+from oil_alpha.data import cache
+from oil_alpha.data.budget import APIBudget
+
+_OHLCV = ["open", "high", "low", "close", "volume"]
+
+
+def _from_cache_or(
+    kind: str,
+    symbol: str,
+    start: str,
+    end: str,
+    fetch,
+    *,
+    budget: APIBudget,
+    source: str,
+    use_cache: bool,
+) -> pd.DataFrame:
+    if use_cache:
+        cached = cache.load(kind, symbol, start, end)
+        if cached is not None and not cached.empty:
+            return cached
+    df = fetch()
+    budget.charge(source)
+    if use_cache and not df.empty:
+        cache.save(df, kind, symbol, start, end)
+    return df
+
+
+def fetch_yf(
+    symbol: str,
+    start: str,
+    end: str,
+    *,
+    budget: APIBudget,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """Daily OHLCV from Yahoo via yfinance.
+
+    ``auto_adjust=True`` is passed *explicitly* because the yfinance default
+    flipped from False to True in 2025 (paper Part 1, "Critical 2025 change"):
+    pinning it removes the ambiguity older tutorials assume.
+    """
+
+    def _fetch() -> pd.DataFrame:
+        import yfinance as yf
+
+        raw = yf.download(
+            symbol,
+            start=start,
+            end=end,
+            auto_adjust=True,      # explicit: see docstring
+            progress=False,
+            multi_level_index=False,
+        )
+        if raw is None or raw.empty:
+            return pd.DataFrame(columns=_OHLCV)
+        raw = raw.rename(columns=str.lower)
+        keep = [c for c in _OHLCV if c in raw.columns]
+        out = raw[keep].copy()
+        out.index = pd.to_datetime(out.index).tz_localize(None)
+        out.index.name = "date"
+        return out
+
+    return _from_cache_or(
+        "yf", symbol, start, end, _fetch, budget=budget, source="yfinance", use_cache=use_cache
+    )
+
+
+def fetch_fred(
+    series: str,
+    start: str,
+    end: str,
+    *,
+    budget: APIBudget,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """Daily series from FRED via the keyless CSV endpoint (no token needed).
+
+    e.g. ``DCOILWTICO`` = WTI spot, Cushing OK, $/bbl. Returns a single
+    ``close`` column for a uniform interface with the price fetchers.
+    """
+
+    def _fetch() -> pd.DataFrame:
+        url = (
+            "https://fred.stlouisfed.org/graph/fredgraph.csv"
+            f"?id={series}&cosd={start}&coed={end}"
+        )
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 (trusted host)
+            payload = resp.read().decode("utf-8")
+        df = pd.read_csv(io.StringIO(payload))
+        # FRED CSV: first column is the date; second is the series. Missing days are ".".
+        date_col, value_col = df.columns[0], df.columns[1]
+        df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+        df = df.dropna(subset=[value_col])
+        out = pd.DataFrame({"close": df[value_col].to_numpy()})
+        out.index = pd.to_datetime(df[date_col]).to_numpy()
+        out.index.name = "date"
+        return out
+
+    return _from_cache_or(
+        "fred", series, start, end, _fetch, budget=budget, source="fred", use_cache=use_cache
+    )
+
+
+def fetch_stooq(
+    symbol: str,
+    start: str,
+    end: str,
+    *,
+    budget: APIBudget,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """Equities/ETF EOD from Stooq via pandas-datareader (fallback only).
+
+    Append the ``.US`` suffix for US tickers. Do NOT use this for crude futures
+    (e.g. ``CL.F``) -- that path has been broken via the Python API since ~2021
+    (paper Part 1, Stooq limitations).
+    """
+
+    def _fetch() -> pd.DataFrame:
+        from pandas_datareader import data as web
+
+        ticker = symbol if "." in symbol else f"{symbol}{STOOQ_SUFFIX}"
+        raw = web.DataReader(ticker, "stooq", start=start, end=end)
+        if raw is None or raw.empty:
+            return pd.DataFrame(columns=_OHLCV)
+        raw = raw.rename(columns=str.lower).sort_index()
+        keep = [c for c in _OHLCV if c in raw.columns]
+        out = raw[keep].copy()
+        out.index = pd.to_datetime(out.index).tz_localize(None)
+        out.index.name = "date"
+        return out
+
+    return _from_cache_or(
+        "stooq", symbol, start, end, _fetch, budget=budget, source="stooq", use_cache=use_cache
+    )
+
+
+def fetch_prices(
+    keys: list[str],
+    start: str,
+    end: str,
+    *,
+    budget: APIBudget,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """Fetch a set of config symbol *keys* via yfinance into one close-price frame.
+
+    Columns are the config keys (e.g. ``wti_fut``, ``energy_etf``), not tickers,
+    so downstream code is symbol-agnostic.
+    """
+    closes: dict[str, pd.Series] = {}
+    for key in keys:
+        ticker = SYMBOLS[key]
+        df = fetch_yf(ticker, start, end, budget=budget, use_cache=use_cache)
+        if not df.empty and "close" in df:
+            closes[key] = df["close"].rename(key)
+    if not closes:
+        return pd.DataFrame()
+    return pd.concat(closes.values(), axis=1)
+
+
+def fetch_wti_spot(
+    start: str,
+    end: str,
+    *,
+    budget: APIBudget,
+    use_cache: bool = True,
+) -> pd.Series:
+    """FRED DCOILWTICO spot close, for cross-checking CL=F (paper Stage 1 threshold)."""
+    df = fetch_fred(FRED_SERIES["wti_spot"], start, end, budget=budget, use_cache=use_cache)
+    return df["close"].rename("wti_spot") if not df.empty else pd.Series(dtype=float)

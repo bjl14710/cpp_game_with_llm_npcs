@@ -1,0 +1,27 @@
+"""Tests for MM sim analysis layer (scaffold — all skipped).
+
+Acceptance criteria from .claude/plans/avellaneda-stoikov-mm-sim.md steps
+5-6. TODO(mm-5): un-skip as implemented.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(mm-5)")
+def test_fixture_run_is_deterministic() -> None:
+    """Two run_mm_sim calls on the committed AAPL fixture with identical
+    MMParams produce identical PnL series (bridge-level determinism)."""
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(mm-5)")
+def test_pnl_decomposition_sums_to_total() -> None:
+    """realized + inventory mark == terminal mark-to-mid PnL (synthetic
+    samples frame with hand-computed values)."""
+
+
+@pytest.mark.skip(reason="not implemented yet — TODO(mm-5)")
+def test_cli_produces_pnl_and_inventory_outputs() -> None:
+    """CLI over the fixture writes figures and prints fill stats without
+    error (smoke)."""

@@ -1,0 +1,69 @@
+# Plan: Per-Ticker Time-Series Trend Following (TSMOM)
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Each stock is judged only against its own history: compute the trailing
+return over a 3–12 month lookback and go long only when that trend is
+positive — no cross-sectional ranking. Volatility scaling is built in from
+day one (the Moskowitz–Ooi–Pedersen result the user cites: vol scaling
+roughly doubles Sharpe and cuts crash risk) by emitting confidence =
+trend strength ÷ trailing σ, which the existing `conf_vol` sizing then
+turns into inverse-vol position weights automatically — the scaling lives
+in the signal, not bolted on later.
+
+## Design Decisions
+- **Fits the existing loop as-is.** The one-bar-hold walk-forward with
+  daily re-picks IS continuous holding: a positive-trend ticker is
+  re-picked daily, and since #55 turnover-based costs, holding an unchanged
+  weight is free. No multi-day-hold engine work needed.
+- **Signal**: lookback L days (default 252, configurable 63–252), optional
+  skip of the most recent month (`skip_days=21` default ON — the standard
+  short-term-reversal exclusion): `trend = close[-skip] / close[-L] − 1`.
+  Long (+1) if trend > 0 else HOLD. Long-only per the idea (no shorting
+  negative trends this version).
+- **Confidence = trend / (σ_daily × √252)** — trend strength in vol units,
+  so conf_vol weighting yields the vol-scaled sizing the research wants,
+  and cross-ticker ranking for top_n favors the cleanest trends.
+- **compatible_regimes = all four.** TSMOM self-gates by trend sign;
+  stacking the regime gate on top would double-filter the same signal.
+- Registry name `tsmom`; constructor params lookback/skip_days.
+
+## Out of Scope
+- Shorting negative trends; multi-horizon blends (3+6+12 ensemble);
+  futures/crypto universes; the separate low-vol strategy (own plan).
+
+## Affected Areas
+- New: `strategies/trend.py` — `TrendFollowingStrategy(DailyStrategy)`.
+- `strategies/registry.py` — register `tsmom`.
+- New tests in `tests/test_research_strategies.py` — monotonic uptrend →
+  +1 with positive confidence; downtrend → HOLD (long-only); skip window
+  actually excluded (recent-month crash doesn't flip an old uptrend);
+  warmup respected; higher-vol ticker gets lower confidence at equal trend.
+
+## Implementation Order
+1. Strategy + unit tests (synthetic series, no network).
+2. Registry entry + one arena smoke (screens + live-ticks through existing
+   machinery unchanged).
+
+## Acceptance Criteria
+- [ ] 12-month uptrend, calm: +1 with confidence ≈ trend/vol (hand-checked)
+- [ ] Trend positive only inside the skipped window → HOLD (skip works)
+- [ ] Negative trend → HOLD, never −1
+- [ ] Equal trends, 2× vol → half the confidence
+- [ ] Selectable via `arena-run backtest --strategies tsmom`
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| History < lookback + skip | HOLD via warmup_bars = lookback + skip + 1 |
+| σ ≈ 0 (flat series) | Confidence floored via the same _VOL_FLOOR discipline as sizing |
+| trend exactly 0 | HOLD (strict >) |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(strategies): TSMOM trend-following with built-in vol scaling` — strategy + registry + tests

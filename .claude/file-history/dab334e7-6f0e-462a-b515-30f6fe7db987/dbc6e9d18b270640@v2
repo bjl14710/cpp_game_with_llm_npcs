@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_metric.html" import metric %}
+{% block content %}
+<h2>Strategy Arena — Comparison</h2>
+
+{% if rows %}
+  {% set live = rows | selectattr("status", "equalto", "PASS") | list %}
+  <div class="metric-row">
+    {{ metric("Strategies tracked", rows | length) }}
+    {{ metric("Live (PASS)", live | length) }}
+    {% set flagged = rows | selectattr("diverged") | list %}
+    {{ metric("Diverged flags", flagged | length,
+              delta=("all clear" if not flagged else "review needed"),
+              delta_positive=(not flagged)) }}
+  </div>
+
+  <table class="arena metrics">
+    <thead>
+      <tr>
+        <th>Strategy</th><th>Status</th><th>Live Sharpe</th><th>Live CAGR</th>
+        <th>Max DD</th><th>Win rate</th><th>Trades</th>
+        <th>Backtest Sharpe</th><th>Divergence z</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.strategy }}</td>
+        <td><span class="badge status-{{ (r.status or 'excluded') | lower }}">{{ r.status }}</span>
+            {% if r.paused_since %}<small>since {{ r.paused_since }}</small>{% endif %}</td>
+        <td>{{ "%.2f" | format(r.live_sharpe) if r.live_sharpe is not none else "—" }}</td>
+        <td>{{ "%.1f%%" | format(r.live_cagr * 100) if r.live_cagr is not none else "—" }}</td>
+        <td>{{ "%.1f%%" | format(r.live_maxdd * 100) if r.live_maxdd is not none else "—" }}</td>
+        <td>{{ "%.0f%%" | format(r.win_rate * 100) if r.win_rate is not none else "—" }}</td>
+        <td>{{ r.trades }}</td>
+        <td>{{ "%.2f" | format(r.backtest_sharpe) if r.backtest_sharpe is not none else "—" }}</td>
+        <td>{{ "%.2f" | format(r.divergence_z) if r.divergence_z is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><small>Read-only view of <code>{{ db_path }}</code>. Manage strategies with
+  <code>arena-run</code> (backtest / live / report / resume / demote).</small></p>
+{% else %}
+  <div class="card">
+    <h2>No arena data yet</h2>
+    <p>The arena database (<code>{{ db_path }}</code>) is empty or missing.
+    Screen some strategies first:</p>
+    <p><code>uv run arena-run backtest --strategies tsmom,lowvol,meanrev
+    --start 2023-01-01 --end 2025-01-01</code></p>
+    <p>then run daily ticks with <code>uv run arena-run live</code> and refresh
+    this page.</p>
+  </div>
+{% endif %}
+{% endblock %}

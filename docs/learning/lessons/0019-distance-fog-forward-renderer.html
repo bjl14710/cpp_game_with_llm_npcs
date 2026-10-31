@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0019 — Distance Fog in a Forward Renderer</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0019 · Rendering · from issue #67 (atmosphere pass)</div>
+<h1>Distance Fog in a Forward Renderer</h1>
+<p>Fog is the cheapest atmosphere money can buy: one shader, two uniforms,
+and the hard horizon line disappears. The interesting parts are the blend
+math and making sure <em>every</em> draw path goes through it.</p>
+
+<h2>The math: depth-based color blending</h2>
+<pre><code>d   = length(cameraPos - fragPosition) * fogDensity
+fog = 1.0 - exp(-d * d)                 // squared exponential
+finalColor.rgb = mix(litColor, fogColor, fog)</code></pre>
+<table>
+<tr><th>Curve</th><th>Character</th></tr>
+<tr><td>linear (start/end)</td><td>Hard band; obvious where fog "begins"</td></tr>
+<tr><td>exp</td><td>Fades immediately — even nearby objects dull</td></tr>
+<tr><td>exp² (used here)</td><td>Flat near the camera, then rolls off fast —
+plaza crisp at 40 units (~5%), far corner ~80% at 220</td></tr>
+</table>
+<p>Two choices carry the whole look: <strong>fogColor = the sky clear
+color</strong>, so geometry melts into the horizon instead of graying out,
+and a <strong>warm multiply</strong> (1.06, 1.00, 0.92) applied <em>before</em>
+fogging so distance still cools toward the sky.</p>
+
+<h2>Every draw path must fog, or the seams show</h2>
+<p>raylib has two distinct 3D paths, each with its own shader binding:</p>
+<ul>
+<li><strong>Meshes</strong> (buildings, roads, cars, characters):
+<code>DrawMesh</code> uses <code>material.shader</code> — assign the fog
+shader to every material at load.</li>
+<li><strong>Batch primitives</strong> (grass plane, slabs, the fountain,
+the viewmodel): drawn through rlgl's immediate batch, which uses the shader
+set by <code>BeginShaderMode</code>. Miss this and the buildings haze while
+the grass stays neon-green to the horizon.</li>
+</ul>
+<p>One shader serves both because the vertex stage computes
+<code>fragPosition = matModel * vertexPosition</code> — and batch vertices
+arrive already in world space with <code>matModel = identity</code>, so the
+same expression is correct in both paths.</p>
+
+<h2>Skinning survives — and why</h2>
+<p>raylib 5.5 skins characters on the CPU: <code>UpdateModelAnimation</code>
+writes posed vertices into the mesh before drawing. The fog shader consumes
+only standard attributes (position/texcoord/color), so animation is
+untouched. A GPU-skinned pipeline would <em>not</em> be this forgiving — the
+custom vertex shader would need the bone matrices.</p>
+
+<h2>Ownership trap: shared shaders vs UnloadModel</h2>
+<div class="callout warn"><code>UnloadModel</code> deliberately does NOT
+free material shaders/textures — raylib's comment says users may share them
+across models. That contract is what makes one-shader-many-materials safe,
+but it also means <em>you</em> must unload the shared shader exactly once
+(Assets' destructor), and standalone <code>UnloadMaterial</code> WOULD free
+it — never call that on materials holding a shared shader.</div>
+
+<div class="callout good"><strong>Budget honesty.</strong> The issue budget
+was "one shader, two uniforms" — no shadow maps, no post-processing, no
+day/night. Fog + tint delivered the atmosphere for one uniform vector, one
+float, and a per-frame camera position.</div>
+</div></body>
+</html>

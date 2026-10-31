@@ -1,0 +1,299 @@
+"""Tests for the generic DailyStrategy walk-forward in walkforward_sim.py.
+
+All data is synthetic and injected — no yfinance, no network.
+"""
+import numpy as np
+import pandas as pd
+import pytest
+
+from costs import CostModel
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+from walkforward_sim import _capped_normalized, _conf_vol_weights, run_strategy_walkforward
+
+
+class AlwaysLong(DailyStrategy):
+    """Test double: long every bar once warmed up."""
+
+    name = "always-long"
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Constant +1 with fixed confidence."""
+        return DailySignal(position=1, confidence=1.0, reason="always long")
+
+
+class NeverTrade(DailyStrategy):
+    """Test double: holds forever."""
+
+    name = "never-trade"
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Constant hold."""
+        return HOLD
+
+
+def test_always_long_reproduces_buy_and_hold(make_ohlcv):
+    """With one ticker, zero cost and top_n=1, equity compounds exactly like
+    holding the ticker from the first traded bar to the last bar."""
+    closes = [100, 102, 101, 105, 107, 104, 110]
+    df = make_ohlcv(closes)
+    eq, blot = run_strategy_walkforward(AlwaysLong(), {"AAA": df},
+                                        top_n=1, capital=1000.0, trade_cost_bps=0.0)
+    # warmup_bars=2 -> first traded bar is index 1 (close 102); last bar never trades
+    expected = 1000.0 * closes[-1] / closes[1]
+    assert eq["equity"].iloc[-1] == pytest.approx(expected)
+    # last bar has no forward return -> no trade recorded on it
+    assert blot["date"].max() == df.index[-2]
+
+
+def test_short_position_realizes_negative_of_return(make_ohlcv):
+    """A short on a rising bar loses exactly the bar's return."""
+
+    class AlwaysShort(AlwaysLong):
+        def generate_signal(self, df):
+            return DailySignal(position=-1, confidence=1.0, reason="always short")
+
+    closes = [100, 100, 110]  # traded bar: +10% move
+    eq, _ = run_strategy_walkforward(AlwaysShort(), {"AAA": make_ohlcv(closes)},
+                                     top_n=1, capital=1000.0, trade_cost_bps=0.0)
+    assert eq["equity"].iloc[-1] == pytest.approx(1000.0 * 0.9)
+
+
+def test_hold_strategy_has_flat_equity_but_full_date_rows(make_ohlcv):
+    """No-pick days still get equity rows so strategies compare on equal series."""
+    df = make_ohlcv([100, 101, 102, 103])
+    eq, blot = run_strategy_walkforward(NeverTrade(), {"AAA": df}, capital=500.0)
+    assert len(eq) == 4
+    assert (eq["equity"] == 500.0).all()
+    assert blot.empty
+
+
+def test_top_n_caps_positions_by_confidence(make_ohlcv):
+    """When more signals fire than top_n, the highest-confidence tickers win."""
+
+    class ConfidenceByTicker(DailyStrategy):
+        name = "conf-by-ticker"
+        RANK = {"AAA": 0.1, "BBB": 0.9, "CCC": 0.5}
+
+        def generate_signal(self, df):
+            return DailySignal(position=1, confidence=self.RANK[df.attrs["ticker"]],
+                               reason="ranked")
+
+    data = {}
+    for t in ("AAA", "BBB", "CCC"):
+        df = make_ohlcv([100, 101, 102, 103])
+        df.attrs["ticker"] = t
+        data[t] = df
+    eq, blot = run_strategy_walkforward(ConfidenceByTicker(), data,
+                                        top_n=2, capital=1000.0, trade_cost_bps=0.0)
+    picked = set(blot["ticker"])
+    assert picked == {"BBB", "CCC"}
+    assert (blot["weight"] == 0.5).all()
+
+
+def test_warmup_bars_respected(make_ohlcv):
+    """No trades before the strategy's warmup history is available."""
+
+    class SlowWarmup(AlwaysLong):
+        @property
+        def warmup_bars(self):
+            return 5
+
+    df = make_ohlcv([100, 101, 102, 103, 104, 105, 106])
+    _, blot = run_strategy_walkforward(SlowWarmup(), {"AAA": df},
+                                       top_n=1, trade_cost_bps=0.0)
+    # first bar with >=5 bars of history is index 4
+    assert blot["date"].min() == df.index[4]
+
+
+def test_empty_data_returns_empty_frames():
+    """No data -> empty equity and blotter, no crash."""
+    eq, blot = run_strategy_walkforward(AlwaysLong(), {})
+    assert eq.empty and blot.empty
+
+
+# ---------------------------------------------------------------------------
+# _capped_normalized: pure weight math
+# ---------------------------------------------------------------------------
+
+def test_capped_normalized_single_pick_hits_the_cap():
+    """A lone signal sizes at exactly the cap, remainder implicitly cash."""
+    w = _capped_normalized({"A": 5.0}, cap=0.30)
+    assert w == pytest.approx({"A": 0.30})
+
+
+def test_capped_normalized_proportional_before_cap():
+    """Confidences 0.9 vs 0.3 at equal vol split 0.75/0.25 (no cap binding)."""
+    w = _capped_normalized({"A": 0.9, "B": 0.3}, cap=0.99)
+    assert w["A"] == pytest.approx(0.75)
+    assert w["B"] == pytest.approx(0.25)
+
+
+def test_capped_normalized_never_exceeds_cap_and_never_exceeds_one():
+    """Property check across a spread of raw weights."""
+    raw = {"A": 10.0, "B": 1.0, "C": 1.0, "D": 1.0, "E": 1.0}
+    w = _capped_normalized(raw, cap=0.30)
+    assert all(v <= 0.30 + 1e-9 for v in w.values())
+    assert sum(w.values()) <= 1.0 + 1e-9
+
+
+def test_capped_normalized_fills_full_investment_when_capacity_allows():
+    """5 picks x 0.30 cap = 1.5 capacity >= 1 -> redistribution reaches sum=1."""
+    raw = {"A": 10.0, "B": 1.0, "C": 1.0, "D": 1.0, "E": 1.0}
+    w = _capped_normalized(raw, cap=0.30)
+    assert sum(w.values()) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_capped_normalized_leaves_cash_when_capacity_is_short():
+    """2 picks x 0.30 cap = 0.6 capacity < 1 -> shortfall stays uninvested."""
+    w = _capped_normalized({"A": 1.0, "B": 1.0}, cap=0.30)
+    assert w == pytest.approx({"A": 0.30, "B": 0.30})
+    assert sum(w.values()) == pytest.approx(0.60)
+
+
+# ---------------------------------------------------------------------------
+# conf_vol sizing integration
+# ---------------------------------------------------------------------------
+
+def test_conf_vol_lower_vol_ticker_gets_larger_weight(make_ohlcv):
+    """Equal confidence, half the volatility -> (before cap) twice the weight."""
+
+    class ConstConfidence(DailyStrategy):
+        name = "const-conf"
+
+        def generate_signal(self, df):
+            return DailySignal(position=1, confidence=1.0, reason="const")
+
+    calm = [100.0]
+    wild = [100.0]
+    rng_calm = [0.001, -0.001] * 15
+    rng_wild = [0.02, -0.02] * 15
+    for c, w in zip(rng_calm, rng_wild):
+        calm.append(calm[-1] * (1 + c))
+        wild.append(wild[-1] * (1 + w))
+
+    data = {"CALM": make_ohlcv(calm), "WILD": make_ohlcv(wild)}
+    _, blot = run_strategy_walkforward(ConstConfidence(), data, top_n=2,
+                                       sizing="conf_vol", max_pos=0.99,
+                                       trade_cost_bps=0.0)
+    last_day = blot["date"].max()
+    row = blot[blot["date"] == last_day].set_index("ticker")
+    assert row.loc["CALM", "weight"] > row.loc["WILD", "weight"]
+
+
+def test_conf_vol_single_signal_day_sizes_at_cap(make_ohlcv):
+    """A lone signal under conf_vol takes exactly max_pos; equity reflects it."""
+
+    class OnlyFirstTickerLongs(DailyStrategy):
+        name = "only-aaa"
+
+        def generate_signal(self, df):
+            return DailySignal(1, 1.0, "long") if df.attrs.get("ticker") == "AAA" else HOLD
+
+    aaa = make_ohlcv([100, 102, 104, 110])
+    aaa.attrs["ticker"] = "AAA"
+    bbb = make_ohlcv([100, 101, 102, 103])
+    bbb.attrs["ticker"] = "BBB"
+    eq, blot = run_strategy_walkforward(OnlyFirstTickerLongs(), {"AAA": aaa, "BBB": bbb},
+                                        top_n=5, sizing="conf_vol", max_pos=0.30,
+                                        capital=1000.0, trade_cost_bps=0.0)
+    assert (blot["weight"] == 0.30).all()
+    # realized return on each trading day = 0.30 * that bar's move
+    last_realized = eq["realized"].iloc[eq["realized"].to_numpy().nonzero()[0][-1]]
+    assert abs(last_realized) < 1.0  # sanity: never treats 0.30 as 100%
+
+
+def test_conf_vol_no_volatility_data_falls_back_to_equal(make_ohlcv):
+    """Too little history for any pick's vol -> equal split, not a crash."""
+
+    class AlwaysLongAll(AlwaysLong):
+        pass
+
+    # only 2 bars total: warmup satisfied (needs 2) but rolling(20) vol is all-NaN
+    data = {"AAA": make_ohlcv([100, 102, 104]), "BBB": make_ohlcv([100, 99, 101])}
+    _, blot = run_strategy_walkforward(AlwaysLongAll(), data, top_n=2,
+                                       sizing="conf_vol", max_pos=0.99,
+                                       trade_cost_bps=0.0)
+    assert not blot.empty
+    assert (blot["weight"] == 0.5).all()
+
+
+def test_equal_sizing_mode_is_regression_pinned(make_ohlcv):
+    """sizing='equal' (the default) reproduces the pre-sizing-feature output."""
+    df = make_ohlcv([100, 102, 101, 105, 107, 104, 110])
+    eq, blot = run_strategy_walkforward(AlwaysLong(), {"AAA": df},
+                                        top_n=1, capital=1000.0, trade_cost_bps=0.0)
+    expected = 1000.0 * 110 / 102
+    assert eq["equity"].iloc[-1] == pytest.approx(expected)
+    assert (blot["weight"] == 1.0).all()
+
+
+# ---------------------------------------------------------------------------
+# Cost model wiring (dual-track equity_gross / equity / cost columns)
+# ---------------------------------------------------------------------------
+
+def test_default_cost_model_reproduces_flat_trade_cost_bps_exactly(make_ohlcv):
+    """Omitting cost_model, using trade_cost_bps, matches the pre-cost-model
+    equity exactly — the regression pin the plan requires."""
+    df = make_ohlcv([100, 102, 101, 105, 107, 104, 110])
+    eq, _ = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, top_n=1,
+                                     capital=1000.0, trade_cost_bps=1.0)
+    # hand-computed legacy formula: equity *= (1+realized)*(1-0.0001) each traded day
+    equity = 1000.0
+    closes = [100, 102, 101, 105, 107, 104, 110]
+    for i in range(1, len(closes) - 1):  # bar[1..len-2] trade (warmup=2, last bar excluded)
+        realized = closes[i + 1] / closes[i] - 1
+        equity *= (1 + realized) * (1 - 1.0 / 10000.0)
+    assert eq["equity"].iloc[-1] == pytest.approx(equity)
+
+
+def test_cost_model_none_equity_equals_equity_gross(make_ohlcv):
+    """--cost_model none: net and gross tracks are identical every day."""
+    df = make_ohlcv([100, 102, 101, 105, 107, 104, 110])
+    eq, _ = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, top_n=1,
+                                     capital=1000.0, cost_model=CostModel(mode="none"))
+    assert (eq["equity"] == eq["equity_gross"]).all()
+    assert (eq["cost"] == 0.0).all()
+
+
+def test_realistic_costs_penalize_churn_more_than_buy_and_hold(make_ohlcv):
+    """Same gross path, but a strategy that flips direction every day should
+    net out lower than one that holds the same direction throughout, under
+    realistic (turnover-based) costs."""
+
+    class Flipper(DailyStrategy):
+        name = "flipper"
+
+        def generate_signal(self, df):
+            # alternate long/short based on row count parity
+            pos = 1 if len(df) % 2 == 0 else -1
+            return DailySignal(pos, 1.0, "flip")
+
+    class Steady(DailyStrategy):
+        name = "steady"
+
+        def generate_signal(self, df):
+            return DailySignal(1, 1.0, "steady")
+
+    closes = [100 + i for i in range(15)]  # steady uptrend, same gross path for both
+    model = CostModel(mode="realistic", commission_bps=0.0, half_spread_bps=5.0, impact_coeff_bps=20.0)
+
+    eq_flip, _ = run_strategy_walkforward(Flipper(), {"AAA": make_ohlcv(closes)},
+                                          top_n=1, capital=1000.0, cost_model=model)
+    eq_steady, _ = run_strategy_walkforward(Steady(), {"AAA": make_ohlcv(closes)},
+                                            top_n=1, capital=1000.0, cost_model=model)
+    assert eq_flip["cost"].sum() > eq_steady["cost"].sum()
+
+
+def test_realistic_costs_are_free_when_holding_the_same_position(make_ohlcv):
+    """A strategy that never changes its target weight pays zero realistic
+    cost after the first entry — holding is free."""
+    df = make_ohlcv([100, 101, 102, 103, 104, 105, 106, 107])
+    model = CostModel(mode="realistic", commission_bps=0.0, half_spread_bps=5.0, impact_coeff_bps=20.0)
+    eq, _ = run_strategy_walkforward(AlwaysLong(), {"AAA": df}, top_n=1,
+                                     capital=1000.0, cost_model=model)
+    # first traded day pays entry cost; every subsequent traded day (same
+    # weight, same ticker, same direction) should cost exactly 0. Rows before
+    # warmup are never traded at all (n_picks=0), so isolate traded rows first.
+    traded = eq[eq["n_picks"] > 0]
+    assert traded["cost"].iloc[0] > 0.0
+    assert (traded["cost"].iloc[1:] == 0.0).all()

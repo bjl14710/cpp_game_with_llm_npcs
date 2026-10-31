@@ -1,0 +1,26 @@
+---
+name: github-access-state
+description: "GH_TOKEN is a placeholder (\"TOKEN\"), gh CLI absent; git push works via macOS keychain; repo renamed to bjl14710/algo_trading_practice"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: dab334e7-6f0e-462a-b515-30f6fe7db987
+---
+
+As of 2026-07-05, GitHub access in this project is split:
+- `GH_TOKEN` env var is the literal 5-char placeholder string `TOKEN` — all REST
+  API calls (issues, labels, PRs) fail 401. User was asked to put a real PAT in
+  `~/.zshrc`; verify with a quick `/user` API call before any API work.
+- `gh` CLI is NOT installed. Use `requests` (already a project dep) against the
+  REST API instead.
+- `git push` over https WORKS — osxkeychain credential helper has valid credentials.
+- The repo was RENAMED: `bjl14710/HFT_practice` → `bjl14710/algo_trading_practice`
+  (old URL redirects; consider `git remote set-url origin` and updating API paths).
+- A ready-to-run issue-creation script for the strategy-layer batch was left in the
+  2026-07-05 session scratchpad (`create_arena_issues.py`); it targets the OLD repo
+  name in its `REPO` constant — update if reused.
+
+**Why:** Two overnight/planning sessions were blocked or degraded by assuming the
+token was valid; checking auth first saves the whole session shape.
+**How to apply:** At the start of any GitHub-dependent task, test the token and use
+the new repo name in API URLs. Related: [[strategy-arena-progress]].

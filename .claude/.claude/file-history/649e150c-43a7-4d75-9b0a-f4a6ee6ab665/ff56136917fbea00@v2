@@ -1,0 +1,63 @@
+# Exercise 05 — VHDL Testbenches for the fpga/ Modules
+
+**Lesson:** [0002 — FPGAs in HFT](../../docs/learning/lessons/0002-fpgas-in-hft.html)
+**Toolchain:** [GHDL](https://github.com/ghdl/ghdl) (opt-in — these tests
+skip automatically when it isn't installed).
+
+```bash
+sudo apt-get install ghdl          # simulator
+sudo apt-get install gtkwave       # optional, waveform viewer
+```
+
+## The exercise
+
+The repo's three VHDL modules ([`fpga/`](../../fpga/)) have **no
+testbenches** — they've only ever been synthesized, never simulated. You
+write the testbenches. Each stub here already has the boring parts (entity,
+DUT instantiation, clock generator, reset); your job is the **stimulus
+process**: drive the inputs through the valid handshake and `assert` the
+expected outputs with `severity error`.
+
+| Stub | DUT | What to verify |
+|------|-----|----------------|
+| `tb_market_maker.vhd` | `market_maker.vhd` | 1-cycle latency, one-shot valid pulse, Q16.16 buy/sell = mid ∓ spread/2 |
+| `tb_moving_average_trader.vhd` | `moving_average_trader.vhd` | warm-up gating, 2-cycle latency, BUY/SELL/HOLD vs the prior-window average |
+| `tb_linear_regression_predictor.vhd` | `linear_regression_predictor.vhd` | 2-cycle latency, accumulator value, BUY/SELL/HOLD thresholds |
+
+## Acceptance criteria
+
+```bash
+bash scripts/run_vhdl_tests.sh                    # all three
+bash scripts/run_vhdl_tests.sh tb_market_maker    # one at a time
+uv run pytest tests/exercises/test_05_vhdl.py -v  # via pytest
+```
+
+A testbench passes when the run ends with `TB PASSED` and no
+`severity error` assertions fired (the runner uses `--assert-level=error`,
+so any failed assert kills the simulation with a nonzero exit).
+
+## Hints
+
+- Timing idiom: set inputs after a rising edge, `wait until
+  rising_edge(clk)` (the DUT samples here), then `wait for 1 ns;` before
+  asserting — registered outputs settle a delta after the edge.
+- Two of the DUTs have a subtlety worth catching: the MA trader's first
+  `valid_out` comes one sample *after* warm-up, and its average excludes
+  the current sample. Read the stage-1 process carefully — finding this in
+  the RTL is most of the exercise.
+- Pick test values that are exact in the fixed-point encodings (Q16.16 for
+  the market maker, ×100 for the MA trader, ×1000 for the predictor).
+- Each stub ends with a `report ... severity failure` sentinel — delete it
+  once your stimulus is in place (it's how the grader knows the exercise is
+  untouched).
+- Waveforms: add `--wave=out.ghw` to the `ghdl --elab-run` line in
+  `scripts/run_vhdl_tests.sh` and open with `gtkwave out.ghw`.
+
+## Check yourself
+
+Solutions: [`solutions/05_vhdl_testbench/`](../../solutions/05_vhdl_testbench/)
+— or run them directly:
+
+```bash
+HFT_EXERCISE_TARGET=solutions bash scripts/run_vhdl_tests.sh
+```

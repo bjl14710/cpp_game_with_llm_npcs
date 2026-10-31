@@ -1,0 +1,93 @@
+#pragma once
+#include <cstdint>
+#include <cstddef>
+#include <functional>
+#include <string>
+
+// Nasdaq TotalView-ITCH 5.0 message subset needed for limit-order-book
+// reconstruction.  Only Add / Delete / Replace / Execute are parsed;
+// all other message types are skipped without reading past the buffer.
+//
+// All multi-byte fields in ITCH are big-endian.
+
+namespace itch {
+
+// ─── Message types (ITCH 5.0 §4) ────────────────────────────────────────────
+
+enum class MsgType : char {
+    AddOrder           = 'A',
+    AddOrderMPID       = 'F',
+    ExecuteOrder       = 'E',
+    ExecuteOrderPrice  = 'C',
+    CancelOrder        = 'X',
+    DeleteOrder        = 'D',
+    ReplaceOrder       = 'U',
+    // All other types are skipped.
+    Unknown            = '\0',
+};
+
+// ─── Parsed message structs ──────────────────────────────────────────────────
+
+// All messages carry the ITCH timestamp: nanoseconds since midnight (ET),
+// 6 bytes big-endian on the wire, widened to uint64_t here.
+
+struct AddOrder {
+    uint64_t timestamp_ns;
+    uint64_t order_ref;
+    char     side;          // 'B' or 'S'
+    uint32_t shares;
+    uint32_t price;         // price * 10000 (ITCH fixed-point 4 decimals)
+};
+
+struct ExecuteOrder {
+    uint64_t timestamp_ns;
+    uint64_t order_ref;
+    uint32_t executed_shares;
+};
+
+struct DeleteOrder {
+    uint64_t timestamp_ns;
+    uint64_t order_ref;
+};
+
+struct ReplaceOrder {
+    uint64_t timestamp_ns;
+    uint64_t old_order_ref;
+    uint64_t new_order_ref;
+    uint32_t shares;
+    uint32_t price;
+};
+
+// ─── Visitor callbacks ───────────────────────────────────────────────────────
+
+struct MessageVisitor {
+    std::function<void(const AddOrder&)>     on_add;
+    std::function<void(const ExecuteOrder&)> on_execute;
+    std::function<void(const DeleteOrder&)>  on_delete;
+    std::function<void(const ReplaceOrder&)> on_replace;
+};
+
+// ─── Parser ─────────────────────────────────────────────────────────────────
+
+struct ParseStats {
+    uint64_t add_count     = 0;
+    uint64_t execute_count = 0;
+    uint64_t delete_count  = 0;
+    uint64_t replace_count = 0;
+    uint64_t skipped_count = 0;
+    uint64_t error_count   = 0;
+};
+
+// Parse a buffer containing concatenated ITCH 5.0 messages.
+// Each message is preceded by a 2-byte big-endian *length* field
+// (the "Moldupd64" framing used by Nasdaq's sample files).
+//
+// Calls the appropriate visitor callback for each recognised message type.
+// Never reads past the end of the buffer.  Unknown message types increment
+// skipped_count and advance past them using their declared length.
+ParseStats parse_buffer(
+    const uint8_t* buf,
+    std::size_t    len,
+    MessageVisitor visitor);
+
+}  // namespace itch

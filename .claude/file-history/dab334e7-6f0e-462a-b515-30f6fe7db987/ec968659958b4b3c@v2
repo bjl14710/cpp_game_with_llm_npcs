@@ -1,0 +1,90 @@
+# Plan: ATR Trailing Stops + Portfolio-Level Drawdown Breaker
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea (one paragraph)
+Two risk controls. (1) Per-position trailing stops sized to each stock's
+own volatility: an ATR(14)-based trail (default 3×ATR) instead of a flat
+percentage, applied as an ENGINE overlay in the daily walk-forward so any
+strategy gets it without changing its signal code. (2) A portfolio-level
+max-drawdown circuit breaker: when the COMBINED equity across all live
+ledgers falls past a configurable threshold from its peak, every live
+strategy is paused at once — the existing per-strategy breaker's big
+sibling, same manual-resume philosophy.
+
+## Design Decisions
+- **Stops are an engine overlay, not strategy logic.** The daily loop's
+  one-bar-hold semantics make "position continuity" implicit (same ticker
+  re-picked = held; #55 costs already treat it that way). The overlay
+  tracks continuous same-direction holdings per ticker: entry bar, running
+  peak (long) / trough (short), trail = peak − k×ATR(14). When a bar's Close
+  crosses the trail, the ticker is SUPPRESSED from candidates for
+  `cooldown_days` (default 5) — a deterministic function of history, so
+  live backfill replays identically (the arena invariant).
+- **ATR from the data already fetched** (High/Low/Close true range, Wilder
+  smoothing, min_periods guard). Flat-percentage fallback intentionally NOT
+  provided — vol-sized or nothing, per the idea.
+- **Opt-in**: `--atr_stop 3.0` (multiplier; absent = no stops, current
+  behavior regression-pinned). Persisted as screened configuration.
+- **Portfolio breaker**: `portfolio_equity(date) = Σ` live ledgers' equity
+  (PASS + PROBATION); running peak since the last portfolio resume;
+  breach of `--portfolio_dd` (default 0.25) → every live strategy set
+  PAUSED + a `portfolio_events` row; `arena-run resume --all` restores all
+  portfolio-paused strategies (each anchored like individual resumes).
+  Individual trips/resumes unaffected. Evaluated once per `arena-run live`
+  after all ticks.
+- Multi-strategy overlap note: combined equity double-counts nothing —
+  ledgers are independent paper accounts; the portfolio breaker treats
+  their sum as "the book."
+
+## Out of Scope
+- Intraday PaperEngine (has its own SL/TP already); take-profit trails;
+  per-strategy ATR multipliers (one global flag per run this version);
+  auto-resume of anything.
+
+## Affected Areas
+- `walkforward_sim.py` — ATR series computation; holding-continuity +
+  trail tracker in `run_strategy_walkforward`; candidate suppression +
+  cooldown; blotter rows gain `stopped` marker on forced exits.
+- `strategy_arena.py` — `--atr_stop`/`--cooldown_days` persisted;
+  `portfolio_events` table; portfolio drawdown evaluation in `cmd_live`;
+  `resume --all`.
+- `analyze_equity.py` — report: `stopped_trades` count column;
+  portfolio-paused strategies show `paused_since` as today.
+- New tests: `tests/test_atr_stops.py` (trail math pinned; long stopped on
+  trail breach; cooldown suppresses re-entry; determinism across replay),
+  portfolio-breaker cases in `tests/test_circuit_breaker.py`.
+
+## Implementation Order
+1. ATR + trail tracker + suppression in the loop, opt-in flag, tests.
+2. Arena persistence of stop config + blotter marker + report count.
+3. Portfolio breaker: combined-equity computation, trip-all, events table,
+   `resume --all`, tests (individual breaker interplay pinned).
+
+## Acceptance Criteria
+- [ ] Synthetic runaway-then-crash series: long position exits within one
+      bar of the 3×ATR trail breach; without the flag it holds (pinned)
+- [ ] Stopped ticker absent from candidates for exactly cooldown_days
+- [ ] Same data replayed (live backfill) reproduces identical stops
+- [ ] Combined ledgers breaching --portfolio_dd pauses ALL live strategies,
+      one portfolio_events row; `resume --all` restores them with fresh
+      anchors; individually-tripped strategies need their own resume
+- [ ] No-flag runs byte-identical to current behavior
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Direction flip (long→short) on consecutive picks | Continuity resets; new trail from the new entry |
+| ATR undefined (short history) | No stop until ATR warms up (min_periods), documented |
+| Gap through the trail (Close far past it) | Exit at that bar's realized return — no intrabar fill fantasy; noted honestly |
+| Portfolio breaker + individual breaker same tick | Individual evaluated first; portfolio sweep skips already-PAUSED — one event each, no double rows |
+| Only one live strategy | Portfolio breaker degenerates to a second threshold on that ledger — fine |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(risk): ATR trailing-stop overlay in the daily walk-forward` — trail tracker, suppression, cooldown, tests
+2. `feat(arena): portfolio-level drawdown breaker + resume --all` — combined equity, portfolio_events, tests

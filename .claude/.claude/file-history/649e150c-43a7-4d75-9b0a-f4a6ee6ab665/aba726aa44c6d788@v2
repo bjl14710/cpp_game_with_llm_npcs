@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0009 — Low-Latency C++ for Trading</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bad { border-left-color: var(--bad); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Latency-cost table */
+  .lat-cost {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px; margin: 16px 0;
+  }
+  .lat-row {
+    display: grid; grid-template-columns: 240px 1fr 90px; gap: 12px;
+    padding: 8px 12px; border-radius: 6px; margin: 4px 0;
+    align-items: center; font-size: 14px;
+  }
+  .lat-row .lat-name { color: var(--accent); }
+  .lat-row .lat-num { text-align: right; font-family: "JetBrains Mono", monospace; color: var(--accent-2); }
+  .lat-row.fast { background: rgba(74, 222, 128, .06); }
+  .lat-row.medium { background: rgba(255, 212, 121, .06); }
+  .lat-row.slow { background: rgba(248, 113, 113, .06); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0009</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Hot-path rules</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Latency cost table</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Stack/heap/cache</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Branch &amp; inline</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 In this project</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Low-Latency C++ for Trading</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>:
+    <code>gradient_boosting/sample_with_gradient_boosting.cpp</code> already shows
+    the shape of a hot loop: per tick it computes a signal and reacts. Its own
+    comment on line 62 admits the moving-average step is O(window) when it could
+    be O(1). That single line is the entire low-latency C++ mindset — and once
+    you spot it, you spot it everywhere.
+  </p>
+
+  <!-- ===================== §1 HOT-PATH RULES ===================== -->
+  <h2>1. The hot-path rules — what you don't do inside a per-tick loop</h2>
+  <p>
+    A "hot path" is the code that runs once per market event. In a real HFT system
+    that's millions of times a second. The rule is brutal: <strong>everything
+    inside the hot loop must be predictable, allocation-free, and side-effect-free
+    apart from the trade decision itself.</strong>
+  </p>
+
+  <div class="grid3">
+    <div class="card">
+      <h4>No heap allocation</h4>
+      <p>No <code>new</code>, no <code>malloc</code>, no <code>std::vector::push_back</code> that might grow. Allocators take an unpredictable lock and can call the OS.</p>
+    </div>
+    <div class="card">
+      <h4>No I/O</h4>
+      <p><code>std::cout</code>, <code>printf</code>, <code>fprintf(stderr, ...)</code> — all forbidden. Each call locks a stream, formats, and may syscall.</p>
+    </div>
+    <div class="card">
+      <h4>No syscalls</h4>
+      <p>No <code>read</code>, <code>write</code>, <code>gettimeofday</code> outside of fast user-space variants. A syscall = a context switch = 100s of ns minimum.</p>
+    </div>
+    <div class="card">
+      <h4>No exceptions</h4>
+      <p>The throw path is enormously expensive and unpredictable. HFT code is usually compiled <code>-fno-exceptions</code> with explicit error codes.</p>
+    </div>
+    <div class="card">
+      <h4>No virtual calls</h4>
+      <p>Indirect calls through a vtable kill inlining and cost a memory dereference. Use templates and CRTP for compile-time polymorphism.</p>
+    </div>
+    <div class="card">
+      <h4>No locks</h4>
+      <p>If two threads must share data, use lock-free queues (SPSC ring buffers) and atomics. <code>std::mutex</code> in the hot path is a panic button.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Mental model:</strong> the hot loop is closer to embedded firmware than
+    to "normal" C++. Pre-allocate everything before the loop; touch only those
+    arenas during it; report or log only after a batch of ticks.
+  </div>
+
+  <!-- ===================== §2 LATENCY COSTS ===================== -->
+  <h2>2. What things actually cost (on a modern Linux server)</h2>
+  <p>
+    Memorize this table. Every "is this fast enough?" question reduces to looking
+    up entries in it.
+  </p>
+
+  <div class="lat-cost">
+    <div class="lat-row fast"><span class="lat-name">Register read / ALU op</span><span>add, sub, integer multiply</span><span class="lat-num">~0.3 ns</span></div>
+    <div class="lat-row fast"><span class="lat-name">L1 cache hit</span><span>data already hot</span><span class="lat-num">~1 ns</span></div>
+    <div class="lat-row fast"><span class="lat-name">L2 / L3 cache hit</span><span>data on this core / socket</span><span class="lat-num">~3–15 ns</span></div>
+    <div class="lat-row fast"><span class="lat-name">Branch mispredict</span><span>pipeline flush + refill</span><span class="lat-num">~10–20 ns</span></div>
+    <div class="lat-row medium"><span class="lat-name">Main memory (RAM) read</span><span>cache miss</span><span class="lat-num">~100 ns</span></div>
+    <div class="lat-row medium"><span class="lat-name">Spinlock acquire (uncontended)</span><span>atomic CAS</span><span class="lat-num">~25 ns</span></div>
+    <div class="lat-row medium"><span class="lat-name">Heap allocation</span><span><code>malloc</code> small block, glibc</span><span class="lat-num">~30–200 ns</span></div>
+    <div class="lat-row medium"><span class="lat-name">Virtual function call</span><span>vtable load + indirect jmp</span><span class="lat-num">~5–15 ns + missed inlining</span></div>
+    <div class="lat-row slow"><span class="lat-name">Lightweight syscall (e.g. <code>read</code>)</span><span>kernel entry/exit</span><span class="lat-num">~300 ns – 1 µs</span></div>
+    <div class="lat-row slow"><span class="lat-name">Mutex lock under contention</span><span>kernel may sleep the thread</span><span class="lat-num">~1–10 µs</span></div>
+    <div class="lat-row slow"><span class="lat-name"><code>std::cout</code> one line, ~30 chars</span><span>iostream lock + format + write</span><span class="lat-num">~1–5 µs</span></div>
+    <div class="lat-row slow"><span class="lat-name">Exception throw + catch</span><span>stack unwind</span><span class="lat-num">~1–10 µs</span></div>
+  </div>
+
+  <p>
+    Compare to your FPGA's ~4 ns clock cycle (Lesson 0002). A single
+    <code>std::cout</code> line in the hot path of a C++ trading loop is roughly
+    <strong>1000 FPGA cycles</strong>. That's the ratio you're fighting.
+  </p>
+
+  <!-- ===================== §3 STACK/HEAP/CACHE ===================== -->
+  <h2>3. Stack, heap, and cache — the three things you allocate from</h2>
+
+  <h3>Stack: free, fast, fixed size</h3>
+<pre><span class="ty">double</span> prices[<span class="num">256</span>];                <span class="com">// Stack: instant, no allocator. Fixed size.</span>
+std::<span class="ty">array</span>&lt;<span class="ty">double</span>, <span class="num">256</span>&gt; prices;     <span class="com">// Same, but typed and bounds-checked in debug.</span>
+</pre>
+  <p>
+    The stack is just a pointer move. Allocation is "free" — no calls, no locks,
+    no fragmentation. The catch: size must be known at compile time, and large
+    stack frames can overflow.
+  </p>
+
+  <h3>Heap: flexible, expensive, unpredictable</h3>
+<pre>std::vector&lt;<span class="ty">double</span>&gt; prices;          <span class="com">// Heap-backed; capacity grows as you push_back.</span>
+prices.<span class="fn">push_back</span>(p);                <span class="com">// May trigger malloc + memcpy under the hood.</span>
+</pre>
+  <p>
+    Every <code>push_back</code> past current capacity triggers a heap allocation
+    and a copy of all existing elements. In the hot path, that single line can
+    cost hundreds of nanoseconds — non-deterministically.
+  </p>
+
+  <p>The HFT-grade alternative: a <strong>ring buffer</strong> on the stack.</p>
+
+<pre><span class="kw">template</span>&lt;<span class="kw">typename</span> T, std::<span class="ty">size_t</span> N&gt;
+<span class="kw">class</span> RingBuffer {
+    std::<span class="ty">array</span>&lt;T, N&gt; data_{};
+    std::<span class="ty">size_t</span>        head_ = <span class="num">0</span>;       <span class="com">// Next write slot</span>
+    std::<span class="ty">size_t</span>        count_ = <span class="num">0</span>;      <span class="com">// How many filled, capped at N</span>
+<span class="kw">public</span>:
+    <span class="fn">void</span> <span class="fn">push</span>(T v) <span class="kw">noexcept</span> {
+        data_[head_] = v;
+        head_ = (head_ + <span class="num">1</span>) % N;            <span class="com">// O(1), no allocation, ever</span>
+        <span class="kw">if</span> (count_ &lt; N) ++count_;
+    }
+    T <span class="fn">oldest</span>() <span class="kw">const</span> <span class="kw">noexcept</span> {              <span class="com">// O(1) accessor for the FIFO front</span>
+        <span class="kw">return</span> data_[(head_ + N - count_) % N];
+    }
+};
+</pre>
+
+  <p>
+    Same shape as the VHDL <code>price_reg</code> array in
+    <code>fpga/moving_average_trader.vhd</code> — fixed-size FIFO with O(1) updates.
+    The hardware and the C++ converge for exactly the same reasons.
+  </p>
+
+  <h3>Cache: where the data <em>actually</em> lives</h3>
+  <p>
+    A "memory read" that misses L1 costs ~100 ns. A read that hits L1 costs ~1 ns.
+    Hot-path C++ is largely an exercise in keeping working sets <strong>cache-resident</strong>.
+  </p>
+
+  <ul>
+    <li><strong>Cache line = 64 bytes.</strong> Reading one byte fetches the whole line.</li>
+    <li><strong>Sequential access is fast</strong> because the hardware prefetches the next line. <code>std::vector</code> wins big here; linked lists lose horribly.</li>
+    <li><strong>Struct-of-Arrays beats Array-of-Structs</strong> when you process one field at a time across many rows (vectorization-friendly).</li>
+    <li><strong>False sharing</strong>: two threads writing different variables that happen to share a cache line will ping-pong the line between caches. Pad to 64 bytes (<code>alignas(64)</code>) to avoid it.</li>
+  </ul>
+
+  <!-- ===================== §4 BRANCH & INLINE ===================== -->
+  <h2>4. Branch prediction, inlining, and the cost of being wrong</h2>
+
+  <h3>Branches</h3>
+  <p>
+    The CPU pipeline is ~15 stages deep. To keep it full, the front-end
+    <em>predicts</em> the outcome of every conditional branch before it knows the
+    answer. When the prediction is right (the common case in a well-trained
+    predictor), branches are nearly free. When it's wrong, the pipeline flushes
+    and refills — ~10–20 ns wasted.
+  </p>
+  <p>
+    In <code>sample_with_gradient_boosting.cpp</code>:
+  </p>
+<pre><span class="kw">if</span> (price &lt; movingAvg - SPREAD) { ... }
+<span class="kw">else if</span> (price &gt; movingAvg + SPREAD &amp;&amp; position &gt; <span class="num">0</span>) { ... }
+<span class="com">// otherwise, hold position — the common case</span>
+</pre>
+  <p>
+    Most ticks fall into the "hold" branch (the dead-band). The compiler/predictor
+    will learn this. But you can make it explicit:
+  </p>
+<pre><span class="kw">if</span> (price &lt; movingAvg - SPREAD) [[<span class="kw">unlikely</span>]] {       <span class="com">// C++20</span>
+    <span class="com">// rare buy path</span>
+} <span class="kw">else if</span> (price &gt; movingAvg + SPREAD &amp;&amp; position &gt; <span class="num">0</span>) [[<span class="kw">unlikely</span>]] {
+    <span class="com">// rare sell path</span>
+}
+<span class="com">// implicit common "hold" — predicted not-taken, no mispredict</span>
+</pre>
+  <p>
+    <code>[[likely]]</code> and <code>[[unlikely]]</code> hint to the compiler
+    about which branch to keep on the fall-through (hot) path. They don't replace
+    the hardware predictor; they help the compiler lay out code so the cold paths
+    sit far away and don't pollute the icache.
+  </p>
+
+  <h3>Inlining and the case against virtual calls</h3>
+  <p>
+    A function call is ~5 ns at minimum (call/ret + register spilling). Inlining
+    removes that overhead and lets the compiler optimize across the boundary.
+    Templates are aggressively inlined; <code>virtual</code> calls cannot be inlined
+    in general because the target isn't known until runtime.
+  </p>
+
+  <p>
+    HFT C++ replaces dynamic polymorphism with <strong>static polymorphism via
+    templates</strong> or the Curiously Recurring Template Pattern (CRTP):
+  </p>
+
+<pre><span class="kw">template</span>&lt;<span class="kw">class</span> Strategy&gt;
+<span class="fn">void</span> <span class="fn">runTick</span>(Strategy&amp; s, <span class="ty">double</span> price) {
+    s.<span class="fn">onTick</span>(price);    <span class="com">// Direct call, fully inlinable, no vtable</span>
+}
+
+<span class="kw">struct</span> MeanReversion {
+    <span class="fn">void</span> <span class="fn">onTick</span>(<span class="ty">double</span> p) <span class="kw">noexcept</span> { <span class="com">/* … */</span> }
+};
+
+<span class="fn">runTick</span>(mr_strategy, p);   <span class="com">// Compiler sees MeanReversion::onTick directly.</span>
+</pre>
+
+  <h3>The <code>noexcept</code> contract</h3>
+  <p>
+    Marking a function <code>noexcept</code> tells the compiler "this can't throw"
+    — which lets it skip generating the exception-unwinding scaffolding and inline
+    more aggressively. Use it on every leaf function in the hot path.
+  </p>
+
+  <!-- ===================== §5 IN THIS PROJECT ===================== -->
+  <h2>5. In this project — rewriting <code>sample_with_gradient_boosting.cpp</code> for HFT</h2>
+
+  <h3>The original (lines 69–82, lightly trimmed)</h3>
+  <span class="filepath">gradient_boosting/sample_with_gradient_boosting.cpp</span>
+<pre><span class="ty">double</span> <span class="fn">calculateMovingAverage</span>(<span class="kw">const</span> std::vector&lt;<span class="ty">double</span>&gt;&amp; prices, <span class="ty">int</span> window) {
+    <span class="kw">if</span> (<span class="kw">static_cast</span>&lt;<span class="ty">int</span>&gt;(prices.<span class="fn">size</span>()) &lt; window) {
+        <span class="kw">return</span> prices.<span class="fn">back</span>();
+    }
+    <span class="ty">double</span> sum = <span class="num">0.0</span>;
+    <span class="kw">for</span> (<span class="ty">int</span> i = <span class="kw">static_cast</span>&lt;<span class="ty">int</span>&gt;(prices.<span class="fn">size</span>()) - window;
+         i &lt; <span class="kw">static_cast</span>&lt;<span class="ty">int</span>&gt;(prices.<span class="fn">size</span>()); ++i) {
+        sum += prices[i];
+    }
+    <span class="kw">return</span> sum / <span class="kw">static_cast</span>&lt;<span class="ty">double</span>&gt;(window);
+}
+</pre>
+  <p>What's costly here, line by line:</p>
+  <ul>
+    <li><strong>Argument <code>const std::vector&amp;</code></strong>: vector header lives on the heap; member access is a pointer chase. <em>Mostly</em> fine because of caching, but the API ties this function to a heap container.</li>
+    <li><strong>Loop body</strong>: 20 additions and 1 division per call. Now multiply by 1000 ticks = 20,000 adds. The lesson 0002 VHDL does this in <em>one add and one subtract per tick, period</em>.</li>
+    <li><strong>Caller's <code>prices.push_back(price)</code></strong>: heap reallocation when capacity is exceeded — non-deterministic stall.</li>
+    <li><strong>Caller's <code>std::cout &lt;&lt; "BUY at" &lt;&lt; …</code></strong>: ~1–5 µs per executed trade line. Lethal at high tick rates.</li>
+  </ul>
+
+  <h3>The HFT-grade rewrite (sketch)</h3>
+<pre><span class="kw">template</span>&lt;std::<span class="ty">size_t</span> WINDOW&gt;
+<span class="kw">class</span> MeanReversion {
+    std::<span class="ty">array</span>&lt;<span class="ty">double</span>, WINDOW&gt; ring_{};   <span class="com">// stack-allocated ring buffer</span>
+    std::<span class="ty">size_t</span>                    head_ = <span class="num">0</span>;
+    std::<span class="ty">size_t</span>                    count_ = <span class="num">0</span>;
+    <span class="ty">double</span>                         sum_ = <span class="num">0.0</span>;    <span class="com">// running sum, like the VHDL</span>
+    <span class="kw">static constexpr</span> <span class="ty">double</span> SPREAD = <span class="num">0.05</span>;        <span class="com">// compile-time constant</span>
+
+<span class="kw">public</span>:
+    <span class="kw">enum class</span> Action : <span class="ty">uint8_t</span> { Hold = <span class="num">0</span>, Buy = <span class="num">1</span>, Sell = <span class="num">2</span> };
+
+    Action <span class="fn">onTick</span>(<span class="ty">double</span> price) <span class="kw">noexcept</span> {
+        <span class="com">// 1. Incremental sum update: O(1) regardless of WINDOW.</span>
+        <span class="kw">if</span> (count_ == WINDOW) {
+            sum_ -= ring_[head_];        <span class="com">// drop the oldest</span>
+        } <span class="kw">else</span> {
+            ++count_;                    <span class="com">// warm-up</span>
+        }
+        ring_[head_] = price;
+        sum_ += price;
+        head_ = (head_ + <span class="num">1</span>) % WINDOW;
+
+        <span class="kw">if</span> (count_ &lt; WINDOW) [[<span class="kw">unlikely</span>]] <span class="kw">return</span> Action::Hold;
+
+        <span class="kw">const</span> <span class="ty">double</span> avg = sum_ / WINDOW;
+        <span class="kw">if</span> (price &lt; avg - SPREAD) [[<span class="kw">unlikely</span>]] <span class="kw">return</span> Action::Buy;
+        <span class="kw">if</span> (price &gt; avg + SPREAD) [[<span class="kw">unlikely</span>]] <span class="kw">return</span> Action::Sell;
+        <span class="kw">return</span> Action::Hold;
+    }
+};
+</pre>
+  <p>What we changed and why:</p>
+  <ul>
+    <li><strong>Stack ring buffer</strong> instead of <code>std::vector</code>: no allocation, ever.</li>
+    <li><strong>Running sum</strong>: O(1) update instead of O(WINDOW) recomputation — same trick as <code>fpga/moving_average_trader.vhd</code> from Lesson 0002.</li>
+    <li><strong>Templated <code>WINDOW</code> + <code>constexpr SPREAD</code></strong>: both baked in at compile time. The compiler can unroll and constant-fold.</li>
+    <li><strong><code>noexcept</code></strong>: no exception machinery generated.</li>
+    <li><strong>Return value, not <code>std::cout</code></strong>: the I/O is moved out of the hot loop. The caller decides whether to log; in production, log to a pre-allocated ring of records and flush from a separate thread.</li>
+    <li><strong><code>[[unlikely]]</code></strong>: signals the cold paths so the hold-case stays on the fall-through.</li>
+  </ul>
+
+  <div class="callout">
+    <strong>What you don't have to change:</strong> the algorithm. Same mean-reversion
+    rule, same parameters, same trades. All the gains come from the discipline of
+    how the same math is expressed in the language. That's the whole HFT C++ skill.
+  </div>
+
+  <h3>And on the egress side: <code>gradient_boosting_data_fetching.cpp</code></h3>
+  <span class="filepath">gradient_boosting/gradient_boosting_data_fetching.cpp (lines 15–22)</span>
+<pre>std::<span class="ty">string</span> dataBuffer;                       <span class="com">// global, heap-backed, grows unboundedly</span>
+
+<span class="ty">size_t</span> <span class="fn">WriteCallback</span>(<span class="fn">void</span>* contents, ... ) {
+    <span class="ty">size_t</span> totalSize = size * nmemb;
+    dataBuffer.<span class="fn">append</span>((<span class="ty">char</span>*)contents, totalSize);   <span class="com">// heap-allocates on growth</span>
+    <span class="kw">return</span> totalSize;
+}
+</pre>
+  <p>
+    cURL over HTTPS to Alpha Vantage is a <em>cold path</em> — it polls a REST API
+    once per minute. So this file is fine as written; the unbounded heap append is
+    a future cleanup, not an HFT crime. The lesson is to know which path you're on:
+    you allocate freely on the cold path and never on the hot path.
+  </p>
+
+  <!-- ===================== §6 CONTRASTS ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4><code>std::array</code> vs <code>std::vector</code></h4>
+      <p>
+        <strong><code>std::array&lt;T, N&gt;</code></strong>: fixed size, stack-allocated, no
+        allocator. Use everywhere in the hot path.
+        <strong><code>std::vector&lt;T&gt;</code></strong>: dynamic size, heap-backed. Use
+        only when size genuinely varies and only outside hot loops.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Latency vs Throughput</h4>
+      <p>
+        <strong>Latency</strong>: time for one operation. HFT obsesses about this.
+        <strong>Throughput</strong>: operations per second. Data engineering
+        obsesses about this. They often trade off; busy-polling burns CPU
+        (lowers throughput) to cut latency.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Cache vs Main memory</h4>
+      <p>
+        <strong>Cache</strong> (L1/L2/L3): on-die SRAM, 1–15 ns access. Holds recently
+        used lines automatically. <strong>Main memory</strong>: off-die DRAM, ~100 ns.
+        The 100× factor is what makes "is the data hot in cache" the most important
+        question in performance work.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Inlining vs Calling</h4>
+      <p>
+        An <strong>inlined</strong> function has its body pasted at the call site —
+        no call/ret, full cross-function optimization. A <strong>called</strong>
+        function (especially <code>virtual</code>) is an opaque jump that blocks
+        optimization. Templates inline; virtuals don't.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Branch prediction vs Branch elimination</h4>
+      <p>
+        <strong>Prediction</strong>: the CPU guesses the outcome. Cheap when right.
+        <strong>Elimination</strong>: write the code so there's no branch at all
+        (e.g. <code>x = cond * a + (1 - cond) * b;</code>). When the branch is
+        unpredictable, eliminating it can win even with extra arithmetic.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Mutex vs Atomic</h4>
+      <p>
+        A <strong>mutex</strong> blocks the thread on contention; the kernel may
+        sleep it (1–10 µs). An <strong>atomic</strong> operation is a single
+        instruction (CAS, LOCK XADD) costing ~25 ns. Lock-free queues use
+        atomics to communicate between threads without locks.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. The biggest single per-tick latency cost in the original <code>sample_with_gradient_boosting.cpp</code> hot loop is:</p>
+    <ul class="options">
+      <li data-correct="false" data-why="`prices.push_back(price)` is occasionally costly when capacity is exceeded, but most ticks it's just a write. It's not the dominant cost — the I/O is.">The <code>prices.push_back(price)</code> growing the vector.</li>
+      <li data-correct="true"  data-why="Right. A single std::cout line with formatting is ~1–5 µs. That's roughly 1000× one O(WINDOW) recompute and dwarfs every other source of latency in the loop. Worse, it executes on every TRADE, which is exactly the path you most want to be fast.">The <code>std::cout</code> formatted print on every trade — roughly 1–5 µs per call.</li>
+      <li data-correct="false" data-why="Integer division is ~5–10 ns. Real but small. The std::cout call costs ~1000× more.">The integer division in the moving-average computation.</li>
+      <li data-correct="false" data-why="A function call costs ~5 ns. Inlining it would shave some time but not transform the loop. The dominant cost is the I/O.">The function call to <code>calculateMovingAverage</code> on every tick.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. In the rewritten hot loop, why is the moving-average update marked O(1) instead of O(WINDOW)?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The C++ standard library doesn't have a 'special O(1)' moving-average. The trick is algorithmic, not library-provided.">Because <code>std::array</code> exposes a built-in O(1) moving average.</li>
+      <li data-correct="true"  data-why="Correct. By maintaining a running sum and incrementally adding the new price while subtracting the oldest from the ring buffer, the cost per tick is one add and one subtract, independent of WINDOW. This is the same idea as the VHDL version in fpga/moving_average_trader.vhd from Lesson 0002.">Because the running sum is updated incrementally — add the new price, subtract the oldest from the ring — costing one add and one subtract per tick regardless of WINDOW.</li>
+      <li data-correct="false" data-why="Compiler unrolling reduces overhead but doesn't change algorithmic complexity. Summing 20 elements is still O(20) work no matter how it's unrolled.">Because the compiler unrolls the WINDOW-element loop into a single vector instruction.</li>
+      <li data-correct="false" data-why="Caching is a separate axis of performance. Both versions touch similar memory; what changes between them is the number of operations, not the cache behavior.">Because the ring buffer fits entirely in L1 cache and so each access is free.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Your colleague adds <code>virtual</code> to the <code>onTick</code> function so they can swap strategies at runtime. From a latency standpoint:</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The vtable cost is real but small (~5–15 ns). The bigger loss is that virtual calls block the compiler from inlining onTick and from optimizing across the call boundary, costing more in practice than the dispatch itself.">It adds about 5 ns from the vtable load — small enough to ignore.</li>
+      <li data-correct="true"  data-why="Right. The direct cost (vtable load + indirect jmp) is ~5–15 ns, but the bigger loss is that the compiler cannot inline onTick or optimize across the call. Template-based static polymorphism (CRTP) achieves the same swappability at compile time with zero runtime cost.">It blocks inlining and cross-function optimization, which often costs more than the vtable dispatch itself. Use a template parameter or CRTP instead.</li>
+      <li data-correct="false" data-why="No — virtual calls are still called every time. The CPU may predict the target of an indirect jump, but the inlining loss is real and persistent.">Modern CPUs predict the vtable target perfectly, so it's free.</li>
+      <li data-correct="false" data-why="Inheritance has nothing to do with cache locality of strategy state — that depends on how the strategy object is laid out and accessed, not on whether onTick is virtual.">It improves cache locality by enforcing a common base class layout.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. Why is the <code>SPREAD</code> constant in the rewrite declared <code>static constexpr</code> instead of <code>const</code>?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Both keywords prevent modification. The difference is when the value is available — constexpr makes it a compile-time constant the compiler can fold into the generated code.">Because <code>const</code> doesn't actually prevent modification in C++.</li>
+      <li data-correct="true"  data-why="Right. constexpr guarantees the value is known at compile time, so the compiler can fold it directly into the generated comparisons (e.g. fuse 'avg - 0.05' as a single immediate). It also lets the value participate in other constant expressions, like template arguments. Plain const may still be a runtime read.">Because <code>constexpr</code> makes the value available at compile time, letting the compiler fold it into the generated machine code as an immediate instead of a memory load.</li>
+      <li data-correct="false" data-why="Both end up at the same place in memory eventually; ROM vs RAM placement is a linker concern, not the reason for constexpr. The runtime benefit is constant folding.">Because <code>constexpr</code> stores the value in ROM instead of RAM.</li>
+      <li data-correct="false" data-why="No — constexpr doesn't itself introduce a syscall. It removes work, it doesn't add it.">Because <code>const</code> would cause a syscall on every access.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. You want to log every executed trade for compliance, but you can't afford <code>std::cout</code> in the hot loop. Which pattern is the right HFT-grade fix?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Disabling stdout buffering makes std::cout *slower*, not faster, because every write becomes an immediate syscall.">Set <code>std::cout</code> to unbuffered mode so it stops slowing down the loop.</li>
+      <li data-correct="true"  data-why="Right. Pre-allocate a fixed-size SPSC (single-producer, single-consumer) ring of trade records. The hot loop writes one record (a few stores into a stack/L1-resident buffer) and advances a head index. A separate logger thread tails the ring and writes to disk/stderr at its own pace. Latency-wise this is ~10–20 ns per trade vs ~1–5 µs for std::cout.">Pre-allocate a fixed-size lock-free ring buffer of trade records; the hot loop writes a record and advances a head index; a separate thread reads from the tail and writes to disk.</li>
+      <li data-correct="false" data-why="Throwing an exception is one of the slowest things you can do — ~1–10 µs and unbounded variability. It's the opposite of the right fix.">Throw an exception with the trade details and let a logging handler catch it.</li>
+      <li data-correct="false" data-why="Skipping logs makes the latency problem 'go away' by making the system non-compliant. The correct answer keeps logs but moves the work off the hot path.">Skip logging entirely — compliance can reconstruct trades from broker confirmations.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. A profiler reports that 40% of CPU time in your hot loop is in <code>operator new</code>. Without seeing the code, name three plausible culprits and the corresponding fix.</summary>
+    <p>
+      Three usual suspects: (a) a <code>std::vector::push_back</code> growing past
+      capacity each loop — pre-<code>reserve()</code> or switch to a stack
+      <code>std::array</code> / ring buffer; (b) a <code>std::string</code> built per
+      iteration for logging — replace with a fixed-size <code>char[64]</code> or a
+      lock-free record ring; (c) a <code>std::unique_ptr</code> or
+      <code>std::shared_ptr</code> created per tick to wrap some "event" — drop
+      the pointer and pass the object by value or by reference into a pre-allocated
+      buffer. The general fix is the same in all three: move allocation out of the
+      loop, keep the loop allocator-free.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You add <code>[[unlikely]]</code> to a branch and benchmark — no improvement. Why might this be expected?</summary>
+    <p>
+      Two common reasons. First, modern CPU branch predictors are very good; if
+      your branch is well-predicted by the hardware already, the hint is redundant.
+      Second, <code>[[unlikely]]</code> mainly affects code layout (keeping cold
+      paths far from the hot path), so the win shows up in instruction cache
+      pressure — visible only when you have a complex hot loop or measure under
+      realistic working-set conditions. On a tight microbenchmark with one branch,
+      the hint can be a no-op. The right discipline: use the hints, but never
+      ship a "fix" without a measurement against the real workload.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. The repo's <code>main.cpp</code> uses ONNX Runtime to load a gradient-boosting model. Roughly how does ONNX inference fit into the latency budget, and what would a "moving the model to the hot path" decision look like?</summary>
+    <p>
+      ONNX Runtime inference for a small GBM is typically in the 1–10 µs range
+      on a CPU — orders of magnitude slower than the per-tick arithmetic in
+      <code>onTick</code>, but still fast enough to gate a decision once per
+      <em>second</em> or even per <em>0.1 s</em>. The decision tree to move the
+      model into the hot path is the same as Lesson 0007's hls4ml conversation:
+      either compile a tiny quantized model into HDL on the FPGA (target ns
+      latency), or keep ONNX as a cold-path signal that updates parameters
+      consumed by a fast hand-rolled hot loop (target µs latency). Don't try
+      to put ONNX Runtime in the per-tick loop verbatim; the right pattern is
+      <em>fast hot loop reads parameters that a slow path occasionally refreshes</em>.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidates: <strong>Mean-variance portfolio optimization</strong>
+    (long overdue — closes the modeling → allocation arc), or
+    <strong>Lock-free queues and busy polling</strong> as a deep dive into
+    the producer/consumer pattern this lesson hinted at.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

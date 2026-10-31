@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0027 — Bind Pose vs Rest Pose in glTF Skinning</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #4a7; padding-bottom: .4rem; }
+  h2 { color: #365; margin-top: 2rem; }
+  code, pre { background: #f4f6f4; border-radius: 4px; }
+  code { padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; border-left: 4px solid #4a7; }
+  .callout { background: #eef7ee; border-left: 4px solid #4a7; padding: .7rem 1rem;
+             margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .warn { background: #fdf3e7; border-left-color: #d90; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #cdd; padding: .45rem .6rem; text-align: left; }
+  th { background: #f0f5f0; }
+</style>
+</head>
+<body>
+<h1>Bind Pose vs Rest Pose in glTF Skinning</h1>
+<p><em>From session 9 (issues #139/#142): why the Quaternius characters froze in a
+T-pose with moving fingers — and the one matrix that fixed both the statues and
+the walk cycle.</em></p>
+
+<h2>Two different "default poses" live in one glTF file</h2>
+<p>A skinned glTF carries <strong>two</strong> skeleton configurations, and nothing
+forces them to match:</p>
+<table>
+<tr><th></th><th>Where it lives</th><th>What it means</th></tr>
+<tr>
+  <td><strong>Bind pose</strong></td>
+  <td><code>skins[0].inverseBindMatrices</code> (one inverse matrix per joint) —
+      and implicitly in the mesh <em>vertices</em>, which are stored in this pose</td>
+  <td>The pose the mesh was <em>skinned in</em> (usually a T- or A-pose, arms out
+      so weight painting is easy)</td>
+</tr>
+<tr>
+  <td><strong>Rest pose</strong></td>
+  <td>Each joint <em>node's</em> local <code>translation/rotation/scale</code>,
+      composed down the node hierarchy</td>
+  <td>The skeleton's default stance when no animation plays (often a natural
+      arms-down pose)</td>
+</tr>
+</table>
+<p>The skinning equation ties them together. For a vertex <code>v</code> stored in
+bind space:</p>
+<pre>v' = &Sigma;<sub>j</sub> w<sub>j</sub> · G<sub>j</sub>(pose) · IBM<sub>j</sub> · v</pre>
+<p><code>IBM</code> (inverse bind matrix) takes the vertex from bind space into the
+joint's local space; the joint's global pose matrix <code>G</code> takes it back out
+into whatever pose is playing. Skip the IBM and you silently assume
+bind&nbsp;==&nbsp;rest.</p>
+
+<h2>The symptom we chased</h2>
+<div class="callout warn">
+<p><strong>Fingers animated, shoulders didn't.</strong> The pack's characters stood
+in a T-pose; Idle/Walk clips moved fingers, elbows, and legs, but the arms stayed
+horizontal forever. Death collapsed the body — with the arms still out.</p>
+</div>
+<p>Every hypothesis that blames the <em>data</em> fails in turn (we checked: arm
+bones are targeted by LINEAR rotation channels; joints are topologically sorted;
+no unbaked IK bones). The decisive test was computing, from raw JSON alone, the
+<em>global</em> wrist position in the rest pose: <code>(±0.25, 1.01)</code> —
+hip height. <strong>The rest pose has the arms down.</strong> The animation keeps
+joints near rest, i.e. near arms-down. The data was right all along.</p>
+
+<h2>The engine assumption</h2>
+<p>raylib's glTF loader never reads <code>inverseBindMatrices</code>. It builds
+<code>model.bindPose</code> from the joint nodes' world transforms — the
+<em>rest</em> pose — and its CPU skinning computes deltas relative to that:</p>
+<pre>boneMatrix<sub>j</sub> &approx; G<sub>j</sub>(anim) · G<sub>j</sub>(rest)<sup>-1</sup>   // rest-relative delta
+v' = &Sigma; w<sub>j</sub> · boneMatrix<sub>j</sub> · v          // v assumed stored in REST space</pre>
+<p>That convention is fine when bind&nbsp;==&nbsp;rest (most exporters, including
+KayKit's, do this — which is why those characters animate perfectly). This pack
+stores vertices in T-pose bind over an arms-down rest: for arm joints the
+animation &approx; rest, so the delta &approx; identity, so the T-pose vertices
+render unchanged. Legs matched between the two poses — that's why they moved.</p>
+
+<h2>The fix: re-bake vertices into the engine's convention, once</h2>
+<pre>// at load, per vertex (Assets.cpp, rebakeVerticesToRestPose):
+skinMat[j] = restGlobal[j] * inverseBind[j];      // bind space -> rest space
+v_rest     = &Sigma; w_j * skinMat[boneId_j] * v_bind;  // write back + re-upload VBO</pre>
+<p>One transform at load and both tiers snap into place: static (unanimated)
+characters stand in the natural arms-down rest pose, and
+<code>UpdateModelAnimation</code>'s rest-relative deltas become exactly right, so
+Idle/Walk play as authored. The IBMs came from the glTF's own JSON (it's the same
+file the model loader parses; the buffer is a base64 <code>data:</code> URI —
+raylib's <code>DecodeDataBase64</code> reads it).</p>
+
+<div class="callout">
+<p><strong>Bonus insight:</strong> because every file in the pack shares one
+skeleton and animation library, posing a head-model and a body-model with the
+same clip at the same time makes a <em>mixed</em> head (witch head on soldier
+body) ride its neck bone perfectly — bone attachment with no attachment code.</p>
+</div>
+
+<h2>How to recognize this bug in the wild</h2>
+<ul>
+<li><strong>Partial animation</strong> — some limbs move, others freeze. The frozen
+ones are where rest &ne; bind; the moving ones are where they agree.</li>
+<li>The model looks right in Blender/Bevy/three.js (they apply IBMs) but wrong in
+your engine.</li>
+<li>Ground-truth from data, not from renderers: glTF is JSON — compose the node
+hierarchy yourself and print a wrist position. Ten lines of python ends the
+guessing.</li>
+</ul>
+
+<h2>Check yourself</h2>
+<ol>
+<li>A skinned mesh's vertices are stored in which pose — and which glTF field maps
+them out of it?</li>
+<li>Why did the <em>legs</em> animate correctly in an engine that ignores IBMs?</li>
+<li>Your engine shows a character in a T-pose that Blender shows arms-down, and
+clips barely move the arms. What single load-time transform fixes it?</li>
+</ol>
+</body>
+</html>

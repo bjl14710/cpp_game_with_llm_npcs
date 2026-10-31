@@ -1,0 +1,108 @@
+"""Tests for predict_next --explain (SHAP per-prediction attribution).
+
+Offline: the model is a throwaway GBM trained in-test, market data is a
+monkeypatched synthetic frame, and the bundle lives in tmp_path (locally
+written by the test itself — the repo's standing bundle trust model).
+"""
+import sys
+
+import joblib
+import numpy as np
+import pandas as pd
+import pytest
+from sklearn.ensemble import GradientBoostingRegressor
+
+import predict_next
+from paper_trading_sim import build_features
+
+FEATURES = ["close", "ret_1d", "ma_5", "ma_10", "ma_gap", "vol_10", "rsi_14"]
+
+
+def _make_ohlcv(closes):
+    idx = pd.bdate_range("2024-01-02", periods=len(closes))
+    closes = list(closes)
+    return pd.DataFrame({"Open": closes, "High": [c * 1.01 for c in closes],
+                         "Low": [c * 0.99 for c in closes], "Close": closes,
+                         "Volume": [1e6] * len(closes)}, index=idx)
+
+
+@pytest.fixture
+def tiny_bundle(tmp_path):
+    """(bundle_path, ohlcv_df): a 5-tree GBM trained on synthetic features."""
+    rng = np.random.RandomState(42)
+    closes = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.01, 250))
+    df = _make_ohlcv(closes)
+    feats = build_features(df)
+    model = GradientBoostingRegressor(n_estimators=5, random_state=42)
+    model.fit(feats[FEATURES].values, feats["fwd_ret_1d"].values)
+    path = tmp_path / "bundle.joblib"
+    joblib.dump({"model": model, "features": FEATURES}, path)
+    return str(path), df
+
+
+def test_shap_values_sum_to_the_models_own_prediction(tiny_bundle):
+    """The standard SHAP consistency check: base value + sum(shap) == prediction."""
+    shap = pytest.importorskip("shap")
+    path, df = tiny_bundle
+    bundle = joblib.load(path)
+    model = bundle["model"]
+    feats = build_features(df)
+    X = feats[FEATURES].iloc[[-1]].astype(float).values
+
+    explainer = shap.TreeExplainer(model)
+    shap_vals = explainer.shap_values(X)[0]
+    base_value = float(np.asarray(explainer.expected_value).ravel()[0])
+    reconstructed = base_value + float(np.sum(shap_vals))
+    assert reconstructed == pytest.approx(float(model.predict(X)[0]), abs=1e-9)
+
+
+def _run_main(monkeypatch, tiny_bundle, tmp_path, extra_args):
+    """Drive predict_next.main() offline with a synthetic market."""
+    path, df = tiny_bundle
+    monkeypatch.setattr(predict_next, "fetch_latest_frames",
+                        lambda tickers, period: {"AAA": df, "BBB": df * 1.01})
+    out_csv = tmp_path / "preds.csv"
+    argv = ["predict_next", "--model", path, "--tickers", "AAA,BBB",
+            "--optimize", "none", "--out_csv", str(out_csv)] + extra_args
+    monkeypatch.setattr(sys, "argv", argv)
+    predict_next.main()
+    return pd.read_csv(out_csv)
+
+
+def test_main_without_explain_has_no_shap_column(monkeypatch, tiny_bundle, tmp_path):
+    """Default path byte-identical shape: no shap_top column, shap never imported."""
+    preds = _run_main(monkeypatch, tiny_bundle, tmp_path, [])
+    assert "shap_top" not in preds.columns
+    assert len(preds) == 2
+
+
+def test_main_with_explain_adds_top_k_attributions(monkeypatch, tiny_bundle, tmp_path):
+    pytest.importorskip("shap")
+    explain_csv = tmp_path / "shap_long.csv"
+    preds = _run_main(monkeypatch, tiny_bundle, tmp_path,
+                      ["--explain", "--explain_top_k", "2",
+                       "--explain_csv", str(explain_csv)])
+    assert "shap_top" in preds.columns
+    # top-k formatting: exactly 2 "feature:+value" entries per ticker
+    for entry in preds["shap_top"]:
+        parts = entry.split(",")
+        assert len(parts) == 2
+        assert all(":" in p for p in parts)
+
+    # long-format dump covers every feature for every ticker
+    long_df = pd.read_csv(explain_csv)
+    assert set(long_df["feature"]) == set(FEATURES)
+    assert set(long_df["ticker"]) == {"AAA", "BBB"}
+
+    # the top-1 feature in shap_top matches the largest |shap_value| in the dump
+    for ticker, group in long_df.groupby("ticker"):
+        best = group.loc[group["shap_value"].abs().idxmax(), "feature"]
+        top_entry = preds.set_index("ticker").loc[ticker, "shap_top"].split(",")[0]
+        assert top_entry.startswith(f"{best}:")
+
+
+def test_explain_top_k_larger_than_feature_count_is_capped(monkeypatch, tiny_bundle, tmp_path):
+    pytest.importorskip("shap")
+    preds = _run_main(monkeypatch, tiny_bundle, tmp_path,
+                      ["--explain", "--explain_top_k", "99"])
+    assert all(len(e.split(",")) == len(FEATURES) for e in preds["shap_top"])

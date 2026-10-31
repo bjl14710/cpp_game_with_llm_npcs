@@ -1,0 +1,9 @@
+{
+  "id": "1",
+  "subject": "Issue #2: Visual testing infrastructure",
+  "description": "conftest.py with compare_screenshot, golden dir, gitignore, pytest qt_api config, requirements-dev.txt",
+  "activeForm": "Building visual test infrastructure (#2)",
+  "status": "completed",
+  "blocks": [],
+  "blockedBy": []
+}

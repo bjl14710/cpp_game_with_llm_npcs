@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0007 — Monitoring Live Strategies Statistically</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161d26; --ink:#dfe6ee; --dim:#8b97a5; --line:#2a3644;
+          --up:#4cc38a; --down:#e5534b; --gold:#e8a33d; --hit:#4cc38a; --miss:#e5534b; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f4ef; --panel:#ffffff; --ink:#1d2733; --dim:#617080; --line:#d8d2c4;
+            --up:#0e7a4f; --down:#c0362c; --gold:#a86a10; --hit:#0e7a4f; --miss:#c0362c; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.6 -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2rem 1.25rem 5rem; }
+  h1 { font:700 1.3rem/1.3 'SF Mono', Menlo, Consolas, monospace; margin:0 0 .3rem; }
+  .chip, button, .qmeta { font-family:'SF Mono', Menlo, Consolas, monospace; }
+  .chip { display:inline-block; border:1px solid var(--line); border-radius:999px;
+          padding:.3rem .8rem; margin:.25rem; cursor:pointer; font-size:.8rem; user-select:none; }
+  .chip.on { border-color:var(--gold); color:var(--gold); }
+  button { background:var(--panel); color:var(--ink); border:1px solid var(--line);
+           border-radius:8px; padding:.55rem 1.1rem; font-size:.85rem; cursor:pointer; }
+  button:hover { border-color:var(--gold); }
+  button:focus-visible, .chip:focus-visible, .options li:focus-visible
+    { outline:2px solid var(--gold); outline-offset:2px; }
+  button.primary { border-color:var(--gold); color:var(--gold); font-weight:700; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+           padding:1.2rem 1.4rem; margin:1rem 0; }
+  .qmeta { display:flex; justify-content:space-between; font-size:.75rem; color:var(--dim); }
+  .progress { height:8px; background:var(--line); border-radius:4px; margin:.5rem 0 1.2rem; }
+  .progress > div { height:100%; background:var(--gold); border-radius:4px; width:0; transition:width .25s; }
+  @media (prefers-reduced-motion: reduce) { .progress > div { transition:none; } }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px;
+        padding:.9rem; overflow-x:auto; font:12.5px/1.5 'SF Mono', Menlo, monospace; }
+  .options { list-style:none; padding:0; }
+  .options li { border:1px solid var(--line); border-radius:8px; padding:.6rem .9rem;
+                margin:.45rem 0; cursor:pointer; background:var(--bg); }
+  .options li:hover { border-color:var(--gold); }
+  .options li.right { border-color:var(--up); }
+  .options li.wrong { border-color:var(--down); }
+  textarea { width:100%; min-height:7rem; background:var(--bg); color:var(--ink);
+             border:1px solid var(--line); border-radius:8px; padding:.7rem;
+             font:14px/1.5 -apple-system, sans-serif; }
+  .feedback { margin-top:.8rem; font-size:.92rem; }
+  .hit { color:var(--hit); } .missed { color:var(--miss); }
+  .model { border-left:3px solid var(--gold); padding:.5rem .9rem; margin-top:.8rem;
+           background:var(--bg); border-radius:0 8px 8px 0; font-size:.95rem; }
+  .nav { display:flex; justify-content:space-between; margin-top:1.2rem; gap:.5rem; }
+  .note { font-size:.78rem; color:var(--dim); }
+  .score-big { font:700 2rem/1 'SF Mono', Menlo, monospace; color:var(--gold); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+<h1>DRILL 0007 · monitoring live strategies statistically</h1>
+<p class="note">Companion to lesson 0036. Written answers are keyword-scanned —
+the scan is rough; always self-judge against the model answer.</p>
+
+<section id="start">
+  <div class="panel">
+    <p><strong>Channels:</strong></p>
+    <div id="chips"></div>
+    <p style="margin-top:1rem"><button class="primary" id="begin">begin ▸</button></p>
+  </div>
+</section>
+
+<section id="quiz" class="hidden">
+  <div class="qmeta"><span id="qpos"></span><span id="qtag"></span><span id="qtype"></span></div>
+  <div class="progress"><div id="pbar"></div></div>
+  <div class="panel" id="qbody"></div>
+  <div class="nav"><button id="prev">◂ prev</button><button id="next">next ▸</button></div>
+</section>
+
+<section id="results" class="hidden">
+  <div class="panel">
+    <p class="score-big" id="finalScore"></p>
+    <div id="breakdown"></div>
+    <p style="margin-top:1rem">
+      <button class="primary" id="reviewMissed">review only what I missed ▸</button>
+      <button id="restart">full restart</button>
+    </p>
+  </div>
+</section>
+
+<script>
+const QUESTIONS = [
+// ---- inputs (PSI) ----
+{ ch:"inputs", type:"written",
+  q:"Write the PSI formula and the three conventional reading bands. Why is the reference percentage per bin exactly 1/n_bins in this repo's implementation?",
+  concepts:[
+    {c:"Σ (live% − ref%)·ln(live%/ref%)", terms:["ln","log","live","ref","sum","Σ"]},
+    {c:"bands: <0.1 / 0.1–0.25 / >0.25", terms:["0.1","0.25"]},
+    {c:"edges ARE the training quantiles → uniform reference", terms:["quantile","decile","own","uniform","by construction"]}],
+  model:"PSI = Σ over bins of (live%ᵢ − ref%ᵢ)·ln(live%ᵢ/ref%ᵢ). Bands: <0.1 no significant shift, 0.1–0.25 moderate, >0.25 significant (the flag line). The reference is uniform (1/n_bins per bin) by construction because the bin edges are the training data's own deciles — each decile contains exactly 10% of training values by definition (drift.py)."},
+{ ch:"inputs", type:"written",
+  q:"Why does predict-next --check_drift pool the day's feature rows ACROSS tickers before computing PSI, rather than checking each ticker separately?",
+  concepts:[
+    {c:"PSI needs a distribution, not one point", terms:["distribution","one point","single point","sample"]},
+    {c:"one row per ticker per day", terms:["one row","per ticker","few values"]}],
+  model:"Each ticker contributes exactly one feature row per day; a single point has no distribution to compare against decile bins. Pooling across the universe gives the day's live SAMPLE, which PSI can meaningfully bin (drift.py's check_drift docstring calls this out)."},
+{ ch:"inputs", type:"mc",
+  q:"A bundle saved before the drift feature is run with --check_drift. What happens?",
+  opts:[
+    {t:"A clear one-line skip notice; nothing crashes", ok:true,
+     why:"bundle.get('feature_reference') is None → check_drift returns None → the CLI prints how to enable it. Backward compatibility was an explicit acceptance criterion."},
+    {t:"KeyError on feature_reference", ok:false,
+     why:".get() with a None-check was used precisely to avoid this."},
+    {t:"The reference is computed on the fly from live data", ok:false,
+     why:"That would compare live data to itself — PSI would be ~0 by construction and meaningless."},
+    {t:"The bundle is silently re-saved with a reference added", ok:false,
+     why:"Mutating a model bundle behind the user's back was never on the table."}],
+},
+{ ch:"inputs", type:"written",
+  q:"Input drift (PSI) vs train/serve skew (lesson 0035): same symptom, different disease. Distinguish them and their fixes.",
+  concepts:[
+    {c:"skew = pipeline bug, inputs computed differently", terms:["pipeline","bug","computed differently","code","skew"]},
+    {c:"drift = world changed, pipeline correct", terms:["world","market","regime","legitimately","changed"]},
+    {c:"fix: code vs retrain", terms:["fix","retrain","golden","test"]}],
+  model:"Train/serve skew is YOUR code feeding the model inputs computed differently than in training (a semantics/availability bug) — fixed in code, guarded by golden tests. PSI drift is the world legitimately changing while the pipeline is byte-correct — 'fixed' by retraining on recent data or retiring the model. Both can show as live underperformance; the PSI table tells you which one you're looking at."},
+// ---- outputs (divergence) ----
+{ ch:"outputs", type:"written",
+  q:"Write the divergence z formula, its two gating conditions before any flag can fire, and why the test is one-sided.",
+  concepts:[
+    {c:"z = (live_mean − bt_mean)/(bt_std/√n_live)", terms:["sqrt","√","bt_std","live_mean","se"]},
+    {c:"needs stored fingerprint AND min_live_days", terms:["fingerprint","min_live","20","stored","bt_mean"]},
+    {c:"one-sided: only underperformance = overfit signal", terms:["one-sided","underperform","overfit","luck"]}],
+  model:"z = (live_mean − bt_mean) / (bt_std / √n_live). It evaluates only when (1) the strategy has a stored backtest fingerprint (bt_mean/bt_std from screening) and (2) at least min_live_days (20) live daily returns exist — small samples have enormous SEs and would flag everything. One-sided (z < −2) because the alert exists to catch overfitting, which manifests as underperformance; flagging lucky outperformance would teach you to ignore the alarm."},
+{ ch:"outputs", type:"written",
+  q:"Why is the divergence comparison a statistical test against a stored fingerprint instead of re-running the backtest over the live period and diffing the two equity curves?",
+  concepts:[
+    {c:"live and backtest share one deterministic code path", terms:["same code","deterministic","shared","one code path"]},
+    {c:"shadow backtest ≡ live ledger → zero by construction", terms:["identical","zero","by construction","reproduce","equal"]}],
+  model:"In this arena, live_tick literally replays run_strategy_walkforward — live IS a deterministic recompute. A same-period shadow backtest would reproduce the live ledger exactly and measure nothing. The meaningful question is whether live RETURNS are consistent with the DISTRIBUTION the screening backtest exhibited — a sampling question, answered with a z-test."},
+{ ch:"outputs", type:"mc",
+  q:"A strategy stays diverged for 10 consecutive live days. How many DIVERGED event rows exist?",
+  opts:[
+    {t:"One — events fire on state transitions, not on states", ok:true,
+     why:"Transition-based alerting: one DIVERGED on entry, one RECOVERED on exit. Ten rows of the same fact would be noise, not signal."},
+    {t:"Ten — one per evaluated day", ok:false,
+     why:"That's exactly the spam the transition design avoids."},
+    {t:"Zero until it recovers", ok:false,
+     why:"The DIVERGED row is written when the flag flips on, not retroactively."},
+    {t:"Two — one at entry, one mid-streak refresh", ok:false,
+     why:"There is no refresh event; the current state lives on the strategy row."}],
+},
+{ ch:"outputs", type:"mc",
+  q:"vol_ratio (live std / backtest std) sits in the report but never alerts. Why include it?",
+  opts:[
+    {t:"Live volatility far above backtest is the other overfit tell — visible context at zero alert cost", ok:true,
+     why:"The mean test catches level shifts; a vol explosion with an OK mean is the other way live can betray a fragile edge. It informs the human without adding an alarm to ignore."},
+    {t:"It is needed to compute the z statistic", ok:false,
+     why:"z uses the BACKTEST std for its SE, not the ratio."},
+    {t:"It triggers the circuit breaker at 2.0", ok:false,
+     why:"The breaker keys on drawdown only."},
+    {t:"It replaces MaxDD in the report", ok:false,
+     why:"live_maxdd is still its own column."}],
+},
+// ---- path & calibration ----
+{ ch:"path", type:"written",
+  q:"The breaker trips at −20% and you run arena-run resume. Explain BOTH things resume changes and why each is necessary.",
+  concepts:[
+    {c:"status PAUSED→PASS", terms:["status","pass","paused"]},
+    {c:"anchor moves to today → fresh drawdown baseline", terms:["anchor","high-water","hwm","reset","today","fresh"]},
+    {c:"else instant re-trip", terms:["re-trip","retrip","immediately","re-pause","still below"]},
+    {c:"paused window never backfilled (since_date)", terms:["backfill","since_date","gap","window"]}],
+  model:"Resume (1) sets status back to PASS so live ticks include the strategy again, and (2) moves the high-water-mark anchor to today. The anchor move is what makes resume meaningful: equity is still ~20%+ below the old peak, so against the old anchor the very next evaluation would re-trip instantly. The anchor also feeds live_tick's since_date, guaranteeing the paused window is never retroactively backfilled as if it had been trading."},
+{ ch:"path", type:"written",
+  q:"State the calibration rule the regime classifier taught (±0.05 → ±0.15), and apply it: you want to flag when live win rate drops below backtest win rate, with ~25 live trades. Roughly how big is the noise floor?",
+  concepts:[
+    {c:"threshold must exceed estimator sampling noise", terms:["sampling","noise","standard error","se","noise floor"]},
+    {c:"autocorr SE ≈ 1/√n", terms:["1/√","1/sqrt","0.13"]},
+    {c:"win-rate SE ≈ √(p(1−p)/n) ≈ 0.10 at n=25", terms:["0.1","p(1-p)","binomial","ten percent","0.10"]}],
+  model:"Rule: a monitoring threshold tighter than the estimator's own sampling error manufactures anomalies instead of detecting them. Lag-1 autocorrelation at n=60 has SE ≈ 1/√60 ≈ 0.13, so ±0.05 flagged white noise; ±0.15 ≈ 1 SE. For a win rate at n=25: SE ≈ √(0.5·0.5/25) = 0.10 — differences under ~10 percentage points are indistinguishable from luck, so any flag line must sit well beyond that."},
+{ ch:"path", type:"mc",
+  q:"Which failure fires the breaker but NEITHER statistical watchdog?",
+  opts:[
+    {t:"A statistically ordinary losing streak that compounds past your tolerance", ok:true,
+     why:"A run of 2σ-consistent losses can breach −20% while inputs match training and live mean stays within sampling noise of the backtest — risk tolerance is a dollar constraint, not a statistical one."},
+    {t:"A feature distribution shifting four standard deviations", ok:false,
+     why:"That's PSI's job (inputs), and it may not lose money at all initially."},
+    {t:"Live mean returns 3 SEs below the backtest mean", ok:false,
+     why:"That's the divergence z-test's exact trigger."},
+    {t:"A KeyError from a renamed feature column", ok:false,
+     why:"That's a loud pipeline failure (names clause, lesson 0035) — no watchdog needed."}],
+},
+{ ch:"path", type:"written",
+  q:"Rank the three watchdogs by autonomy and justify the design line between detection and action.",
+  concepts:[
+    {c:"breaker acts (pauses), drift/divergence flag only", terms:["pause","flag","acts","autonom"]},
+    {c:"resume is human-only", terms:["human","manual","resume","never auto"]},
+    {c:"stop digging vs interpret evidence", terms:["stop","judgment","cheap","review","interpret","bleeding"]}],
+  model:"Breaker: pauses on breach (most autonomy) but can never resume itself. Drift and divergence: flag and log only. The line: stopping further loss is time-critical and safe to automate (worst case, you miss some upside while paused); interpreting WHY something looks wrong — regime change vs overfit vs pipeline bug — and deciding to continue requires judgment, so re-enabling is exclusively human (`arena-run resume`)."},
+];
+
+const CH_LABELS = { inputs:"inputs · PSI", outputs:"outputs · divergence", path:"path · breaker & calibration" };
+let active = new Set(Object.keys(CH_LABELS));
+let deck = [], idx = 0;
+const state = QUESTIONS.map(() => ({ typed:"", mc:null, self:null }));
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));
+  [a[i],a[j]]=[a[j],a[i]]; } return a; }
+const $ = id => document.getElementById(id);
+
+const chipsEl = $("chips");
+Object.entries(CH_LABELS).forEach(([k,label])=>{
+  const c = document.createElement("span");
+  c.className = "chip on"; c.tabIndex = 0; c.textContent = label;
+  const toggle = ()=>{ active.has(k) ? (active.delete(k), c.classList.remove("on"))
+                                     : (active.add(k), c.classList.add("on")); };
+  c.addEventListener("click", toggle);
+  c.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle();} });
+  chipsEl.appendChild(c);
+});
+
+function startSession(indices){
+  deck = shuffle(indices.slice()); idx = 0;
+  $("start").classList.add("hidden"); $("results").classList.add("hidden");
+  $("quiz").classList.remove("hidden");
+  render();
+}
+$("begin").addEventListener("click", ()=>{
+  const pool = QUESTIONS.map((q,i)=>({q,i})).filter(x=>active.has(x.q.ch)).map(x=>x.i);
+  if (pool.length) startSession(pool);
+});
+
+function render(){
+  const bankIdx = deck[idx], q = QUESTIONS[bankIdx], st = state[bankIdx];
+  $("qpos").textContent = "Q " + (idx+1) + " / " + deck.length;
+  $("qtag").textContent = "[" + CH_LABELS[q.ch] + "]";
+  $("qtype").textContent = q.type === "mc" ? "multiple choice" : "written recall";
+  $("pbar").style.width = (100*(idx+1)/deck.length) + "%";
+  const body = $("qbody"); body.innerHTML = "";
+  const p = document.createElement("p"); p.innerHTML = "<strong>"+q.q+"</strong>"; body.appendChild(p);
+  q.type === "mc" ? renderMC(q, st, body) : renderWritten(q, st, body);
+  $("prev").disabled = idx === 0;
+  $("next").textContent = idx === deck.length-1 ? "finish ▸" : "next ▸";
+}
+
+function renderMC(q, st, body){
+  const ul = document.createElement("ul"); ul.className = "options";
+  const items = q.opts.map(o=>{
+    const li = document.createElement("li");
+    li.tabIndex = 0; li.textContent = o.t;
+    li.dataset.correct = o.ok ? "true" : "false"; li.dataset.why = o.why;
+    return li;
+  });
+  shuffle(items).forEach(li=>ul.appendChild(li));  // DOM order randomized each render
+  body.appendChild(ul);
+  const fb = document.createElement("p"); fb.className = "feedback"; fb.hidden = true;
+  body.appendChild(fb);
+  const commit = li=>{
+    const correct = li.dataset.correct === "true";  // attribute, never position
+    if (st.mc === null) st.mc = correct;
+    li.classList.add(correct ? "right" : "wrong");
+    fb.hidden = false;
+    fb.innerHTML = (correct ? "<span class='hit'>✓ Correct.</span> " :
+                              "<span class='missed'>✗ Not quite.</span> ") + li.dataset.why;
+  };
+  items.forEach(li=>{
+    li.addEventListener("click", ()=>commit(li));
+    li.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();commit(li);} });
+  });
+}
+
+function renderWritten(q, st, body){
+  const ta = document.createElement("textarea");
+  ta.value = st.typed; ta.placeholder = "type your answer from memory…";
+  ta.addEventListener("input", ()=>{ st.typed = ta.value; });
+  body.appendChild(ta);
+  const row = document.createElement("p");
+  const check = document.createElement("button"); check.textContent = "check my answer";
+  const show = document.createElement("button"); show.textContent = "show me the answer";
+  row.append(check, " ", show); body.appendChild(row);
+  const fb = document.createElement("div"); fb.className = "feedback"; body.appendChild(fb);
+  check.addEventListener("click", ()=>{
+    const text = (st.typed||"").toLowerCase();
+    const hits = q.concepts.map(c=>({c:c.c, hit:c.terms.some(t=>text.includes(t.toLowerCase()))}));
+    const got = hits.filter(h=>h.hit).length;
+    fb.innerHTML = "<p><strong>" + got + " / " + q.concepts.length +
+      " key concepts detected</strong> <span class='note'>(rough scan — self-judge below)</span></p>" +
+      hits.map(h=>"<div class='"+(h.hit?"hit":"missed")+"'>"+(h.hit?"✓ ":"✗ ")+h.c+"</div>").join("");
+  });
+  show.addEventListener("click", ()=>{
+    fb.innerHTML = "<div class='model'><strong>Model answer.</strong> " + q.model + "</div>" +
+      "<p>Self-rate: <button data-rate='solid'>knew it</button> " +
+      "<button data-rate='review'>needs review</button> <span class='note' id='rated'></span></p>";
+    fb.querySelectorAll("[data-rate]").forEach(b=>b.addEventListener("click", ()=>{
+      st.self = b.dataset.rate;
+      fb.querySelector("#rated").textContent = "recorded: " + (st.self==="solid"?"knew it ✓":"needs review ↻");
+    }));
+  });
+}
+
+$("prev").addEventListener("click", ()=>{ if(idx>0){idx--;render();} });
+$("next").addEventListener("click", ()=>{ idx < deck.length-1 ? (idx++, render()) : finish(); });
+function finish(){
+  $("quiz").classList.add("hidden"); $("results").classList.remove("hidden");
+  const mcIdx = deck.filter(i=>QUESTIONS[i].type==="mc");
+  const wIdx = deck.filter(i=>QUESTIONS[i].type==="written");
+  const mcRight = mcIdx.filter(i=>state[i].mc===true).length;
+  const solid = wIdx.filter(i=>state[i].self==="solid").length;
+  $("finalScore").textContent = "MC " + mcRight + "/" + mcIdx.length +
+    " · written solid " + solid + "/" + wIdx.length;
+  $("breakdown").innerHTML = "<p class='note'>Log the result in docs/learning/PROGRESS.md " +
+    "so the next session targets the gaps.</p>";
+}
+$("reviewMissed").addEventListener("click", ()=>{
+  const missed = deck.filter(i=>{
+    const q = QUESTIONS[i], st = state[i];
+    return q.type==="mc" ? st.mc!==true : st.self!=="solid";
+  });
+  if (missed.length) startSession(missed);
+});
+$("restart").addEventListener("click", ()=>{
+  state.forEach(s=>{ s.typed=""; s.mc=null; s.self=null; });
+  $("results").classList.add("hidden"); $("start").classList.remove("hidden");
+});
+</script>
+</main>
+</body>
+</html>

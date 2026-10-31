@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "Integration you asked for: `feature/npc-memory-and-model` (PR #54's content) "
+    "merged onto current main (which now has the full multiplayer + raylib "
+    "migration), conflicts resolved.\n\n"
+    "**The one real conflict** was `src/app/main.cpp` — the memory branch forked "
+    "before the UI-parity rewrite. Resolution: kept the full raylib game loop and "
+    "grafted the memory hooks into it (store load + prompt injection at startup, "
+    "summary requests on both dialogue-close paths including arrest, the "
+    "summary-reply drain ahead of dialogue routing, on-quit transcript save; "
+    "guests skip summarization — their conversations live host-side). "
+    "CMakeLists/tests Makefile auto-merged.\n\n"
+    "**What this delivers on main once merged:** NPCs remember players across "
+    "restarts (SQLite summaries injected into prompts) and the measured model "
+    "swap to qwen3:8b with think=false (bench/REPORT.md).\n\n"
+    "**Verified:** fresh configure + build, 106 tests / 739 assertions green, "
+    "100-frame smoke run exit 0.\n\n"
+    "Supersedes #54 (same content, pre-resolved against main — close #54 when "
+    "this merges).\n\nCloses #49\nCloses #50\n\n---\n"
+    "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(
+            title="merge: NPC memory + qwen3 model swap into the raylib mainline",
+            body=body, head="integration/npc-memory-into-raylib", base="main",
+            draft=False)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)

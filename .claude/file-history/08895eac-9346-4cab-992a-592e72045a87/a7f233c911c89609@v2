@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""Create milestones + ready-for-ai issues for the five 2026-07-06 plans.
+
+Uses the gh CLI (keyring auth). If the GH_TOKEN env var is present but
+invalid it is dropped for gh calls so it can't shadow the keyring login.
+Idempotent: skips milestones/issues whose titles already exist.
+
+Run:  python3 create_issues_july6.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+OWNER = "bjl14710"
+REPO = f"{OWNER}/HFT_Trading_Practice_Repo"
+
+
+def gh_env() -> dict:
+    env = dict(os.environ)
+    tok = env.get("GH_TOKEN")
+    if tok:
+        probe = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"],
+            capture_output=True, text=True, env=env)
+        if probe.returncode != 0:
+            print("note: GH_TOKEN is invalid — using gh keyring auth instead")
+            env.pop("GH_TOKEN", None)
+            env.pop("GITHUB_TOKEN", None)
+    return env
+
+
+ENV = gh_env()
+
+
+def gh(*args: str, input_: str | None = None) -> str:
+    r = subprocess.run(["gh", *args], capture_output=True, text=True,
+                       env=ENV, input=input_)
+    if r.returncode != 0:
+        raise SystemExit(f"gh {' '.join(args[:3])}... failed:\n{r.stderr}")
+    return r.stdout.strip()
+
+
+ISSUE_TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/issue-NUM-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+# One milestone per plan; issues follow each plan's Suggested GitHub Issues.
+# Scaffolds for every issue already exist on feature/scaffold-2026-07-06
+# with TODO(<tag>) markers named below.
+MILESTONES: list[dict] = [
+    {
+        "title": "Bench Latency History",
+        "description": "Performance as a time series. Plan: .claude/plans/bench-latency-history.md. Scaffold: feature/scaffold-2026-07-06.",
+        "issues": [
+            {
+                "title": "bench_history: parser + regression rule + unit tests",
+                "slug": "bench-parser-rule",
+                "what": "Implement parse_latency_line (frozen LATENCY_RE; raise ValueError quoting the output tail on drift) and regression_verdict (median of last N same-host means, threshold flag, 'insufficient history' path) in scripts/bench_history.py; un-skip the four stubs in tests/test_bench_history.py.",
+                "where": "scripts/bench_history.py TODO(bench-1) markers; tests/test_bench_history.py (canned output includes the real macOS p50=0 quirk).",
+                "verify": "pytest tests/test_bench_history.py passes with all four stubs un-skipped; full pytest stays green.",
+                "constraints": "Regression rule judges MEAN only (macOS timer quantizes percentiles). Never record on parse failure (exit 2 semantics).",
+                "economy_note": "Stdlib only (re, statistics). No changes to the bench binaries or their output format — the parser adapts to them, never the reverse.",
+                "concept": "Performance regression detection: median baselines, noise-aware thresholds, and why the mean beats quantized percentiles",
+            },
+            {
+                "title": "bench_history: runner, seeded history.csv, optional pre-push hook",
+                "slug": "bench-runner",
+                "what": "Implement host_id() and main() (argparse --check-only/--threshold/--runs/--history; build benches if missing; best-of-K runs; append to docs/perf/history.csv with schema header; exit 1 on regression naming the bench). Implement scripts/install_bench_hook.sh (idempotent pre-push; blocks on exit 1, allows on exit 2). Seed history.csv with first real rows.",
+                "where": "scripts/bench_history.py TODO(bench-2); scripts/install_bench_hook.sh; docs/perf/history.csv (create).",
+                "verify": "Running scripts/bench_history.py appends two rows (bench_main, bench_main_flat) with commit hash (dirty-suffixed if applicable) and host fingerprint, exit 0; --check-only appends nothing.",
+                "constraints": "Rows append even when flagged (history keeps bad days). Comparisons never cross (host_id, bench).",
+                "economy_note": "Stdlib only. Reuse the cmake invocation pattern from build_cpp.sh verbatim — no new build machinery.",
+                "concept": "Benchmark hygiene: host fingerprints, best-of-K noise control, and why cross-machine latency numbers lie",
+            },
+        ],
+    },
+    {
+        "title": "Backtest-vs-Live Divergence",
+        "description": "Look-ahead bias measured. Plan: .claude/plans/backtest-vs-live-divergence.md. Scaffold: feature/scaffold-2026-07-06.",
+        "issues": [
+            {
+                "title": "Walk-forward CCF engine + regime-flip correctness test",
+                "slug": "walkforward-engine",
+                "what": "Implement walkforward_ccf (strict point-in-time slicing with an explicit no-future assertion, skip-and-count NaN-starved windows, ValueError naming minimum length) and divergence_report (leader agreement rate, mean |lag drift|, mean OOS gap) in src/oil_alpha/analysis/walkforward.py; un-skip the three stubs in tests/test_walkforward.py.",
+                "where": "src/oil_alpha/analysis/walkforward.py TODO(divergence-1); tests/test_walkforward.py (regime-flip generator provided; poison test defines the leakage contract).",
+                "verify": "All three tests pass un-skipped: walk-forward tracks the injected regime flip while full-sample reports one leader; poisoning post-as-of rows changes nothing; short series raises.",
+                "constraints": "Consume analysis/leadlag.ccf_leadlag as-is — no changes to it. Contemporaneous PIT verdicts agree only with contemporaneous full-sample verdicts.",
+                "economy_note": "pandas/numpy already present; no statsmodels needed here. One module + its test file, nothing else.",
+                "concept": "Look-ahead bias and strict information-set slicing in walk-forward estimation",
+            },
+            {
+                "title": "Divergence report on real CL/XLE + docs/perf writeup",
+                "slug": "divergence-report",
+                "what": "Implement the walkforward.py CLI (cached fetch via sources.fetch_prices + build_returns_frame, print step table + headline metrics) and write docs/perf/<next-free>-backtest-vs-live.md in the 01-flat-book style with the measured numbers, explicitly stating the yfinance not-vendor-PIT limitation.",
+                "where": "src/oil_alpha/analysis/walkforward.py TODO(divergence-2); docs/perf/.",
+                "verify": "PYTHONPATH=src python -m oil_alpha.analysis.walkforward prints a DivergenceReport; the writeup contains the same numbers and no TODO strings.",
+                "constraints": "Depends on the walk-forward engine issue. Use the parquet cache — no new API budget spend beyond one fetch.",
+                "economy_note": "No plotting this issue; tables and prose only, matching 01-flat-book.md's format.",
+                "concept": "Scoring estimates out-of-sample: the look-ahead advantage as a measurable gap, not a warning",
+            },
+        ],
+    },
+    {
+        "title": "ITCH Replay Clock",
+        "description": "Deterministic playback infra. Plan: .claude/plans/itch-replay-clock.md. Scaffold: feature/scaffold-2026-07-06.",
+        "issues": [
+            {
+                "title": "ReplayClock core: deterministic MaxSpeed + SingleStep playback",
+                "slug": "replay-core",
+                "what": "Implement ReplayClock::step (framing per itch_parser.cpp: 2-byte BE length, zero-length padding counted, truncated final frame stops cleanly, timestamp peeked at offset 5 when len>=11), from_file (gulp with signals_py-style IO errors), and run for MaxSpeed (drain step). Un-skip the determinism, single-step, and padding/truncation gtests.",
+                "where": "cpp/itch/replay_clock.{hpp,cpp} TODO(replay-1); cpp/tests/test_replay_clock.cpp.",
+                "verify": "ctest: the three replay-1 suites pass un-skipped (byte-identical delivery hash across modes; exactly one message per step; padding/truncation counted).",
+                "constraints": "Raw framed delivery only — no parsing beyond length+timestamp (layer boundary is the plan's core decision).",
+                "economy_note": "No new library; mirror parse_buffer's loop structure rather than inventing a second framing idiom.",
+                "concept": "Deterministic replay: separating event order (the contract) from event timing (the mode)",
+            },
+            {
+                "title": "ReplayClock wall-clock pacing + replay_main demo",
+                "slug": "replay-pacing",
+                "what": "Implement WallClock mode: schedule = start + cumulative(ITCH-delta/speed), drift-corrected against steady_clock, negative deltas clamp to zero. Implement replay_main (file/mode/speed argv, sink wired to parse_buffer, prints ReplayStats+ParseStats+wall time). Un-skip the pacing gtest (loose bounds).",
+                "where": "cpp/itch/replay_clock.cpp TODO(replay-2); cpp/itch/replay_main.cpp; cpp/tests/test_replay_clock.cpp.",
+                "verify": "ctest green incl. pacing test; replay_main replays tests/fixtures/aapl-12302019-first8mb.itch in both batch modes without error.",
+                "constraints": "Depends on the core issue. Timing test bounds loose enough to never flake (>=80ms for 100ms of tape at 1x; <20ms MaxSpeed).",
+                "economy_note": "std::chrono + std::this_thread only. Do not add pause/seek — restart is the documented reset.",
+                "concept": "Drift-corrected pacing: scheduling against a monotonic clock instead of accumulating sleeps",
+            },
+        ],
+    },
+    {
+        "title": "VHDL Flat Book (Simulation Only)",
+        "description": "Hardware-parallel vs cache-sequential. Plan: .claude/plans/vhdl-flat-book.md. Scaffold: feature/scaffold-2026-07-06. Prereq: scripts/setup-vhdl.sh (ghdl).",
+        "issues": [
+            {
+                "title": "Golden-vector generator from OrderBookFlat",
+                "slug": "golden-vectors",
+                "what": "Implement cpp/itch/golden_vectors_main.cpp: emit the CSV (versioned header) of level ops + expected outputs from OrderBookFlat for (a) the hand-written edge-case sequence (clamp-at-zero, best-level removal, side emptying, boundary indexes) and (b) a seeded ~10k-op pseudo-random sequence.",
+                "where": "cpp/itch/golden_vectors_main.cpp TODO(vhdl-1); CMake target `golden_vectors` already registered.",
+                "verify": "Running golden_vectors produces both CSVs deterministically (same seed => byte-identical); a smoke gtest or script diff pins that.",
+                "constraints": "OrderBookFlat is the oracle — consumed unmodified. CSV schema defined once in a header-string constant.",
+                "economy_note": "Plain fprintf CSV — no serialization library. Fixed seed, no Date/random-device.",
+                "concept": "Golden-vector testing: software oracles for hardware verification",
+            },
+            {
+                "title": "flat_book.vhd level array + parity testbench + sim scripts",
+                "slug": "vhdl-levels",
+                "what": "Implement the level arrays + clamp-at-zero logic in hw/vhdl/flat_book.vhd, the file-driven testbench (std.textio CSV reader, header version assert, one op per cycle, level-total assertions), and scripts/run_vhdl_sim.sh (ghdl -a/-e/-r, exit code propagated). Un-skip the two parity stubs in tests/test_vhdl_flat_book.py.",
+                "where": "hw/vhdl/flat_book.vhd + flat_book_tb.vhd TODO(vhdl-2); scripts/run_vhdl_sim.sh; tests/test_vhdl_flat_book.py.",
+                "verify": "With ghdl installed: both parity pytest cases pass; without ghdl they skip (never fail).",
+                "constraints": "Simulation only — no synthesis constructs beyond what GHDL --std=08 analyzes. op_index >= DEPTH stays undefined-by-contract (generator bounds-checks).",
+                "economy_note": "One entity, one testbench, one shell script. No VUnit/OSVVM frameworks.",
+                "concept": "Registers, BRAM-style arrays and clocked processes: mapping a software update rule onto RTL",
+            },
+            {
+                "title": "Priority-encoder best tracking + DEPTH sweep + perf writeup",
+                "slug": "vhdl-priority",
+                "what": "Add per-side occupancy bitmasks and priority encoders (bid from high index, ask from low) to flat_book.vhd; extend the testbench to assert best bid/ask + clamp pulses; run the DEPTH 1024-vs-4096 sweep; write docs/perf/<next-free>-vhdl-flat-book.md with the cycles-vs-ns comparison and the simulation-only caveat in the first paragraph.",
+                "where": "hw/vhdl/*.vhd TODO(vhdl-3); tests/test_vhdl_flat_book.py third stub; docs/perf/.",
+                "verify": "Full parity incl. best outputs (exit 0); cycles-per-op identical across DEPTH builds; writeup has no TODO strings.",
+                "constraints": "No hardware timing claims — scaling behaviour only (repo's hardware-verification principle).",
+                "economy_note": "The encoder is a for-loop process over the bitmask — no vendor primitives, no generate-macro cleverness.",
+                "concept": "Priority encoders: O(1)-cycle best-price selection in hardware vs O(range) scans in software",
+            },
+        ],
+    },
+    {
+        "title": "Avellaneda-Stoikov MM Sim",
+        "description": "Quoting against the replayed real book with deterministic queue position. Plan: .claude/plans/avellaneda-stoikov-mm-sim.md. Scaffold: feature/scaffold-2026-07-06.",
+        "issues": [
+            {
+                "title": "FIFO queue-aware order book + parity tests",
+                "slug": "mm-queue-book",
+                "what": "Implement OrderBookQueue (per-level FIFO deques + ref locator; executions consume from the front; visitor-compatible mutations; level_queue introspection). Un-skip the two OrderBookQueue gtests (top_of_book parity with OrderBookFlat; FIFO by arrival).",
+                "where": "cpp/itch/order_book_queue.hpp TODO(mm-1); cpp/tests/test_mm_sim.cpp.",
+                "verify": "ctest: both mm-1 tests pass un-skipped; existing suites unaffected.",
+                "constraints": "Public mutation API identical to OrderBookFlat so the same visitor drives both.",
+                "economy_note": "std::deque + unordered_map — no intrusive-list library. Level scan for cancel is fine (queues are short).",
+                "concept": "Price-time priority: FIFO order queues inside a limit order book",
+            },
+            {
+                "title": "Shadow order queue-position fill mechanics",
+                "slug": "mm-shadow-order",
+                "what": "Implement ShadowOrder: placement snapshots queue-ahead; executions consume ahead first then fill us (shadow no-impact); cancels ahead promote; requote = rejoin at back. Un-skip the two ShadowOrder gtests (hand-computed 50-share and cancel-promotion cases from the plan).",
+                "where": "cpp/itch/shadow_order.hpp TODO(mm-2); cpp/tests/test_mm_sim.cpp.",
+                "verify": "ctest: both mm-2 tests pass un-skipped with the plan's hand-computed values.",
+                "constraints": "Depends on mm-queue-book for integration, but ShadowOrder itself stays book-agnostic (pure counters).",
+                "economy_note": "A struct and two methods — resist the urge to generalize to multiple simultaneous orders per side this issue.",
+                "concept": "Queue position value: deterministic passive-fill modeling from order-level data",
+            },
+            {
+                "title": "A-S quoter + latency-delayed action queue",
+                "slug": "mm-quoter-latency",
+                "what": "Implement the A-S closed form (reservation + spread per the header comment; tick rounding; clamp inside touch with counter) as a pure function, the rolling sigma^2 estimator, and the tape-time pending-action queue (apply before first event >= t+latency; drop past session end, counted). Un-skip the two mm-3 gtests (inventory skew sign; latency ordering).",
+                "where": "cpp/itch/mm_simulator.hpp TODO(mm-3) (+ a .cpp if bodies outgrow the header); cpp/tests/test_mm_sim.cpp.",
+                "verify": "ctest: both mm-3 tests pass un-skipped; skew sign convention pinned.",
+                "constraints": "Quoter must be a pure function of (mid, q, sigma2, t) for testability — no book access inside it.",
+                "economy_note": "No config files; MMParams struct is the whole parameter surface.",
+                "concept": "Avellaneda-Stoikov: inventory-aware reservation price and the optimal spread trade-off",
+            },
+            {
+                "title": "MMSimulator event loop + accounting + determinism",
+                "slug": "mm-simulator-loop",
+                "what": "Implement MMSimulator::run: visitor-driven loop wiring book, shadow orders, quoter, latency queue; cash/inventory accounting; MMSample series + MMResult counters (requotes, clamps, dropped actions, realized vs terminal mark). Un-skip the determinism gtest.",
+                "where": "cpp/itch/mm_simulator.hpp TODO(mm-4) + new mm_simulator.cpp added to itch_lib.",
+                "verify": "ctest: determinism test passes (bit-identical series on identical params); full suite green.",
+                "constraints": "Depends on mm-1/2/3. Max-speed batch only — no ReplayClock dependency (composes later).",
+                "economy_note": "One loop, one accounting struct. Inventory-cap behaviour = pull the risk-increasing quote, nothing fancier.",
+                "concept": "Event-driven simulation with delayed actions: modeling decision latency honestly",
+            },
+            {
+                "title": "MM sim bridge, Python analysis, golden-day run + writeup",
+                "slug": "mm-analysis-writeup",
+                "what": "Implement signals_cpp.run_mm_sim (columnar MMSample/fill output, MMParams kwargs), mm_analysis.py (frame loader, PnL decomposition, twin-axis figure, CLI with --latency-sweep 0/1/5/20ms), un-skip the three pytest stubs, run the golden day, and write docs/perf/<next-free>-mm-queue-latency.md with the sweep numbers and the queue-position finding.",
+                "where": "cpp/signals_py/bindings.cpp TODO(mm-4 stub); src/oil_alpha/microstructure/mm_analysis.py TODO(mm-5); tests/test_mm_analysis.py; docs/perf/.",
+                "verify": "pytest green with the three stubs live; CLI produces PnL/inventory outputs on the fixture; writeup has no TODO strings.",
+                "constraints": "Depends on all four prior issues. Columnar boundary only (perf/02 lesson) — no per-event Python objects.",
+                "economy_note": "Reuse plots._decimate and the events.py load pattern verbatim; no dashboard panel this milestone.",
+                "concept": "PnL decomposition: spread capture vs inventory risk, and what latency costs a passive quoter",
+            },
+        ],
+    },
+]
+
+
+def main() -> None:
+    login = gh("api", "user", "--jq", ".login")
+    print(f"Authenticated as: {login}")
+
+    existing_titles = {
+        t.lower()
+        for t in json.loads(gh("issue", "list", "-R", REPO, "--state", "open",
+                               "--limit", "100", "--json", "title") or "[]" )
+        and [i["title"] for i in json.loads(gh("issue", "list", "-R", REPO,
+             "--state", "open", "--limit", "100", "--json", "title"))]
+    } if False else {
+        i["title"].lower()
+        for i in json.loads(gh("issue", "list", "-R", REPO, "--state", "open",
+                               "--limit", "100", "--json", "title"))
+    }
+    print(f"Existing open issues: {len(existing_titles)}")
+
+    # label (ignore exists-error)
+    subprocess.run(["gh", "label", "create", "ready-for-ai", "-R", REPO,
+                    "--color", "0e8a16",
+                    "--description", "Queued for the overnight autonomous session"],
+                   capture_output=True, text=True, env=ENV)
+
+    existing_ms = {m["title"]: m["number"] for m in json.loads(
+        gh("api", f"repos/{REPO}/milestones?state=open&per_page=100"))}
+
+    created = []
+    for ms in MILESTONES:
+        if ms["title"] in existing_ms:
+            ms_number = existing_ms[ms["title"]]
+            print(f"Milestone exists: {ms['title']} (#{ms_number})")
+        else:
+            out = json.loads(gh("api", f"repos/{REPO}/milestones",
+                                "-f", f"title={ms['title']}",
+                                "-f", f"description={ms['description']}"))
+            ms_number = out["number"]
+            print(f"Created milestone #{ms_number}: {ms['title']}")
+
+        for spec in ms["issues"]:
+            if spec["title"].lower() in existing_titles:
+                print(f"  Skipping (exists): {spec['title']}")
+                continue
+            body = ISSUE_TEMPLATE.format(**spec)
+            url = gh("issue", "create", "-R", REPO,
+                     "--title", spec["title"], "--body", body,
+                     "--label", "ready-for-ai", "--assignee", OWNER,
+                     "--milestone", ms["title"])
+            number = url.rstrip("/").rsplit("/", 1)[-1]
+            gh("issue", "edit", number, "-R", REPO, "--body",
+               body.replace("feature/issue-NUM-", f"feature/issue-{number}-"))
+            print(f"  Created #{number}: {spec['title']}")
+            created.append({"number": number, "title": spec["title"],
+                            "concept": spec["concept"], "url": url})
+
+    print("\n=== ready-for-ai queue ===")
+    queue = json.loads(gh("issue", "list", "-R", REPO, "--label", "ready-for-ai",
+                          "--state", "open", "--limit", "100",
+                          "--json", "number,title"))
+    for i in queue:
+        print(f"  #{i['number']:>3} {i['title']}")
+    print(f"\nTotal: {len(queue)} issues queued")
+
+    summary = (f"# Issue Planning Summary\nDate: {datetime.now():%Y-%m-%d %H:%M}\n"
+               f"Repo: {REPO}\nFocus: \"July 6th 2026 ideas\"\n\n## Issues Created\n")
+    for i in created:
+        summary += (f"- #{i['number']}: {i['title']}\n  Concept: {i['concept']}\n"
+                    f"  URL: {i['url']}\n\n")
+    summary += (
+        "\n## What Was NOT Planned\n"
+        "- Hayashi-Yoshida intraday lead-lag: already implemented on\n"
+        "  feature/hy-intraday-leadlag (48 tests green) — needs a PR, not an issue.\n"
+        "- Incremental best-index book optimization (perf/03): deliberately\n"
+        "  deferred until the perf/02 follow-up is scheduled; measured-change\n"
+        "  discipline says it lands alone.\n"
+        "- Eight pushed branches awaiting manual PR creation (see\n"
+        "  OVERNIGHT_REPORT.md on chore/overnight-report-2026-07-06).\n")
+    Path(".claude/memory").mkdir(parents=True, exist_ok=True)
+    Path(".claude/memory/planning-session.md").write_text(summary)
+    print("\nPlan summary saved to .claude/memory/planning-session.md")
+
+
+if __name__ == "__main__":
+    main()

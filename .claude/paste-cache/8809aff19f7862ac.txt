@@ -1,0 +1,54 @@
+/idea
+
+Goal: Expand hairstyle variety in the character creator, and make created
+characters actually match the visual style of roaming NPCs — treat these as
+one fix, not two, since they likely share a root cause.
+
+Context: The character creator currently offers only ~3 hairstyles and its
+parts look noticeably different from the NPCs already roaming the town.
+The most likely explanation: the creator draws from its own separate, smaller
+parts pool rather than the same asset pool the roaming NPCs are rendered
+from — two disconnected sets of heads/hair/bodies instead of one shared
+library. If that's confirmed, fixing the pool-separation is the real ticket;
+adding more hairstyles to the wrong pool would just grow the mismatch.
+
+Scope:
+1. Audit first — confirm whether roaming NPCs and the character creator
+   read from the same part/asset source. Report this plainly in
+   OVERNIGHT_REPORT.md before doing anything else, since it determines the
+   rest of the work.
+2. If they're separate: unify into one shared parts library (heads, hair,
+   eyes, body types, etc.), each part conforming to the existing socket/
+   size-contract system so nothing needs re-tuning to combine. The
+   character creator becomes a picker/randomizer over this one pool — it
+   should not maintain its own smaller subset going forward.
+3. If they're already unified and the mismatch is something else (e.g. a
+   filter limiting which parts the creator surfaces, or a style-tag issue
+   restricting selection), fix that instead and say so — don't force a
+   pool-merge that isn't actually the bug.
+4. Expand hairstyle count within whatever the shared pool ends up being,
+   tagged consistently with the existing style system so new hairstyles
+   don't reintroduce a visual mismatch of their own.
+5. Once complete: a character built in the creator and an NPC generated for
+   the town should be able to use literally the same assets and look
+   native to the same world, not like two separate art sources.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Where a decision would normally prompt me, pick the
+  most defensible option yourself, log the decision and reasoning in
+  OVERNIGHT_REPORT.md, and keep going.
+- Prefer fixing the actual pool-separation over just adding more assets to
+  the existing (possibly wrong) pool, even if that's slower to ship tonight.
+- If unifying the pools breaks existing roaming-NPC variety assumptions
+  (e.g. NPCs currently pick from a wider range than the creator exposes),
+  preserve the NPCs' existing range as the baseline the creator should now
+  match, not the other way around.
+- Before opening the draft PR, delegate to the visual-qa subagent to
+  confirm a created character actually looks consistent with roaming NPCs
+  in a side-by-side screenshot, and include its report in
+  OVERNIGHT_REPORT.md.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

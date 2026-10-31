@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Draft PR for issue #64 + issue bookkeeping."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+body = (
+    "Closes #64. First PR of the city-polish milestone; stacks on #60 "
+    "(base = `feature/motion-collision-viewmodel`), so this diff is just the "
+    "fountain + one smoke-tooling commit.\n\n"
+    "## What changed\n"
+    "- **Composite fountain from primitives** — the KayKit pack has no "
+    "fountain model, so the flat base-tile stand-in is replaced by a stone "
+    "basin brimming with translucent water, a column-borne upper bowl with "
+    "its own water ring, and a finial. Dispatched by id in the buildings "
+    "pass **before** the model lookup, because `modelForBuilding` falls back "
+    "to a hashed generic building for uncurated ids.\n"
+    "- **Sizing stays table-driven**: height comes from the fountain's "
+    "SizeSpec entry (raised 1.2 -> 2.6 — the pancake-era value reads flat on "
+    "an 8-unit footprint); radii derive from the authored collision AABB, so "
+    "visuals and collider match by construction. City/collision untouched.\n"
+    "- **Smoke tooling**: `--frames N shot.png --camera x z yaw` lets "
+    "scripted runs photograph any part of the city (used for the park-side "
+    "verification shots; the rest of the milestone reuses it).\n\n"
+    "## Verification\n"
+    "- Screenshot round-trip drove two fixes: 1.2 height read as a pancake "
+    "(raised via the SizeSpec), and recessed water was invisible because "
+    "raylib's DrawCylinder renders capped solids (water discs now float "
+    "just above their caps).\n"
+    "- Suite green: 127 cases / 824 assertions. Build + park-side smoke "
+    "shots clean.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+pr = retry(lambda: repo.create_pull(
+    title="feat(render): proper plaza fountain from primitives (#64)",
+    body=body,
+    head="feature/issue-64-plaza-fountain",
+    base="feature/motion-collision-viewmodel",
+    draft=True), "create pr")
+print(f"PR #{pr.number}: {pr.html_url}")
+
+issue = retry(lambda: repo.get_issue(64), "issue")
+retry(lambda: issue.add_to_labels("ai-completed"), "label")
+try:
+    issue.remove_from_labels("ai-in-progress")
+except GithubException:
+    pass
+retry(lambda: issue.create_comment(
+    f"Implemented in draft PR #{pr.number} (stacked on #60). "
+    "Park-side screenshots verified the tiered fountain and water surfaces; "
+    "suite green at 127 cases / 824 assertions."), "comment")
+retry(lambda: issue.edit(state="closed"), "close")
+print("issue #64 closed")

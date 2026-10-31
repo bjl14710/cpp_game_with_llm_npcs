@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0003 · Order-Book Reconstruction</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#131824; --panel2:#1a2130; --line:#263048; --ink:#e6edf5;
+    --muted:#8b98ab; --green:#2ecc8f; --red:#ff5c6c; --amber:#f2b04c; --cyan:#39c5e0;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); line-height:1.6; }
+  .wrap { max-width:780px; margin:0 auto; padding:1.6rem 1.1rem 6rem; }
+  .kicker { font-family:var(--mono); font-size:.72rem; letter-spacing:.18em; text-transform:uppercase; color:var(--cyan); }
+  h1 { font-size:1.5rem; margin:.25rem 0 .3rem; }
+  .sub { color:var(--muted); font-size:.95rem; margin:0 0 1.2rem; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1.2rem 1.3rem; margin:1rem 0; }
+  .chips { display:flex; flex-wrap:wrap; gap:.5rem; margin:.8rem 0 1rem; }
+  .chip { font-family:var(--mono); font-size:.78rem; cursor:pointer; border:1px solid var(--line);
+          color:var(--muted); background:var(--panel2); border-radius:999px; padding:.3rem .85rem; }
+  .chip.on { border-color:var(--cyan); color:var(--cyan); background:#10222b; }
+  .rowline { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; margin:.6rem 0; }
+  label.toggle { font-size:.85rem; color:var(--muted); display:flex; gap:.45rem; align-items:center; cursor:pointer; }
+  button { font:inherit; cursor:pointer; border-radius:8px; border:1px solid var(--line);
+           background:var(--panel2); color:var(--ink); padding:.5rem 1.1rem; font-size:.9rem; }
+  button.primary { background:var(--cyan); border-color:var(--cyan); color:#06222b; font-weight:700; }
+  button:disabled { opacity:.4; cursor:default; }
+  button:focus-visible, .chip:focus-visible, li:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+  .meta { display:flex; align-items:center; gap:.7rem; flex-wrap:wrap; font-family:var(--mono); font-size:.74rem; }
+  .tag { border:1px solid var(--line); border-radius:5px; padding:.12rem .55rem; color:var(--amber); }
+  .tag.type { color:var(--cyan); }
+  .bar { height:6px; background:var(--panel2); border-radius:4px; margin:.7rem 0 1.1rem; overflow:hidden; }
+  .bar i { display:block; height:100%; background:linear-gradient(90deg,var(--cyan),var(--green)); width:0; transition:width .25s; }
+  .qtext { font-size:1.03rem; font-weight:600; }
+  pre { background:#0d1117; border:1px solid var(--line); color:#d8dee9; padding:.85rem 1rem;
+        border-radius:8px; overflow-x:auto; font-family:var(--mono); font-size:.8rem; line-height:1.55; }
+  .src { font-family:var(--mono); font-size:.72rem; color:var(--muted); margin-top:-.4rem; }
+  ul.opts { list-style:none; padding:0; margin:.9rem 0 0; }
+  ul.opts li { border:1px solid var(--line); border-radius:8px; background:var(--panel2);
+               padding:.55rem .85rem; margin:.5rem 0; cursor:pointer; font-size:.93rem; }
+  ul.opts li:hover { border-color:var(--cyan); }
+  ul.opts li.right { border-color:var(--green); background:#0e2a20; }
+  ul.opts li.wrong { border-color:var(--red); background:#2c1218; }
+  ul.opts li.locked { cursor:default; }
+  .fb { font-size:.88rem; margin-top:.7rem; }
+  .fb.good { color:var(--green); } .fb.bad { color:var(--red); }
+  textarea { width:100%; min-height:110px; resize:vertical; border-radius:8px; background:#0d1117;
+             color:var(--ink); border:1px solid var(--line); font:inherit; font-size:.92rem;
+             padding:.7rem .8rem; margin-top:.8rem; }
+  .concepts { margin:.7rem 0 0; padding:0; list-style:none; font-size:.87rem; }
+  .hit::before { content:"▲ "; color:var(--green); font-family:var(--mono); }
+  .miss::before { content:"▼ "; color:var(--red); font-family:var(--mono); }
+  .model { border-left:3px solid var(--cyan); background:var(--panel2); padding:.6rem .9rem;
+           border-radius:0 8px 8px 0; margin-top:.8rem; font-size:.92rem; }
+  .note { font-size:.76rem; color:var(--muted); font-style:italic; }
+  .nav { display:flex; gap:.6rem; margin-top:1.2rem; flex-wrap:wrap; }
+  .spacer { flex:1; }
+  .hidden { display:none !important; }
+  .stat { font-family:var(--mono); font-size:1.6rem; }
+  .statline { display:flex; gap:2.2rem; flex-wrap:wrap; margin:.8rem 0; }
+  .statline .lbl { font-size:.74rem; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; }
+  table.res { border-collapse:collapse; width:100%; font-size:.85rem; margin-top:.8rem; }
+  table.res td, table.res th { border-bottom:1px solid var(--line); padding:.4rem .5rem; text-align:left; }
+  .pill { font-family:var(--mono); font-size:.72rem; border-radius:999px; padding:.1rem .6rem; }
+  .pill.ok { background:#0e2a20; color:var(--green); }
+  .pill.no { background:#2c1218; color:var(--red); }
+  .pill.skip { background:var(--panel2); color:var(--muted); }
+  @media (prefers-reduced-motion:reduce) { .bar i { transition:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="kicker">Drill 0003 · retention check</div>
+<h1>Order-Book Reconstruction</h1>
+<p class="sub">Companion to Lesson 0003. Mostly written recall — type before you peek.</p>
+
+<div id="start" class="card">
+  <p style="margin-top:0">Pick channels, then begin. <span class="note">The keyword checker is rough — always self-judge against the model answer.</span></p>
+  <div class="chips" id="chips"></div>
+  <div class="rowline">
+    <label class="toggle"><input type="checkbox" id="chk-all" checked> all channels</label>
+    <label class="toggle"><input type="checkbox" id="chk-shuffle" checked> shuffle question order</label>
+    <span class="spacer"></span>
+    <button class="primary" id="btn-begin">Begin drill ▸</button>
+  </div>
+</div>
+
+<div id="quiz" class="card hidden">
+  <div class="meta"><span id="q-num"></span><span class="tag" id="q-cat"></span><span class="tag type" id="q-type"></span></div>
+  <div class="bar"><i id="q-bar"></i></div>
+  <div id="q-body"></div>
+  <div class="nav">
+    <button id="btn-prev">◂ prev</button><span class="spacer"></span>
+    <button id="btn-next">next ▸</button>
+    <button class="primary hidden" id="btn-finish">Finish → results</button>
+  </div>
+</div>
+
+<div id="results" class="card hidden">
+  <h2 style="margin-top:0">Session results</h2>
+  <div class="statline">
+    <div><div class="stat" id="r-mc">–</div><div class="lbl">multiple choice</div></div>
+    <div><div class="stat" id="r-wr">–</div><div class="lbl">written · self-rated solid</div></div>
+  </div>
+  <table class="res"><thead><tr><th>#</th><th>Channel</th><th>Question</th><th>Result</th></tr></thead><tbody id="r-rows"></tbody></table>
+  <div class="nav">
+    <button id="btn-review">Review only what I missed ▸</button><span class="spacer"></span>
+    <button id="btn-restart">Back to start</button>
+  </div>
+  <p class="note" id="r-note" style="margin-bottom:0"></p>
+</div>
+
+<script>
+(function () {
+"use strict";
+var CHANNELS = { feed:"Feed & message taxonomy", state:"State & failure modes", code:"Reading real code" };
+
+var BANK = [
+  { ch:"feed", type:"mc",
+    q:"Which ITCH message types REMOVE liquidity from a reconstructed book?",
+    opts:[
+      { t:"'E'/'C' executions, 'X' partial cancels, 'D' deletes, and the outgoing half of 'U' replaces", correct:true,
+        why:"All four paths shrink resting depth. Miss any one and the book only ever accumulates phantom shares." },
+      { t:"'E'/'C' executions and 'D' deletes only — 'X' merely annotates an order", correct:false,
+        why:"'X' removes canceled shares from the resting order — treating it as an annotation is exactly the bug this repo hit." },
+      { t:"'D' deletes only — executions move the price but leave depth intact", correct:false,
+        why:"An execution consumes the resting shares that traded; depth drops by the executed amount." },
+      { t:"'X' and 'D' only — executions are reported on a separate trade feed", correct:false,
+        why:"ITCH 'E'/'C' reference the resting order directly and its shares must be removed; the 'P' trade messages cover non-displayed liquidity." }
+    ]},
+  { ch:"feed", type:"w",
+    q:"Explain why an incremental feed consumer gets NO error correction, and what that implies about message-type coverage.",
+    concepts:[
+      { label:"you maintain the state, exchange doesn't resend", terms:["you maintain","no snapshot","no correction","never resend","your copy","own copy"] },
+      { label:"one missed/mishandled type diverges permanently", terms:["diverge","permanent","forever","drift","corrupt"] },
+      { label:"no signal tells you it happened", terms:["silent","no signal","invisible","nothing tells"] },
+      { label:"every state-mutating type must be handled", terms:["every","all types","taxonomy","must be handled","complete"] }
+    ],
+    model:"The exchange broadcasts events once and assumes every consumer applies all of them perfectly — there is no snapshot to resync against and no checksum on your state. Mishandle a single state-mutating type and your book diverges permanently and silently. Therefore correctness is all-or-nothing over the message taxonomy: every type that adds, removes, or moves liquidity must be handled; only genuinely state-neutral types may be skipped." },
+  { ch:"feed", type:"w",
+    q:"'E', 'X' and 'D' have nearly identical book mechanics. What distinguishes them economically?",
+    concepts:[
+      { label:"E = a trade happened", terms:["trade","executed","print","filled"] },
+      { label:"X/D = liquidity withdrawn without trading", terms:["withdraw","cancel","no trade","without trading","pulled"] },
+      { label:"same mechanics: reduce/remove resting shares", terms:["same","reduce","remove","mechanic","state transition"] },
+      { label:"matters for flow/volume interpretation, not book state", terms:["ofi","volume","interpret","signal","economic"] }
+    ],
+    model:"All three reduce or remove resting shares — the book state transition is the same family (which is why the engine routes cancels through book_.execute()). Economically they differ: an 'E' means a trade printed (someone paid to consume that liquidity — it feeds traded volume and aggressive-flow measures), while 'X'/'D' mean the owner withdrew liquidity without any trade. The book doesn't care; volume and flow interpretation does." },
+  { ch:"state", type:"w",
+    q:"Describe the phantom-depth bug this repo hit on real data: symptom, root cause, and why 24 green tests missed it.",
+    concepts:[
+      { label:"symptom: permanently crossed top / frozen stale bid", terms:["cross","frozen","stale","289.75","phantom"] },
+      { label:"cause: parser skipped 'X' partial cancels", terms:["x","cancel","skip"] },
+      { label:"order executed+canceled to zero, book kept remainder", terms:["remainder","18","350","kept","left over","residual"] },
+      { label:"tests only fed synthetic input without X", terms:["synthetic","never contained","no x","test input","benchmarks"] }
+    ],
+    model:"Symptom: after the 9:30 open, top-of-book was crossed on 100% of events — best bid frozen at $289.75 × 18 shares while asks moved normally. Root cause: the parser routed 'X' (partial cancel) to the skip branch; order 6129577 was added for 350, executed 332 and X-canceled 18, so the real order reached zero but our book kept 18 phantom shares at an aggressive price forever. The 24 unit tests all passed because every test and benchmark input was synthetic and never contained an 'X' — real data exercised the taxonomy the tests didn't." },
+  { ch:"state", type:"w",
+    q:"What cheap 'reality checks' can catch silent book divergence, given that counters like skipped_count can't?",
+    concepts:[
+      { label:"invariants of a real market: book not crossed post-open", terms:["cross","spread","invariant","positive spread"] },
+      { label:"prices within traded range", terms:["range","traded","within","band","sane price"] },
+      { label:"counters can't distinguish relevant from irrelevant skips", terms:["counter","skipped_count","can't tell","indistinguish","looked identical"] },
+      { label:"validate against real data, not only synthetic", terms:["real data","validate","fixture","golden"] }
+    ],
+    model:"Assert market invariants that a faithful reconstruction must satisfy: post-open the displayed book never stays crossed (spread > 0), best prices stay within the day's traded range, depth is non-negative, event timestamps are monotone. Counters like skipped_count are survivability tools, not correctness tools — 431 skipped X messages look identical to 431 skipped irrelevant ones. The repo's crossed-book assertion on the real AAPL fixture is exactly such a tripwire: it failed, and that failure was the bug report." },
+  { ch:"state", type:"mc",
+    q:"Order ref 77: A 200 sh @ $50.00, then X 50, then E 150. A correct book now shows:",
+    opts:[
+      { t:"Nothing at $50.00 from this order — it reached zero and was removed", correct:true,
+        why:"50 canceled + 150 executed = 200 = everything. The order dies at zero regardless of which removal type finished it." },
+      { t:"50 shares resting at $50.00", correct:false,
+        why:"That's the book you'd get if the X were skipped — the phantom-depth failure, not the correct state." },
+      { t:"150 shares resting at $50.00", correct:false,
+        why:"That would mean the execution was ignored instead — same class of bug, different missed type." },
+      { t:"200 shares until a 'D' arrives to confirm removal", correct:false,
+        why:"No 'D' is owed once E/X drain an order to zero; waiting for one is how state rots." }
+    ]},
+  { ch:"code", type:"w",
+    q:"From cpp/itch/microstructure_signals.hpp — why is routing on_cancel through book_.execute() a principled choice, and where IS the cancel distinguished?",
+    code:
+"void on_cancel(const CancelOrder& m) {\n" +
+"    book_.execute(m.order_ref, m.canceled_shares);\n" +
+"    emit(m.timestamp_ns);\n" +
+"}",
+    src:"cpp/itch/microstructure_signals.hpp",
+    concepts:[
+      { label:"identical state transition (reduce, erase at zero)", terms:["same","identical","reduce","erase","transition","mechanics"] },
+      { label:"book doesn't model trade-vs-withdrawal semantics", terms:["doesn't model","no semantics","book doesn't care","meaning"] },
+      { label:"distinguished in ParseStats cancel_count", terms:["cancel_count","parsestats","stats","counted separately"] },
+      { label:"execute() already clamps + handles unknown refs", terms:["clamp","min","unknown","error_count","safe"] }
+    ],
+    model:"A partial cancel and an execution perform the identical book transition — reduce the resting order's shares, erase it at zero — and execute() already clamps to available shares and error-counts unknown refs. The book deliberately doesn't model the economic difference (trade vs withdrawal), so same mechanics ⇒ same code path. The distinction is preserved where it belongs: the parser counts cancels separately (ParseStats.cancel_count), and any future traded-volume signal would hook the visitor's on_execute only." },
+  { ch:"code", type:"w",
+    q:"The regression test replays A(100 bid) → add ask → E(82) → X(18). State what a correct book asserts afterward and why the cancel event itself emits nothing.",
+    concepts:[
+      { label:"bid side empty / order gone", terms:["empty","no bid","gone","removed","false"] },
+      { label:"only the ask order remains (order_count 1)", terms:["ask remains","order_count","1"] },
+      { label:"one-sided book -> event skipped & counted", terms:["one-sided","skip","no event","skipped_one_sided"] },
+      { label:"guards the phantom-depth regression", terms:["phantom","regression","guard","crossed"] }
+    ],
+    model:"After E(82)+X(18) the bid order has hit zero: best_bid must be empty and order_count == 1 (just the ask). The cancel is the update that emptied the bid side, so the post-update book is one-sided — the engine cannot compute OFI or microprice without both sides, so it skips the event and increments skipped_one_sided instead. The test (MicroEngine.CancelViaParserRemovesPhantomDepth) is the permanent guard against the exact A→E→X pattern that created phantom depth." },
+  { ch:"code", type:"mc",
+    q:"itch_filter keeps 'S' system events and the target's 'R' directory entry alongside the symbol's order messages. Why keep 'R'?",
+    opts:[
+      { t:"The stock-locate code is assigned per day — 'R' is where a consumer learns which locate means AAPL", correct:true,
+        why:"Locates are session-scoped integers. Without the R entry, a downstream consumer of the filtered file couldn't map locate→symbol or verify the filter targeted the right stock." },
+      { t:"'R' messages carry the opening price needed to seed the book", correct:false,
+        why:"Stock Directory describes the instrument (symbol, category, tick); the book seeds from order messages, not R." },
+      { t:"The parser crashes if a file doesn't begin with an 'R'", correct:false,
+        why:"The parser skips unknown/unneeded types by length — it has no ordering requirement." },
+      { t:"'R' terminates the pre-market session in the framing protocol", correct:false,
+        why:"Session phases are signalled by 'S' system events, not the directory." }
+    ]}
+];
+
+/* ─── engine (shared drill pattern: shuffled options, attribute-checked) ─── */
+function $(id){ return document.getElementById(id); }
+function shuffle(a){ for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+function esc(s){ var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+BANK.forEach(function(q){ if (q.type==="mc") shuffle(q.opts); });
+
+var session=[], cur=0, state={}, reviewMode=false;
+var chipEls={};
+Object.keys(CHANNELS).forEach(function(key){
+  var n = BANK.filter(function(q){return q.ch===key;}).length;
+  var c = document.createElement("span");
+  c.className="chip on"; c.tabIndex=0; c.textContent=CHANNELS[key]+" · "+n;
+  c.addEventListener("click", function(){ c.classList.toggle("on"); syncAll(); });
+  c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();c.click();} });
+  chipEls[key]=c; $("chips").appendChild(c);
+});
+function syncAll(){ $("chk-all").checked = Object.keys(chipEls).every(function(k){return chipEls[k].classList.contains("on");}); }
+$("chk-all").addEventListener("change", function(){ var on=this.checked;
+  Object.keys(chipEls).forEach(function(k){ chipEls[k].classList.toggle("on", on); }); });
+$("btn-begin").addEventListener("click", function(){
+  var chans = Object.keys(chipEls).filter(function(k){return chipEls[k].classList.contains("on");});
+  if(!chans.length){ alert("Pick at least one channel."); return; }
+  session=[]; BANK.forEach(function(q,i){ if(chans.indexOf(q.ch)>=0) session.push(i); });
+  if($("chk-shuffle").checked) shuffle(session);
+  state={}; cur=0; reviewMode=false; show("quiz"); render();
+});
+function show(name){ ["start","quiz","results"].forEach(function(s){ $(s).classList.toggle("hidden", s!==name); }); }
+function st(bi){ return state[bi] || (state[bi]={typed:"",mcPicked:-1,mcRight:null,checked:false,rated:null,revealed:false}); }
+
+function render(){
+  var bi=session[cur], q=BANK[bi], s=st(bi);
+  $("q-num").textContent = "Q "+(cur+1)+" / "+session.length+(reviewMode?" · review":"");
+  $("q-cat").textContent = CHANNELS[q.ch];
+  $("q-type").textContent = q.type==="mc" ? "multiple choice" : "written recall";
+  $("q-bar").style.width = ((cur+1)/session.length*100)+"%";
+  $("btn-prev").disabled = (cur===0);
+  var last = (cur===session.length-1);
+  $("btn-next").classList.toggle("hidden", last);
+  $("btn-finish").classList.toggle("hidden", !last);
+  var body=$("q-body"); body.innerHTML="";
+  var p=document.createElement("p"); p.className="qtext"; p.textContent=q.q; body.appendChild(p);
+  if(q.code){ var pre=document.createElement("pre"); pre.textContent=q.code; body.appendChild(pre);
+    var src=document.createElement("p"); src.className="src"; src.textContent="— "+q.src; body.appendChild(src); }
+  if(q.type==="mc") renderMC(q,s,body); else renderW(q,s,body);
+}
+function renderMC(q,s,body){
+  var ul=document.createElement("ul"); ul.className="opts";
+  var fb=document.createElement("p"); fb.className="fb"; fb.hidden=true;
+  q.opts.forEach(function(opt,oi){
+    var li=document.createElement("li"); li.tabIndex=0; li.textContent=opt.t;
+    function commit(){ if(s.mcPicked>=0) return; s.mcPicked=oi; s.mcRight=!!opt.correct; paint(); }
+    li.addEventListener("click",commit);
+    li.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){e.preventDefault();commit();} });
+    ul.appendChild(li);
+  });
+  function paint(){
+    Array.prototype.forEach.call(ul.children,function(li,oi){
+      li.classList.add("locked");
+      if(q.opts[oi].correct) li.classList.add("right");
+      if(oi===s.mcPicked && !q.opts[oi].correct) li.classList.add("wrong");
+    });
+    fb.hidden=false; fb.className="fb "+(s.mcRight?"good":"bad");
+    fb.textContent=(s.mcRight?"▲ Correct. ":"▼ Not quite. ")+q.opts[s.mcPicked].why;
+  }
+  body.appendChild(ul); body.appendChild(fb);
+  if(s.mcPicked>=0) paint();
+}
+function renderW(q,s,body){
+  var ta=document.createElement("textarea");
+  ta.placeholder="Type your answer from memory before checking…";
+  ta.value=s.typed; ta.addEventListener("input",function(){ s.typed=ta.value; });
+  body.appendChild(ta);
+  var row=document.createElement("div"); row.className="nav";
+  var bC=document.createElement("button"); bC.textContent="Check my answer";
+  var bS=document.createElement("button"); bS.textContent="Show me the answer";
+  row.appendChild(bC); row.appendChild(bS); body.appendChild(row);
+  var out=document.createElement("div"); body.appendChild(out);
+  function renderCheck(){
+    var text=(s.typed||"").toLowerCase();
+    var hits=q.concepts.map(function(c){ return {c:c, hit:c.terms.some(function(t){return text.indexOf(t.toLowerCase())>=0;})}; });
+    var got=hits.filter(function(h){return h.hit;}).length;
+    var html='<p class="fb '+(got===q.concepts.length?"good":(got?"":"bad"))+'" style="margin-bottom:.2rem">'+
+             got+' / '+q.concepts.length+' key concepts detected</p><ul class="concepts">';
+    hits.forEach(function(h){ html+='<li class="'+(h.hit?"hit":"miss")+'">'+esc(h.c.label)+'</li>'; });
+    html+='</ul><p class="note">Keyword scan is rough — judge yourself against the model answer.</p>';
+    out.innerHTML=html; s.checked=true;
+    if(s.revealed) renderModel();
+  }
+  function renderModel(){
+    s.revealed=true;
+    var m=document.createElement("div"); m.className="model";
+    m.innerHTML="<strong>Model answer.</strong> "+esc(q.model); out.appendChild(m);
+    var rate=document.createElement("div"); rate.className="nav";
+    var bK=document.createElement("button"); bK.textContent="✓ knew it";
+    var bR=document.createElement("button"); bR.textContent="↻ needs review";
+    function mark(v){ s.rated=v;
+      bK.style.borderColor=v==="solid"?"var(--green)":"var(--line)"; bK.style.color=v==="solid"?"var(--green)":"var(--ink)";
+      bR.style.borderColor=v==="review"?"var(--red)":"var(--line)"; bR.style.color=v==="review"?"var(--red)":"var(--ink)"; }
+    bK.addEventListener("click",function(){mark("solid");});
+    bR.addEventListener("click",function(){mark("review");});
+    rate.appendChild(bK); rate.appendChild(bR); out.appendChild(rate);
+    if(s.rated) mark(s.rated);
+  }
+  bC.addEventListener("click",renderCheck);
+  bS.addEventListener("click",function(){ out.innerHTML=""; if(s.checked) renderCheck(); else s.checked=true;
+    if(!out.querySelector(".model")) renderModel(); });
+  if(s.checked) renderCheck();
+  if(s.revealed && !out.querySelector(".model")) renderModel();
+}
+$("btn-prev").addEventListener("click",function(){ if(cur>0){cur--;render();} });
+$("btn-next").addEventListener("click",function(){ if(cur<session.length-1){cur++;render();} });
+$("btn-finish").addEventListener("click",showResults);
+function showResults(){
+  var mcT=0,mcG=0,wrT=0,wrS=0,rows="";
+  session.forEach(function(bi,i){
+    var q=BANK[bi],s=st(bi),pill;
+    if(q.type==="mc"){ mcT++;
+      if(s.mcRight===true){mcG++;pill='<span class="pill ok">correct</span>';}
+      else if(s.mcPicked>=0){pill='<span class="pill no">missed</span>';}
+      else pill='<span class="pill skip">unanswered</span>';
+    } else { wrT++;
+      if(s.rated==="solid"){wrS++;pill='<span class="pill ok">knew it</span>';}
+      else if(s.rated==="review"){pill='<span class="pill no">needs review</span>';}
+      else pill='<span class="pill skip">unrated</span>'; }
+    rows+="<tr><td>"+(i+1)+"</td><td>"+esc(CHANNELS[q.ch])+"</td><td>"+esc(q.q.slice(0,70))+(q.q.length>70?"…":"")+"</td><td>"+pill+"</td></tr>";
+  });
+  $("r-mc").textContent=mcG+" / "+mcT; $("r-wr").textContent=wrS+" / "+wrT;
+  $("r-rows").innerHTML=rows;
+  var missed=missedIdx();
+  $("btn-review").disabled=(missed.length===0);
+  $("r-note").textContent = missed.length
+    ? missed.length+" item(s) flagged — a gap found is the drill doing its job."
+    : "Nothing flagged. Report scores back in chat so PROGRESS.md can be updated.";
+  show("results");
+}
+function missedIdx(){
+  return session.filter(function(bi){ var q=BANK[bi],s=st(bi);
+    if(q.type==="mc") return s.mcPicked>=0 ? !s.mcRight : true;
+    return s.rated!=="solid"; });
+}
+$("btn-review").addEventListener("click",function(){
+  var missed=missedIdx(); if(!missed.length) return;
+  missed.forEach(function(bi){ delete state[bi]; if(BANK[bi].type==="mc") shuffle(BANK[bi].opts); });
+  session=missed.slice(); cur=0; reviewMode=true; show("quiz"); render();
+});
+$("btn-restart").addEventListener("click",function(){ show("start"); });
+})();
+</script>
+</div>
+</body>
+</html>

@@ -1,0 +1,46 @@
+---
+name: planning-session-combat
+description: GitHub issues created 2026-06-28 for weapons/hud/combat milestone in cpp_game_with_llm_npcs
+metadata:
+  type: project
+---
+
+# Issue Planning Summary
+Date: 2026-06-28
+Repo: bjl14710/cpp_game_with_llm_npcs
+Milestone: Combat System — Weapons, HUD & LLM Reactions (#1)
+
+## Issues Created
+
+- #7: Player state + weapon data structs
+  Concept: C++ constexpr lookup tables and static_assert size guards
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/7
+
+- #8: NPC health + state machine
+  Concept: State machine design in C++ game entities
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/8
+
+- #9: World::updateCombat — melee hit detection and projectile travel
+  Concept: Game physics circle-vs-cylinder collision and erase-remove idiom
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/9
+
+- #10: Attack input + HUD overlay
+  Concept: SFML immediate-mode HUD rendering over OpenGL 3D scene
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/10
+
+- #11: Weapon visual and attack animation in Renderer3D
+  Concept: OpenGL immediate mode screen-space overlays and orthographic projection
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/11
+
+- #12: LLM combat reaction — floating callout when NPC is attacked
+  Concept: LLM-as-reactive-game-component with fire-and-forget async routing
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/12
+
+- #13: Cop armed AI — preferred-range movement, accuracy roll, player death screen
+  Concept: Probabilistic game AI with uniform distribution accuracy rolls
+  URL: https://github.com/bjl14710/cpp_game_with_llm_npcs/issues/13
+
+## What Was NOT Planned
+- Weapon pickup from ground (out of scope per plan)
+- Reload animations (out of scope per plan)
+- Pre-existing open issues #3, #4, #5 (city stations, NPC instructions, town detail) — separate backlog

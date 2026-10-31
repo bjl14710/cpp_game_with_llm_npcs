@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0008 — Length-Prefixed Framing</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1.5rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.3rem; margin-bottom:1.2rem; }
+  .q h3 { font-size:1rem; margin-bottom:.7rem; }
+  .opt { display:block; width:100%; text-align:left; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.55rem .8rem; margin-bottom:.45rem; cursor:pointer; font-size:.92rem; }
+  .opt:hover { border-color:var(--accent); }
+  .opt.right { border-color:var(--green); background:#16281f; }
+  .opt.wrong { border-color:var(--red); background:#2a1820; }
+  .why { display:none; color:var(--muted); font-size:.88rem; margin-top:.5rem; border-top:1px dashed var(--border); padding-top:.5rem; }
+  .q.done .why { display:block; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .3em; font-size:.88em; }
+  textarea { width:100%; min-height:70px; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.6rem; font-size:.92rem; }
+  details { margin-top:.5rem; color:var(--muted); }
+</style>
+<script>
+function pick(btn, ok) {
+  const q = btn.closest('.q');
+  if (q.classList.contains('done')) return;
+  q.classList.add('done');
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (!ok) q.querySelectorAll('.opt').forEach(o => { if (o.dataset.ok === '1') o.classList.add('right'); });
+}
+</script>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0008 · pairs with lesson 0008</div>
+<h1>Length-Prefixed Framing</h1>
+
+<div class="q"><h3>1. The server calls <code>send()</code> twice: a Welcome, then a snapshot. What may the client's first <code>recv()</code> return?</h3>
+<button class="opt" onclick="pick(this,false)">Exactly the Welcome message</button>
+<button class="opt" onclick="pick(this,false)">Exactly one of the two messages, never a partial one</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Any byte split: half a message, both glued together, or three bytes of a prefix</button>
+<div class="why">TCP preserves byte order and integrity, never write boundaries. Framing exists to rebuild boundaries.</div></div>
+
+<div class="q"><h3>2. Why does <code>FrameAssembler</code> use a length prefix while <code>StreamAssembler</code> uses newlines?</h3>
+<button class="opt" onclick="pick(this,false)">Length prefixes are faster than scanning for delimiters</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Ollama's NDJSON already promises newline delimiters; our own protocol needed no-escaping, binary-safe framing we fully control</button>
+<button class="opt" onclick="pick(this,false)">Newlines can't cross TCP packet boundaries</button>
+<div class="why">Delimiters fit protocols that already guarantee them; a length prefix is the default when you own both ends.</div></div>
+
+<div class="q"><h3>3. A frame arrives whose 4-byte prefix declares 900 MB. The correct response is…</h3>
+<button class="opt" onclick="pick(this,false)">Skip this frame and start reading the next one</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Drop the connection — without trusting the length you can never find the next frame boundary</button>
+<button class="opt" onclick="pick(this,false)">Allocate the buffer and wait; TCP will deliver eventually</button>
+<div class="why">"Skip" requires knowing where the frame ends — which is exactly the number you don't trust. <code>feed()</code> returns false; the caller disconnects.</div></div>
+
+<div class="q"><h3>4. Why encode the prefix with shifts (<code>len &gt;&gt; 24</code>…) instead of <code>memcpy</code>-ing the <code>uint32_t</code>?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">The CPU's in-memory byte order is little-endian on x86/ARM; the wire convention is big-endian, so the order must be explicit</button>
+<button class="opt" onclick="pick(this,false)">memcpy is slower than four shifts</button>
+<button class="opt" onclick="pick(this,false)">uint32_t may be padded to 8 bytes on some platforms</button>
+<div class="why">Copying raw int bytes ships your CPU's endianness; two same-endian peers would work by luck, mixed peers would read garbage lengths.</div></div>
+
+<div class="q"><h3>5. Written recall — no peeking:</h3>
+<p>Sketch <code>feed()</code>'s loop: what are the two "not yet" cases and the one "emit" case?</p>
+<textarea placeholder="buffer_.append(...); while ..."></textarea>
+<details><summary>Reference answer</summary>Append bytes to the buffer. Loop: (a) fewer than 4 bytes → return, wait for the prefix; (b) prefix read but buffer < 4+length → return, wait for payload; (c) full frame present → emit payload via callback, erase 4+length bytes, repeat. Oversized prefix → return false (drop connection).</details></div>
+</div></body></html>

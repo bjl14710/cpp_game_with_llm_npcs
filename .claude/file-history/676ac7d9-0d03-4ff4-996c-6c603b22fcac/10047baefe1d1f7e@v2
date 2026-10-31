@@ -1,0 +1,185 @@
+# Silmulator — Learning Progress
+
+## Learner Profile
+- Builder/developer of the Silmulator project itself
+- Experienced enough to be writing/fixing Python + Qt code
+- Learning goal: understand how to USE Silmulator as an end-user (the HIL/SIL workflow)
+
+## Sessions
+
+### Session 1 (2026-06-20)
+**Lesson:** [0001 — How to Use Silmulator](lessons/0001-how-to-use-silmulator.html)
+**Covered:**
+- What SIL/HIL/CIL means and why Silmulator exists
+- The three-step workflow: Place → Connect → Drive
+- Adding hardware blocks to the canvas
+- Drawing wires between ports
+- Sending SCPI commands via the console
+- Loading source code (snippet + project folder modes)
+- Saving and reloading layouts
+
+**Engagement:** First lesson — baseline not yet measured.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Session 2 (2026-06-20)
+**Lesson:** [0002 — Connections &amp; Documentation](lessons/0002-connections-and-documentation.html)
+**Covered:**
+- ConnectionPort internals: port_id, parent_block, connected_to, fractional x/y positioning
+- WireItem: ZValue=-1, update_position(), connect_ports() guards, remove_block() wire cleanup
+- disconnect() contract — both sides must be nulled or ghost state occurs
+- Reading real _setup_ports() patterns across Oscilloscope, MSP430
+- How to_dict()/from_dict() serialize and restore connections via port_map
+- hardware_docs/ folder purpose, layout, and workflow loop to custom blocks
+- Custom block JSON spec: ports, commands (literal / empty / template), discovery at startup
+- Contrasting Port vs Wire vs Qt Signal
+
+**Engagement:** Second lesson — quiz results pending.
+**Noted gaps:** Unknown until quiz responses reviewed.
+
+### Drill 1 (2026-06-20)
+**Drill:** [0001 — How to Use Silmulator](drills/0001-how-to-use-silmulator.html)
+**Channels drilled:** workflow · SCPI code path · SIL/HIL/CIL · real-code · bugs
+**Questions:** 20 (12 MC + 8 written recall)
+**MC score:** pending user run
+**Written self-ratings:** pending user run
+**Noted gaps:** pending
+
+### Session 3 (2026-06-28, overnight)
+**Lesson:** [0008 — Visual Regression Testing](lessons/0008-visual-regression-testing.html)
+**Drill:** [0008 — Visual Regression Testing](drills/0008-visual-regression-testing.html)
+**Covered (from the visual-testing epic, issues #2–#6):**
+- Golden-image comparison: capture → convert → RMS diff → threshold; auto-create golden on first run
+- `compare_screenshot` capturing both `QWidget` (`.grab()`) and `QGraphicsItem` blocks (`QGraphicsScene.render()`)
+- Determinism: threshold=5 not 0; freezing the multimeter's random reading; fixed window size; `fit_all()` for off-screen blocks
+- Update-golden workflow (`UPDATE_GOLDEN=1` / delete+rerun); goldens committed, diffs gitignored
+- Headless execution via `QT_QPA_PLATFORM=offscreen` + pytest-xvfb (no DISPLAY)
+
+**Engagement:** Generated overnight — quiz/drill results pending user run.
+
+### Session 4 (2026-07-15, overnight — issue #18)
+**Lesson:** [0009 — ADC Transfer Functions: the Reference as the Unit of Measure](lessons/0009-adc-reference-transfer-functions.html)
+**Concept taught:** an ADC code is a ratio, not a voltage — NADC = FS × (Vin − VR−)/(VR+ − VR−) (SLAU367P §34.2.1 Eq. 13); the reference IS the conversion's unit of measure. Grounded in commit 58b7e2d (reference-aware ADC conversion, VR+/VR− scaling, -224 validation).
+**Covered:**
+- Same input → different codes under different references (1.2 V @ VREF → 4095 vs @ AVCC 3.3 → 1489)
+- The transfer function with worked examples, truncation (int() vs rounding), and the inverse (code → volts)
+- The real diff: hardcoded 3.3 → `_adc_reference_voltage()`, `ADC_INTERNAL_REF_V`, `VALID_ADC_REFERENCES`, `_veref_v` (+*RST reset)
+- Why references are a fixed hardware set: ADC12VRSEL encodings, REF_A's 1.2/2.0/2.5-V REFVSEL outputs, AVCC (live `clock.vcc`), external VeREF+ (`ADC:REFERENCE VEREF,<v>`)
+- SCPI -224 for illegal reference tokens vs -104 for a malformed VEREF voltage
+- Full-scale/clipping (clamp to [0, max_code]), LSB voltage vs reference, ratiometric vs absolute measurement
+- Why it matters for SIL: the cancelling-errors failure mode — simulator and buggy firmware both wrong by 3.3 → tests passed on mis-scaled conversions
+**Files created:**
+- lessons/0009-adc-reference-transfer-functions.html (lesson: 9 sections, 5-question quiz, 3 scenarios)
+- drills/0009-adc-reference-transfer-functions.html (drill: 24 questions across 5 channels — transfer math, reference set, 58b7e2d code, clipping/LSB, SIL bug-hunting)
+- vocab/0009-adc-reference-transfer-functions.html (8 terms: reference voltage, full-scale code, transfer function, LSB voltage, ADC12VRSEL, REF_A, VeREF+, ratiometric measurement)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; quiz/drill scores pending user run.
+**Noted gaps:** pending
+
+### Session 5 (2026-07-15, overnight — issue #19)
+**Lesson:** [0010 — Register Width and Encoding Constraints: Modeling What Silicon Can Actually Hold](lessons/0010-register-width-and-encoding-constraints.html)
+**Concept taught:** registers have physical widths and field encodings that bound the reachable state space — a 16-bit TAxR cannot hold 0x10000, ID×TAIDEX never reaches /128 — and a simulator that accepts unreachable states silently voids SIL results. Grounded in commit a20fbb1 (Timer_A/B width guards, divider bound, CAP-bit storage, PERIOD=CCR0 aliasing).
+**Covered:**
+- Register width vs Python's unbounded int: the 0–0xFFFF guard on COUNT/CCR writes, -222 rejection, two-sided (negative values too)
+- Encoding reachability: full ID (1/2/4/8) × TAIDEX (1–8) product enumeration — 20 reachable dividers, max /64; /128 unreachable; the model's power-of-two subset vs reachable-but-unexposed values like /48
+- The real diff: `TimerState` (period field deleted, `cc_mode` dict added), `_timer_count`/`_timer_cc_val` guards, `_timer_clk_div` VALID set, `_timer_cc_mode` validation, `_timer_period` → one-line delegation
+- Reject vs mask vs store-verbatim policy; why this repo rejects loudly; -222 (range) vs -224 (set membership)
+- Register aliasing: PERIOD IS TAxCCR0 — the double-store bug class, delete-and-delegate fix, reset value change 0xFFFF → 0
+- Stored-state-only modeling: CAP bit persists, capture events out of scope — time does not pass
+- Why SIL cares: unreachable states silently void results (the /128 timing math and 200000-count truncation examples); four strict xfails flipped; vendor-doc diff MATCH 13→17, CONFLICT 5→1
+**Files created:**
+- lessons/0010-register-width-and-encoding-constraints.html (lesson: 10 sections, 5-question quiz, 3 scenarios)
+- drills/0010-register-width-and-encoding-constraints.html (drill: 24 questions across 5 channels — width math, encoding reachability, reject vs mask, a20fbb1 code, spot-the-bug)
+- vocab/0010-register-width-and-encoding-constraints.html (8 terms: register width, encoding, reachable state space, write masking, TAIDEX, CAP bit, register aliasing, stored-state modeling)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; quiz/drill scores pending user run.
+**Noted gaps:** pending
+
+### Session 6 (2026-07-15, overnight — issue #20)
+**Lesson:** [0011 — Lesson 0011 — Clock Trees: Why Reported Frequency Must Follow the Selected Source](lessons/0011-clock-trees-source-aware-frequency.html)
+**Concept taught:** Clock trees: why reported frequency must follow the selected source. Grounded in commit 701853d.
+**Covered:**
+- The FR5994 clock tree: CSCTL2 source muxes (SELM/SELS vs SELA source sets), CSCTL3 dividers /1../32
+- Fixed-rate internal sources: VLO ~9.4 kHz, MODCLK ~4.8 MHz, LFMODCLK = MODCLK/128
+- Derived-value queries: FREQUENCY? walks source -> base -> divider instead of echoing DCO
+- The silent-lie bug class: a frequency query that ignores the mux poisons timer/UART math downstream
+**Files created:**
+- lessons/0011-clock-trees-source-aware-frequency.html
+- drills/0011-clock-trees-source-aware-frequency.html
+- vocab/0011-clock-trees-source-aware-frequency.html (8 terms)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; drill scores pending user run.
+**Noted gaps:** pending
+
+### Session 7 (2026-07-15, overnight — issue #21)
+**Lesson:** [0012 — Lesson 0012 — PxREN Semantics: One Enable Bit Whose Direction Lives in Another Register](lessons/0012-pxren-pull-resistor-semantics.html)
+**Concept taught:** PxREN semantics: one enable bit whose direction lives in another register. Grounded in commit 4cb71a1.
+**Covered:**
+- Register repurposing: PxOUT is drive level for outputs, pull direction for REN-enabled inputs (Table 12-1)
+- Inexpressible states: independent pullup/pulldown masks allowed both pulls on one pin — structurally impossible now
+- Derived views (pullup/pulldown as @property over REN+OUT) and deprecated aliases that compose real registers
+- Pull-aware input reads for undriven pins; pin-index 0-7 validation
+**Files created:**
+- lessons/0012-pxren-pull-resistor-semantics.html
+- drills/0012-pxren-pull-resistor-semantics.html
+- vocab/0012-pxren-pull-resistor-semantics.html (8 terms)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; drill scores pending user run.
+**Noted gaps:** pending
+
+### Session 8 (2026-07-15, overnight — issue #22)
+**Lesson:** [0013 — Lesson 0013 — MSP430X: 20-bit Registers on a 16-bit-looking ISA](lessons/0013-msp430x-20-bit-registers.html)
+**Concept taught:** MSP430X: 20-bit registers on a 16-bit-looking ISA. Grounded in commit 07f1f69.
+**Covered:**
+- CPUX widens R0-R15 to 20 bits and the address space to 1 MB while 16-bit encodings run unchanged
+- Write masking width asserts which CPU you model: & 0xFFFF vs & 0xFFFFF is a one-digit, whole-CPU difference
+- PC validation: even, <= 0xFFFFF — an odd PC has no silicon state
+- Reset is a vector fetch (0xFFFE little-endian word, default 0x4000), not a jump to a constant
+**Files created:**
+- lessons/0013-msp430x-20-bit-registers.html
+- drills/0013-msp430x-20-bit-registers.html
+- vocab/0013-msp430x-20-bit-registers.html (8 terms)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; drill scores pending user run.
+**Noted gaps:** pending
+
+### Session 9 (2026-07-15, overnight — issue #23)
+**Lesson:** [0014 — Lesson 0014 — Password-Protected Registers and PUC Semantics on MSP430](lessons/0014-password-registers-and-puc.html)
+**Concept taught:** Password-protected registers and PUC semantics on MSP430. Grounded in commit fa7c595/5e2ba08/615b4e1.
+**Covered:**
+- WDTPW: every WDTCTL write carries 0x5A in the upper byte or triggers an immediate PUC — protection by reset, not by error flag
+- The BOR/POR/PUC reset hierarchy and what a PUC restores (PC from vector, GIE cleared, peripherals defaulted)
+- I2C trust boundary: per-address buffers, NACK for unknown addresses, 10-bit UCSLA10 addressing, standard-mode frequency set
+- Minimal interrupt wiring: GIE-gated VECTOR? vs ungated FLAG?, fixed Table 9-4 vector priorities, no asynchronous firing
+**Files created:**
+- lessons/0014-password-registers-and-puc.html
+- drills/0014-password-registers-and-puc.html
+- vocab/0014-password-registers-and-puc.html (8 terms)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; drill scores pending user run.
+**Noted gaps:** pending
+
+### Session 10 (2026-07-17, overnight — issue #35)
+**Lesson:** [0015 — Three-Way Merge Semantics for Append-Only Log Files](lessons/0015-three-way-merge-append-only-logs.html)
+**Concept taught:** git merges lines, not meaning — a three-way merge (base/ours/theirs) must conflict when both sides append at a log's append anchor, and can silently violate the file's semantic invariants even when it succeeds textually. Grounded in this repo's real merges: 24f142b (the loud PROGRESS.md both-sides-append conflict) and f2b6fbf (the silent duplicate-Session-4 auto-merge plus the index.html add/add).
+**Covered:**
+- Three-way merge mechanics: merge base (df5c43c / 701853d), per-region decision table, why both-changed-same-region and both-inserted-at-one-point are the two conflict cases
+- The append anchor: why append-only logs (PROGRESS.md, GLOSSARY.md, changelogs) conflict by construction, and the mitigation spectrum (per-entry files, merge=union's trap, accept-and-repair)
+- The real 24f142b hunk: ours' July issue-#18 Session 3 vs theirs' June visual-testing Session 3, empty diff3 base as the both-sides-append fingerprint
+- Keep-one vs keep-both diagnosis: different events (dates/issues/artifacts) → keep both, chronological, renumber; revision/superset → keep one; the `--ours` reflex as silent history deletion
+- Textual success ≠ semantic success: f2b6fbf's clean auto-merge produced a duplicate "Session 4" + off-by-one tail; post-merge invariant repair (5 headings renumbered) with uniqueness/monotonicity assertions (`sort | uniq -d`, awk)
+- Derived files: index.html's add/add resolved by regenerating via `.tools/build_index.py`, never by hand-merging generated output
+- Merge vs rebase for shared branches: rebasing rewrites SHAs cited in PR bodies, the audit report, and PROGRESS.md itself ("grounded in 58b7e2d")
+- Verification: merge-tree dry runs before, index stages (`:1:`/`:2:`/`:3:`) + diff3 during, marker sweep + invariant checks after
+**Files created:**
+- lessons/0015-three-way-merge-append-only-logs.html (lesson: 11 sections, real conflict block, both resolutions, misconceptions table, 5-question quiz, 3 scenarios)
+- drills/0015-three-way-merge-append-only-logs.html (drill: 22 questions across 5 channels — merge mechanics, keep-one vs keep-both, invariant repair, real-repo reading, spot-the-bad-resolution)
+- vocab/0015-three-way-merge-append-only-logs.html (8 terms: three-way merge, merge base, conflict hunk, keep-both resolution, semantic invariant, append anchor, derived file, merge-tree dry run)
+- GLOSSARY.md — appended the 8 vocab terms
+**Engagement:** Autonomous overnight session — no interactive knowledge checks run; quiz/drill scores pending user run.
+**Noted gaps:** pending
+
+## Suggested Next Lessons
+1. **SCPI command structure** — the IEEE 488.2 tree syntax that every instrument in Silmulator uses; grounded in `silmulator/scpi/parser.py` and the device command handlers
+2. **Writing a complete SIL test** — paste real embedded C code into the Code Input block, wire it to simulated hardware, and interpret the responses
+3. **Custom blocks** — create a JSON spec for a device that isn't in the library yet (grounded in `silmulator/gui/blocks/custom_block.py`)
+4. **Reading the waveform** — inject a sine wave into the oscilloscope and interpret the CURVE? data transfer

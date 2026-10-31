@@ -1,0 +1,78 @@
+"""Daily-bar strategy contract for the Strategy Arena.
+
+This interface is intentionally separate from :class:`strategies.base.BaseStrategy`,
+which is the intraday 2-bar contract used by ``PaperEngine`` / ``intraday_sim``.
+Arena strategies see the FULL daily OHLCV history up to and including the
+decision bar and return a target direction, so ML models (which need long
+feature windows) and rule-based strategies share one contract.
+
+See .claude/plans/strategy-arena.md for the full design.
+"""
+import abc
+from dataclasses import dataclass
+
+import pandas as pd
+
+
+@dataclass
+class DailySignal:
+    """Target position emitted by a DailyStrategy for one ticker on one day.
+
+    Attributes:
+        position: Target direction — +1 long, -1 short, 0 flat/hold.
+        confidence: Non-negative strength of the signal. The arena harness
+            ranks candidate tickers by confidence when it can only hold
+            ``top_n`` names; scale is strategy-relative, not comparable
+            across strategies.
+        reason: Short human-readable explanation (e.g. "bullish engulfing",
+            "pred_ret=+0.42%"). Persisted to the arena trade log.
+    """
+
+    position: int
+    confidence: float
+    reason: str
+
+
+HOLD = DailySignal(position=0, confidence=0.0, reason="hold")
+
+
+class DailyStrategy(abc.ABC):
+    """Abstract base for all Strategy Arena participants (daily frequency).
+
+    Implementations must be deterministic given ``df`` — the arena's
+    auto-backfill replays missed days from history and assumes identical
+    output for identical input.
+    """
+
+    #: Registry/CLI identifier — override in subclasses (e.g. "engulfing").
+    name: str = "daily"
+
+    #: Market regimes (see regime.py) this strategy is allowed to trade in.
+    #: Default: all four — restricting this is an explicit per-strategy
+    #: design choice, not automatic, so existing strategies keep trading in
+    #: every regime until deliberately narrowed.
+    compatible_regimes: frozenset = frozenset({"trending", "mean_reverting", "high_vol", "neutral"})
+
+    @property
+    def warmup_bars(self) -> int:
+        """Minimum number of daily bars required before signals are valid.
+
+        The arena skips (ticker, day) pairs with less history than this
+        instead of calling ``generate_signal``.
+        """
+        return 2
+
+    @abc.abstractmethod
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Produce a target position from daily OHLCV history.
+
+        Args:
+            df: Date-indexed OHLCV frame (columns: Open, High, Low, Close,
+                Volume — the ``fetch_history`` format) containing all bars up
+                to AND INCLUDING the decision bar. Never contains future data.
+
+        Returns:
+            A DailySignal. "No pattern today" is ``position=0`` (hold),
+            never an exception.
+        """
+        ...

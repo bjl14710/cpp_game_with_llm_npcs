@@ -1,0 +1,100 @@
+[build-system]
+requires = [
+  "setuptools>=68",
+  "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-package"
+version = "0.2.0"
+description = "Backtesting, walk-forward simulation, and live-style prediction tools using yfinance and Gradient Boosting, with optional risk-aware allocation and news features."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+  { name = "bolee" }
+]
+dependencies = [
+  "joblib==1.5.2",
+  "numpy==2.3.3",
+  "onnx==1.19.1",
+  "pandas==2.3.3",
+  "lxml>=4.9",
+  "beautifulsoup4>=4.12",
+  "scikit-learn==1.7.2",
+  "skl2onnx==1.19.1",
+  "yfinance==0.2.66",
+  "requests==2.32.3",
+  "tqdm>=4.66",
+  "matplotlib==3.10.7",
+  "robin-stocks>=3.0.2",
+  "fastapi>=0.111.0,<0.116.0",
+  "starlette>=0.37.2,<1.0.0",
+  "uvicorn>=0.30.0,<0.35.0",
+  "jinja2>=3.1,<4.0",
+  "python-multipart>=0.0.7",
+  "shap>=0.52.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+  "exercise: HFT practice exercise tests (deselect with -m 'not exercise')",
+  "cpp: exercise tests that compile and run C++ (require g++)",
+  "vhdl: exercise tests that simulate VHDL (require ghdl; skipped when absent)",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "python-docx>=1.1.0",
+]
+
+[project.scripts]
+paper-backtest = "paper_trading_sim:main"
+predict-next = "predict_next:main"
+walkforward-sim = "walkforward_sim:main"
+analyze-equity = "analyze_equity:main"
+news-fetch = "news_fetch:main"
+news-features = "news_features:main"
+gui-hft = "gui_app:main"
+universe-builder = "scripts.universe_builder:main"
+rh-exec = "scripts.robinhood_executor:main"
+morning-runner = "scripts.morning_runner:main"
+web-hft = "webapp.main:run"
+refresh-tickers = "refresh_tickers:main"
+intraday-sim = "intraday_sim:main"
+arena-run = "strategy_arena:main"
+live-watch = "live_watch:main"
+refresh-earnings = "earnings_data:main"
+pairs-scan = "pairs:main_scan"
+pairs-backtest = "pairs:main_backtest"
+
+[tool.setuptools]
+py-modules = [
+  "paper_trading_sim",
+  "predict_next",
+  "walkforward_sim",
+  "analyze_equity",
+  "news_fetch",
+  "news_features"
+  ,
+  "gui_app",
+  "refresh_tickers",
+  "intraday_sim",
+  "strategy_arena",
+  "costs",
+  "regime",
+  "shocks",
+  "drift",
+  "live_watch",
+  "earnings_data",
+  "kelly",
+  "pairs"
+]
+packages = ["scripts", "webapp", "strategies"]
+

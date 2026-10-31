@@ -1,0 +1,25 @@
+# Checkpoint
+Session started: 2026-07-05 (evening)
+Goal: Work through all ready-for-ai issues
+Status: IN PROGRESS
+
+## Environment notes
+- GitHub API auth broken (GH_TOKEN 401, gh CLI not installed) — the three
+  planned issues were NEVER created on GitHub (see scratchpad plan_github.py
+  and .claude/memory/planning-session.md was not written either).
+- Working from the issue specs in .claude/plans/microstructure-signals.md
+  instead. All gh label/comment/PR steps deferred to the morning report.
+- git push over HTTPS works (keychain), so branches WILL be pushed.
+- Base branch for the stack: feature/microstructure-scaffold
+  (contains micro-2 engine + scaffold; main has none of the 5 pending PRs merged).
+- git-historian agent not available in this repo — orientation done inline.
+- graphify not installed — skipped.
+
+Issues to process (virtual, from plan):
+  micro-3: Implement signals_cpp.events_from_file (columnar ITCH event bridge)
+  micro-4: Implement rolling-window Kyle's lambda estimator
+  micro-5: Microstructure dashboard panel + docs/perf/02 writeup
+
+Issues completed: []
+Issues failed: []
+Issues skipped: []

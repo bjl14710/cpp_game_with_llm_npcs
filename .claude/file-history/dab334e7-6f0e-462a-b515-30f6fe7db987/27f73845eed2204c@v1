@@ -1,0 +1,76 @@
+# Overnight Build Report
+Date: 2026-06-30
+Session duration: start to finish (all 5 issues processed)
+Issues attempted: 5
+
+## Summary
+All 5 ready-for-ai issues were completed successfully with draft PRs opened. The session delivered the full PWA mobile web app stack: icon generation, web app manifest, iOS meta tags, mobile-responsive CSS, and a Mac launch script with ngrok tunnel — enabling the AlgoTrade dashboard to be installed on an iPhone home screen without the App Store. One lesson and one drill were written on Progressive Web Apps and iOS installation.
+
+## Completed ✅
+| Issue | Title | Branch | PR | Concept Taught |
+|-------|-------|--------|----|----------------|
+| #42 | Generate PWA app icon PNGs | feature/issue-42-pwa-app-icons | #47 | PWA icon requirements & matplotlib canvas |
+| #43 | Add PWA manifest and iOS meta tags | feature/issue-43-pwa-manifest | #48 | Web App Manifest & iOS meta tags |
+| #44 | Mobile-responsive CSS for webapp | feature/issue-44-mobile-responsive-css | #49 | CSS hamburger nav, touch targets, 16px rule |
+| #45 | Add mac-setup.sh launch script | feature/issue-45-mac-setup-script | #50 | Shell defensive programming & SIGINT trap |
+| #46 | Write MAC_SETUP.md setup guide | feature/issue-46-mac-setup-guide | #51 | ngrok tunnel mechanics |
+
+## Failed ❌
+None.
+
+## Skipped (needs human) ⏭
+None.
+
+## Learning Materials Created
+| Concept | Lesson | Drill |
+|---------|--------|-------|
+| Progressive Web Apps & iOS installation | ✅ 0034 | ✅ 0005 |
+
+## Test Status
+All PRs pass `uv run pytest tests/ -m "not exercise" -q` — 26 passed, 54 deselected. No new tests were added (issues were documentation, CSS, and scripting — no new Python logic).
+
+## PR Dependency Order
+PRs #47 (icons) → #48 (manifest) are loosely ordered: the manifest references icon paths that exist after #47 is merged. Merge #47 first, then #48. PRs #49, #50, #51 are independent.
+
+Suggested merge order:
+1. **PR #47** — icon PNGs (prerequisite for manifest icons)
+2. **PR #48** — manifest + base.html meta tags
+3. **PR #49** — mobile CSS (independent, safe to merge any time)
+4. **PR #50** — mac-setup.sh (independent)
+5. **PR #51** — MAC_SETUP.md (independent)
+
+## Key Technical Details
+
+### PWA install requirements (must all be true)
+- HTTPS URL — provided by ngrok free tier
+- `<link rel="manifest">` in `<head>`
+- Manifest with `display: standalone` and at least one icon
+- `<meta name="apple-mobile-web-app-capable" content="yes">` for iOS standalone mode
+- Must be opened in **Safari** on iOS — Chrome on iOS cannot install PWAs
+
+### iOS vs Android/Chrome icon handling
+- **iOS** reads `<link rel="apple-touch-icon">` → uses `icon-180.png` (180×180, @3x Retina)
+- **Android Chrome** reads `manifest.json → "icons"` → uses `icon-192.png` and `icon-512.png`
+- iOS **ignores** the manifest icons array entirely
+
+### ngrok URL rotation (free tier)
+The ngrok URL changes every time `mac-setup.sh` is restarted. The user must re-open the new URL in Safari and re-add to home screen. Paid ngrok plans allow a reserved subdomain.
+
+### iOS font-size auto-zoom
+iOS Safari zooms in when a user taps any `<input>` / `<select>` with `font-size < 16px`. The fix (now in `style.css`) is `font-size: 16px` on all form controls inside the mobile media query.
+
+## Suggested First Move
+After reviewing and merging these PWA PRs, test the full flow:
+```bash
+./mac-setup.sh
+```
+Navigate to the printed ngrok URL on an iPhone in Safari. Tap Share → Add to Home Screen → Add. Confirm the AlgoTrade icon appears and the app opens full-screen with no URL bar.
+
+## Draft PRs Awaiting Review
+| PR | Description |
+|----|-------------|
+| #47 | feat(#42): generate PWA app icon PNGs |
+| #48 | feat(#43): add PWA manifest and iOS meta tags |
+| #49 | feat(#44): mobile-responsive CSS for webapp |
+| #50 | feat(#45): add mac-setup.sh launch script |
+| #51 | docs(#46): write MAC_SETUP.md setup guide |

@@ -1,0 +1,183 @@
+// Golden-vector generator for the VHDL flat book.
+// Plan: .claude/plans/vhdl-flat-book.md, step 1.
+//
+// Emits a CSV of price-LEVEL operations (op, side, tick_index, shares) each
+// followed by the expected best-of-book outputs and clamp flag, for the VHDL
+// testbench to replay and assert against. The oracle here implements exactly
+// the level-update rule of cpp/itch/order_book_flat.hpp — ADD accumulates,
+// REMOVE clamps at zero (the phantom-depth rule from _remove_level) — and the
+// best-of-book scan directions (bid from the HIGH index, ask from the LOW).
+//
+// Usage: golden_vectors <edge|random> <depth> <out.csv> [seed]
+//   edge   : hand-written boundary / clamp / emptying sequence
+//   random : seeded pseudo-random ~10k-op sequence (determinism via the seed)
+//
+// The CSV's first line is a schema+params comment the testbench asserts before
+// running, so a format drift fails loudly rather than mis-parsing.
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <random>
+#include <string>
+#include <vector>
+
+namespace {
+
+constexpr int OP_ADD = 0;
+constexpr int OP_REMOVE = 1;
+constexpr int SIDE_BID = 0;
+constexpr int SIDE_ASK = 1;
+
+// Level oracle: the flat book's per-side level arrays and best scan, isolated
+// from order tracking (which stays in software / out of hardware scope).
+struct LevelBook {
+    std::vector<uint32_t> bid, ask;
+    explicit LevelBook(std::size_t depth) : bid(depth, 0), ask(depth, 0) {}
+
+    // Returns true only on a true underflow — a REMOVE for MORE shares than the
+    // level holds — which clamps to zero (the phantom-depth rule). Exact
+    // removal (shares == level) empties the level without an underflow, matching
+    // OrderBookFlat::_remove_level's `if (lv <= shares) lv = 0;` for the value
+    // while distinguishing the error pulse from a clean emptying.
+    bool apply(int op, int side, std::size_t idx, uint32_t shares) {
+        std::vector<uint32_t>& lv = (side == SIDE_BID) ? bid : ask;
+        if (op == OP_ADD) {
+            lv[idx] += shares;
+            return false;
+        }
+        if (shares > lv[idx]) {
+            lv[idx] = 0;
+            return true;  // underflow clamp
+        }
+        lv[idx] -= shares;
+        return false;
+    }
+
+    // best_bid: highest occupied index; best_ask: lowest occupied index.
+    bool best(int side, std::size_t& idx, uint32_t& shares) const {
+        const std::vector<uint32_t>& lv = (side == SIDE_BID) ? bid : ask;
+        if (side == SIDE_BID) {
+            for (std::size_t i = lv.size(); i-- > 0;)
+                if (lv[i] > 0) { idx = i; shares = lv[i]; return true; }
+        } else {
+            for (std::size_t i = 0; i < lv.size(); ++i)
+                if (lv[i] > 0) { idx = i; shares = lv[i]; return true; }
+        }
+        idx = 0;
+        shares = 0;
+        return false;
+    }
+};
+
+struct Op {
+    int op, side;
+    uint32_t index, shares;
+};
+
+void write_csv(std::FILE* out, std::size_t depth, const std::vector<Op>& ops) {
+    std::fprintf(out, "# flat_book_golden schema=1 depth=%zu shares_w=32\n", depth);
+    std::fprintf(out,
+        "op,side,index,shares,bid_valid,bid_index,bid_shares,"
+        "ask_valid,ask_index,ask_shares,clamp\n");
+    LevelBook book(depth);
+    for (const Op& o : ops) {
+        const bool clamp = book.apply(o.op, o.side, o.index, o.shares);
+        std::size_t bidx = 0, aidx = 0;
+        uint32_t bsh = 0, ash = 0;
+        const bool bv = book.best(SIDE_BID, bidx, bsh);
+        const bool av = book.best(SIDE_ASK, aidx, ash);
+        std::fprintf(out, "%d,%d,%u,%u,%d,%zu,%u,%d,%zu,%u,%d\n",
+                     o.op, o.side, o.index, o.shares,
+                     bv ? 1 : 0, bidx, bsh, av ? 1 : 0, aidx, ash, clamp ? 1 : 0);
+    }
+}
+
+// Hand-written sequence hitting the contract's corners: boundary indexes 0 and
+// depth-1, clamp-at-zero, removing the current best (best moves), and emptying
+// a side (best_valid deasserts).
+std::vector<Op> edge_ops(std::size_t depth) {
+    // Level indexes are derived from depth so the sequence stays in-bounds for
+    // any depth the tool accepts in edge mode (>= 8, enforced in main). Earlier
+    // hardcoded indexes (100/200/350/400) overran the level arrays whenever
+    // depth was small — a silent heap overflow. The interior levels are spaced
+    // 0 < b_lo < b_hi < a_mid < a_hi < depth-1 so best-of-side still moves up
+    // (bid) and down (ask), and both boundaries (0 and depth-1) are exercised.
+    const uint32_t hi    = static_cast<uint32_t>(depth - 1);
+    const uint32_t b_lo  = static_cast<uint32_t>(depth / 8);
+    const uint32_t b_hi  = static_cast<uint32_t>(depth / 4);
+    const uint32_t a_mid = static_cast<uint32_t>(3 * depth / 8);
+    const uint32_t a_hi  = static_cast<uint32_t>(depth / 2);
+    return {
+        {OP_ADD, SIDE_BID, b_lo, 500},        // bid best = b_lo
+        {OP_ADD, SIDE_BID, b_hi, 300},        // bid best moves up to b_hi
+        {OP_ADD, SIDE_BID, 0, 111},           // boundary index 0 (not best)
+        {OP_ADD, SIDE_ASK, a_hi, 250},        // ask best = a_hi
+        {OP_ADD, SIDE_ASK, hi, 999},          // boundary index depth-1
+        {OP_ADD, SIDE_ASK, a_mid, 700},       // ask best moves down to a_mid
+        {OP_REMOVE, SIDE_ASK, a_mid, 700},    // remove best ask -> back to a_hi
+        {OP_REMOVE, SIDE_BID, b_hi, 1000},    // over-remove best bid -> clamp, best back to b_lo
+        {OP_REMOVE, SIDE_BID, b_lo, 500},     // empty b_lo
+        {OP_REMOVE, SIDE_BID, 0, 111},        // empty side -> bid best invalid
+        {OP_REMOVE, SIDE_ASK, a_hi, 250},     // empty a_hi -> ask best = depth-1
+        {OP_REMOVE, SIDE_ASK, hi, 999},       // empty side -> ask best invalid
+    };
+}
+
+std::vector<Op> random_ops(std::size_t depth, uint32_t seed, int n) {
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<int> side(0, 1);
+    std::uniform_int_distribution<int> op(0, 1);
+    std::uniform_int_distribution<uint32_t> idx(0, static_cast<uint32_t>(depth - 1));
+    std::uniform_int_distribution<uint32_t> sh(1, 1000);
+    std::vector<Op> ops;
+    ops.reserve(n);
+    for (int i = 0; i < n; ++i)
+        ops.push_back({op(rng), side(rng), idx(rng), sh(rng)});
+    return ops;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    if (argc < 4) {
+        std::fprintf(stderr,
+            "usage: %s <edge|random> <depth> <out.csv> [seed]\n", argv[0]);
+        return 2;
+    }
+    const std::string mode = argv[1];
+    const std::size_t depth = std::strtoul(argv[2], nullptr, 10);
+    const char* out_path = argv[3];
+    const uint32_t seed = argc >= 5 ? std::strtoul(argv[4], nullptr, 10) : 12345u;
+    if (depth < 2 || depth > 4096) {
+        std::fprintf(stderr, "depth must be in [2, 4096]\n");
+        return 2;
+    }
+
+    std::vector<Op> ops;
+    if (mode == "edge") {
+        if (depth < 8) {
+            std::fprintf(stderr,
+                "edge mode needs depth >= 8 (its fixed corner sequence uses "
+                "depth/8..depth-1 as distinct levels)\n");
+            return 2;
+        }
+        ops = edge_ops(depth);
+    } else if (mode == "random") {
+        ops = random_ops(depth, seed, 10000);
+    } else {
+        std::fprintf(stderr, "unknown mode '%s' (edge|random)\n", mode.c_str());
+        return 2;
+    }
+
+    std::FILE* out = std::fopen(out_path, "wb");
+    if (!out) {
+        std::fprintf(stderr, "cannot open %s for writing\n", out_path);
+        return 2;
+    }
+    write_csv(out, depth, ops);
+    std::fclose(out);
+    std::fprintf(stderr, "wrote %zu ops (%s, depth=%zu) to %s\n",
+                 ops.size(), mode.c_str(), depth, out_path);
+    return 0;
+}

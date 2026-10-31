@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0008 — STL containers and their memory layout</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 30px; margin: 8px 0 6px; line-height: 1.25; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .mem-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .family-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 18px;
+  }
+  .family-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px; font-size: 13px;
+  }
+  .family-card h4 { margin: 0 0 6px; font-size: 14px; color: var(--accent-2); }
+  .family-card ul { margin: 0; padding-left: 18px; }
+  .family-card.seq { border-top: 3px solid #a0d8ff; }
+  .family-card.ass { border-top: 3px solid #c4e08a; }
+  .family-card.ada { border-top: 3px solid #ffb780; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .family-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0008 &middot; cpp_games / docs / learning</div>
+  <h1>STL containers and their memory layout</h1>
+  <p class="why">Why this matters: your code already uses <em>five</em> different STL containers (<code class="inline">vector</code>, <code class="inline">array</code>, <code class="inline">deque</code>, <code class="inline">queue</code>, <code class="inline">unordered_map</code>) plus <code class="inline">string</code>. Each has a different shape in memory and that shape decides how fast it actually runs. This lesson turns "I use whatever container compiles" into "I know which one I'm reaching for, and why."</p>
+</header>
+
+<h2>1. The concept &mdash; three families, three memory shapes</h2>
+
+<p>The STL groups containers into three families based on what they're <em>for</em>. The families also happen to map onto distinct memory layouts &mdash; which is what this lesson actually cares about, because (lesson 0003) memory layout is what dictates performance.</p>
+
+<div class="family-row">
+  <div class="family-card seq">
+    <h4>Sequence containers</h4>
+    <p>"Ordered list of elements." Indexable by position.</p>
+    <ul>
+      <li><code class="inline">vector</code></li>
+      <li><code class="inline">array</code></li>
+      <li><code class="inline">deque</code></li>
+      <li><code class="inline">list</code> / <code class="inline">forward_list</code></li>
+    </ul>
+  </div>
+  <div class="family-card ass">
+    <h4>Associative containers</h4>
+    <p>"Keyed lookup of elements." Indexable by key, not position.</p>
+    <ul>
+      <li><code class="inline">map</code> / <code class="inline">set</code> (red-black tree)</li>
+      <li><code class="inline">unordered_map</code> / <code class="inline">unordered_set</code> (hash table)</li>
+      <li><code class="inline">multimap</code> / <code class="inline">multiset</code> (duplicate keys allowed)</li>
+    </ul>
+  </div>
+  <div class="family-card ada">
+    <h4>Container adapters</h4>
+    <p>Not containers themselves &mdash; thin wrappers that hide some of an underlying container's API.</p>
+    <ul>
+      <li><code class="inline">queue</code> (uses <code class="inline">deque</code> by default)</li>
+      <li><code class="inline">stack</code> (uses <code class="inline">deque</code>)</li>
+      <li><code class="inline">priority_queue</code> (uses <code class="inline">vector</code>)</li>
+    </ul>
+  </div>
+</div>
+
+<h3>The memory shapes</h3>
+
+<div class="mem-diagram">  vector — single contiguous heap buffer
+   [0][1][2][3][4][5][6][7] . . . . . . . . . .
+   ^                       ^                  ^
+   begin                   end              capacity
+
+  array — like vector but inline (no heap pointer), size fixed
+   { [0][1][2][3] }   inside whatever struct/stack/etc.
+
+  deque — array of fixed-size blocks; each block is contiguous, blocks are not
+   [block0]------+   [block1]------+   [block2]------+
+   |[0][1][2][3] |   |[4][5][6][7] |   |[8][9][10][11]|
+   +-------------+   +-------------+   +--------------+
+       ^  segmented; random access is TWO pointer dereferences
+
+  list — doubly-linked nodes; each node a separate heap allocation
+   [0]&lt;->[1]&lt;->[2]&lt;->[3]&lt;->[4]
+    each node carries prev/next pointers + the element
+    no cache locality whatsoever
+
+  map (red-black tree) — nodes scattered on the heap, sorted by key
+        (k=10, val)
+        /          \
+    (k=5)          (k=17)
+   /     \         /     \
+  (k=3) (k=7)   (k=12) (k=22)
+
+  unordered_map (hash table) — array of buckets, each pointing to a chain
+   bucket[0] -> [keyA, val] -> [keyD, val]
+   bucket[1] -> nullptr
+   bucket[2] -> [keyB, val]
+   bucket[3] -> [keyC, val]
+   ...
+   ^ array is contiguous; chains are scattered heap nodes</div>
+
+<p>Three things to take away from these layouts:</p>
+<ul>
+  <li><b><code class="inline">vector</code> wins on cache</b>. The whole sequence sits in one heap buffer; iterating it is what the CPU prefetcher was designed for.</li>
+  <li><b><code class="inline">deque</code> and <code class="inline">unordered_map</code> are <em>partially</em> contiguous.</b> Deque blocks are contiguous internally; hash-table buckets sit in one array. The pointers connecting blocks/chains are where you lose performance.</li>
+  <li><b><code class="inline">list</code> and <code class="inline">map</code> are pointer-chasing all the way down.</b> Every element is its own heap allocation. Cache-unfriendly by construction. Reach for them rarely.</li>
+</ul>
+
+<div class="callout warn">
+  <h3>The modern default</h3>
+  <p>Start with <code class="inline">std::vector</code>. Only switch when you have a specific reason: <code class="inline">std::array</code> for compile-time fixed size, <code class="inline">std::unordered_map</code> for keyed lookup, <code class="inline">std::deque</code> if you need push/pop from <em>both</em> ends, the others rarely. "I might need to insert in the middle" usually doesn't justify <code class="inline">std::list</code> &mdash; <code class="inline">vector</code> + <code class="inline">erase</code> is faster up to surprising sizes thanks to cache locality.</p>
+</div>
+
+<h2>2. Minimal example &mdash; same five integers, four containers</h2>
+
+<pre class="code"><span class="pp">#include</span> <span class="str">&lt;array&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;deque&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;list&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;vector&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;unordered_map&gt;</span>
+
+<span class="kw">auto</span> data = {<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>};
+
+std::array&lt;<span class="typ">int</span>, <span class="num">5</span>&gt;   a = {<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>};   <span class="com">// 20 bytes inline</span>
+std::vector&lt;<span class="typ">int</span>&gt;     v(data);                          <span class="com">// 24-byte struct + 20-byte heap buffer</span>
+std::deque&lt;<span class="typ">int</span>&gt;      d(data);                          <span class="com">// big internal struct + block(s) on heap</span>
+std::list&lt;<span class="typ">int</span>&gt;       l(data);                          <span class="com">// 5 separate heap nodes, each ~24 bytes</span>
+std::unordered_map&lt;<span class="typ">int</span>, <span class="typ">int</span>&gt; m = {{<span class="num">0</span>,<span class="num">10</span>},{<span class="num">1</span>,<span class="num">20</span>},{<span class="num">2</span>,<span class="num">30</span>},{<span class="num">3</span>,<span class="num">40</span>},{<span class="num">4</span>,<span class="num">50</span>}};
+<span class="com">// hash table: contiguous bucket array + scattered chain nodes</span>
+
+<span class="com">// Same 20 bytes of "real" data. Vastly different total memory footprint,</span>
+<span class="com">// vastly different access cost, vastly different iteration speed.</span></pre>
+
+<p>The two extremes are <code class="inline">array</code>/<code class="inline">vector</code> on one end (one block, maximal cache) and <code class="inline">list</code>/<code class="inline">map</code> on the other (every element is its own pointer-chase). Everything else is somewhere in between.</p>
+
+<h2>3. In your project &mdash; the containers you've already shipped</h2>
+
+<h3>The contiguous winners: <code class="inline">vector</code>, <code class="inline">array</code></h3>
+
+<p>Covered in detail in lesson 0002. Recap: <code class="inline">std::vector&lt;Projectile&gt;</code> in the shooter, <code class="inline">std::array&lt;sf::Vector2f, 4&gt;</code> in the racing game. The reason these were "the right call" wasn't taste &mdash; it was the layout. Your hot loops iterate them, the prefetcher hits, the CPU never stalls on memory.</p>
+
+<h3>The segmented case: <code class="inline">std::deque</code></h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.hpp:37</small>
+<pre class="code">std::deque&lt;TranscriptLine&gt; transcript_;</pre>
+
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.cpp:97</small>
+<pre class="code"><span class="kw">void</span> DialogUI::pushLine(TranscriptLine line) {
+    transcript_.push_back(std::move(line));
+    <span class="kw">while</span> (transcript_.size() &gt; kMaxTranscriptLines) transcript_.pop_front();
+}</pre>
+
+<p>Here's why I picked <code class="inline">deque</code> instead of <code class="inline">vector</code> when I built your UI: the transcript needs <code class="inline">push_back</code> on new lines and <code class="inline">pop_front</code> when we exceed the cap. <code class="inline">std::vector::pop_front</code> doesn't exist &mdash; <code class="inline">erase(begin())</code> shifts every remaining element, O(n). <code class="inline">std::deque::pop_front</code> is O(1) because each end has its own block. We're trading a small per-element cache penalty for cheap operations at both ends.</p>
+
+<p>Was that the right call? Probably. The transcript caps at 200 lines and we render it at 60 fps &mdash; even an O(200) shift per push would be invisible on a modern CPU. But the deque encodes the intent ("I push at one end and pop at the other") more clearly than a vector with erase-from-front would. Use this case as your mental model for when deque is right: <b>both ends are hot</b>.</p>
+
+<h3>The adapter: <code class="inline">std::queue</code></h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.hpp:82</small>
+<pre class="code">std::queue&lt;ChatRequest&gt; requests_;</pre>
+
+<p><code class="inline">std::queue</code> isn't really a container &mdash; it's a thin wrapper around a <code class="inline">std::deque</code> that exposes only <code class="inline">push</code>, <code class="inline">pop</code>, <code class="inline">front</code>, <code class="inline">empty</code>, <code class="inline">size</code>. The point isn't performance; it's <b>API restriction</b>. Anyone reading <code class="inline">LlmClient.cpp</code> sees <code class="inline">std::queue</code> and knows immediately: FIFO discipline, no random access, no iteration. The compiler enforces what would otherwise be a comment. Under the hood it's a deque, with the same memory layout as the deque case above.</p>
+
+<h3>The hash table: <code class="inline">std::unordered_map</code></h3>
+
+<small class="path">cpp_racing_game/src/main.cpp:94</small>
+<pre class="code">std::unordered_map&lt;std::string, std::string&gt; parseKeyValueFile(<span class="kw">const</span> std::string&amp; path);</pre>
+
+<small class="path">cpp_game_with_llm_npcs/src/main.cpp:31</small>
+<pre class="code">std::unordered_map&lt;std::string, std::string&gt; readKv(<span class="kw">const</span> fs::path&amp; path);</pre>
+
+<p>Both games parse config files into hash maps. The choice is obvious for this use case: a few dozen entries, looked up by string key like <code class="inline">"host"</code> or <code class="inline">"max_steer_deg"</code>. Average-case O(1) lookup, plus we don't care about iteration order. The <em>scattering</em> across heap nodes that would hurt us in a hot loop is irrelevant here &mdash; we read config once at startup and access ~10 keys, total. <b>Cache cost is paid only when you iterate in volume</b>; for sparse keyed lookup it doesn't matter.</p>
+
+<h3>The disguised heap: <code class="inline">std::string</code></h3>
+
+<p>You've shipped <code class="inline">std::string</code> in <code class="inline">Persona</code>, <code class="inline">ChatTurn</code>, <code class="inline">LlmConfig</code>, and the transcript. Lesson 0006 explained SSO: short strings stay inline in the 32-byte struct; longer ones are <em>functionally a vector&lt;char&gt;</em> &mdash; pointer to a heap buffer, a length, a capacity. Same memory layout, same cache properties, same growth semantics. When you reach for <code class="inline">std::string</code>, you've reached for a contiguous heap buffer (or an inlined one).</p>
+
+<h2>4. Often confused with...</h2>
+
+<h3><code class="inline">vector</code> vs. <code class="inline">deque</code></h3>
+<p>Both are sequence containers, both support <code class="inline">push_back</code>, both let you index <code class="inline">[i]</code>. The differences live in the layout:</p>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th><code class="inline">vector</code></th><th><code class="inline">deque</code></th></tr></thead>
+  <tbody>
+    <tr><td>Storage</td><td>One contiguous heap block</td><td>Array of fixed-size blocks, blocks are separate heap allocations</td></tr>
+    <tr><td>Random access</td><td>One pointer add + one load</td><td>Two pointer dereferences (block table, then block)</td></tr>
+    <tr><td><code class="inline">push_front</code></td><td>Doesn't exist (use <code class="inline">erase</code>/shift, O(n))</td><td>O(1) &mdash; allocate a new front block if needed</td></tr>
+    <tr><td><code class="inline">push_back</code></td><td>O(1) amortised, O(n) on realloc</td><td>O(1), no big reallocations</td></tr>
+    <tr><td><code class="inline">data()</code> raw pointer</td><td>Yes &mdash; pass directly to C APIs / SFML / OpenGL</td><td>No &mdash; segmented memory can't be exposed as one pointer</td></tr>
+    <tr><td>Best when</td><td>You iterate or random-access heavily</td><td>You push/pop on both ends, you don't need a C-style pointer</td></tr>
+  </tbody>
+</table>
+
+<h3><code class="inline">map</code> vs. <code class="inline">unordered_map</code></h3>
+<p>Both are keyed lookups. They share <em>nothing</em> at the memory layout level:</p>
+<ul>
+  <li><b><code class="inline">map</code></b> is a red-black tree. Nodes scattered on heap, sorted by key. Lookup/insert/erase are O(log n). Iteration produces keys <em>in sorted order</em>. Tree-rebalance allocations on every insert.</li>
+  <li><b><code class="inline">unordered_map</code></b> is a hash table. Contiguous bucket array, scattered chain nodes. Lookup/insert are O(1) average, O(n) worst case if your hash function is bad or you get unlucky. Iteration order is meaningless.</li>
+</ul>
+<p>Use <code class="inline">unordered_map</code> by default for in-memory key/value. Use <code class="inline">map</code> only when you specifically need sorted iteration (config files in deterministic order, log output, etc.).</p>
+
+<h3>Container vs. container adapter</h3>
+<p><code class="inline">std::queue</code>, <code class="inline">std::stack</code>, <code class="inline">std::priority_queue</code> are <em>not</em> containers. They wrap a container (deque or vector) and restrict its interface to model a specific abstraction. You can't iterate them; you can't index them; you can't pass them to STL algorithms that take iterators. They're a discipline tool: the compiler enforces "you only push and pop in this pattern." Pick them when that's the point.</p>
+
+<h3>Container vs. iterator</h3>
+<p>A container owns the data. An <b>iterator</b> is a small handle that points <em>into</em> a container &mdash; conceptually a pointer with extra rules. Modifying a container can <b>invalidate iterators</b> that point into it: <code class="inline">vector::push_back</code> may move the whole buffer to a new address, leaving stored iterators pointing into freed memory. Each container has its own invalidation rules; iterating-while-modifying is the classic place this bites. (We dodge it in the shooter's erase-remove idiom by using the <code class="inline">erase(remove_if(...))</code> form that's invalidation-safe.)</p>
+
+<h3>"Cache-friendly" vs. "uses less RAM"</h3>
+<p>Easy to conflate. A <code class="inline">vector&lt;int&gt;</code> with 100 elements uses about the same total memory as a <code class="inline">list&lt;int&gt;</code> with 100 elements &mdash; maybe a bit less for the vector. But iterating the vector is dramatically faster because the CPU prefetcher can read the next cache line while the current one is being processed. Cache friendliness is about <em>access pattern</em>, not about size. List loses on access despite being a similar memory size.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">In <code class="inline">DialogUI</code> the transcript uses <code class="inline">std::deque&lt;TranscriptLine&gt;</code> &mdash; <code class="inline">push_back</code> on new lines, <code class="inline">pop_front</code> when over the cap. If we'd used <code class="inline">std::vector</code>, which operation would have become problematic and why?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="push_back is O(1) amortised on vector; growing capacity occasionally causes a reallocation but that's fine. The pop side is what hurts.">
+      <code class="inline">push_back</code> &mdash; vector reallocates on every push, while deque doesn't.
+    </li>
+    <li data-correct="true" data-why="Right. Vector has no pop_front; you'd write erase(begin()), which shifts every remaining element forward — O(n) per call. With a 200-line cap that's still cheap, but it expresses the wrong intent. Deque's pop_front is O(1) because each end has its own block.">
+      <code class="inline">pop_front</code> &mdash; vector doesn't have one; emulating it shifts every remaining element forward each time.
+    </li>
+    <li data-correct="false" data-why="Vector has random access via operator[]. The question is about end-operations, not indexed access.">
+      Indexed access to the middle of the transcript &mdash; vector can't do <code class="inline">[i]</code>.
+    </li>
+    <li data-correct="false" data-why="Both vector and deque iterate cleanly. Range-for, iterators, all fine on both.">
+      Range-for iteration &mdash; vector doesn't support iterator-style loops.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You decide to track how many times each NPC has been spoken to. The data structure will hold an entry per NPC and be looked up by NPC name on every dialog turn. Which container is best?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Vector keyed by name means linear search every lookup. Fine for 5 NPCs, slow for 500. The right tool for keyed access is a hash map.">
+      <code class="inline">std::vector&lt;std::pair&lt;std::string, int&gt;&gt;</code> &mdash; iterate and find by name.
+    </li>
+    <li data-correct="false" data-why="Map gives sorted iteration, which we don't need. It's also O(log n) and pointer-chasing per access. Unordered_map is the better default here.">
+      <code class="inline">std::map&lt;std::string, int&gt;</code> &mdash; sorted keys give predictable lookup.
+    </li>
+    <li data-correct="true" data-why="Right. O(1) average lookup, the keys are strings (so unordered_map's hash table is the standard choice), and we don't care about iteration order. The 'scattered chain nodes' caveat doesn't bite here because you do one lookup per dialog turn — there's no hot iteration.">
+      <code class="inline">std::unordered_map&lt;std::string, int&gt;</code> &mdash; O(1) average lookup by name.
+    </li>
+    <li data-correct="false" data-why="List is pointer-chasing per element AND has no keyed lookup. Worst of both worlds for this problem.">
+      <code class="inline">std::list&lt;NpcStat&gt;</code> &mdash; insert and erase are cheap.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q"><code class="inline">LlmClient</code>'s <code class="inline">requests_</code> field is <code class="inline">std::queue&lt;ChatRequest&gt;</code>. What does picking the adapter buy you over using <code class="inline">std::deque&lt;ChatRequest&gt;</code> directly?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Underneath, queue uses a deque by default; the performance is identical. The benefit isn't speed.">
+      Better performance &mdash; queues are optimized for FIFO operations.
+    </li>
+    <li data-correct="false" data-why="Vector vs deque memory layout aside, std::queue is the adapter and is built on deque, not vector. The adapter is about API, not layout.">
+      Lower memory footprint &mdash; queues store elements more compactly than deques.
+    </li>
+    <li data-correct="true" data-why="Right. The adapter exposes only push/pop/front/empty/size. A reader of LlmClient.cpp immediately knows: FIFO discipline, no random access, no iteration. The type itself documents the intent and the compiler enforces it.">
+      It restricts the API to FIFO operations only, so the type itself documents the discipline and prevents accidental random-access from creeping in.
+    </li>
+    <li data-correct="false" data-why="Thread safety isn't a property of std::queue; you still need the mutex (which LlmClient has) to coordinate access. The adapter doesn't add synchronisation.">
+      Thread-safety guarantees &mdash; <code class="inline">std::queue</code> serialises multi-thread access internally.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A teammate proposes using <code class="inline">std::list&lt;Enemy&gt;</code> in the shooter game "because we'll be deleting enemies from the middle when they die, and list delete is O(1)." What's wrong with this argument?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The O(1) claim for list erase is true *given an iterator*. The problem is what surrounds that operation in practice.">
+      The O(1) claim is false &mdash; list erase is actually O(n).
+    </li>
+    <li data-correct="true" data-why="Right. The big-O for the erase itself misses the actual workload. Every list node is a separate heap allocation; iterating a list to *find* the enemy is dramatically slower than iterating a vector even when the vector also has to shift on erase. In practice vector beats list at 'delete-from-middle' workloads up to surprisingly large sizes — the cache wins.">
+      The O(1) for erase ignores that everything *else* (iteration, allocation per element, finding the enemy in the first place) is much slower on a list because each node is its own heap allocation.
+    </li>
+    <li data-correct="false" data-why="std::list does support range-for, iterators, and remove_if. It's just slow at most of them. The complaint isn't 'won't compile.'">
+      <code class="inline">std::list</code> doesn't support <code class="inline">remove_if</code>, so the erase-remove idiom won't work.
+    </li>
+    <li data-correct="false" data-why="Memory consumption isn't the headline issue. The dominant cost of list is the cache-unfriendliness, not the per-node overhead.">
+      <code class="inline">std::list</code> uses about 16&times; more memory per element due to overhead.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You have a <code class="inline">std::vector&lt;Enemy&gt; enemies;</code> and a long-lived <code class="inline">Enemy* boss = &amp;enemies[0];</code>. Later you call <code class="inline">enemies.push_back(spawnEnemy());</code> and the vector reallocates. What happens to <code class="inline">boss</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Vectors don't 'update pointers' — that would require knowing every pointer in the program, which is impossible. Stored pointers/references/iterators are invalidated on reallocation.">
+      <code class="inline">boss</code> is automatically updated by the vector to point at the new location.
+    </li>
+    <li data-correct="true" data-why="Right. The realloc moved the buffer to a fresh heap address; boss still holds the old address, which is now freed. Using it is undefined behaviour — sometimes you get garbage, sometimes the OS catches it as a segfault. This is the classic iterator-invalidation bug in pointer form.">
+      <code class="inline">boss</code> now points into freed memory &mdash; dereferencing it is undefined behaviour.
+    </li>
+    <li data-correct="false" data-why="The compiler can't catch this — the relationship between boss and enemies is a runtime fact, not a type-level one. This is a class of bug C++ specifically doesn't protect you from.">
+      The compiler refuses to compile this; you'd get a use-after-free warning.
+    </li>
+    <li data-correct="false" data-why="Reservation prevents the realloc but doesn't 'fix' a pointer-to-old-buffer scenario; the question describes the realloc happening. The fix to the underlying problem is reserve(), as in lesson 0003.">
+      Nothing &mdash; vectors only invalidate pointers if you call <code class="inline">reserve</code> explicitly.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> The racing game's config reader returns <code class="inline">std::unordered_map&lt;std::string, std::string&gt;</code>. The map gets ~30 entries, is read at startup, and queried ~10 times. Would <code class="inline">std::map</code> be measurably worse? Defend your answer using cache behaviour, big-O, and "what does this code actually do".</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> You decide to add a small "recent messages" cache to <code class="inline">LlmClient</code> &mdash; the last 16 requests, used for de-duplication. You'll always look them up by string content. Which container family is right, and which specific container would you pick? Justify in two sentences.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> Look at the shooter game's <code class="inline">updateProjectiles</code> loop (<code class="inline">cpp_shooter_game/src/main.cpp:639</code>). It does the per-projectile motion update, then a nested loop over <code class="inline">enemies</code> for collision. Both vectors are contiguous (good). But suppose you also wanted, per frame, to ask "for any enemy, give me all projectiles aimed at it." What container would you add to <code class="inline">GameState</code> and how would you reason about its layout cost vs the lookup it buys you?</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can name the three families and what each is for</label></li>
+  <li><label><input type="checkbox"> Read section 2 &mdash; I can sketch the memory layout of each container</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I can point at vector / array / deque / queue / unordered_map in my own repo</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I won't conflate "cache-friendly" with "uses less RAM"</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/cpp/container">cppreference: containers library</a> &middot;
+    <a href="https://en.cppreference.com/cpp/container/vector">cppreference: <code>std::vector</code></a> &middot;
+    <a href="https://en.cppreference.com/cpp/container/deque">cppreference: <code>std::deque</code></a> &middot;
+    <a href="https://en.cppreference.com/cpp/container/unordered_map">cppreference: <code>std::unordered_map</code></a> &middot;
+    <a href="https://chromium.googlesource.com/chromium/src/+/HEAD/base/containers/README.md">Chromium base/containers — practical guidance</a>
+  </p>
+  <p>Lesson 0008 &middot; <code class="inline">docs/learning/lessons/0008-stl-containers-and-memory-layout.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

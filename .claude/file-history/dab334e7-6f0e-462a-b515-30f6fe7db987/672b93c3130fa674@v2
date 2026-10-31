@@ -1,0 +1,159 @@
+# Plan: Statistical Rigor — Deflated Sharpe, t-Stat Promotion Gate, Purged CV
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea (one paragraph)
+The arena currently promotes strategies on a lenient bar (Sharpe > 0) that a
+lucky coin-flipper clears half the time. This adds the standard defenses from
+the quant-research literature: a Deflated Sharpe Ratio (Bailey & López de
+Prado) that discounts each backtest Sharpe by how many trials were ever run
+(tracked honestly in a persistent ledger), a Harvey-Liu-style t-statistic
+promotion gate (t ≥ 3.0 for full PASS), and purged/embargoed K-fold
+cross-validation for the GBM model so overlapping return windows can't leak
+training information into evaluation.
+
+## Goal
+A strategy's arena status now answers "is this edge statistically real given
+everything I've tried?" instead of "was it above zero once" — and the GBM's
+evaluation numbers survive the leakage audit a quant interviewer would run.
+
+## Decisions Made (were open questions)
+- **Two-tier gate** (user decision): t ≥ 3.0 AND DSR ≥ 0.95 → `PASS`;
+  2.0 ≤ t < 3.0 (or t ≥ 3.0 with DSR < 0.95) → new `PROBATION` status —
+  trades live paper exactly like PASS but is prominently flagged as
+  statistically unproven in every report; t < 2.0 → `EXCLUDED`. The MaxDD
+  bound still applies to both live tiers. Context that drove this: t ≈
+  Sharpe_ann × √years, so a 2-year window demands Sharpe ≈ 2.1 for t=3 — a
+  hard gate would leave the arena empty for years and kill its
+  compare-live-track-records purpose.
+- **Persistent trial ledger** (user decision): every `arena-run backtest`
+  appends one row per (strategy, config) to a `trials` table in arena.db —
+  config-hash (sha256 of strategy name + sizing + cost mode + window +
+  tickers + top_n) as PK, `INSERT OR REPLACE` so identical re-runs update
+  rather than inflate. N = COUNT(trials); cross-trial Sharpe variance feeds
+  the expected-max-Sharpe term. `--n_trials` overrides for what-if analysis.
+- **Purged CV scoped to where leakage actually lives** (my call,
+  documented): the arena's generic walk-forward has NO training step for
+  rule strategies — "switching" it to CV would be cargo cult. Purging
+  applies to (a) a new purged/embargoed K-fold evaluation mode for the GBM
+  (`paper-backtest --purged_cv`), and (b) an actual live bug: `split_by_time`
+  in paper_trading_sim.py puts the boundary row's label (which contains the
+  first test day's return) in the TRAINING set — a 1-day leak, fixed by
+  purging `label_horizon` rows at the split. Walk-forward remains the
+  arena's engine; CPCV (combinatorial) is out of scope.
+- **PROBATION interactions**: breaker and divergence watchdogs apply to
+  PROBATION identically to PASS. Ensembles may include PROBATION members
+  (their weights come from live track records anyway) but the ensemble
+  itself inherits PROBATION status if any member is on probation — a chain
+  is as proven as its weakest link.
+- **Statuses are recomputed only at screen time.** Live performance never
+  upgrades PROBATION → PASS automatically; you re-run `arena-run backtest`
+  over a longer window when you believe the evidence has accumulated.
+
+## Out of Scope (this version)
+- Combinatorial Purged CV (CPCV) and walk-forward path resampling
+- Multiple-testing corrections on the LIVE divergence/drift alerts (they
+  remain per-strategy; noted caveat stands)
+- Retro-fitting the trial ledger with screens run before this feature
+  (N starts counting from deployment; documented)
+- False Discovery Rate control across strategy families (Benjamini-Hochberg
+  etc.) — DSR's expected-max adjustment is this version's answer
+- Any change to real-money gating (rh-exec untouched, as always)
+
+## Affected Areas
+- New: `sharpe_stats.py` (root py-module) — pure math, no I/O:
+  `t_stat(mean_daily, std_daily, n_days)`;
+  `probabilistic_sharpe(sr, skew, kurt, n) -> float` (PSR vs SR₀=0);
+  `expected_max_sharpe(n_trials, var_trial_sr) -> float` (E[max SR] under
+  the null, Euler–Mascheroni form);
+  `deflated_sharpe(sr, skew, kurt, n, sr0) -> float`.
+  Every function hand-verifiable against the Bailey–LdP paper's examples.
+- `strategy_arena.py` —
+  `_SCHEMA`: new `trials` table (config_hash PK, strategy, sharpe_daily,
+  n_days, screened_at); `record_trial()` + `trial_stats()` (N, var of trial
+  SRs) on ArenaState.
+  `cmd_backtest`: compute daily-return t-stat, skew, kurtosis; record the
+  trial; derive status via the two-tier gate (`--t_pass 3.0`,
+  `--t_probation 2.0`, `--dsr_pass 0.95`, `--n_trials` override); print
+  t/DSR per strategy with the tier verdict.
+  `cmd_live` + `cmd_ensemble`: treat `PROBATION` as live-eligible everywhere
+  `PASS` currently is; ensemble status inherits PROBATION from any member.
+- `analyze_equity.py` — `compare_strategies`: new `t_stat` and `dsr` columns
+  (from the strategies row, stored at screen time), status column now
+  surfaces PROBATION.
+- New: `purged_cv.py` (root py-module) —
+  `PurgedKFold(n_splits=5, purge=1, embargo_frac=0.01)` with
+  `split(index) -> (train_idx, test_idx)` pairs: contiguous test folds,
+  training rows within `purge` labels of the test block dropped, plus an
+  embargo strip after each test block;
+  `evaluate_purged_cv(feats, feat_cols, n_splits, ...) -> DataFrame` — fits
+  the GBM per fold, reports per-fold OOS hit-rate, IC (rank corr of pred vs
+  realized), and mean return of top-decile predictions.
+- `paper_trading_sim.py` — `split_by_time` gains `purge: int = 1`, dropping
+  the last `purge` rows of the training split (the boundary leak fix —
+  changes existing single-split results slightly, which is the point);
+  `main` gains `--purged_cv` printing the fold table after (or instead of)
+  the standard run.
+- Migration note: `trials` is a new table (CREATE IF NOT EXISTS — no ALTER
+  needed); `strategies.status` already TEXT, PROBATION needs no schema
+  change. Existing DBs upgrade in place, consistent with prior migrations.
+- New tests: `tests/test_sharpe_stats.py` (hand-computed PSR/E[maxSR]/DSR
+  pins), `tests/test_purged_cv.py` (no train index within purge+embargo of
+  any test index — property-checked; boundary-leak regression on
+  split_by_time), `tests/test_trial_ledger.py` (hash dedupe, N growth,
+  two-tier gate transitions incl. PROBATION live-eligibility and ensemble
+  inheritance).
+
+## Implementation Order
+1. `sharpe_stats.py` + paper-pinned unit tests — pure math first, no
+   behavior change anywhere.
+2. `purged_cv.py` + `split_by_time` purge fix + `--purged_cv` CLI — the
+   leakage half, independent of the arena.
+3. Trial ledger in ArenaState (`trials` table, record/stats) + tests —
+   still no gate change.
+4. Two-tier gate in `cmd_backtest` + PROBATION handling in
+   `cmd_live`/`cmd_ensemble`/report + tests — the behavior flip, last,
+   after all its inputs exist.
+5. Docs: CLAUDE.md conventions note; PROGRESS.md next-lesson suggestion
+   ("why your backtest Sharpe is a maximum, not an estimate").
+
+## Acceptance Criteria
+- [ ] `sharpe_stats` reproduces a hand-computed PSR and DSR case to 1e-9,
+      and `expected_max_sharpe` is monotonically increasing in N
+- [ ] Screening the same config twice leaves N unchanged (hash dedupe);
+      screening a new window/config increments N
+- [ ] A synthetic strategy with t ≈ 4 and DSR > 0.95 lands PASS; t ≈ 2.5
+      lands PROBATION and still receives live ticks; t ≈ 1 lands EXCLUDED
+- [ ] PROBATION rows are visibly tiered in `arena-run report` (status +
+      t_stat + dsr columns)
+- [ ] An ensemble containing one PROBATION member reports PROBATION itself
+- [ ] `PurgedKFold`: property test — no training index falls within
+      `purge` labels before or `embargo` after any test block, across
+      random fold counts and lengths
+- [ ] `split_by_time(purge=1)`: the last training row's `fwd_ret_1d` no
+      longer overlaps the first test row's return window (regression-pinned
+      against the old leaky split)
+- [ ] `paper-backtest --purged_cv` prints one row per fold with OOS
+      hit-rate and IC, no fold trained on purged rows
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| N = 1 trial (first ever screen) | E[max SR] term ≈ 0 → DSR degrades to plain PSR; gate still functions on t-stat |
+| Cross-trial SR variance is 0 (identical trials) | expected_max_sharpe returns 0, not NaN — guarded |
+| Backtest window too short for kurtosis estimation (< ~30 days) | DSR reported as None with a printed note; t-stat still computed; gate falls back to t-only |
+| Strategy screened pre-feature (no t/dsr stored) | Report shows blanks; status untouched until re-screened |
+| `--n_trials` given smaller than ledger N | Used as given but printed with a warning — what-if mode is explicit, never silent |
+| PurgedKFold with purge+embargo consuming an entire fold | Raises with a clear message (too many splits for the data), never yields an empty train set silently |
+| PROBATION strategy trips the drawdown breaker | PAUSED as usual; `arena-run resume` returns it to PROBATION (its screened tier), not PASS |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(stats): sharpe_stats.py — PSR, expected-max Sharpe, Deflated Sharpe` — pure math + paper-pinned tests
+2. `feat(cv): purged/embargoed K-fold + split_by_time boundary-leak fix` — purged_cv.py, --purged_cv CLI, regression pin
+3. `feat(arena): persistent trial ledger with config-hash dedupe` — trials table, N/variance stats
+4. `feat(arena): two-tier PASS/PROBATION promotion gate wired to t-stat + DSR` — gate, live/ensemble/report handling

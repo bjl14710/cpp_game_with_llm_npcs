@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0010 — Low-Latency C++ Best Practices</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Threads + ring diagram */
+  .arch {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px; margin: 16px 0;
+  }
+  .arch-row {
+    display: grid; grid-template-columns: 200px 1fr 200px; gap: 14px; align-items: center;
+    margin: 10px 0;
+  }
+  .arch-box {
+    background: var(--panel-2); border-radius: 8px; padding: 10px 12px;
+    border-left: 3px solid var(--accent); font-size: 13px;
+  }
+  .arch-box strong { color: var(--accent); display: block; margin-bottom: 4px; font-size: 14px; }
+  .arch-arrow {
+    text-align: center; color: var(--accent-2); font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0010</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Architecture</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 SPSC ring</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 CPU isolation</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Build discipline</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 In this project</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Low-Latency C++ Best Practices</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: Lesson 0009 cleaned up
+    <em>one</em> hot loop. Real HFT C++ is multi-threaded — a feed thread,
+    a strategy thread, a logger thread — communicating through lock-free rings,
+    pinned to isolated cores, compiled with non-default flags. This is the
+    layer that turns a fast loop into a production system.
+  </p>
+
+  <!-- ===================== §1 ARCHITECTURE ===================== -->
+  <h2>1. The production architecture: three threads, two rings</h2>
+
+  <p>
+    Every serious HFT system in C++ has the same shape, regardless of strategy.
+    The hot path is split across dedicated threads, each doing one thing, each
+    pinned to one core, talking through lock-free queues.
+  </p>
+
+  <div class="arch">
+    <div class="arch-row">
+      <div class="arch-box">
+        <strong>Feed thread</strong>
+        Reads market data from the NIC (kernel-bypass or FPGA), parses ticks, pushes onto a ring.
+      </div>
+      <div class="arch-arrow">─SPSC─►</div>
+      <div class="arch-box">
+        <strong>Strategy thread</strong>
+        Drains ticks from the ring, runs <code>MeanReversion::onTick</code>, decides BUY/HOLD/SELL.
+      </div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box" style="grid-column: 1 / span 2;">
+        <strong>Strategy thread</strong> (continued)
+        Emits orders directly to the NIC; pushes trade records onto a log ring.
+      </div>
+      <div class="arch-arrow">─SPSC─►</div>
+      <div class="arch-box">
+        <strong>Logger thread</strong>
+        Tails the log ring, writes to disk / Kafka / stderr. Not latency-critical.
+      </div>
+    </div>
+  </div>
+
+  <p>Why this shape and not "one big main loop"?</p>
+  <ul>
+    <li><strong>Isolation.</strong> The logger can stall on disk I/O without slowing the strategy.</li>
+    <li><strong>Pinnability.</strong> Each thread gets its own dedicated CPU core; the kernel can't context-switch them.</li>
+    <li><strong>Specialization.</strong> Each thread can be optimized for its own workload (busy-poll the NIC; batch-flush the disk).</li>
+  </ul>
+
+  <p>The rings are the only shared state, and they are <em>lock-free</em>. That's the central object of this lesson.</p>
+
+  <!-- ===================== §2 SPSC RING ===================== -->
+  <h2>2. The SPSC ring buffer — done right</h2>
+
+  <p>
+    <strong>SPSC</strong> = single-producer, single-consumer. The simplest and
+    fastest lock-free queue. One thread always pushes; one thread always pops.
+    No other configuration. (For multi-producer or multi-consumer you need MPSC
+    or MPMC — much more expensive and worth avoiding when you can.)
+  </p>
+
+  <p>A correct SPSC has four ingredients that beginners almost always get wrong:</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>1. Power-of-two capacity</h4>
+      <p>
+        Replace modulo with bitwise-and: <code>idx & (N - 1)</code> instead of
+        <code>idx % N</code>. One instruction instead of an integer division.
+      </p>
+    </div>
+    <div class="card">
+      <h4>2. Acquire/release ordering, not seq_cst</h4>
+      <p>
+        <code>std::atomic</code>'s default is <code>memory_order_seq_cst</code> — a
+        full barrier on every access, ~10× slower than necessary. The producer
+        publishes with <code>release</code>; the consumer reads with
+        <code>acquire</code>.
+      </p>
+    </div>
+    <div class="card">
+      <h4>3. Cache-line padding on head/tail</h4>
+      <p>
+        If the producer's write index and the consumer's read index share a
+        cache line, every push ping-pongs that line between cores
+        (false sharing). Force them onto different lines with
+        <code>alignas(64)</code>.
+      </p>
+    </div>
+    <div class="card">
+      <h4>4. Storage by value, not pointer</h4>
+      <p>
+        The ring holds the records inline (<code>std::array&lt;T, N&gt;</code>),
+        not pointers to heap-allocated objects. Otherwise you've put the
+        allocator back on the hot path.
+      </p>
+    </div>
+  </div>
+
+  <h3>Reference implementation</h3>
+
+<pre><span class="kw">template</span>&lt;<span class="kw">typename</span> T, std::<span class="ty">size_t</span> N&gt;
+<span class="kw">class</span> SpscRing {
+    <span class="kw">static_assert</span>((N &amp; (N - <span class="num">1</span>)) == <span class="num">0</span>, <span class="str">"N must be power of 2"</span>);
+    <span class="kw">static constexpr</span> <span class="ty">size_t</span> MASK = N - <span class="num">1</span>;
+    <span class="kw">static constexpr</span> <span class="ty">size_t</span> CACHELINE = <span class="num">64</span>;
+
+    std::<span class="ty">array</span>&lt;T, N&gt; data_{};
+
+    <span class="com">// Each index sits on its own cache line — no false sharing.</span>
+    <span class="kw">alignas</span>(CACHELINE) std::atomic&lt;std::<span class="ty">size_t</span>&gt; head_{<span class="num">0</span>};   <span class="com">// producer writes</span>
+    <span class="kw">alignas</span>(CACHELINE) std::atomic&lt;std::<span class="ty">size_t</span>&gt; tail_{<span class="num">0</span>};   <span class="com">// consumer reads</span>
+
+<span class="kw">public</span>:
+    <span class="com">// Producer-only.  Returns false if full.</span>
+    <span class="ty">bool</span> <span class="fn">try_push</span>(<span class="kw">const</span> T&amp; v) <span class="kw">noexcept</span> {
+        <span class="kw">const auto</span> h = head_.<span class="fn">load</span>(std::memory_order_relaxed);
+        <span class="kw">const auto</span> t = tail_.<span class="fn">load</span>(std::memory_order_acquire);
+        <span class="kw">if</span> (h - t == N) <span class="kw">return</span> <span class="kw">false</span>;        <span class="com">// full</span>
+        data_[h &amp; MASK] = v;                       <span class="com">// store payload</span>
+        head_.<span class="fn">store</span>(h + <span class="num">1</span>, std::memory_order_release);  <span class="com">// publish</span>
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+
+    <span class="com">// Consumer-only.  Returns false if empty.</span>
+    <span class="ty">bool</span> <span class="fn">try_pop</span>(T&amp; out) <span class="kw">noexcept</span> {
+        <span class="kw">const auto</span> t = tail_.<span class="fn">load</span>(std::memory_order_relaxed);
+        <span class="kw">const auto</span> h = head_.<span class="fn">load</span>(std::memory_order_acquire);
+        <span class="kw">if</span> (h == t) <span class="kw">return</span> <span class="kw">false</span>;             <span class="com">// empty</span>
+        out = data_[t &amp; MASK];
+        tail_.<span class="fn">store</span>(t + <span class="num">1</span>, std::memory_order_release);
+        <span class="kw">return</span> <span class="kw">true</span>;
+    }
+};
+</pre>
+
+  <h3>What every memory_order line is doing</h3>
+
+  <table>
+    <tr><th>Line</th><th>Order</th><th>Why</th></tr>
+    <tr>
+      <td><code>head_.load(relaxed)</code> in push</td>
+      <td>relaxed</td>
+      <td>The producer is the only writer of <code>head_</code> — it owns the value, doesn't need synchronization to read its own write.</td>
+    </tr>
+    <tr>
+      <td><code>tail_.load(acquire)</code> in push</td>
+      <td>acquire</td>
+      <td>Sees the latest tail published by the consumer. Acquire ensures any payload reads the consumer did before publishing are visible — actually unused here but cheap.</td>
+    </tr>
+    <tr>
+      <td><code>head_.store(release)</code> in push</td>
+      <td>release</td>
+      <td><strong>The publish.</strong> Guarantees the payload write to <code>data_[h &amp; MASK]</code> is visible to any thread that does an acquire-load of <code>head_</code>. Without release, the consumer could see <code>head_</code> advance while still reading stale memory.</td>
+    </tr>
+    <tr>
+      <td><code>head_.load(acquire)</code> in pop</td>
+      <td>acquire</td>
+      <td>Pairs with the producer's release. After this load returns a new value, the consumer is guaranteed to see the payload that was written before it.</td>
+    </tr>
+  </table>
+
+  <div class="callout warn">
+    <strong>The seq_cst tax.</strong> If you'd written <code>std::atomic&lt;size_t&gt;</code>
+    and used the default operators (<code>head_++</code>, <code>head_ = h+1</code>),
+    you'd silently get <code>memory_order_seq_cst</code>, which inserts a full
+    fence (<code>MFENCE</code> on x86, ~5–10 ns) on every operation. Industry
+    benchmarks show 10×+ speedups by dropping to release/acquire. Always write
+    the orders explicitly.
+  </div>
+
+  <!-- ===================== §3 CPU ISOLATION ===================== -->
+  <h2>3. CPU isolation, thread pinning, and the kernel scheduler</h2>
+
+  <p>
+    A fast hot loop is worthless if Linux can preempt it 10,000 times a second
+    to run cron jobs or background kernel work. HFT systems carve out cores
+    that the kernel won't touch and pin one thread to each.
+  </p>
+
+  <h3>Kernel boot parameters (set in <code>/etc/default/grub</code>)</h3>
+<pre>GRUB_CMDLINE_LINUX=<span class="str">"isolcpus=4-7 nohz_full=4-7 rcu_nocbs=4-7"</span></pre>
+
+  <table>
+    <tr><th>Parameter</th><th>What it does</th></tr>
+    <tr><td><code>isolcpus=4-7</code></td><td>Tells the scheduler not to place general tasks on cores 4–7. Only threads that explicitly pin to those cores will run there.</td></tr>
+    <tr><td><code>nohz_full=4-7</code></td><td>Turns off the periodic 1 kHz timer tick on those cores when only one task is runnable. No timer interrupts = no jitter.</td></tr>
+    <tr><td><code>rcu_nocbs=4-7</code></td><td>Offloads RCU (read-copy-update) callbacks from those cores. Removes another source of kernel work.</td></tr>
+  </table>
+
+  <h3>Pinning a thread to a core in C++</h3>
+<pre>#<span class="kw">include</span> &lt;pthread.h&gt;
+
+<span class="fn">void</span> <span class="fn">pinThread</span>(std::thread&amp; t, <span class="ty">int</span> core_id) {
+    cpu_set_t cpus;
+    <span class="fn">CPU_ZERO</span>(&amp;cpus);
+    <span class="fn">CPU_SET</span>(core_id, &amp;cpus);
+    <span class="fn">pthread_setaffinity_np</span>(t.<span class="fn">native_handle</span>(), <span class="kw">sizeof</span>(cpus), &amp;cpus);
+}
+
+<span class="com">// Wire the three threads onto isolated cores:</span>
+std::thread feed_thread{<span class="fn">feed_loop</span>, &amp;tick_ring};       <span class="fn">pinThread</span>(feed_thread, <span class="num">4</span>);
+std::thread strat_thread{<span class="fn">strategy_loop</span>, &amp;tick_ring, &amp;log_ring}; <span class="fn">pinThread</span>(strat_thread, <span class="num">5</span>);
+std::thread log_thread{<span class="fn">log_loop</span>, &amp;log_ring};         <span class="fn">pinThread</span>(log_thread, <span class="num">6</span>);
+</pre>
+
+  <p>
+    The strategy thread now runs <em>uninterrupted</em> on core 5: no scheduler
+    preemption, no timer interrupts, no migration to a different cache. Combined
+    with the lock-free ring, the per-tick path is fully deterministic.
+  </p>
+
+  <div class="callout">
+    <strong>Bonus tweaks the experienced teams add:</strong>
+    <code>SCHED_FIFO</code> with a high priority (real-time scheduler class),
+    <code>mlockall(MCL_CURRENT | MCL_FUTURE)</code> to prevent paging,
+    transparent-huge-pages disabled, hyperthreading off on the
+    strategy core (so it owns the L1).
+  </div>
+
+  <!-- ===================== §4 BUILD DISCIPLINE ===================== -->
+  <h2>4. Build &amp; compiler discipline — the flags that matter</h2>
+
+  <p>
+    Default compiler settings leave a lot of latency on the table. HFT C++
+    is typically built with:
+  </p>
+
+  <table>
+    <tr><th>Flag</th><th>What it does</th></tr>
+    <tr><td><code>-O3</code></td><td>Aggressive optimization: inlining, loop unrolling, auto-vectorization.</td></tr>
+    <tr><td><code>-march=native</code></td><td>Uses the full instruction set of the build machine (AVX2, AVX-512, FMA). Critical for SIMD wins.</td></tr>
+    <tr><td><code>-flto</code></td><td>Link-Time Optimization — lets the compiler inline across translation units and dead-code-eliminate globally.</td></tr>
+    <tr><td><code>-fno-exceptions</code></td><td>Removes exception scaffolding. Pair with explicit error codes.</td></tr>
+    <tr><td><code>-fno-rtti</code></td><td>Removes <code>typeid</code> / <code>dynamic_cast</code> machinery. Almost never needed in HFT code.</td></tr>
+    <tr><td><code>-fno-plt</code></td><td>Removes one level of indirection for shared-library calls.</td></tr>
+    <tr><td><code>-fprofile-use</code> (PGO)</td><td>Profile-Guided Optimization: build, run with representative load to gather a profile, rebuild using it. The compiler now knows which branches are hot. Real wins: 5–15% on the hot path.</td></tr>
+  </table>
+
+  <h3>The PGO loop</h3>
+<pre>$ g++ -O3 -march=native -fprofile-generate=./prof  *.cpp -o trader
+$ ./trader replay.dat                    <span class="com"># run a representative workload to collect profile</span>
+$ g++ -O3 -march=native -flto -fprofile-use=./prof *.cpp -o trader_pgo
+</pre>
+
+  <p>
+    The PGO binary lays out hot basic blocks contiguously, predicts branches
+    based on the real profile, and inlines aggressively where the data shows
+    it pays. For a measurement-driven team this is free latency.
+  </p>
+
+  <h3>SIMD: the bonus you get nearly for free</h3>
+  <p>
+    With <code>-O3 -march=native</code>, the compiler auto-vectorizes simple
+    loops. In Lesson 0009's rewritten <code>MeanReversion::onTick</code>, the
+    running-sum update is already O(1), so SIMD is irrelevant there. But if
+    you batch-process e.g. 1024 ticks for offline backtest replay, the inner
+    loop will be auto-vectorized into AVX-2 (4 doubles/op) or AVX-512
+    (8 doubles/op) without you writing a single intrinsic. Inspect the
+    assembly with <code>objdump -d</code> or <a href="https://godbolt.org">godbolt</a>
+    to confirm.
+  </p>
+
+  <!-- ===================== §5 IN THIS PROJECT ===================== -->
+  <h2>5. In this project — restructuring the C++ for production</h2>
+
+  <p>
+    The repo's three C++ files don't yet have any threading. To get production-grade,
+    the responsibilities split this way:
+  </p>
+
+  <table>
+    <tr><th>Existing file</th><th>Hot/cold</th><th>Becomes…</th></tr>
+    <tr>
+      <td><code>gradient_boosting_data_fetching.cpp</code></td>
+      <td>Cold (cURL → REST API)</td>
+      <td>Stays on a worker thread; pushes parsed ticks onto <code>tick_ring</code>. Allocate freely.</td>
+    </tr>
+    <tr>
+      <td><code>sample_with_gradient_boosting.cpp</code></td>
+      <td>Hot</td>
+      <td>Becomes the strategy loop pinned to an isolated core; drains <code>tick_ring</code>, runs <code>onTick</code> (per Lesson 0009), pushes <code>TradeRecord</code> onto <code>log_ring</code>.</td>
+    </tr>
+    <tr>
+      <td><code>main.cpp</code> (ONNX inference)</td>
+      <td>Warm</td>
+      <td>Runs on a parameter-update thread. Refreshes the strategy's weight constants every 100 ms via a single atomic publish. Hot loop reads with <code>memory_order_acquire</code>.</td>
+    </tr>
+  </table>
+
+  <h3>The skeleton</h3>
+<pre><span class="kw">struct</span> Tick { <span class="ty">double</span> price; <span class="ty">uint64_t</span> ts_ns; };
+<span class="kw">struct</span> TradeRecord { <span class="ty">double</span> price; <span class="kw">enum class</span> Side : <span class="ty">uint8_t</span> { Buy, Sell } side; <span class="ty">uint64_t</span> ts_ns; };
+
+<span class="kw">static</span> SpscRing&lt;Tick,        <span class="num">1</span> &lt;&lt; <span class="num">14</span>&gt; tick_ring;     <span class="com">// 16384 ticks buffered</span>
+<span class="kw">static</span> SpscRing&lt;TradeRecord, <span class="num">1</span> &lt;&lt; <span class="num">14</span>&gt; log_ring;      <span class="com">// 16384 trades buffered</span>
+
+<span class="fn">void</span> <span class="fn">strategy_loop</span>() <span class="kw">noexcept</span> {
+    MeanReversion&lt;<span class="num">20</span>&gt; strat;
+    Tick tk;
+    <span class="kw">while</span> (running.<span class="fn">load</span>(std::memory_order_acquire)) {
+        <span class="kw">if</span> (!tick_ring.<span class="fn">try_pop</span>(tk)) [[<span class="kw">unlikely</span>]] {
+            <span class="com">// Spin: a few PAUSE instructions, then re-check. No syscalls, no sleep.</span>
+            _mm_pause();
+            <span class="kw">continue</span>;
+        }
+        <span class="kw">auto</span> action = strat.<span class="fn">onTick</span>(tk.price);
+        <span class="kw">if</span> (action != MeanReversion::Action::Hold) [[<span class="kw">unlikely</span>]] {
+            <span class="com">// Send order to the NIC (kernel-bypass or FPGA path).</span>
+            <span class="fn">emit_order</span>(tk.price, action);
+            log_ring.<span class="fn">try_push</span>({tk.price,
+                <span class="fn">action_to_side</span>(action), tk.ts_ns});
+        }
+    }
+}
+</pre>
+
+  <p>
+    What this delivers:
+  </p>
+  <ul>
+    <li><strong>Zero allocation per tick</strong> — the rings are pre-allocated, <code>strat</code> holds its stack array.</li>
+    <li><strong>Zero I/O per tick</strong> — logging is a single <code>try_push</code> of a 24-byte record.</li>
+    <li><strong>Zero syscalls per tick</strong> — busy-poll the ring with <code>_mm_pause()</code>; the kernel never sees us.</li>
+    <li><strong>Deterministic per-tick time</strong> on the isolated core.</li>
+  </ul>
+
+  <div class="callout warn">
+    <strong>Repo honesty:</strong> none of this is implemented yet — the existing
+    C++ is single-threaded and synchronous, and that's the appropriate first cut.
+    The point of this lesson is what the system <em>becomes</em> when you decide
+    to take latency seriously, and to give you the right vocabulary to ask
+    "where would this thread live?" on every line you write.
+  </div>
+
+  <!-- ===================== §6 CONTRASTS ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>SPSC vs MPSC vs MPMC</h4>
+      <p>
+        <strong>SPSC</strong>: one producer, one consumer — fastest. <strong>MPSC</strong>:
+        many producers, one consumer (e.g. logger fed by many strategy threads).
+        <strong>MPMC</strong>: many of each — most expensive. HFT teams design
+        the system to need only SPSC wherever possible.
+      </p>
+    </div>
+    <div class="card">
+      <h4>seq_cst vs release/acquire</h4>
+      <p>
+        <strong>seq_cst</strong>: total global order on all atomics — strongest,
+        slowest, default. <strong>release/acquire</strong>: pairs publish↔read
+        of a specific atomic — enough for queues. <strong>relaxed</strong>: no
+        synchronization, just atomicity — for indices the thread owns.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Lock-free vs Wait-free</h4>
+      <p>
+        <strong>Lock-free</strong>: at least one thread always makes progress.
+        <strong>Wait-free</strong>: every thread completes in bounded steps.
+        SPSC rings written as above are wait-free. Most MPMC queues are only
+        lock-free.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Thread pinning vs Process affinity</h4>
+      <p>
+        <strong>Thread pinning</strong> (<code>pthread_setaffinity_np</code>):
+        per-thread, fine-grained. <strong>Process affinity</strong>
+        (<code>taskset</code>): whole-process at launch. HFT pins each thread
+        individually because each plays a different role.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Busy polling vs Sleeping</h4>
+      <p>
+        <strong>Busy poll</strong> the ring with <code>_mm_pause()</code> —
+        latency-optimal, burns a core. <strong>Sleep</strong> on a condition
+        variable — energy-friendly, adds tens of µs wakeup latency. HFT busy-polls
+        on the strategy thread, sleeps on the logger.
+      </p>
+    </div>
+    <div class="card">
+      <h4>PGO vs LTO</h4>
+      <p>
+        <strong>PGO</strong> (Profile-Guided Optimization): uses a real run's
+        branch probabilities to lay out code. <strong>LTO</strong> (Link-Time
+        Optimization): runs the optimizer across all translation units at link
+        time. They are independent and stack — use both.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. Why does <code>SpscRing</code> use <code>alignas(64)</code> on the head and tail indices?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The atomic guarantees atomicity; alignment doesn't change that. The reason is about cache behavior, not atomicity.">Because <code>std::atomic</code> only guarantees atomicity at 64-byte alignment.</li>
+      <li data-correct="true"  data-why="Right. Modern x86 cache lines are 64 bytes. If head_ and tail_ shared a line, every push (producer write) would invalidate the consumer's cached copy and vice versa — the line would ping-pong between cores, costing ~10 ns per operation. alignas(64) forces them onto different lines.">To force head_ and tail_ onto different cache lines so that the producer's writes don't invalidate the consumer's cached read of the other variable (false sharing).</li>
+      <li data-correct="false" data-why="64 isn't a magic SIMD width here — that would be 32 or 64 bytes depending on AVX2/AVX-512. The reason is cache-line based, not SIMD.">To make the indices SIMD-vectorizable.</li>
+      <li data-correct="false" data-why="No — every memory access works at any alignment for 8-byte values. The cost is cache coherence traffic, not allocator boundaries.">Because the heap allocator requires 64-byte alignment.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. The producer publishes a new entry by calling <code>head_.store(h + 1, std::memory_order_release)</code>. What does <code>release</code> actually guarantee?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="release is one-way: it orders prior writes before the store. It says nothing about loads happening after the store.">That any load <em>after</em> this store also sees the latest data.</li>
+      <li data-correct="true"  data-why="Right. Release pairs with acquire. It promises that all writes done by the producer thread BEFORE the head_.store (including writing data_[h & MASK] = v) become visible to any consumer thread that does an acquire-load of head_. Without release, the consumer could see head_ advance while still reading stale or torn payload memory.">That any writes the producer did before this store — specifically the payload write into <code>data_[h &amp; MASK]</code> — are visible to any consumer thread that acquire-loads <code>head_</code>.</li>
+      <li data-correct="false" data-why="No — release doesn't synchronize the producer with itself. The producer is the only writer of head_; it doesn't need to synchronize against its own future operations.">That the producer's own subsequent reads of <code>head_</code> see the updated value.</li>
+      <li data-correct="false" data-why="release does NOT insert a full fence on x86 — it's typically free, because x86 has a strong memory model. seq_cst is what adds the MFENCE.">That a full hardware fence (MFENCE) is inserted on x86 before the store.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. You boot with <code>isolcpus=4-7 nohz_full=4-7</code> and pin the strategy thread to core 5. Which of the following is the most important consequence?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The CPU runs the same frequency regardless of isolcpus. Frequency scaling is governed by separate config (cpufreq governor, intel_pstate).">Core 5 automatically runs at a higher clock frequency.</li>
+      <li data-correct="true"  data-why="Right. isolcpus tells the scheduler not to place arbitrary tasks on core 5; nohz_full eliminates the periodic 1 kHz timer interrupt when only one task is runnable. Together: the strategy thread runs essentially uninterrupted, removing the largest single source of HFT jitter — kernel scheduler preemption and timer ticks.">Core 5 is no longer subject to general scheduler preemption or the 1 kHz timer tick, eliminating the biggest single source of jitter for the strategy thread.</li>
+      <li data-correct="false" data-why="The kernel still runs on the unisolated cores (0-3 here), so the system functions normally. isolcpus carves out cores, it doesn't shut down the kernel.">The kernel can no longer schedule any work, so the rest of the system stops.</li>
+      <li data-correct="false" data-why="Pinning prevents migration BETWEEN cores; it doesn't change cache size. Each core still has its own L1/L2 of the standard size.">Core 5's L1 and L2 caches double in size because no other process can use them.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. Your team measures a 12% latency win after switching from default-built binaries to <code>-O3 -march=native -flto</code>. They want to push further. What's the highest-impact next step?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="That gets you cleaner code but barely moves performance. Modern allocators are already fast; the bigger wins are in profile-guided layout.">Rewrite the code in C instead of C++ to remove abstraction overhead.</li>
+      <li data-correct="true"  data-why="Right. PGO consistently gives another 5-15% on top of -O3 -flto, because the compiler now knows from a real run which branches are hot, which functions to inline, and how to lay out basic blocks. Cheap to set up; real wins.">Add Profile-Guided Optimization: build with <code>-fprofile-generate</code>, run a representative workload, rebuild with <code>-fprofile-use</code>.</li>
+      <li data-correct="false" data-why="Switching compilers gives variable, usually small differences. PGO is a cheaper and more reliable next step.">Switch the compiler from g++ to clang++ for better autovectorization.</li>
+      <li data-correct="false" data-why="A bigger NIC helps network latency. It does nothing for the CPU-side strategy code, which is what the team has been optimizing.">Buy a faster network card to reduce I/O latency.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. The strategy thread busy-polls the tick ring with <code>_mm_pause()</code> instead of sleeping on a condition variable. What's the tradeoff?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="_mm_pause() does not put the core to sleep. It's a hint to the CPU's pipeline that this is a spin-wait loop, so it should slow speculative execution and conserve power, not halt.">Busy polling is strictly worse — sleeping is faster.</li>
+      <li data-correct="true"  data-why="Right. Busy poll keeps the wakeup latency at near-zero (~10s of ns) because the thread is already running when the next tick arrives. The cost: that core is at 100% utilization continuously, burning ~25 W even when nothing is happening. A condition-variable sleep is energy-efficient but adds ~10–30 µs of wakeup latency every event — fatal for HFT.">Busy poll gives near-zero wakeup latency (the thread is already running) but burns one core at 100% utilization. Sleeping is energy-efficient but adds ~10–30 µs of wakeup latency per event.</li>
+      <li data-correct="false" data-why="Reordering by the CPU is exactly what acquire/release prevent at the relevant boundary. _mm_pause is unrelated to those guarantees.">Busy polling defeats the memory ordering — the CPU is allowed to reorder freely.</li>
+      <li data-correct="false" data-why="No — _mm_pause is a hint, not a sleep. The thread keeps running. Energy is still consumed; the win is wakeup latency.">Busy polling lets the kernel safely sleep the thread for microseconds at a time.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. You introduce the SpscRing but forget the <code>alignas(64)</code> on head_/tail_. The microbenchmark shows the queue does ~5 M ops/s with both threads on the same physical core, but drops to ~2 M ops/s when the threads are pinned to different cores. Explain.</summary>
+    <p>
+      Classic false sharing. When both threads share a core, they share the L1
+      cache and the head_/tail_ ping-pong is invisible — same cache, no
+      coherence traffic. When you pin them to different cores, every producer
+      write to head_ invalidates the consumer's cached copy of the same line
+      (because tail_ lives there too). The line ping-pongs between L1s via the
+      L3, costing ~30 ns per round-trip. Fix: <code>alignas(64)</code> on each
+      atomic so they live on separate cache lines. Counter-intuitively, the
+      "more isolated" topology gets slower without the fix.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. Your team enables <code>-fno-exceptions</code> and a header-only library you depend on stops compiling because it throws <code>std::runtime_error</code> on bad input. What are your options?</summary>
+    <p>
+      Three workable paths. (a) <strong>Wall it off</strong>: keep
+      <code>-fno-exceptions</code> on the hot-path TU and link in the
+      library-using TU compiled with exceptions enabled — at the cost of
+      losing some cross-module optimization. (b) <strong>Fork the dependency</strong>
+      to return error codes; ugly but bounded. (c) <strong>Don't use it on
+      the hot path</strong>; call it only during setup, where exceptions are
+      fine. The wrong answer is "leave exceptions on globally": you give up
+      the bandwidth/code-size win without solving the root problem, which is
+      that this library was never intended for HFT-hot use.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. Two scenarios. (a) The logger ring fills up — the logger is slower than the strategy. (b) The tick ring fills up — the strategy is slower than the feed. What's the right policy for each?</summary>
+    <p>
+      (a) <strong>Logger ring full</strong>: the strategy must not block. The
+      sane policy is to drop the log record and increment a "dropped_log_count"
+      atomic that the logger reads later. Trades still happen; you lose
+      diagnostic data, not money. (b) <strong>Tick ring full</strong>: this
+      means the strategy is falling behind real-time. Different problem
+      entirely. Options: drop the oldest tick (latest-is-truth), drop the
+      incoming tick (most-recent-state-is-truth), or escalate to a panic
+      shutdown. The choice depends on whether your strategy needs every tick
+      or just the latest market state — but never block the feed, because the
+      next tick is already arriving on the wire.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidate: <strong>Mean-variance portfolio optimization</strong>
+    — closes out the modeling → allocation arc the queue has pointed at since
+    Lesson 0006. After that, the lock-free / kernel-bypass / FIX-decoder
+    follow-ups become natural deep dives.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

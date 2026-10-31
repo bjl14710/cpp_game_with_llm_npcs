@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Lesson 0029 — The volatile Keyword</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel2:#1d222c;--ink:#e7ecf3;--dim:#aab3c0;--accent:#7cc4ff;--accent2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--cbg:#0b0d12;--ckw:#ff8ec3;--cstr:#c5e478;--cnum:#ffd479;--ccom:#6b7585;--cfn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}
+body{font:16px/1.65 -apple-system,"SF Pro Text",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}
+main{max-width:880px;margin:0 auto}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}
+.lead{color:var(--dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}
+code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--cbg);padding:1px 6px;border-radius:4px;font-size:14px}
+pre{background:var(--cbg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.6;border:1px solid var(--rule)}
+pre .kw{color:var(--ckw)}pre .str{color:var(--cstr)}pre .num{color:var(--cnum)}pre .com{color:var(--ccom);font-style:italic}pre .fn{color:var(--cfn)}pre .ty{color:var(--accent)}
+.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}
+.callout.warn{border-left-color:var(--accent2)}.callout.danger{border-left-color:var(--bad)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent2);font-size:14px}
+.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}
+.question p.q{margin:0 0 10px;font-weight:600}
+ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}
+.feedback{margin:10px 2px 0;font-size:14px}
+.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}
+.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent2);font-weight:600}
+.small{font-size:13px;color:var(--dim)}.tag{display:inline-block;background:var(--panel2);padding:1px 8px;border-radius:4px;font-size:12px;color:var(--accent)}
+</style></head><body><main>
+
+<div class="scoreboard"><span class="pill">Lesson 0029</span><span class="small">Quiz: <strong id="quizScore">0 / 5</strong></span></div>
+
+<h1>The <code>volatile</code> Keyword</h1>
+<p class="lead">Why this matters: <code>bench.cpp</code> in exercise 08 uses <code>volatile</code> in two distinct ways — one to prevent a dead-store optimisation during warm-up, and one (as <code>__asm__ volatile</code>) as a compiler memory barrier around timed regions. Getting either wrong silently produces meaningless latency numbers.</p>
+
+<h2>1. What <code>volatile</code> tells the compiler</h2>
+<p>In C and C++, the compiler is free to reorganise, eliminate, or cache any computation that has the same observable result. "Observable result" normally means: final output, file I/O, and network — not reads and writes to ordinary variables that are only used locally.</p>
+<p><code>volatile</code> widens the definition of "observable". A <code>volatile</code>-qualified variable or memory location is treated as if every read or write is a <strong>visible side effect</strong> that the compiler must preserve in program order:</p>
+<pre><span class="com">// Without volatile — compiler may eliminate the entire loop</span>
+<span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i &lt; WARMUP; ++i) {
+    <span class="ty">uint64_t</span> dummy = <span class="fn">rdtsc</span>();   <span class="com">// result never used → dead store → removed</span>
+    (<span class="kw">void</span>)dummy;
+}
+
+<span class="com">// With volatile — every iteration's rdtsc() call is preserved</span>
+<span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i &lt; WARMUP; ++i) {
+    <span class="kw">volatile</span> <span class="ty">uint64_t</span> dummy = <span class="fn">rdtsc</span>();  <span class="com">// write to volatile = observable, must stay</span>
+    (<span class="kw">void</span>)dummy;
+}</pre>
+<p>The write to <code>dummy</code> is the side effect. Even though nobody ever reads <code>dummy</code> back, the compiler must keep it because the variable is <code>volatile</code>.</p>
+
+<h3>Three classic use cases</h3>
+<table>
+<tr><th>Use case</th><th>Why volatile is needed</th><th>Example</th></tr>
+<tr><td>Memory-mapped hardware I/O</td><td>The hardware register changes outside the program's view; a cached read would miss updates</td><td>Reading a UART status register in an embedded system or FPGA device driver</td></tr>
+<tr><td>Signal handlers</td><td>A signal can modify a flag variable between any two instructions; the compiler can't cache it</td><td><code>volatile sig_atomic_t got_signal = 0;</code></td></tr>
+<tr><td>Benchmark warm-up / dead-store prevention</td><td>Stop the compiler from deleting "useless" work that you need to actually execute</td><td><code>volatile uint64_t dummy = rdtsc();</code> in <code>bench.cpp</code></td></tr>
+</table>
+
+<h2>2. Two forms in this project</h2>
+
+<h3>Form A — <code>volatile</code> variable qualifier (line 54, <code>solutions/08_latency_bench/bench.cpp</code>)</h3>
+<pre><span class="com">// Warm-up loop — we need the CPU to actually execute rdtsc() 10,000 times</span>
+<span class="com">// so that the instruction is in I-cache and the branch predictor is trained.</span>
+<span class="kw">for</span> (<span class="ty">int</span> i = <span class="num">0</span>; i &lt; WARMUP; ++i) {
+    <span class="kw">volatile</span> <span class="ty">uint64_t</span> dummy = <span class="fn">rdtsc</span>();  <span class="com">// &lt;-- Form A</span>
+    (<span class="kw">void</span>)dummy;
+}</pre>
+<p><strong>What it does:</strong> the write to <code>dummy</code> is a side effect the compiler cannot prove is unnecessary. It keeps the <code>rdtsc()</code> call alive. Without <code>volatile</code>, with <code>-O2</code>, the compiler would simply delete the loop body — or the whole loop — because the result is never consumed.</p>
+<p><code>(void)dummy</code> just silences the "unused variable" warning; the <em>write</em> is what matters, and the write already happened.</p>
+
+<h3>Form B — <code>__asm__ volatile</code> memory barrier (lines 66 and 82)</h3>
+<pre><span class="ty">uint64_t</span> t0 = <span class="fn">rdtsc</span>();
+<span class="ty">uint64_t</span> t1 = <span class="fn">rdtsc</span>();
+<span class="kw">__asm__</span> <span class="kw">volatile</span>(<span class="str">""</span> ::: <span class="str">"memory"</span>);   <span class="com">// &lt;-- Form B: compiler barrier</span>
+rdtsc_hist.<span class="fn">record</span>(t1 - t0);
+
+<span class="com">// And later:</span>
+t0 = <span class="fn">rdtsc</span>();
+dummy_hist.<span class="fn">record</span>(<span class="kw">static_cast</span>&lt;<span class="ty">uint64_t</span>&gt;(i));
+<span class="kw">__asm__</span> <span class="kw">volatile</span>(<span class="str">""</span> ::: <span class="str">"memory"</span>);   <span class="com">// barrier between timed call and t1</span>
+t1 = <span class="fn">rdtsc</span>();</pre>
+<p>This is a GNU inline assembly statement with three parts:</p>
+<table>
+<tr><th>Part</th><th>Value</th><th>Meaning</th></tr>
+<tr><td>Template</td><td><code>""</code></td><td>No actual assembly instructions — zero machine code emitted</td></tr>
+<tr><td><code>volatile</code></td><td>(the keyword)</td><td>Prevents the compiler from removing or reordering <em>the asm statement itself</em></td></tr>
+<tr><td>Clobber: <code>"memory"</code></td><td></td><td>Tells the compiler: "after this asm, all memory contents may have changed — don't keep anything cached in registers"</td></tr>
+</table>
+<p>Combined effect: a <strong>compiler-only memory barrier</strong>. It generates no CPU instructions but prevents the C++ compiler from moving stores/loads past it. The timed call stays between the two <code>rdtsc()</code> calls. Without it, with <code>-O2</code>, the compiler might hoist <code>t1 = rdtsc()</code> before the call being timed, collapsing the measured interval to zero.</p>
+
+<div class="callout warn">
+<strong>Important distinction:</strong> <code>__asm__ volatile("" ::: "memory")</code> is a <em>compiler</em> barrier — it constrains the C++ optimiser. It does NOT emit a CPU fence instruction. On x86-64 the store buffer is ordered enough that this often works for local benchmarks, but it is <strong>not</strong> a substitute for <code>std::atomic_thread_fence</code> in multithreaded code.
+</div>
+
+<h2>3. What <code>volatile</code> does NOT do</h2>
+<div class="callout danger">
+<strong>Common mistake:</strong> using <code>volatile</code> as a threading primitive. It is not. The C++11 memory model makes no guarantees about <code>volatile</code> across threads. The SPSC ring in exercise 04 uses <code>std::atomic</code> with explicit <code>memory_order_release</code> / <code>memory_order_acquire</code> — not <code>volatile</code>.
+</div>
+<pre><span class="com">// WRONG — volatile does not prevent data races</span>
+<span class="kw">volatile</span> <span class="ty">int</span> counter = <span class="num">0</span>;
+<span class="com">// Thread A:</span>
+counter++;              <span class="com">// read-modify-write; not atomic; data race</span>
+
+<span class="com">// RIGHT — atomic with appropriate ordering</span>
+std::atomic&lt;<span class="ty">int</span>&gt; counter{<span class="num">0</span>};
+counter.fetch_add(<span class="num">1</span>, std::memory_order_relaxed);  <span class="com">// atomic RMW</span></pre>
+
+<h2>4. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4><code>volatile</code> vs <code>std::atomic</code></h4>
+<p><strong>Shared:</strong> both suppress certain compiler optimisations on the target variable.</p>
+<p><strong>Diverge:</strong> <code>volatile</code> is a single-threaded compiler hint with no defined semantics in C++11's memory model for cross-thread access. <code>std::atomic</code> is a language-level thread-synchronisation primitive that guarantees atomicity, defines happens-before relationships, and maps to actual CPU memory-ordering instructions when needed.</p>
+<p><strong>Rule:</strong> use <code>volatile</code> for hardware I/O and benchmark dead-store prevention; use <code>std::atomic</code> for any value shared between threads.</p></div>
+<div class="card"><h4><code>__asm__ volatile</code> vs CPU fence (<code>mfence</code>)</h4>
+<p><strong>Shared:</strong> both prevent certain reorderings around themselves.</p>
+<p><strong>Diverge:</strong> <code>__asm__ volatile("" ::: "memory")</code> only constrains the <em>compiler</em> — it emits zero machine instructions. An <code>mfence</code> (or <code>std::atomic_thread_fence</code>) additionally drains the CPU's store buffer, preventing hardware reordering that is invisible to the compiler. For local single-threaded benchmarks, the compiler barrier is enough; for multithreaded correctness, you need the CPU fence too.</p></div>
+<div class="card"><h4><code>volatile</code> vs <code>const</code></h4>
+<p><strong>Not opposites</strong> despite looking like them. <code>const volatile</code> is valid and common for read-only hardware registers: <code>const</code> means "the program won't write it," <code>volatile</code> means "the hardware may change it, so always re-read from memory."</p></div>
+<div class="card"><h4><code>volatile</code> in C vs C++</h4>
+<p>In C, <code>volatile</code> is heavier-weight and sometimes used as a threading primitive (older POSIX code). In C++11+, the standard explicitly says <code>volatile</code> does <em>not</em> establish happens-before relationships across threads — the memory model lives in <code>std::atomic</code> and <code>std::mutex</code>, not <code>volatile</code>. C++ code should use <code>volatile</code> only for hardware access and single-threaded benchmark tricks.</p></div>
+</div>
+
+<h2>5. Practice</h2>
+
+<div class="question" data-question>
+<p class="q">Q1. In the warm-up loop in <code>bench.cpp</code>, what would <code>-O2</code> do to the loop body if <code>volatile</code> were removed from <code>dummy</code>?</p>
+<ul class="options">
+<li data-correct="true" data-why="Correct. The compiler sees that dummy is written but never read back, and that rdtsc() has no visible side effects (no I/O, no globals changed). A dead-store elimination pass removes the assignment, and the loop body becomes empty — then the loop itself may be removed. The warm-up achieves nothing.">Eliminate the entire loop body as dead code — the value is never read, so the write is provably useless.</li>
+<li data-correct="false" data-why="The compiler can and does remove dead stores with -O2. This is exactly the optimization volatile is designed to prevent.">Leave it unchanged — the compiler doesn't remove loop bodies.</li>
+<li data-correct="false" data-why="The compiler doesn't move a dead store — it deletes it. Moving would still emit the rdtsc() call.">Move the rdtsc() call outside the loop (loop-invariant code motion).</li>
+<li data-correct="false" data-why="Inlining is about function calls, not about whether a result is used. The loop body would still be eliminated as dead code after any inlining.">Inline rdtsc() but not eliminate the call.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question>
+<p class="q">Q2. What does <code>__asm__ volatile("" ::: "memory")</code> emit into the compiled binary?</p>
+<ul class="options">
+<li data-correct="false" data-why="mfence is an x86 CPU instruction that also drains the store buffer — a CPU-level barrier. The asm volatile with memory clobber is compiler-only and emits nothing.">An x86 <code>mfence</code> instruction to drain the CPU store buffer.</li>
+<li data-correct="false" data-why="The string is an empty asm template — no instructions at all, not even a nop.">A no-op (<code>nop</code>) instruction as a scheduling hint.</li>
+<li data-correct="true" data-why="Correct. The template string is empty so nothing is emitted. The volatile keyword prevents the compiler from removing or reordering the asm statement; the 'memory' clobber tells it not to hold any values in registers across this point. The result: a compiler-only memory barrier with zero machine-code output.">Zero machine instructions — it is a compiler-only barrier with no runtime cost.</li>
+<li data-correct="false" data-why="It's not related to the call stack. Barriers operate on memory ordering, not the stack.">A stack fence to ensure local variables are flushed to the stack frame.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question>
+<p class="q">Q3. The SPSC ring in exercise 04 (<code>solutions/04_spsc_ring/spsc_ring.hpp</code>) uses <code>std::atomic</code> for <code>head_</code> and <code>tail_</code>, not <code>volatile</code>. What would break if you replaced <code>std::atomic&lt;size_t&gt; head_</code> with <code>volatile size_t head_</code>?</p>
+<ul class="options">
+<li data-correct="false" data-why="volatile does suppress some optimisations, but the real problem is deeper than cache.">The CPU cache would not be flushed between producer and consumer reads.</li>
+<li data-correct="true" data-why="Correct. std::atomic with memory_order_release/acquire establishes a happens-before relationship defined by the C++ memory model: the producer's stores are guaranteed to be visible to the consumer before it reads the tail. volatile makes no such guarantee — the CPU may reorder the store buffer, and the compiler may reorder memory accesses around it. The data race is undefined behaviour; on weakly-ordered CPUs (ARM) it would corrupt data, and on x86 it would still be UB.">The release/acquire happens-before guarantee disappears — the consumer might read a stale head_ before the payload is written, corrupting the queue.</li>
+<li data-correct="false" data-why="The sizeof/alignment is unrelated to volatile vs atomic. alignas(64) is on the struct members for cache-line separation regardless.">The sizeof check would fail because volatile changes the size of the struct.</li>
+<li data-correct="false" data-why="volatile doesn't affect compile time. The problem is runtime correctness.">The code would not compile — volatile and atomic are mutually exclusive.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question>
+<p class="q">Q4. In the latency benchmark, the barrier appears <em>after</em> the second <code>rdtsc()</code> in Benchmark 1 but <em>before</em> the second <code>rdtsc()</code> in Benchmark 2. Why are they in different positions?</p>
+<ul class="options">
+<li data-correct="false" data-why="The position is intentional and asymmetric for a reason — it depends on what we're timing.">It is a bug — the barrier should be in the same position in both benchmarks.</li>
+<li data-correct="true" data-why="Correct. In Benchmark 1 we're timing just rdtsc() itself, so both timestamps are taken first (t0, t1) and the barrier sits after them to prevent record() from being moved earlier. In Benchmark 2 we time record() — t0 comes first, then the call, then the barrier, then t1. The barrier in each case separates 'the thing being timed' from 'the code after the timing window'.">In Benchmark 1 the timed region is the two <code>rdtsc()</code> calls; the barrier prevents <code>record()</code> from moving before them. In Benchmark 2 the timed region is <code>record()</code>; the barrier prevents <code>t1 = rdtsc()</code> from moving before it.</li>
+<li data-correct="false" data-why="The barrier doesn't prevent specific function calls — it constrains the compiler's reordering of the surrounding code.">The barrier position controls which CPU core executes the code.</li>
+<li data-correct="false" data-why="Both benchmarks use the same barrier syntax. The difference is placement, not variant.">Benchmark 2 uses a heavier barrier variant because record() modifies memory.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question>
+<p class="q">Q5. A hardware register on an FPGA device appears at memory address <code>0xFFFF0000</code>. You want to poll it until bit 0 is set. Which declaration is correct?</p>
+<ul class="options">
+<li data-correct="false" data-why="Without volatile, the compiler will read the register once, cache it in a register, and loop forever (or not at all) depending on the initial value. The hardware update to memory is invisible to the optimiser."><code>uint32_t* reg = (uint32_t*)0xFFFF0000; while (!(*reg &amp; 1)) {}</code></li>
+<li data-correct="true" data-why="Correct. volatile uint32_t* tells the compiler that the value at this address can change outside the program's control (the FPGA hardware is writing it). Every iteration of the loop will re-read from memory rather than using a cached register value."><code>volatile uint32_t* reg = (volatile uint32_t*)0xFFFF0000; while (!(*reg &amp; 1)) {}</code></li>
+<li data-correct="false" data-why="std::atomic is for synchronising between software threads — it doesn't help when the writer is hardware outside the CPU. The atomic load would still compile to a cacheable memory read; volatile is the correct tool for memory-mapped I/O."><code>std::atomic&lt;uint32_t&gt;* reg = ...; while (!(reg-&gt;load() &amp; 1)) {}</code></li>
+<li data-correct="false" data-why="const means the program won't write the register, which is true here, but alone it doesn't prevent the compiler from caching the read. You need both: const volatile uint32_t*."><code>const uint32_t* reg = (const uint32_t*)0xFFFF0000; while (!(*reg &amp; 1)) {}</code></li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>6. Scenarios</h2>
+
+<details class="scenario"><summary>S1. You're writing exercise 08's bench.cpp and your p50 latency for rdtsc() comes out as 0 ns. What's likely wrong?</summary>
+<p>The most probable cause: the <code>__asm__ volatile("" ::: "memory")</code> barrier is missing or placed incorrectly. Without it, the compiler (at -O2) may hoist <code>t1 = rdtsc()</code> to immediately after <code>t0 = rdtsc()</code>, or even evaluate both at compile time and subtract to get a constant 0. The resulting <code>t1 - t0</code> is always 0 or near-0, and all 1M samples land in bucket 0 → percentile returns 1 cycle → divided by MHz ≈ 0 ns. Fix: add the barrier between the timed expression and the second timestamp.</p>
+<p>A secondary possibility: the loop body was entirely eliminated by dead-store elimination (the variable holding t0/t1 is unused). In that case all 1M iterations of the outer loop vanish and the histogram is empty, giving <code>percentile(0.5) = 0</code>. Fix: ensure the computed delta is actually passed to <code>record()</code>.</p></details>
+
+<details class="scenario"><summary>S2. A colleague proposes replacing <code>std::atomic&lt;size_t&gt; head_</code> in the SPSC ring with <code>volatile size_t head_</code> to "avoid the overhead of atomic." Is this safe on x86-64?</summary>
+<p>It is undefined behaviour in C++11/14/17/20, and therefore not safe regardless of the target architecture. The C++ memory model defines a data race on any non-atomic object accessed from two threads without synchronisation — the compiler is allowed to assume such a race never happens and optimise accordingly (e.g. keep head_ in a register across loop iterations in the consumer, never re-reading from memory). On x86-64 the <em>hardware</em> happens to be TSO (total store order), which provides enough ordering that the code might accidentally work in practice, but:</p>
+<ol><li>It's still UB — a future compiler version or optimisation level could break it.</li>
+<li>The memory_order_release/acquire semantics are needed for the compiler's own reordering constraints, not just the CPU's.</li>
+<li>On ARM (which many modern servers now use — AWS Graviton, Apple M-series), the hardware memory model is weaker and this would visibly corrupt data.</li></ol>
+<p>The "overhead" of a relaxed atomic load on x86-64 is literally a plain load instruction — the only overhead is that the compiler can't cache it across iterations. That is the desired behaviour. Use <code>std::atomic</code>.</p></details>
+
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{
+    const l=q.querySelector('.options');
+    shuffle([...l.children]).forEach(li=>l.appendChild(li));
+    const f=q.querySelector('.feedback');
+    l.querySelectorAll('li').forEach(li=>{
+        li.addEventListener('click',()=>{
+            const c=li.dataset.correct==='true';
+            l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));
+            li.classList.add(c?'picked-good':'picked-bad');
+            f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+            f.style.color=c?'var(--good)':'var(--bad)';
+            if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}
+        });
+    });
+});rs();
+</script></body></html>

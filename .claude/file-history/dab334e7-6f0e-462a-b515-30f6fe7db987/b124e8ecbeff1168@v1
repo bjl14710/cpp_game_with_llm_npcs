@@ -1,0 +1,76 @@
+# Learning Progress
+
+## Session: 2026-06-28 (overnight)
+
+### Concepts covered
+
+| # | Lesson file | Concept | Drill |
+|---|-------------|---------|-------|
+| 0032 | lessons/0032-candlestick-pattern-detection.html | Candlestick pattern detection without lookahead bias | drills/0004-candlestick-pattern-detection.html |
+| 0033 | lessons/0033-bar-by-bar-simulation.html | Bar-by-bar simulation without lookahead | — |
+
+### Issues implemented in this session (all have draft PRs)
+
+| PR | Issue | Description |
+|----|-------|-------------|
+| #34 | #30 | strategies/ package — BaseStrategy ABC and Signal dataclass |
+| #35 | #4  | --loop mode for robinhood_executor (daily market-hours scheduling) |
+| #36 | #9  | NASDAQ-100 universe scraper + micro-cap filter |
+| #37 | #31 | EngulfingStrategy — bullish/bearish engulfing signal detector |
+| #38 | #26 | morning_runner.py — daily trade pipeline orchestration |
+| #39 | #6  | meanvar_long_short() — portfolio-level --allow_short flag |
+| #40 | #32 | PaperEngine — intraday bar-by-bar simulation with SL/TP/EOD |
+| #41 | #33 | intraday-sim CLI — yfinance + strategy registry + engine + CSV |
+
+### Key concepts introduced (for future lessons)
+
+- Strategy pattern with ABC (from #30)
+- CLI extensibility with registry dict (from #33)
+- Long-short mean-variance portfolio construction (from #6)
+- Pipeline orchestration in Python (from #26)
+- Market-hours scheduling with datetime arithmetic (from #4)
+- Web scraping for financial universe construction (from #9)
+
+### Suggested next lessons (priority order)
+
+1. **Long-short mean-variance portfolio construction** — how negative weights change the efficient frontier; follows directly from PR #39 which added meanvar_long_short()
+2. **Strategy pattern in Python** — ABC vs. Protocol, when to use each; core to the extensible strategies/ package
+3. **Pipeline orchestration** — scheduling, retrain logic, dry-run safety gates; follows morning_runner.py (PR #38)
+4. **Adding a second candlestick strategy** — now that the base ABC exists, add a Harami or Inside Bar pattern to solidify the extension pattern
+
+---
+
+## Session: 2026-06-30 (overnight)
+
+### Concepts covered
+
+| # | Lesson file | Concept | Drill |
+|---|-------------|---------|-------|
+| 0034 | lessons/0034-progressive-web-apps.html | Progressive Web Apps and iOS installation | drills/0005-progressive-web-apps.html |
+
+### Issues implemented in this session (all have draft PRs)
+
+| PR | Issue | Description |
+|----|-------|-------------|
+| #47 | #42 | scripts/generate_icons.py — PWA icons via matplotlib (180/192/512px) |
+| #48 | #43 | webapp/static/manifest.json + PWA meta tags in base.html |
+| #49 | #44 | Mobile-responsive CSS: hamburger nav, touch targets, 16px inputs |
+| #50 | #45 | mac-setup.sh — prereq checks, uvicorn + ngrok launch, SIGINT trap |
+| #51 | #46 | MAC_SETUP.md — step-by-step guide for Mac+ngrok+iPhone setup |
+
+### Key concepts introduced (for future lessons)
+
+- PWA secure context requirement (HTTPS vs http://, loopback exemption)
+- Web App Manifest fields: display, start_url, short_name, icons
+- iOS-specific PWA meta tags vs W3C standard manifest
+- ngrok reverse tunnel mechanics (outbound TCP, local management API)
+- CSS checkbox hack for JS-free hamburger nav
+- iOS font-size auto-zoom prevention (16px rule)
+- matplotlib icon generation: fig.add_axes([0,0,1,1]) for full-bleed art
+
+### Suggested next lessons (priority order)
+
+1. **Long-short mean-variance portfolio construction** — how negative weights change the efficient frontier; follows directly from PR #39
+2. **Shell script defensive programming** — prerequisite gating, background PID management, polling loops, SIGINT trap; directly from mac-setup.sh (PR #50)
+3. **Strategy pattern in Python** — ABC vs. Protocol; core to strategies/ package
+4. **Pipeline orchestration** — scheduling, retrain logic, dry-run safety gates; from morning_runner.py (PR #38)

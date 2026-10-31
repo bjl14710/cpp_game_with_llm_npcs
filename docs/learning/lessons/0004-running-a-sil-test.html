@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lesson 0004 — Running a Complete SIL Test</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0a0e17;--surf:#111827;--surf2:#1f2937;--surf3:#374151;
+  --accent:#34d399;--blue:#60a5fa;--yellow:#fbbf24;--red:#f87171;
+  --purple:#a78bfa;--text:#d1fae5;--dim:#6b7280;--border:#1f2937;
+  --code:#060a0f;--header:#065f46;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:#e5e7eb;font-size:15px;line-height:1.72;min-height:100vh}
+.page{max-width:840px;margin:0 auto;padding:2.5rem 1.5rem 5rem}
+
+/* ── header ── */
+.lbl{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.15em;
+     text-transform:uppercase;margin-bottom:.5rem}
+h1{font-size:1.95rem;color:#fff;line-height:1.2;margin-bottom:.5rem}
+.tagline{color:var(--accent);font-size:.97rem;margin-bottom:.6rem}
+.breadcrumb{font-family:var(--mono);font-size:.75rem;color:var(--dim);margin-bottom:2rem}
+
+/* ── progress bar ── */
+.progress-bar{background:var(--surf);border:1px solid var(--border);border-radius:8px;
+              padding:1rem 1.2rem;margin-bottom:2.5rem}
+.progress-bar h3{font-family:var(--mono);font-size:.74rem;color:var(--dim);
+                 text-transform:uppercase;letter-spacing:.08em;margin-bottom:.7rem}
+.sections{display:flex;flex-wrap:wrap;gap:.45rem}
+.sec-chip{font-family:var(--mono);font-size:.74rem;padding:.28rem .75rem;
+          border:1px solid var(--border);border-radius:20px;color:var(--dim);
+          cursor:pointer;user-select:none;transition:all .15s}
+.sec-chip.done{border-color:var(--accent);color:var(--accent);
+               background:rgba(52,211,153,.08)}
+#pct{font-family:var(--mono);font-size:.82rem;color:var(--accent);margin-top:.6rem}
+
+/* ── sections ── */
+section{background:var(--surf);border:1px solid var(--border);border-radius:8px;
+        padding:1.5rem 1.65rem;margin-bottom:1.4rem}
+section h2{font-size:1.08rem;color:#fff;margin-bottom:.9rem;
+           display:flex;align-items:center;gap:.6rem}
+.snum{font-family:var(--mono);font-size:.72rem;background:var(--surf2);
+      border:1px solid var(--border);border-radius:4px;padding:.15rem .45rem;color:var(--dim)}
+p{margin-bottom:.75rem}p:last-child{margin-bottom:0}
+ul.prose,ol.prose{padding-left:1.4rem;margin-bottom:.75rem}
+ul.prose li,ol.prose li{margin-bottom:.35rem}
+
+/* ── pipeline diagram ── */
+.pipeline{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;
+          margin:1.2rem 0;justify-content:center}
+.pbox{font-family:var(--mono);font-size:.8rem;padding:.55rem 1rem;
+      border-radius:6px;text-align:center;border:1px solid var(--border)}
+.pbox.code{background:#1e1a2e;border-color:#7c3aed;color:#a78bfa}
+.pbox.parser{background:#1a2318;border-color:#4ade80;color:#86efac}
+.pbox.router{background:#172233;border-color:var(--blue);color:#93c5fd}
+.pbox.device{background:#1c1710;border-color:var(--yellow);color:#fde68a}
+.arrow{color:var(--dim);font-size:1.2rem;flex-shrink:0}
+.psub{font-size:.7rem;color:var(--dim);display:block;margin-top:.2rem;
+      font-family:sans-serif;font-style:italic}
+
+/* ── code blocks ── */
+pre{background:var(--code);border:1px solid var(--border);border-radius:6px;
+    padding:.9rem 1.1rem;overflow-x:auto;font-family:var(--mono);
+    font-size:.82rem;line-height:1.65;margin:1rem 0}
+code{font-family:var(--mono);font-size:.85em;background:var(--surf2);
+     padding:.1em .35em;border-radius:3px;color:#e5e7eb}
+.cm{color:#374151;font-style:italic}.kw{color:#a78bfa}
+.fn{color:#34d399}.str{color:#86efac}.cls{color:#fbbf24}
+.at{color:#93c5fd}.num{color:#fca5a5}.op{color:#9ca3af}
+
+/* file path badge */
+.fpath{font-family:var(--mono);font-size:.72rem;background:var(--surf2);
+       border:1px solid var(--border);border-radius:3px;padding:.15rem .5rem;
+       color:var(--dim);margin-bottom:.5rem;display:inline-block}
+
+/* ── steps ── */
+.steps{list-style:none;counter-reset:step}
+.steps li{counter-increment:step;padding:.5rem 0 .5rem 2.6rem;position:relative;
+          border-bottom:1px solid var(--border)}
+.steps li:last-child{border-bottom:none}
+.steps li::before{content:counter(step);position:absolute;left:0;top:.6rem;
+                  width:1.7rem;height:1.7rem;border-radius:50%;
+                  background:var(--surf2);border:1px solid var(--border);
+                  display:flex;align-items:center;justify-content:center;
+                  font-family:var(--mono);font-size:.75rem;color:var(--accent)}
+
+/* ── callouts ── */
+.callout{border-radius:6px;padding:.85rem 1.1rem;margin:1rem 0;
+         font-size:.88rem;display:flex;gap:.65rem;align-items:flex-start}
+.callout-icon{font-size:1.1rem;flex-shrink:0;margin-top:.05rem}
+.tip{background:rgba(52,211,153,.06);border:1px solid rgba(52,211,153,.22)}
+.warn{background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.28)}
+.info{background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.22)}
+
+/* ── table ── */
+table{width:100%;border-collapse:collapse;font-size:.87rem;margin:.9rem 0}
+th{background:var(--surf2);color:var(--dim);font-family:var(--mono);
+   font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+   padding:.5rem .85rem;text-align:left;border:1px solid var(--border)}
+td{padding:.5rem .85rem;border:1px solid var(--border);vertical-align:top;line-height:1.5}
+tr:nth-child(even) td{background:rgba(17,24,39,.5)}
+
+/* ── quiz ── */
+.quiz-section{background:var(--surf);border:2px solid var(--accent);
+              border-radius:8px;padding:1.5rem 1.65rem;margin-bottom:1.4rem}
+.quiz-section h2{font-size:1.08rem;color:#fff;margin-bottom:1.2rem}
+.question{margin-bottom:1.4rem}
+.question p{font-weight:600;color:#fff;margin-bottom:.6rem;font-size:.95rem;line-height:1.5}
+.options{list-style:none}
+.options li{background:var(--surf2);border:1px solid var(--border);border-radius:5px;
+            padding:.5rem .9rem;margin-bottom:.38rem;cursor:pointer;
+            font-size:.88rem;user-select:none;transition:border-color .12s,background .12s}
+.options li:hover:not(.locked){border-color:var(--accent);background:rgba(52,211,153,.07)}
+.options li:focus{outline:2px solid var(--accent);outline-offset:2px}
+.options li.correct{border-color:var(--accent);background:rgba(52,211,153,.1);color:var(--accent)}
+.options li.wrong{border-color:var(--red);background:rgba(248,113,113,.08);color:var(--red)}
+.options li.locked{cursor:default}
+.feedback{font-size:.85rem;margin-top:.5rem;padding:.4rem .7rem;border-radius:4px;display:none}
+.feedback.correct{background:rgba(52,211,153,.09);color:var(--accent);
+                  border:1px solid rgba(52,211,153,.28)}
+.feedback.wrong{background:rgba(248,113,113,.08);color:var(--red);
+                border:1px solid rgba(248,113,113,.28)}
+.quiz-score{font-family:var(--mono);text-align:center;font-size:1.1rem;
+            color:var(--accent);margin-top:1rem;display:none}
+.mark-done{display:inline-flex;align-items:center;gap:.5rem;margin-top:1.1rem;
+           font-family:var(--mono);font-size:.8rem;padding:.4rem .9rem;
+           border:1px solid var(--border);border-radius:5px;cursor:pointer;
+           background:var(--surf2);color:var(--dim);user-select:none;
+           transition:all .15s}
+.mark-done:hover{border-color:var(--accent);color:var(--accent)}
+.mark-done.done{border-color:var(--accent);color:var(--accent);
+                background:rgba(52,211,153,.07)}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="lbl">Lesson 0004</div>
+<h1>Running a Complete SIL Test</h1>
+<p class="tagline">Paste real firmware code into the Code Input block, wire it to simulated instruments, and watch the SCPI commands flow — this is Silmulator doing its actual job.</p>
+<p class="breadcrumb">Builds on: 0001 (workflow) → 0002 (connections) → 0003 (running the app)</p>
+
+<!-- progress -->
+<div class="progress-bar">
+  <h3>Lesson progress</h3>
+  <div class="sections" id="chip-container"></div>
+  <div id="pct">0 / 6 sections complete</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 1 — THE END-TO-END PICTURE
+════════════════════════════════════════════════════════ -->
+<section id="s1">
+<h2><span class="snum">01</span> The End-to-End Picture</h2>
+
+<p>Lesson 0001 showed you the three-step workflow in the abstract: <strong>Place → Connect → Drive</strong>. This lesson makes it concrete by walking through a real SIL test from start to finish — raw C firmware code in, SCPI responses out.</p>
+
+<p>Here is what happens inside Silmulator from the moment you paste firmware code to the moment the simulated instrument answers:</p>
+
+<div class="pipeline">
+  <div class="pbox code">C / C++ / Python<br>firmware source<span class="psub">your test input</span></div>
+  <div class="arrow">→</div>
+  <div class="pbox parser">CodeParser<span class="psub">code_parser/base_parser.py</span></div>
+  <div class="arrow">→</div>
+  <div class="pbox router">CodeInputBlock._run_commands()<span class="psub">routes to connected blocks</span></div>
+  <div class="arrow">→</div>
+  <div class="pbox device">Device.process(cmd)<span class="psub">simulated instrument responds</span></div>
+</div>
+
+<p>Each stage is a real class in the codebase. Understanding this pipeline is the key to knowing what Silmulator can and can't do.</p>
+
+<button class="mark-done" onclick="markDone('s1',this)">○ Mark complete</button>
+</section>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 2 — STEP 1: PLACE THE BLOCKS
+════════════════════════════════════════════════════════ -->
+<section id="s2">
+<h2><span class="snum">02</span> Step 1 — Place and Connect the Blocks</h2>
+
+<p>For a typical SIL test you need at least two blocks on the canvas:</p>
+
+<ul class="prose">
+  <li><strong>Code Input</strong> — the block that holds your firmware source and routes extracted SCPI calls.</li>
+  <li>One or more <strong>instrument blocks</strong> — the simulated hardware your firmware talks to (Oscilloscope, Power Supply, etc.).</li>
+</ul>
+
+<ol class="steps">
+  <li>From the Library panel (or Add menu), add a <strong>Code Input</strong> block and an <strong>Oscilloscope</strong> block.</li>
+  <li>Draw a wire from <code>Code Input → OUT1</code> to <code>Oscilloscope → CH1_IN</code>. The Code Input block has three output ports (OUT1, OUT2, OUT3) on its right edge, one per connected instrument.</li>
+  <li>If your code talks to multiple instruments (e.g. a power supply <em>and</em> an oscilloscope), add each instrument, wire a separate OUT port to each one.</li>
+</ol>
+
+<div class="callout info">
+  <span class="callout-icon">ℹ️</span>
+  <div>The Code Input block's three OUT ports are defined in <code>silmulator/gui/blocks/code_input_block.py:51-53</code>:
+  <pre style="margin:.5rem 0 0"><span class="fn">add_port</span>(<span class="str">"OUT1"</span>, <span class="str">"OUT1"</span>, <span class="num">1.0</span>, <span class="num">0.3</span>)   <span class="cm"># right edge, 30% down</span>
+<span class="fn">add_port</span>(<span class="str">"OUT2"</span>, <span class="str">"OUT2"</span>, <span class="num">1.0</span>, <span class="num">0.5</span>)   <span class="cm"># right edge, 50% down</span>
+<span class="fn">add_port</span>(<span class="str">"OUT3"</span>, <span class="str">"OUT3"</span>, <span class="num">1.0</span>, <span class="num">0.7</span>)   <span class="cm"># right edge, 70% down</span></pre>
+  x_frac=1.0 puts them on the right edge; y_frac positions them vertically.</div>
+</div>
+
+<button class="mark-done" onclick="markDone('s2',this)">○ Mark complete</button>
+</section>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 3 — STEP 2: PASTE AND PARSE YOUR CODE
+════════════════════════════════════════════════════════ -->
+<section id="s3">
+<h2><span class="snum">03</span> Step 2 — Paste and Parse Your Firmware Code</h2>
+
+<p>Double-click the Code Input block to open the code editor. Paste your C, C++, or Python code on the left; the right pane shows extracted SCPI commands in real time when you click <strong>Parse</strong>.</p>
+
+<h3 style="font-size:.92rem;color:#fff;margin:1.1rem 0 .6rem">What the parser recognises</h3>
+<p>The parser (<span class="fpath">silmulator/code_parser/base_parser.py</span>) scans each line against a list of known C/C++ and Python patterns. These are the C patterns it looks for:</p>
+
+<pre><span class="cm"># C/C++ write patterns (from C_WRITE_PATTERNS in base_parser.py)</span>
+viWrite(session, <span class="str">"VOLT 5.0"</span>)         <span class="cm">✓ extracted</span>
+visa_write(dev, <span class="str">"OUTP ON"</span>)            <span class="cm">✓ extracted</span>
+scpi_send(handle, <span class="str">"ACQ:STATE 1"</span>)       <span class="cm">✓ extracted</span>
+ibwrt(dev, <span class="str">"TRIG:A:LEVEL 1.5"</span>)       <span class="cm">✓ extracted</span>
+
+<span class="cm"># C/C++ query patterns</span>
+result = viQueryF(session, <span class="str">"MEAS:VOLT:DC?"</span>)  <span class="cm">✓ extracted as query</span>
+
+<span class="cm"># Python patterns</span>
+inst.write(<span class="str">"VOLT 5.0"</span>)                <span class="cm">✓ extracted</span>
+result = inst.query(<span class="str">"MEAS:VOLT:DC?"</span>)   <span class="cm">✓ extracted as query</span></pre>
+
+<p>After extraction each command becomes a <code>ParsedCommand</code> object:</p>
+<div class="fpath">silmulator/code_parser/base_parser.py</div>
+<pre><span class="at">@dataclass</span>
+<span class="kw">class</span> <span class="cls">ParsedCommand</span>:
+    scpi_command: <span class="cls">str</span>        <span class="cm"># e.g. "VOLT 5.0" or "MEAS:VOLT:DC?"</span>
+    line_number:  <span class="cls">int</span>        <span class="cm"># where it appeared in the source</span>
+    source_language: <span class="cls">str</span>    <span class="cm"># "c" or "python"</span>
+    context:  <span class="cls">str</span> = <span class="str">""</span>      <span class="cm"># first 80 chars of the original line</span>
+    is_query: <span class="cls">bool</span> = <span class="op">False</span>  <span class="cm"># True if ends with ?</span>
+    variable_name: <span class="cls">Optional</span>[<span class="cls">str</span>] = <span class="op">None</span>  <span class="cm"># e.g. "result" for query assignments</span></pre>
+
+<p>The block face shows a live tally: <em>"SCPI calls found: 6"</em> and a preview of the last four commands.</p>
+
+<div class="callout warn">
+  <span class="callout-icon">⚠️</span>
+  <div><strong>The SCPI heuristic is not infallible.</strong> The parser uses a regex that matches strings starting with <code>*WORD</code> or <code>WORD[:]</code> — it can miss commands buried in preprocessor macros, variadic format strings, or indirect string construction. Real embedded code that builds SCPI strings dynamically (e.g. <code>sprintf(buf, "VOLT %f", v)</code>) will be extracted as <code>VOLT &lt;VAR&gt;</code> — the variable part is replaced with the literal <code>&lt;VAR&gt;</code> placeholder.</div>
+</div>
+
+<button class="mark-done" onclick="markDone('s3',this)">○ Mark complete</button>
+</section>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 4 — STEP 3: RUN AND INTERPRET
+════════════════════════════════════════════════════════ -->
+<section id="s4">
+<h2><span class="snum">04</span> Step 3 — Run and Read the Responses</h2>
+
+<p>Right-click the Code Input block → <strong>Run parsed commands</strong>. This calls <code>_run_commands()</code>:</p>
+
+<div class="fpath">silmulator/gui/blocks/code_input_block.py:163</div>
+<pre><span class="kw">def</span> <span class="fn">_run_commands</span>(self) -> <span class="cls">None</span>:
+    <span class="cm">"""Route parsed SCPI commands to connected blocks."""</span>
+    <span class="kw">if not</span> self._parsed_commands:
+        <span class="kw">return</span>
+    connected_blocks = self.<span class="fn">_get_connected_blocks</span>()
+    <span class="kw">for</span> parsed_cmd <span class="kw">in</span> self._parsed_commands:
+        <span class="kw">for</span> block <span class="kw">in</span> connected_blocks:
+            block.<span class="fn">send_command</span>(parsed_cmd.scpi_command)</pre>
+
+<p>Key things to notice:</p>
+<ul class="prose">
+  <li><code>_get_connected_blocks()</code> walks all three OUT ports and collects every instrument on the other end of a wire. If you have two instruments wired up, <em>every</em> parsed command is sent to <em>both</em> — there is no routing-by-instrument-type. Connect only the instruments your firmware actually talks to.</li>
+  <li><code>block.send_command()</code> calls the instrument's <code>device.process(cmd)</code> which returns the SCPI response. Responses appear in the block's SCPI Console panel (bottom of the window) or in the block's right-click context menu output.</li>
+</ul>
+
+<p>What does the instrument actually do with the command string? It goes through the <code>ScpiParser</code>:</p>
+
+<div class="fpath">silmulator/scpi/parser.py</div>
+<pre><span class="at">@dataclass</span>
+<span class="kw">class</span> <span class="cls">ScpiCommand</span>:
+    path:     <span class="cls">str</span>         <span class="cm"># e.g. "MEAS:VOLT:DC" (normalised, no ?)</span>
+    is_query: <span class="cls">bool</span>        <span class="cm"># True if ends with ?</span>
+    params:   List[<span class="cls">str</span>]   <span class="cm"># e.g. ["5.0"] for "VOLT 5.0"</span></pre>
+
+<p>The parser splits compound commands on <code>;</code>, strips the <code>?</code> suffix, uppercases the header path, and separates parameters. The device handler then looks up the path in its command table and either sets a value or returns one.</p>
+
+<h3 style="font-size:.92rem;color:#fff;margin:1.1rem 0 .6rem">Interpreting responses</h3>
+<table>
+  <thead><tr><th>Command type</th><th>What it does</th><th>Response</th></tr></thead>
+  <tbody>
+    <tr><td><code>VOLT 5.0</code></td><td>Sets power supply channel voltage</td><td><em>(empty — write-only)</em></td></tr>
+    <tr><td><code>OUTP ON</code></td><td>Enables output</td><td><em>(empty)</em></td></tr>
+    <tr><td><code>MEAS:VOLT:DC?</code></td><td>Query: read measured voltage</td><td><code>5.00001</code> (set value + noise)</td></tr>
+    <tr><td><code>ACQ:STATE 1</code></td><td>Starts acquisition on oscilloscope</td><td><em>(empty)</em></td></tr>
+    <tr><td><code>CURVE?</code></td><td>Transfers waveform data</td><td>ASCII comma-separated floats</td></tr>
+    <tr><td><code>*IDN?</code></td><td>Instrument identification</td><td><code>Silmulator,Oscilloscope,...</code></td></tr>
+  </tbody>
+</table>
+
+<button class="mark-done" onclick="markDone('s4',this)">○ Mark complete</button>
+</section>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 5 — SNIPPET vs PROJECT MODE
+════════════════════════════════════════════════════════ -->
+<section id="s5">
+<h2><span class="snum">05</span> Snippet Mode vs Project Mode</h2>
+
+<p>The Code Input block has two input modes. Both end up in the same parse → run pipeline; the difference is how you get code in.</p>
+
+<table>
+  <thead>
+    <tr><th>Mode</th><th>How to activate</th><th>What it parses</th><th>Best for</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Snippet</strong></td>
+      <td>Double-click the block</td>
+      <td>A single text buffer you paste manually</td>
+      <td>Quick experiments, one-off command sequences</td>
+    </tr>
+    <tr>
+      <td><strong>Project</strong></td>
+      <td>Right-click → "Load project folder…"</td>
+      <td>Every <code>.c</code>, <code>.cpp</code>, <code>.py</code> file in the chosen directory tree, in file/line order</td>
+      <td>Full firmware trees (RTOS, flight SW), full-system SIL runs</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>In project mode the block face shows:</p>
+<pre><span class="cm">Project: my_firmware/</span>
+<span class="cm">Files: 12/47  ← parsed / total recognised</span>
+<span class="cm">SCPI calls found: 38</span></pre>
+
+<p>The "Right-click → Refresh project" action re-parses all files without closing the block — useful when you edit the firmware and want to re-run immediately.</p>
+
+<div class="callout tip">
+  <span class="callout-icon">💡</span>
+  <div><strong>Often confused:</strong> "Run parsed commands" vs "Send SCPI command" (in the SCPI Console). <em>Run parsed commands</em> fires the entire list extracted from source code, in order, broadcasting to all connected instruments. <em>Send SCPI command</em> sends a single command you type manually to the selected block. Use the Console for interactive debugging; use Run for automated replay of your firmware's command sequence.</div>
+</div>
+
+<button class="mark-done" onclick="markDone('s5',this)">○ Mark complete</button>
+</section>
+
+<!-- ════════════════════════════════════════════════════════
+     SECTION 6 — QUIZ
+════════════════════════════════════════════════════════ -->
+<div class="quiz-section" id="s6">
+<h2>Check Your Understanding</h2>
+
+<div class="question" data-question>
+  <p>Q1. You paste firmware C code into snippet mode and click Parse. The right panel shows zero commands. Your code contains <code>scpi_send(handle, "ACQ:STATE 1");</code>. What is the most likely cause?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="scpi_send is in C_WRITE_PATTERNS in base_parser.py — it is recognised by the parser. The problem is more likely a language-detection failure.">scpi_send is not a recognised C pattern — only viWrite and ibwrt are supported.</li>
+    <li data-correct="true"  data-why="Correct. The language combo defaults to 'auto', which tries to detect C vs Python. If detection fails (no #include, no import, no :: etc.) it may fall back to Python parsing only and miss the C patterns. Set the dropdown to 'c' or 'cpp' explicitly.">The language dropdown is set to 'auto' and auto-detection picked 'python' instead of 'c', skipping all C_WRITE_PATTERNS.</li>
+    <li data-correct="false" data-why="The Code Input block is connected with a wire so Run will work — but Parse happening to produce zero commands is a parser/language issue, not a wiring issue.">The Code Input block is not connected to any instrument block yet, so Parse returns nothing.</li>
+    <li data-correct="false" data-why="scpi_send goes through _deduplicate() only if the same (command, line_number) pair appears twice. A single call at line 42 will not be deduplicated away.">The _deduplicate() method removed the command because it appears twice in the code.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q2. <code>_run_commands()</code> loops over <code>connected_blocks</code> for every parsed command. Your Code Input has OUT1 wired to a Power Supply and OUT2 wired to an Oscilloscope. What happens when the firmware contains both <code>VOLT 5.0</code> and <code>ACQ:STATE 1</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Silmulator has no routing-by-instrument-type or routing-by-port logic. _run_commands() blindly fans every command out to every connected block.">VOLT 5.0 goes only to the Power Supply; ACQ:STATE 1 goes only to the Oscilloscope — Silmulator routes by command prefix.</li>
+    <li data-correct="true"  data-why="Correct. _get_connected_blocks() returns [PowerSupply, Oscilloscope]. For each parsed command, the inner loop calls both blocks. Both instruments receive both commands. The oscilloscope will silently ignore VOLT 5.0 (unknown command path) and the power supply will silently ignore ACQ:STATE 1.">Both VOLT 5.0 and ACQ:STATE 1 are sent to both the Power Supply and the Oscilloscope; each instrument silently ignores commands it doesn't recognise.</li>
+    <li data-correct="false" data-why="_run_commands() fires all parsed commands, not just the first one. There's no single-command limit.">Only the first parsed command is sent; run must be clicked once per command to advance through the list.</li>
+    <li data-correct="false" data-why="Silmulator does not throw on unrecognised SCPI paths — the device's command table lookup returns an empty string for unknown paths, not an error.">The run raises an error because VOLT is not a valid oscilloscope command.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q3. Your C firmware uses <code>sprintf(buf, "VOLT %f", voltage); visa_write(dev, buf);</code> to build a command dynamically. What does the Code Input block extract?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Silmulator's parser is heuristic-based regex, not a C interpreter. It cannot evaluate runtime values of variables — it can only extract string literals.">It extracts the correct command with the runtime value of voltage substituted in.</li>
+    <li data-correct="true"  data-why="Correct. The parser matches the format string 'VOLT %f' inside sprintf(). The _looks_like_scpi heuristic recognises VOLT as SCPI-like. The Python-side cleans up format specifiers by replacing {…} with <VAR> for f-strings; for C-style % patterns the raw % may remain, giving 'VOLT %f' as the extracted command.">It extracts the sprintf format string literally — something like VOLT %f — because the parser reads string literals, not runtime variable values.</li>
+    <li data-correct="false" data-why="The parser does find the sprintf pattern (sprintf is in C_WRITE_PATTERNS) and extracts the string literal inside the quotes — it's just not the resolved runtime value.">It extracts nothing — the parser skips sprintf() because it's a formatting call, not a VISA call.</li>
+    <li data-correct="false" data-why="The parser has no awareness of variable types or the execution order of your code. It only matches string literals at parse time.">It extracts the command once for each unique value of voltage it can infer from the source code.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q4. In project mode you load a firmware folder. The block face shows "Files: 12/47". What does the 47 represent?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The block has only 3 OUT ports, so it can route to at most 3 instruments regardless of file count.">The total number of instrument blocks Silmulator supports connecting at once.</li>
+    <li data-correct="false" data-why="12/47 is a file count, not a command count. SCPI calls found gives the command total separately.">The total number of SCPI commands found across all files (12 matched, 47 total).</li>
+    <li data-correct="true"  data-why="Correct. 47 is the count of all .c, .cpp, and .py files found in the project folder tree. 12 of those were actually parsed (the rest may have been skipped due to errors, or simply had no SCPI calls).">The total number of source files found in the folder tree; 12 of them were successfully parsed.</li>
+    <li data-correct="false" data-why="The refresh action re-parses everything; the 12/47 ratio doesn't represent a staged loading state.">The number of files still pending — 12 are loaded; 47 remain to be loaded on the next refresh.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q5. You run parsed commands against the Power Supply. The SCPI Console shows a response of <code>5.00001</code> for <code>MEAS:VOLT:DC?</code> even though you set <code>VOLT 5.0</code>. Is this a bug?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A 0.001% deviation is not a calibration issue — it's intentional simulation of real instrument noise. Real instruments have measurement uncertainty and noise floors.">Yes — the power supply block is miscalibrated and needs reset with *RST before measurements are reliable.</li>
+    <li data-correct="true"  data-why="Correct. Silmulator adds a small Gaussian noise term (~1e-5 relative) to simulated measurements to mimic real instruments. 5.00001 is 5.0 + noise. This is by design — stated in the README under 'Simulation fidelity'.">No — Silmulator intentionally adds small Gaussian noise (~1e-5 relative) to measurements to mimic real instrument behavior.</li>
+    <li data-correct="false" data-why="The noise is always present on measurement queries regardless of whether you issue *RST. *RST resets instrument state (output off, voltage to default) — it doesn't remove the noise model.">Yes — you need to issue *RST after setting VOLT to flush the noise accumulator.</li>
+    <li data-correct="false" data-why="The C++ SCPI parser is used for parsing command strings; the measurement noise is added in the Python device layer (power_supply.py), not related to which parser backend is active.">Yes — the C++ SCPI parser is not built, so the Python fallback introduces extra floating-point rounding.</li>
+  </ul>
+  <p class="feedback"></p>
+</div>
+
+<div class="quiz-score" id="quiz-score"></div>
+<button class="mark-done" onclick="markDone('s6',this)">○ Mark complete</button>
+</div>
+
+</div><!-- .page -->
+
+<script>
+// ── section progress ───────────────────────────────────────────
+const SEC_LABELS={
+  s1:'End-to-end pipeline',s2:'Place & connect blocks',s3:'Parse firmware',
+  s4:'Run & interpret',s5:'Snippet vs project mode',s6:'Quiz',
+};
+const done={};
+const container=document.getElementById('chip-container');
+Object.entries(SEC_LABELS).forEach(([id,label])=>{
+  const chip=document.createElement('div');
+  chip.className='sec-chip';chip.id='chip-'+id;chip.textContent=label;
+  chip.onclick=()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});
+  container.appendChild(chip);
+});
+function markDone(id,btn){
+  done[id]=true;btn.textContent='✓ Complete';btn.classList.add('done');
+  document.getElementById('chip-'+id)?.classList.add('done');
+  const n=Object.keys(done).length;
+  document.getElementById('pct').textContent=`${n} / ${Object.keys(SEC_LABELS).length} sections complete`;
+}
+
+// ── quiz ───────────────────────────────────────────────────────
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+let answered=0,correct_count=0;
+const total_q=document.querySelectorAll('[data-question]').length;
+document.querySelectorAll('[data-question]').forEach(q=>{
+  const list=q.querySelector('.options');
+  shuffle([...list.children]).forEach(li=>list.appendChild(li));
+  const fb=q.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li=>{
+    li.tabIndex=0;
+    const commit=()=>{
+      if(li.classList.contains('locked'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('locked'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'correct':'wrong');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('correct');
+      fb.style.display='block';fb.className='feedback '+(ok?'correct':'wrong');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      answered++;if(ok)correct_count++;
+      if(answered===total_q){
+        const sc=document.getElementById('quiz-score');sc.style.display='block';
+        sc.textContent=`Score: ${correct_count} / ${total_q}`;
+        sc.style.color=correct_count===total_q?'var(--accent)':correct_count>=3?'var(--yellow)':'var(--red)';
+      }
+    };
+    li.addEventListener('click',commit);
+    li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')commit();});
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# arena_daily.sh — one arena paper-trading tick + standings snapshot.
+# Designed for launchd/cron: idempotent (a second run the same day is a
+# no-op) and self-backfilling (missed days replay deterministically on the
+# next run), so an unreliable schedule costs nothing.
+#
+# Install (macOS launchd, weekdays 17:30 local — see scripts/arena.plist):
+#   cp scripts/arena.plist ~/Library/LaunchAgents/com.algotrading.arena.plist
+#   launchctl load ~/Library/LaunchAgents/com.algotrading.arena.plist
+# Disable:
+#   launchctl unload ~/Library/LaunchAgents/com.algotrading.arena.plist
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # uv, for launchd's bare env
+cd "$REPO_DIR"
+
+LOG="arena_state/daily.log"
+mkdir -p arena_state
+{
+  echo "===== arena tick $(date '+%Y-%m-%d %H:%M:%S') ====="
+  uv run arena-run live
+  echo "----- standings -----"
+  uv run arena-run report
+  echo
+} >> "$LOG" 2>&1

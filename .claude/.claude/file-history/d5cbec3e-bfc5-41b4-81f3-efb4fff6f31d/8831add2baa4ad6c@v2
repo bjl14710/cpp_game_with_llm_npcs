@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0005 — Multithreading and shared resources</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .timeline {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0005 &middot; cpp_games / docs / learning</div>
+  <h1>Multithreading and shared resources</h1>
+  <p class="why">Why this matters: your <code class="inline">LlmClient</code> already runs two threads (the game loop and a worker) and they pass data through shared memory. Every primitive in this lesson is sitting in <code class="inline">LlmClient.cpp</code> right now &mdash; mutex, condition variable, atomic, joinable thread. This lesson is the <em>why</em> behind what you already have.</p>
+</header>
+
+<h2>1. The concept &mdash; what threads share, and what goes wrong</h2>
+
+<p>A <b>thread</b> is an independent stream of execution. When you start one inside your program, it runs alongside the main thread on a different CPU core (most of the time). They can both be doing useful work simultaneously. <em>And</em> &mdash; this is the part that gets you in trouble &mdash; they share the same memory.</p>
+
+<table class="compare">
+  <thead><tr><th>What's shared between threads in one process?</th><th>What's private to each thread?</th></tr></thead>
+  <tbody>
+    <tr><td>The heap. <code class="inline">std::vector</code>, <code class="inline">std::queue</code>, any object reachable through a pointer or reference.</td><td>The stack. Local variables and the call chain that produced them.</td></tr>
+    <tr><td>Global and static variables.</td><td>CPU registers, including the program counter (where in the code this thread is).</td></tr>
+    <tr><td>Open file descriptors, sockets, anything kernel-tracked.</td><td>Whatever's currently in this thread's registers.</td></tr>
+  </tbody>
+</table>
+
+<p>Shared mutable state is the source of every multithreading bug. The classic disaster:</p>
+
+<div class="timeline">      time -->
+
+  Thread A:    read counter (= 5)        ... add 1 ... write counter (= 6)
+  Thread B:                read counter (= 5) ... add 1 ... write counter (= 6)
+
+  Two increments happened. The counter is 6 instead of 7.
+  That's a <b>race condition</b>.</div>
+
+<p>The fix is <b>synchronisation</b> &mdash; tools that force threads to take turns where it matters. Modern C++ gives you three you'll meet today:</p>
+
+<table class="compare">
+  <thead><tr><th>Primitive</th><th>What it does</th><th>Use when</th></tr></thead>
+  <tbody>
+    <tr><td><b><code class="inline">std::mutex</code></b></td><td>Only one thread at a time can hold the lock. Others wait at the door.</td><td>Protecting a non-trivial data structure (a queue, a vector, a struct with multiple fields).</td></tr>
+    <tr><td><b><code class="inline">std::condition_variable</code></b></td><td>Lets a thread sleep cheaply until another thread says "wake up, the thing you were waiting for is ready."</td><td>"Wait until the queue has work" / "wait until shutdown is signalled."</td></tr>
+    <tr><td><b><code class="inline">std::atomic&lt;T&gt;</code></b></td><td>A single variable whose read/modify/write is uninterruptible by another thread. Hardware-supported.</td><td>One simple value: a counter, a flag, a pointer swap.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <h3>The rule of thumb</h3>
+  <p>Use <b>atomic</b> for a single variable. Use <b>mutex</b> for anything bigger. Use a <b>condition variable</b> on top of a mutex when one thread needs to <em>wait</em> for a state change rather than poll.</p>
+</div>
+
+<h2>2. Minimal example &mdash; the same counter, three ways</h2>
+
+<p>Two threads each try to increment a counter a million times. We expect 2,000,000.</p>
+
+<pre class="code"><span class="com">// (1) NO SYNC — race condition. Final value is unpredictable, usually low.</span>
+<span class="bad"><span class="typ">int</span> counter = <span class="num">0</span>;
+<span class="kw">auto</span> worker = [&amp;] { <span class="kw">for</span> (<span class="typ">int</span> i = <span class="num">0</span>; i &lt; <span class="num">1'000'000</span>; ++i) ++counter; };
+std::thread t1(worker), t2(worker);
+t1.join(); t2.join();
+std::cout &lt;&lt; counter;   <span class="com">// e.g. 1,437,221. Different every run. Wrong.</span></span>
+
+<span class="com">// (2) MUTEX — correct, ~50× slower for this trivial workload.</span>
+<span class="ok"><span class="typ">int</span> counter = <span class="num">0</span>;
+std::mutex m;
+<span class="kw">auto</span> worker = [&amp;] {
+    <span class="kw">for</span> (<span class="typ">int</span> i = <span class="num">0</span>; i &lt; <span class="num">1'000'000</span>; ++i) {
+        std::lock_guard&lt;std::mutex&gt; lock(m);  <span class="com">// take lock</span>
+        ++counter;                            <span class="com">// safe</span>
+    }                                         <span class="com">// lock released here</span>
+};</span>
+
+<span class="com">// (3) ATOMIC — correct, near native speed. The right tool here.</span>
+<span class="ok">std::atomic&lt;<span class="typ">int</span>&gt; counter{<span class="num">0</span>};
+<span class="kw">auto</span> worker = [&amp;] {
+    <span class="kw">for</span> (<span class="typ">int</span> i = <span class="num">0</span>; i &lt; <span class="num">1'000'000</span>; ++i) {
+        counter.fetch_add(<span class="num">1</span>);                <span class="com">// uninterruptible RMW</span>
+    }
+};</span></pre>
+
+<p>Three things to take away from this example:</p>
+<ul>
+  <li><b>"It works on my machine"</b> is meaningless for thread bugs. Version 1 will sometimes print 2,000,000 by sheer luck. Race conditions are not deterministic.</li>
+  <li><b>The mutex is correct but wasteful here.</b> We're locking and unlocking a million times to protect a single <code class="inline">int</code>. That's what atomics exist for.</li>
+  <li><b>The atomic version isn't free.</b> <code class="inline">fetch_add</code> compiles to a special CPU instruction (e.g. <code class="inline">LOCK XADD</code> on x86). It's much faster than a mutex but still ~10&times; slower than a plain <code class="inline">++</code>.</li>
+</ul>
+
+<h2>3. In your project &mdash; the four primitives in <code class="inline">LlmClient</code></h2>
+
+<p>Open <code class="inline">cpp_game_with_llm_npcs/src/LlmClient.hpp</code>. The bottom of the class is a small museum of every concept above.</p>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.hpp:74</small>
+<pre class="code"><span class="kw">private</span>:
+    <span class="com">// ATOMIC FLAGS — single bools read/written from both threads.</span>
+    std::atomic&lt;<span class="typ">bool</span>&gt; stop_{<span class="kw">false</span>};
+    std::atomic&lt;<span class="typ">bool</span>&gt; inFlight_{<span class="kw">false</span>};
+
+    <span class="com">// MUTEX + CV + QUEUE — main thread submits, worker dequeues.</span>
+    std::mutex requestMutex_;
+    std::condition_variable requestCv_;
+    std::queue&lt;ChatRequest&gt; requests_;
+
+    <span class="com">// SECOND MUTEX — protects the reply list independently.</span>
+    std::mutex replyMutex_;
+    std::vector&lt;ChatReply&gt; replies_;
+
+    <span class="com">// ATOMIC COUNTER — generating unique request IDs without a mutex.</span>
+    std::atomic&lt;std::uint64_t&gt; nextId_{<span class="num">1</span>};
+
+    std::thread worker_;</pre>
+
+<h3>The thread itself: RAII lifetime</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:13</small>
+<pre class="code">LlmClient::LlmClient(LlmConfig config) : config_(std::move(config)) {
+    worker_ = std::thread(&amp;LlmClient::workerLoop, <span class="kw">this</span>);   <span class="com">// start</span>
+}
+
+LlmClient::~LlmClient() {
+    stop_.store(<span class="kw">true</span>);          <span class="com">// signal: time to leave</span>
+    requestCv_.notify_all();    <span class="com">// wake worker if it's sleeping</span>
+    <span class="kw">if</span> (worker_.joinable()) worker_.join();   <span class="com">// wait for it to finish</span>
+}</pre>
+
+<p>The thread is owned by the object. Constructor starts it, destructor joins it. If we forgot the <code class="inline">join()</code>, the program would <code class="inline">std::terminate()</code> when the thread object went out of scope while still running. RAII for thread lifetime is just as important as RAII for memory.</p>
+
+<h3>Producer side: submit a request</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:21</small>
+<pre class="code">std::uint64_t LlmClient::submit(std::string systemPrompt,
+                                std::vector&lt;ChatTurn&gt; history,
+                                std::string userMessage) {
+    ChatRequest req;
+    req.id = nextId_.fetch_add(<span class="num">1</span>);   <span class="com">// ATOMIC: no mutex needed</span>
+    <span class="com">// ... move parameters into req ...</span>
+
+    {
+        std::lock_guard&lt;std::mutex&gt; lock(requestMutex_);  <span class="com">// MUTEX: take lock</span>
+        requests_.push(std::move(req));                   <span class="com">// modify shared queue</span>
+    }                                                     <span class="com">// release at scope end</span>
+    requestCv_.notify_one();   <span class="com">// CV: wake up one waiter (the worker)</span>
+    <span class="kw">return</span> req.id;
+}</pre>
+
+<p>Two synchronisation primitives in one function. <code class="inline">nextId_</code> is atomic because incrementing a counter is the textbook atomic use case &mdash; cheaper than a mutex. The queue is mutex-protected because it's a non-trivial data structure with multiple pointers being shuffled around inside <code class="inline">push()</code>. The notify wakes the worker if it was asleep waiting for work.</p>
+
+<h3>Consumer side: the worker waits properly</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:48</small>
+<pre class="code"><span class="kw">void</span> LlmClient::workerLoop() {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        ChatRequest req;
+        {
+            std::unique_lock&lt;std::mutex&gt; lock(requestMutex_);
+
+            <span class="com">// CV WITH PREDICATE — sleeps if predicate is false,</span>
+            <span class="com">// re-checks every wakeup, ignores spurious wakeups for free.</span>
+            requestCv_.wait(lock, [<span class="kw">this</span>] {
+                <span class="kw">return</span> stop_.load() || !requests_.empty();
+            });
+
+            <span class="kw">if</span> (stop_.load() &amp;&amp; requests_.empty()) <span class="kw">return</span>;
+            req = std::move(requests_.front());
+            requests_.pop();
+        }   <span class="com">// release lock before doing slow work</span>
+
+        ChatReply reply = processOne(req);  <span class="com">// no lock held — others can submit</span>
+
+        {
+            std::lock_guard&lt;std::mutex&gt; lock(replyMutex_);
+            replies_.push_back(std::move(reply));
+        }
+    }
+}</pre>
+
+<p>Four design decisions to notice:</p>
+
+<ol>
+  <li><b>The CV uses the predicate form of <code class="inline">wait</code>.</b> The version without a predicate is a trap &mdash; OS-level CVs are allowed to wake threads <em>spuriously</em> (no notify happened, the thread just woke up anyway). With a predicate, the standard library re-checks the condition and goes back to sleep if it wasn't really ready. We don't have to write that loop ourselves.</li>
+  <li><b>The predicate checks two things.</b> <code class="inline">stop_</code> OR <code class="inline">!requests_.empty()</code>. So the worker wakes on either "shutdown" or "new work". One CV handles both.</li>
+  <li><b>The lock is released before <code class="inline">processOne()</code>.</b> Otherwise the worker would hold <code class="inline">requestMutex_</code> for the entire 1-3 second HTTP call to Ollama, and any thread calling <code class="inline">submit()</code> would block. The scope of the lock is exactly "manipulate the queue" &mdash; not "do the actual work."</li>
+  <li><b>The reply uses a different mutex.</b> The worker doesn't need <code class="inline">requestMutex_</code> while writing to <code class="inline">replies_</code>, and the main thread (calling <code class="inline">drainReplies()</code>) doesn't need <code class="inline">replyMutex_</code> while calling <code class="inline">submit()</code>. Two independent locks = no false sharing of contention.</li>
+</ol>
+
+<h3>Why two mutexes and not one</h3>
+
+<p>Imagine if both vectors lived under a single <code class="inline">stateMutex_</code>. Every <code class="inline">submit()</code> would briefly contend with every <code class="inline">drainReplies()</code> even though they touch <em>different data</em>. With two mutexes:</p>
+
+<div class="timeline">  Single mutex:
+    main thread  |--submit--||--drain--|
+    worker       :----wait-----: |--push-result--|
+
+  Two mutexes:
+    main thread  |--submit--||--drain--|
+    worker       :wait: |---http call (no lock)---| |push-result|
+
+  The worker can hold replyMutex_ to write a result *while* the main
+  thread is holding requestMutex_ to submit a new request. They don't
+  block each other.</div>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Mutex vs. atomic</h3>
+<p>People reach for atomics because they sound faster. They are &mdash; <em>for one variable</em>. The moment you need to update two fields together ("subtract from account A and add to account B"), atomic stops being correct on its own; you'd need a mutex around both updates so they appear atomic <em>together</em>. Atomic is for single values that can be read/modified/written in one CPU instruction. Mutex is for anything bigger or any case where invariants span multiple variables.</p>
+
+<h3>Race condition vs. deadlock</h3>
+<p>A <b>race condition</b> is two threads stepping on each other's data because neither waited. The program runs but produces wrong results. A <b>deadlock</b> is two threads each holding a lock the other one needs; they wait forever. The program freezes producing nothing. Different failure modes, different fixes: more synchronisation prevents races; <em>less</em> or smarter synchronisation prevents deadlocks. The cardinal rule for avoiding deadlocks is: <em>always acquire locks in the same order</em>. Our <code class="inline">LlmClient</code> never holds both mutexes at once, so deadlock is impossible there.</p>
+
+<h3>notify_one vs. notify_all</h3>
+<p>Our <code class="inline">submit()</code> calls <code class="inline">notify_one</code> &mdash; there's only one worker, so waking one is exactly right. <code class="inline">notify_all</code> is for when you've changed the state in a way <em>multiple</em> waiters might care about (e.g. "the connection is now open; everyone who was waiting can proceed"). Using <code class="inline">notify_all</code> when <code class="inline">notify_one</code> would do creates a <b>thundering herd</b>: every waiter wakes, contends for the mutex, finds nothing to do, and goes back to sleep. The destructor uses <code class="inline">notify_all</code> in case we ever add a second worker; with only one waiter today it's equivalent.</p>
+
+<h3>CV vs. polling with sleep</h3>
+<p>A tempting alternative for the worker loop is <code class="inline">while(!hasWork) sleep_for(1ms);</code>. It would even work. But the worker is awake every millisecond doing nothing &mdash; burning CPU and battery, and adding up to a millisecond of latency when work arrives mid-sleep. The CV version is <em>asleep</em> &mdash; the OS removes it from the scheduler entirely. It wakes only when notified. Lower latency, lower power, less code.</p>
+
+<h3>Threads vs. processes</h3>
+<p>Lesson 0004 mentioned this in passing. Threads share memory; processes don't. Your game and Ollama are two processes &mdash; they can't even see each other's <code class="inline">std::queue</code>, which is why we need HTTP to communicate. Your main thread and worker thread are inside <em>one</em> process &mdash; they share <code class="inline">requests_</code> directly, no serialisation, no syscall. That's why threading is the right tool for the producer/consumer pattern inside <code class="inline">LlmClient</code>, and processes are the right tool for talking to a totally separate program like Ollama.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">You add a debug counter <code class="inline">int requestsSubmitted</code> to <code class="inline">LlmClient</code> and bump it inside <code class="inline">submit()</code>. The class is now multithread-buggy. What's the smallest correct fix?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="It would work, but you'd be locking around a one-instruction increment. Atomic is the cheaper correct fix.">
+      Wrap the increment in a <code class="inline">std::lock_guard&lt;std::mutex&gt;</code>.
+    </li>
+    <li data-correct="true" data-why="Right. A single integer with read-modify-write is exactly the atomic use case. fetch_add(1) is one CPU instruction with hardware-guaranteed atomicity — cheaper than a mutex and correct.">
+      Change the type to <code class="inline">std::atomic&lt;int&gt;</code> and use <code class="inline">fetch_add(1)</code>.
+    </li>
+    <li data-correct="false" data-why="volatile prevents the compiler from caching the value in a register, but it does NOT make the increment atomic. Two threads can still tear or race. This is the classic 'volatile means thread-safe' myth.">
+      Mark it <code class="inline">volatile int</code>.
+    </li>
+    <li data-correct="false" data-why="Putting it in static storage doesn't change anything about access — multiple threads still race on it.">
+      Move it to a static variable so only one thread can write it.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Why does the worker in <code class="inline">workerLoop()</code> release <code class="inline">requestMutex_</code> before calling <code class="inline">processOne()</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="processOne uses cpp-httplib, which makes its own system calls and doesn't need our mutex. The reason for releasing is performance, not requirement.">
+      <code class="inline">processOne</code> needs the mutex internally, so holding it from outside would deadlock.
+    </li>
+    <li data-correct="true" data-why="Right. processOne takes seconds because it's waiting on Ollama. If we held requestMutex_ that whole time, every submit() from the main thread would block — even though they're touching the same queue we already dequeued from. Locks should cover only the manipulation of the shared data, not the slow work derived from it.">
+      So that other threads calling <code class="inline">submit()</code> can keep enqueueing while the slow HTTP call is happening.
+    </li>
+    <li data-correct="false" data-why="The compiler can't release a mutex on its own — that would be a bug in the language. RAII releases at scope end, deterministically.">
+      Because the compiler will optimize away the mutex if it sees the call.
+    </li>
+    <li data-correct="false" data-why="Mutexes don't have built-in timers in C++. The release here is structural, governed by scope, not by elapsed time.">
+      To allow the mutex's internal timer to expire and avoid a deadlock.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">The worker loop's wait line is <code class="inline">requestCv_.wait(lock, [this] { return stop_.load() || !requests_.empty(); });</code>. Why include the predicate and not just <code class="inline">wait(lock)</code>?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Notifications fire on call. There's no syntactic-sugar reason to write a predicate; it's a semantic one.">
+      Predicates are syntactic sugar that lets <code class="inline">notify_one</code> work without a lambda.
+    </li>
+    <li data-correct="true" data-why="Right. Without the predicate, a spurious wakeup (the OS waking us with no notify having happened) would drop us out of wait() and proceed to pop from an empty queue. The predicate form re-acquires the lock, re-checks the condition, and goes back to sleep if it wasn't really ready — for free.">
+      Condition variables can wake spuriously (with no notify). The predicate re-checks and goes back to sleep if the wakeup was bogus.
+    </li>
+    <li data-correct="false" data-why="The predicate form actually generates a small loop internally; it's slightly *more* code under the hood. It's safer, not cheaper.">
+      The predicate form is faster than the plain form on modern CPUs.
+    </li>
+    <li data-correct="false" data-why="They share one CV. Adding the predicate is what lets one CV handle both — the predicate ORs the conditions.">
+      You need a separate CV for shutdown vs work; the predicate ties them together.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A junior dev "simplifies" <code class="inline">LlmClient</code> by replacing both mutexes with one <code class="inline">stateMutex_</code>. The code still compiles and passes its tests. What real-world behaviour is now worse?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Memory layout doesn't change meaningfully; both mutexes were already tiny class members.">
+      Memory use roughly doubles &mdash; one big mutex is larger than two small ones.
+    </li>
+    <li data-correct="false" data-why="Deadlock requires holding two locks in opposite orders. With one mutex you can't deadlock that way. The harm is different.">
+      The class is now susceptible to deadlock.
+    </li>
+    <li data-correct="true" data-why="Right. submit() (touching requests_) and drainReplies() (touching replies_) used to be independent. Now they serialise on one mutex even though they touch different data. Under load you get false contention — a measurable but invisible-to-tests slowdown.">
+      <code class="inline">submit()</code> and <code class="inline">drainReplies()</code> now contend on the same lock even though they touch different data.
+    </li>
+    <li data-correct="false" data-why="Race conditions come from missing synchronisation, not from having only one lock. With one big lock you tend to have *fewer* races, not more.">
+      Race conditions become more likely because one lock has to cover more code.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A new feature lets multiple NPCs talk in parallel by spawning multiple worker threads, all calling <code class="inline">processOne</code>. <code class="inline">submit()</code> still does <code class="inline">notify_one</code>. Is anything wrong?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Nothing's broken. notify_one wakes any one sleeping worker. With several workers all waiting on the same CV, the OS picks one — which is exactly what we want for distributing work fairly.">
+      Nothing's wrong. <code class="inline">notify_one</code> wakes any single waiter, which is what we want when handing work to a worker pool.
+    </li>
+    <li data-correct="false" data-why="notify_all would wake all workers; they'd race for the lock, all but one would find an empty queue, and they'd all go back to sleep. Thundering herd. Worse than notify_one here.">
+      You must switch to <code class="inline">notify_all</code> or only the first worker will ever do work.
+    </li>
+    <li data-correct="false" data-why="You can absolutely share a CV between waiters; that's the point. One CV + many workers is the standard pattern for a worker pool.">
+      You need one CV per worker; sharing a CV among workers is undefined behaviour.
+    </li>
+    <li data-correct="false" data-why="Multiple threads holding the same shared_ptr is fine; shared_ptr's control block uses atomics for the refcount. That's not the issue here.">
+      Each worker needs its own <code class="inline">std::shared_ptr&lt;ChatRequest&gt;</code> to avoid use-after-free.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> Imagine I'd written <code class="inline">stop_</code> as a plain <code class="inline">bool</code> instead of a <code class="inline">std::atomic&lt;bool&gt;</code>. Describe a sequence where the worker thread <em>misses the shutdown signal and runs forever</em>. Two threads, three or four steps each. (Hint: there's no mutex on <code class="inline">stop_</code>.)</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> The destructor calls <code class="inline">requestCv_.notify_all()</code> after setting <code class="inline">stop_</code>. Why is the order (set, then notify) important? What goes wrong if you flip them?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> You decide to give each <code class="inline">Npc</code> its own dedicated worker thread (a worker per NPC, not one shared worker). Argue both sides: what's the case for it (one paragraph), what's the case against it for your game specifically (one paragraph)? Use lesson 0003's concepts where they apply.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can name what is and isn't shared between threads</label></li>
+  <li><label><input type="checkbox"> Walked through the three-counter example &mdash; race vs mutex vs atomic</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; the four primitives in <code class="inline">LlmClient</code> make sense</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I can contrast mutex/atomic, race/deadlock, CV/polling</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/cpp/thread/condition_variable/wait">cppreference: <code>condition_variable::wait</code></a> &middot;
+    <a href="https://wiki.sei.cmu.edu/confluence/display/cplusplus/CON54-CPP.+Wrap+functions+that+can+spuriously+wake+up+in+a+loop">SEI CERT: wrap CV waits in a loop</a> &middot;
+    <a href="https://www.modernescpp.com/index.php/c-core-guidelines-be-aware-of-the-traps-of-condition-variables/">Modernes C++: traps of CVs</a> &middot;
+    <a href="https://en.cppreference.com/cpp/atomic/atomic">cppreference: <code>std::atomic</code></a>
+  </p>
+  <p>Lesson 0005 &middot; <code class="inline">docs/learning/lessons/0005-multithreading-and-shared-resources.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

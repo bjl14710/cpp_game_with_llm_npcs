@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Drill 0001 — Statistics in Trading</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0e17;--surface:#111827;--surface2:#1c2333;--surface3:#232d42;
+    --border:#2a3550;--text:#e2e8f0;--muted:#7c8ba1;--accent:#3b82f6;
+    --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;--purple:#a78bfa;
+    --mono:'JetBrains Mono',monospace;--sans:'Inter',system-ui,sans-serif;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;padding:1rem}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+  /* ── Header ─────────────────────────────────────────────── */
+  .drill-header{width:100%;max-width:800px;margin-bottom:2rem;text-align:center}
+  .drill-header h1{font-family:var(--mono);font-size:1.1rem;color:var(--accent);letter-spacing:.08em;margin-bottom:.4rem}
+  .drill-header h2{font-size:1.7rem;font-weight:600;margin-bottom:.3rem}
+  .drill-header p{color:var(--muted);font-size:.9rem}
+
+  /* ── Start screen ─────────────────────────────────────────  */
+  #start-screen{width:100%;max-width:800px}
+  .section-label{font-family:var(--mono);font-size:.72rem;color:var(--accent);
+    letter-spacing:.12em;text-transform:uppercase;margin-bottom:.75rem}
+  .channel-grid{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.5rem}
+  .chip{padding:.35rem .85rem;border-radius:9999px;border:1px solid var(--border);
+    background:var(--surface2);color:var(--text);font-size:.82rem;cursor:pointer;
+    transition:border-color .15s,background .15s;user-select:none}
+  .chip.active{border-color:var(--accent);background:#1e3a5f;color:#93c5fd}
+  .chip:hover{border-color:var(--accent)}
+  .start-options{display:flex;gap:1rem;align-items:center;margin-bottom:1.5rem}
+  .toggle-row{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:var(--muted)}
+  .toggle{width:38px;height:20px;background:var(--border);border-radius:10px;
+    cursor:pointer;position:relative;transition:background .15s}
+  .toggle.on{background:var(--accent)}
+  .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;
+    background:#fff;border-radius:50%;transition:transform .15s}
+  .toggle.on::after{transform:translateX(18px)}
+  .start-btn{padding:.7rem 2rem;background:var(--accent);border:none;border-radius:.5rem;
+    color:#fff;font-family:var(--sans);font-size:1rem;font-weight:600;cursor:pointer;
+    transition:opacity .15s}
+  .start-btn:hover{opacity:.85}
+  .info-box{background:var(--surface);border:1px solid var(--border);border-radius:.75rem;
+    padding:1rem 1.25rem;font-size:.85rem;color:var(--muted);line-height:1.6;margin-bottom:1.5rem}
+  .info-box strong{color:var(--text)}
+
+  /* ── Question screen ──────────────────────────────────────── */
+  #question-screen{display:none;width:100%;max-width:800px}
+  .progress-bar-wrap{background:var(--surface2);border-radius:9999px;height:5px;margin-bottom:.6rem}
+  .progress-bar-fill{height:5px;background:var(--accent);border-radius:9999px;transition:width .3s}
+  .progress-meta{display:flex;justify-content:space-between;align-items:center;
+    font-size:.8rem;color:var(--muted);margin-bottom:1.2rem}
+  .q-tags{display:flex;gap:.5rem}
+  .tag{padding:.15rem .6rem;border-radius:.25rem;font-family:var(--mono);font-size:.7rem;
+    font-weight:600;text-transform:uppercase;letter-spacing:.07em}
+  .tag-mc{background:#1e3a5f;color:#93c5fd}
+  .tag-wr{background:#2d1f4e;color:#c4b5fd}
+  .tag-channel{background:var(--surface3);color:var(--muted)}
+
+  .q-card{background:var(--surface);border:1px solid var(--border);border-radius:1rem;
+    padding:1.5rem;margin-bottom:1rem}
+  .q-text{font-size:1.05rem;line-height:1.7;margin-bottom:1.2rem}
+  .q-text code{font-family:var(--mono);font-size:.9em;background:var(--surface3);
+    padding:.1em .35em;border-radius:.25rem;color:#93c5fd}
+  pre.snippet{background:var(--surface3);border:1px solid var(--border);border-radius:.5rem;
+    padding:1rem;margin:1rem 0;overflow-x:auto;font-family:var(--mono);font-size:.82rem;
+    line-height:1.7;color:#e2e8f0}
+  pre.snippet .kw{color:#c792ea}
+  pre.snippet .fn{color:#82aaff}
+  pre.snippet .num{color:#f78c6c}
+  pre.snippet .cm{color:#546e7a;font-style:italic}
+  pre.snippet .hi{color:#ffcb6b}
+
+  /* MC options */
+  .options-list{list-style:none;display:flex;flex-direction:column;gap:.6rem}
+  .options-list li{padding:.75rem 1rem;border:1px solid var(--border);border-radius:.5rem;
+    cursor:pointer;font-size:.93rem;line-height:1.5;transition:border-color .15s,background .15s;
+    position:relative}
+  .options-list li:hover:not(.answered){border-color:var(--accent);background:var(--surface2)}
+  .options-list li.correct-choice{border-color:var(--green)!important;background:#052e16!important}
+  .options-list li.wrong-choice{border-color:var(--red)!important;background:#2d0c0c!important}
+  .options-list li.show-correct{border-color:var(--green)!important;background:#052e16!important;opacity:.7}
+  .option-why{display:none;font-size:.82rem;color:var(--muted);margin-top:.4rem;font-style:italic}
+  .options-list li.correct-choice .option-why,
+  .options-list li.wrong-choice .option-why,
+  .options-list li.show-correct .option-why{display:block}
+  .options-list li.correct-choice .option-why{color:#86efac}
+  .options-list li.wrong-choice .option-why{color:#fca5a5}
+  .options-list li.show-correct .option-why{color:#86efac}
+  .mc-feedback{margin-top:.8rem;padding:.6rem 1rem;border-radius:.5rem;font-size:.9rem;
+    display:none;line-height:1.5}
+  .mc-feedback.correct{background:#052e16;border:1px solid var(--green);color:#86efac}
+  .mc-feedback.wrong{background:#2d0c0c;border:1px solid var(--red);color:#fca5a5}
+
+  /* Written recall */
+  .wr-textarea{width:100%;min-height:100px;background:var(--surface3);border:1px solid var(--border);
+    border-radius:.5rem;padding:.75rem;color:var(--text);font-family:var(--sans);font-size:.93rem;
+    line-height:1.6;resize:vertical;transition:border-color .15s}
+  .wr-textarea:focus{outline:none;border-color:var(--accent)}
+  .wr-btns{display:flex;gap:.75rem;margin-top:.75rem;flex-wrap:wrap}
+  .btn{padding:.5rem 1.1rem;border-radius:.4rem;border:none;font-family:var(--sans);
+    font-size:.85rem;font-weight:500;cursor:pointer;transition:opacity .15s}
+  .btn:hover{opacity:.85}
+  .btn-check{background:var(--accent);color:#fff}
+  .btn-reveal{background:var(--surface3);border:1px solid var(--border);color:var(--text)}
+  .btn-knew{background:#052e16;border:1px solid var(--green);color:#86efac}
+  .btn-review{background:#2d0c0c;border:1px solid var(--red);color:#fca5a5}
+  .keyword-result{margin-top:.85rem;background:var(--surface2);border:1px solid var(--border);
+    border-radius:.5rem;padding:.75rem 1rem;font-size:.85rem;display:none}
+  .keyword-result .tally{font-family:var(--mono);font-size:1rem;margin-bottom:.5rem;font-weight:600}
+  .keyword-result .kw-hit{color:var(--green)}
+  .keyword-result .kw-miss{color:var(--red)}
+  .keyword-result .kw-note{font-size:.75rem;color:var(--muted);margin-top:.4rem;font-style:italic}
+  .model-answer{margin-top:.85rem;background:var(--surface3);border:1px solid var(--border);
+    border-radius:.5rem;padding:1rem;font-size:.88rem;line-height:1.7;display:none}
+  .model-answer h4{font-family:var(--mono);font-size:.72rem;color:var(--accent);
+    letter-spacing:.08em;text-transform:uppercase;margin-bottom:.5rem}
+  .self-rate{display:none;margin-top:.75rem;display:none;gap:.6rem;flex-wrap:wrap}
+
+  /* Navigation */
+  .nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:.5rem}
+  .btn-nav{padding:.5rem 1.2rem;background:var(--surface2);border:1px solid var(--border);
+    border-radius:.4rem;color:var(--text);font-family:var(--sans);font-size:.9rem;cursor:pointer;
+    transition:border-color .15s}
+  .btn-nav:hover{border-color:var(--accent)}
+  .btn-nav:disabled{opacity:.3;cursor:default}
+  .btn-finish{padding:.5rem 1.5rem;background:var(--green);border:none;
+    border-radius:.4rem;color:#052e16;font-weight:600;font-family:var(--sans);font-size:.9rem;cursor:pointer}
+
+  /* Results screen */
+  #results-screen{display:none;width:100%;max-width:800px}
+  .result-card{background:var(--surface);border:1px solid var(--border);border-radius:1rem;
+    padding:1.5rem;margin-bottom:1rem}
+  .score-big{font-family:var(--mono);font-size:2.5rem;font-weight:600;color:var(--accent);
+    margin-bottom:.3rem}
+  .score-sub{color:var(--muted);font-size:.9rem;margin-bottom:1.2rem}
+  .channel-breakdown{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem}
+  .channel-stat{background:var(--surface2);border:1px solid var(--border);border-radius:.5rem;padding:.75rem}
+  .channel-stat .ch-name{font-size:.8rem;color:var(--muted);margin-bottom:.25rem}
+  .channel-stat .ch-score{font-family:var(--mono);font-weight:600}
+  .result-btn{padding:.6rem 1.5rem;border:none;border-radius:.5rem;font-family:var(--sans);
+    font-size:.9rem;font-weight:500;cursor:pointer;margin-right:.75rem;margin-top:.5rem}
+  .result-btn.primary{background:var(--accent);color:#fff}
+  .result-btn.secondary{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="drill-header">
+  <h1>DRILL 0001</h1>
+  <h2>Statistics in Trading</h2>
+  <p>Returns · Risk Metrics · Covariance · CUSUM · Alpha &amp; Beta · grounded in <em>analyze_equity.py</em>, <em>walkforward_sim.py</em>, <em>predict_next.py</em></p>
+</div>
+
+<!-- START SCREEN -->
+<div id="start-screen">
+  <div class="section-label">Select channels</div>
+  <div class="channel-grid" id="channel-chips">
+    <div class="chip active" data-ch="all">All topics</div>
+    <div class="chip active" data-ch="returns">Returns &amp; Annualization</div>
+    <div class="chip active" data-ch="risk">Risk Metrics</div>
+    <div class="chip active" data-ch="cagr">CAGR vs APR</div>
+    <div class="chip active" data-ch="cov">Covariance &amp; Portfolio Math</div>
+    <div class="chip active" data-ch="cusum">CUSUM &amp; Change Detection</div>
+    <div class="chip active" data-ch="capm">Alpha, Beta &amp; CAPM</div>
+  </div>
+
+  <div class="info-box">
+    <strong>20 questions</strong> — 8 multiple-choice + 12 written recall.<br>
+    Multiple-choice options are shuffled on every load. Written recall uses keyword detection;
+    always self-judge against the model answer. Questions are drawn from real code in this repo.
+  </div>
+
+  <div class="start-options">
+    <div class="toggle-row">
+      <div class="toggle on" id="shuffle-toggle"></div>
+      <span>Shuffle question order</span>
+    </div>
+  </div>
+
+  <button class="start-btn" id="start-btn">Begin drill →</button>
+</div>
+
+<!-- QUESTION SCREEN -->
+<div id="question-screen">
+  <div class="progress-bar-wrap">
+    <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+  </div>
+  <div class="progress-meta">
+    <div class="q-tags">
+      <span class="tag tag-channel" id="q-channel-tag">—</span>
+      <span class="tag" id="q-type-tag">—</span>
+    </div>
+    <span id="q-counter">Q 1 / 20</span>
+  </div>
+
+  <div class="q-card">
+    <div class="q-text" id="q-text"></div>
+    <div id="q-body"></div>
+  </div>
+
+  <div class="nav-row">
+    <button class="btn-nav" id="btn-prev" disabled>← Prev</button>
+    <span id="answered-indicator" style="font-size:.8rem;color:var(--muted)"></span>
+    <button class="btn-nav" id="btn-next">Next →</button>
+  </div>
+  <button class="btn-finish" id="btn-finish" style="display:none;margin-top:1rem;width:100%">
+    See results →
+  </button>
+</div>
+
+<!-- RESULTS SCREEN -->
+<div id="results-screen">
+  <div class="result-card">
+    <div class="score-big" id="res-score">—</div>
+    <div class="score-sub" id="res-sub">—</div>
+    <div class="channel-breakdown" id="ch-breakdown"></div>
+  </div>
+  <button class="result-btn primary" id="btn-retry">Restart drill</button>
+  <button class="result-btn secondary" id="btn-review-missed">Review missed only</button>
+</div>
+
+<script>
+'use strict';
+
+/* ============================================================
+   QUESTION BANK
+   type: 'mc' | 'wr'
+   channel: matches chip data-ch
+   options (MC): array of {text, correct, why}
+   concepts (WR): array of {label, terms:[...]}
+   answer (WR): full model answer HTML string
+============================================================ */
+const ALL_QUESTIONS = [
+
+// ── RETURNS & ANNUALIZATION ─────────────────────────────────
+
+{id:'mc-ann-sqrt', type:'mc', channel:'returns', channel_label:'Returns & Annualization',
+ text:`<code>analyze_equity.py:20</code> computes annualized volatility as:
+<pre class="snippet"><span class="hi">vol</span> = <span class="fn">float</span>(ret.<span class="fn">std</span>()) * math.<span class="fn">sqrt</span>(ann)   <span class="cm"># ann = 252</span></pre>
+Why does this multiply by <strong>√252</strong> rather than <strong>×252</strong>?`,
+ options:[
+   {text:'Variance adds linearly across independent periods, so standard deviation scales by the square root of the number of periods.',correct:true,
+    why:'Var(annual) = 252 × Var(daily) → σ_annual = σ_daily × √252. The square-root rule follows from variance additivity.'},
+   {text:'The square root is a convention agreed upon by industry regulators; there is no deeper mathematical reason.',correct:false,
+    why:'Wrong — the √252 rule is derived from the variance additivity property of independent returns, not arbitrary convention.'},
+   {text:'pandas .std() uses ddof=1 which introduces a √n bias that must be corrected by dividing by √(n/ann).',correct:false,
+    why:'Wrong — Bessel\'s correction (ddof=1) divides by n-1 for unbiasedness; it doesn\'t change the annualization exponent.'},
+   {text:'Returns are bounded in [-1,+∞) which compresses their distribution, requiring a root transform to annualize fairly.',correct:false,
+    why:'Wrong — the √n scaling comes from variance additivity, not from the asymmetric support of simple returns.'},
+ ]},
+
+{id:'mc-shift', type:'mc', channel:'returns', channel_label:'Returns & Annualization',
+ text:`In <code>paper_trading_sim.py:68</code>:
+<pre class="snippet">out[<span class="hi">"fwd_ret_1d"</span>] = out[<span class="hi">"ret_1d"</span>].<span class="fn">shift</span>(<span class="num">-1</span>)</pre>
+What is the purpose of <code>.shift(-1)</code> here?`,
+ options:[
+   {text:'To align tomorrow\'s return with today\'s features, so the model trained on row t predicts the return that will be realized on day t+1.',correct:true,
+    why:'shift(-1) moves values one step backward in time. Row t now contains today\'s features alongside tomorrow\'s return — the target the model should predict.'},
+   {text:'To lag returns by one day so that features and target are from the same trading session, preventing look-ahead.',correct:false,
+    why:'Incorrect — shift(-1) moves target values backward (earlier), not forward. Shift(+1) would lag. The goal is to attach tomorrow\'s return as today\'s label.'},
+   {text:'To compute a 1-period moving average of daily returns for use as a momentum feature.',correct:false,
+    why:'Wrong — shift(-1) just shifts index alignment; it performs no averaging. The moving averages use .rolling().mean().'},
+   {text:'To convert simple returns to log returns by offsetting the time axis.',correct:false,
+    why:'Wrong — the conversion from simple to log returns uses np.log(1 + ret); shift(-1) only changes which date a value is aligned to.'},
+ ]},
+
+{id:'wr-log-vs-simple', type:'wr', channel:'returns', channel_label:'Returns & Annualization',
+ text:'Explain the key difference between <strong>simple returns</strong> and <strong>log returns</strong>. Which is additive across <em>assets</em>? Which across <em>time</em>? Which does the repo use, and why?',
+ concepts:[
+   {label:'Simple return formula', terms:['pct_change','(p_t','p_t-1','p_{t-1}','(pt','percent change','pct change']},
+   {label:'Log return formula', terms:['ln(','log(','ln ','log return','logarithm']},
+   {label:'Cross-asset additivity (simple)', terms:['cross-asset','portfolio return','asset','weight','weighted','assets']},
+   {label:'Cross-time additivity (log)', terms:['time','compound','additive across time','sum of log','log-additiv','across period']},
+   {label:'Repo uses simple', terms:['pct_change','simple','repo','this repo','paper_trading']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Simple return:</strong> r_t = (P_t − P_{t-1}) / P_{t-1}, computed in the repo via <code>ret.pct_change()</code>.
+<br><strong>Log return:</strong> r_t = ln(P_t / P_{t-1}).
+<br><br>
+<strong>Additive across assets (simple):</strong> A portfolio return is the weighted sum of individual asset simple returns: r_p = Σ w_i r_i. This works because of how prices combine in a portfolio. Log returns do NOT have this property.
+<br><br>
+<strong>Additive across time (log):</strong> Log returns sum across periods: multi-period return = Σ ln(P_t/P_{t-1}). Simple returns must be compounded, not summed. Log returns are also symmetric around zero.
+<br><br>
+<strong>The repo uses simple returns</strong> (<code>pct_change()</code>) as features and as the target (<code>fwd_ret_1d</code>) because the cross-sectional ranking step weights asset returns in a portfolio, which requires simple-return additivity.`
+},
+
+// ── RISK METRICS ──────────────────────────────────────────────
+
+{id:'mc-maxdd', type:'mc', channel:'risk', channel_label:'Risk Metrics',
+ text:`<code>analyze_equity.py:26</code>:
+<pre class="snippet">maxdd = <span class="fn">float</span>((cum / roll_max - <span class="num">1.0</span>).<span class="fn">min</span>())</pre>
+What does the <code>.min()</code> call produce?`,
+ options:[
+   {text:'The most negative value in the drawdown series — i.e., the worst peak-to-trough loss fraction the strategy ever experienced.',correct:true,
+    why:'cum/roll_max - 1 ≤ 0 always. The minimum is the maximum drawdown — the single worst drop from any prior peak.'},
+   {text:'The date index where the drawdown was largest, expressed as a float.',correct:false,
+    why:'Wrong — .min() on a pandas Series of floats returns the minimum float value, not a date index.'},
+   {text:'The average drawdown across all periods, which is always negative.',correct:false,
+    why:'Wrong — .mean() would give the average; .min() gives the single worst observation.'},
+   {text:'A value between 0 and 1 representing the proportion of trading days spent in drawdown.',correct:false,
+    why:'Wrong — cum/roll_max - 1 is ≤ 0 everywhere (not bounded to [-1, 0] either); .min() finds the worst single-day value, not a proportion.'},
+ ]},
+
+{id:'mc-ddof', type:'mc', channel:'risk', channel_label:'Risk Metrics',
+ text:'In <code>analyze_equity.py:20</code>, <code>ret.std()</code> is called without any extra arguments. What does pandas use as the denominator inside the standard deviation calculation?',
+ options:[
+   {text:'n − 1 (Bessel\'s correction), meaning pandas defaults to ddof=1, producing the unbiased sample standard deviation.',correct:true,
+    why:'pandas Series.std() defaults to ddof=1, dividing by n-1. NumPy np.std() defaults to ddof=0 (population std). The difference matters at small n.'},
+   {text:'n (the population standard deviation), because financial returns are rarely modeled as a sample from a parent distribution.',correct:false,
+    why:'Wrong — pandas defaults to ddof=1 (divide by n-1). It\'s NumPy that defaults to ddof=0. Mixing these is a real source of bugs.'},
+   {text:'n − 2, applying a two-sample correction needed when computing both mean and std from the same data.',correct:false,
+    why:'Wrong — ddof=2 is used in specific regression residual contexts, not as a pandas default.'},
+   {text:'252, the annualization factor, because pandas automatically normalizes financial time series by trading days.',correct:false,
+    why:'Wrong — pandas has no special financial-normalization defaults; ddof controls only the degrees-of-freedom correction.'},
+ ]},
+
+{id:'wr-sharpe', type:'wr', channel:'risk', channel_label:'Risk Metrics',
+ text:'Walk through the Sharpe ratio formula from <code>analyze_equity.py:22–23</code>. Explain what each component measures and what a Sharpe ratio above 2.0 implies.',
+ concepts:[
+   {label:'Numerator: mean × 252 (expected annual return)', terms:['mean','expected','annuali','252','average return']},
+   {label:'Denominator: std × √252 (annualized volatility)', terms:['std','volatil','sqrt','denomin','risk']},
+   {label:'Risk-free rate assumed zero', terms:['risk-free','risk free','rf = 0','rf=0','zero rate']},
+   {label:'Sharpe > 2 implication', terms:['2','excellent','signal','statistic','unlikely','random','noise']},
+ ],
+ answer:`<h4>Model Answer</h4>
+From <code>analyze_equity.py:22-23</code>:<br>
+<code>sharpe = (ret.mean() * 252) / (ret.std() * sqrt(252))</code>
+<br><br>
+<strong>Numerator:</strong> <code>ret.mean() × 252</code> — the expected annualized return (arithmetic, not geometric). Scales by 252 trading days.
+<br><strong>Denominator:</strong> <code>ret.std() × √252</code> — annualized volatility. Uses √252 because variance adds across periods.
+<br><strong>Risk-free rate:</strong> The repo assumes r_f = 0. In full form: Sharpe = (E[r_s] − r_f) / σ_s.
+<br><br>
+<strong>Sharpe > 2.0</strong> means you earn >2 units of excess return per unit of volatility annually. In academic finance, Sharpe > 1 is considered solid; > 2 is excellent; > 3 raises suspicion (could signal overfit or look-ahead). For a live strategy at a hedge fund, a realized > 1.5 over 3+ years is strong.`
+},
+
+{id:'wr-maxdd-why', type:'wr', channel:'risk', channel_label:'Risk Metrics',
+ text:'Why do investors often focus on <strong>maximum drawdown</strong> as much as (or more than) Sharpe ratio? What psychological and structural factors make it the "career risk" metric?',
+ concepts:[
+   {label:'Emotional impact of drawdown', terms:['emotion','psych','feel','pain','loss aversion']},
+   {label:'Redemptions / client capital', terms:['redempt','client','capital','withdraw','allocator','fund']},
+   {label:'Sharpe doesn\'t capture tail/path', terms:['sharpe','path','sequence','tail','distribution','skew']},
+   {label:'Definition of max drawdown', terms:['peak','trough','worst','minimum','drawdown','peak-to-trough']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Maximum drawdown (MaxDD)</strong> is the worst peak-to-trough loss the equity curve ever experienced. Computed as <code>min(equity_t / rolling_peak_t − 1)</code>, always ≤ 0.
+<br><br>
+<strong>Why it dominates Sharpe in practice:</strong>
+<ol style="margin:.5rem 0 .5rem 1.2rem;line-height:1.8">
+  <li><strong>Investor psychology:</strong> Clients experience drawdown as real loss, even if unrealized. Loss aversion means a 20% drop hurts more than a 20% gain helps.</li>
+  <li><strong>Redemption risk:</strong> A deep drawdown triggers client redemptions, forcing asset sales at the worst time — locking in losses and preventing recovery.</li>
+  <li><strong>Career risk:</strong> PMs are fired after large drawdowns; strategies are shut down. A high Sharpe strategy with a 40% max drawdown may not survive long enough to deliver its edge.</li>
+  <li><strong>Sharpe is path-blind:</strong> Two strategies can have identical Sharpe but very different drawdown profiles. Sharpe uses only mean and std; it ignores the sequence of returns.</li>
+</ol>`
+},
+
+// ── CAGR vs APR ───────────────────────────────────────────────
+
+{id:'mc-cagr-apr', type:'mc', channel:'cagr', channel_label:'CAGR vs APR',
+ text:'A strategy has a mean daily return of 0.10% and daily volatility of 1.5%. Which statement about its annualized CAGR vs APR_simple is correct?',
+ options:[
+   {text:'CAGR &lt; APR because compounding reduces the geometric mean relative to the arithmetic mean (volatility drag ≈ σ²/2 per year).',correct:true,
+    why:'Annual volatility drag ≈ σ²/2 ≈ (0.015√252)²/2 ≈ (0.238)²/2 ≈ 2.8%. So CAGR ≈ APR − 2.8%. Higher volatility = bigger gap.'},
+   {text:'CAGR &gt; APR because compounding causes gains to grow faster than simple addition assumes.',correct:false,
+    why:'Wrong — compounding helps if there were no volatility, but volatility drag always makes CAGR ≤ APR. Gains do not compound "faster" than simple arithmetic predicts.'},
+   {text:'CAGR = APR whenever the risk-free rate is assumed to be zero, as in analyze_equity.py.',correct:false,
+    why:'Wrong — the CAGR/APR gap comes from volatility (Jensen\'s inequality on the log transform), not from the risk-free rate assumption.'},
+   {text:'CAGR &lt; APR only when the Sharpe ratio is below 1, because low Sharpe implies the compounding penalty exceeds the return.',correct:false,
+    why:'Wrong — CAGR &lt; APR is always true for any non-zero volatility, regardless of the Sharpe ratio value.'},
+ ]},
+
+{id:'wr-vol-drag', type:'wr', channel:'cagr', channel_label:'CAGR vs APR',
+ text:'Explain <strong>volatility drag</strong> in your own words. What is the approximate formula relating CAGR, APR, and annual volatility σ? If two strategies have the same expected return but different volatility, which compounds faster?',
+ concepts:[
+   {label:'CAGR vs APR gap', terms:['cagr','apr','gap','difference','less than','≤','compound']},
+   {label:'Formula: CAGR ≈ APR − σ²/2', terms:['σ²/2','sigma squared','variance','half','formula','approx']},
+   {label:'Higher vol → larger drag', terms:['higher vol','larger gap','more volatility','bigger drag','volatility increases']},
+   {label:'Lower volatility compounds faster', terms:['lower vol','less volatility','compounds faster','better','prefer']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Volatility drag:</strong> Because returns compound geometrically rather than adding arithmetically, randomness always reduces the realized growth rate below the expected arithmetic return.
+<br><br>
+<strong>Formula:</strong> CAGR ≈ APR − σ²/2<br>
+where APR = E[r] × 252 and σ = daily_std × √252. This comes from the log-return expansion: E[ln(1+r)] ≈ μ − σ²/2.
+<br><br>
+<strong>Example:</strong> APR = 10%, σ = 20% → CAGR ≈ 10% − 4%/2 = 8%.
+<br><br>
+<strong>Implication:</strong> Two strategies with identical expected returns — the one with lower volatility compounds faster. This is why mean-variance optimization explicitly penalizes variance, and why the Sharpe ratio uses volatility as the denominator.`
+},
+
+{id:'wr-cagr-formula', type:'wr', channel:'cagr', channel_label:'CAGR vs APR',
+ text:`<code>analyze_equity.py:19</code> computes:
+<pre class="snippet">cagr = (final / initial) ** (ann / <span class="fn">max</span>(<span class="num">1.0</span>, n)) - <span class="num">1.0</span></pre>
+Why does this formula use <strong>exponentiation</strong> instead of division? And what does <code>max(1.0, n)</code> guard against?`,
+ concepts:[
+   {label:'Geometric compounding', terms:['compound','geometr','annuali','exponenti','power','year']},
+   {label:'The exponent ann/n = 252/n', terms:['252/n','ann/n','exponent','scale','normaliz','ratio']},
+   {label:'max(1,n) prevents division by zero', terms:['division by zero','zero','n=0','guard','protect','max']},
+   {label:'Different from APR (no exponentiation)', terms:['apr','arithmetic','mean','no exponent','simpler']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Why exponentiation:</strong> CAGR is the geometrically-compounded annual growth rate. If an investment goes from <em>initial</em> to <em>final</em> over n trading days (≈ n/252 years), the annualized rate r satisfies:
+<br><code>final = initial × (1 + r)^(n/252)</code><br>
+Solving for r: <code>r = (final/initial)^(252/n) − 1</code>. The exponent converts fractional years to an annual rate the way compounding works — it's the inverse of the compound interest formula.
+<br><br>
+<strong>APR_simple</strong> is just <code>ret.mean() × 252</code> — no exponentiation, just arithmetic scaling. APR assumes returns add; CAGR knows they multiply.
+<br><br>
+<strong>max(1.0, n):</strong> Guards against division-by-zero when n=0 (no return data). With n=1 there's also a corner case: one data point doesn't define a CAGR meaningfully. The <code>if len(eq) < 2</code> check above is the primary guard; <code>max(1.0, n)</code> is a belt-and-suspenders fallback.`
+},
+
+// ── COVARIANCE & PORTFOLIO MATH ───────────────────────────────
+
+{id:'mc-shrinkage', type:'mc', channel:'cov', channel_label:'Covariance & Portfolio Math',
+ text:`In <code>predict_next.py:176-180</code>:
+<pre class="snippet">Sigma_emp = ret_panel.cov().<span class="fn">to_numpy</span>()
+diag      = np.diag(np.diag(Sigma_emp))
+Sigma     = (<span class="num">1</span> - lam) * Sigma_emp + lam * diag   <span class="cm"># lam = shrink arg</span></pre>
+What does <code>Sigma</code> equal when <code>lam = 1.0</code>?`,
+ options:[
+   {text:'A diagonal matrix containing only individual asset variances — all off-diagonal covariances set to zero.',correct:true,
+    why:'lam=1.0: Sigma = (0)*Sigma_emp + (1)*diag. np.diag(np.diag(M)) extracts M\'s diagonal into a new diagonal-only matrix. Full cross-asset correlations are discarded.'},
+   {text:'The identity matrix, normalizing all variances to 1.0 and zeroing correlations.',correct:false,
+    why:'Wrong — diag = np.diag(np.diag(Sigma_emp)) preserves the original variances from Sigma_emp; it doesn\'t normalize them to 1.'},
+   {text:'A zero matrix, effectively giving equal weights to all assets by making the inverse undefined.',correct:false,
+    why:'Wrong — a zero matrix would be singular. The diagonal has the original variances, not zeros.'},
+   {text:'The full empirical covariance matrix, because lam=1.0 means "full weight on sample estimate."',correct:false,
+    why:'Wrong — lam multiplies the diagonal term, not the empirical term. At lam=1.0, the empirical component is (1-1.0)=0.'},
+ ]},
+
+{id:'wr-shrinkage', type:'wr', channel:'cov', channel_label:'Covariance & Portfolio Math',
+ text:'What goes wrong when you directly invert a poorly-estimated sample covariance matrix? What does <strong>shrinkage toward the diagonal</strong> fix, structurally?',
+ concepts:[
+   {label:'Sample covariance needs many observations', terms:['sample','few','observation','n < p','undersampled','noisy']},
+   {label:'Ill-conditioned / nearly singular', terms:['ill-condition','singular','invert','inverse','nearly singular','rank']},
+   {label:'Small eigenvalues amplified by inversion', terms:['eigenvalue','amplif','inversion','blow','tiny','instab']},
+   {label:'Shrinkage pulls toward diagonal', terms:['shrink','diagonal','blend','mix','stable','regulariz']},
+   {label:'Lambda controls the tradeoff', terms:['lambda','lam','tradeoff','bias','variance','control']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>The problem with raw inversion:</strong> The sample covariance matrix Σ_emp is estimated from N daily return rows and P assets. When N is not much larger than P (common in practice — 90 days of history for 50+ assets), the matrix is poorly conditioned. Its smallest eigenvalues are near-zero artifacts of estimation noise. Inverting Σ amplifies these tiny eigenvalues to huge values, so the portfolio weights blow up in directions that are pure noise — the optimizer confidently picks extreme positions that live entirely in the noise eigenvectors.
+<br><br>
+<strong>Shrinkage toward the diagonal:</strong> The formula <code>Σ = (1-λ)Σ_emp + λ·diag(Σ_emp)</code> blends the noisy full matrix with the stable diagonal. The diagonal (individual variances) is always well-conditioned because each diagonal entry only needs one asset's history. As λ → 1, off-diagonal correlations are discarded entirely; as λ → 0, the full sample estimate is used.
+<br><br>
+<strong>λ is a bias-variance tradeoff:</strong> More shrinkage = more bias (ignoring real correlations) but less variance (more stable inverse). The repo defaults to <code>--shrink 0.2</code>, keeping most of the estimated correlations while adding a regularizing nudge.`
+},
+
+{id:'wr-meanvar', type:'wr', channel:'cov', channel_label:'Covariance & Portfolio Math',
+ text:'Explain how <code>predict_next.py:meanvar_long_only</code> computes portfolio weights. What is the unconstrained mean-variance solution, and what does the <code>max_w</code> cap add?',
+ concepts:[
+   {label:'Unconstrained MV weights: w ∝ Σ⁻¹μ', terms:['sigma inverse','σ⁻¹','pinv','inverse','mu','expected return','proportional']},
+   {label:'Long-only: clip negatives to zero', terms:['long-only','clip','negative','zero','np.clip','positive']},
+   {label:'Normalize to sum to 1', terms:['normalize','sum to 1','divide by sum','w_sum','total weight']},
+   {label:'max_w cap on individual positions', terms:['max_w','cap','0.3','maximum','individual','position size']},
+ ],
+ answer:`<h4>Model Answer</h4>
+The unconstrained mean-variance solution (Markowitz 1952) is:
+<br><code>w* ∝ Σ⁻¹μ</code>
+where μ is the vector of expected (predicted) returns and Σ is the covariance matrix. This weight vector maximizes the Sharpe ratio.
+<br><br>
+In <code>meanvar_long_only</code>:
+<ol style="margin:.5rem 0 .5rem 1.2rem;line-height:1.8">
+  <li><code>w = np.linalg.pinv(Sigma_reg) @ mu</code> — compute Σ⁻¹μ using pseudoinverse (handles near-singular Σ).</li>
+  <li><code>w = np.clip(w, 0, None)</code> — set negative weights to zero (long-only constraint).</li>
+  <li><code>w = w / w.sum()</code> — normalize to sum to 1 (fully invested).</li>
+  <li><code>w = np.clip(w, 0, max_w)</code> then renormalize — cap each position at max_w=30% to prevent over-concentration.</li>
+</ol>
+<code>Sigma_reg = Sigma + eps × I</code> is a small ridge term to prevent exact singularity before inversion.`
+},
+
+// ── CUSUM & CHANGE DETECTION ──────────────────────────────────
+
+{id:'mc-cusum-k', type:'mc', channel:'cusum', channel_label:'CUSUM & Change Detection',
+ text:`In <code>walkforward_sim.py:294</code>:
+<pre class="snippet">k = cusum_threshold * (sigma <span class="kw">if</span> sigma > <span class="num">0</span> <span class="kw">else</span> <span class="num">1.0</span>)</pre>
+What role does <code>k</code> play in the CUSUM update?`,
+ options:[
+   {text:'k is the slack term — the amount of drift per period that is "forgiven" before the running sum builds up to a change signal.',correct:true,
+    why:'CUSUM update: pos = max(0, pos + r - k); neg = min(0, neg + r + k). k acts as a dead-band: returns within ±k of zero don\'t accumulate.'},
+   {text:'k sets the maximum number of consecutive periods CUSUM must observe before it can trigger, preventing spurious signals.',correct:false,
+    why:'Wrong — k is a magnitude threshold (in return units), not a count threshold. CUSUM can trigger on the very first update if the return is large enough.'},
+   {text:'k is the number of standard deviations the CUSUM statistic must reach before the overall stress flag is set.',correct:false,
+    why:'Wrong — the threshold for triggering is whether pos > 0 or neg < 0, not a comparison to k. k controls how quickly they accumulate.'},
+   {text:'k is the reset level: when the CUSUM statistic exceeds k in either direction, both pos and neg are reset to zero.',correct:false,
+    why:'Wrong — there is no explicit reset in this implementation. Once pos > 0, cusum_hit is True; the sums keep accumulating.'},
+ ]},
+
+{id:'wr-cusum-walk', type:'wr', channel:'cusum', channel_label:'CUSUM & Change Detection',
+ text:`Walk through the CUSUM algorithm in <code>walkforward_sim.py:293–299</code>. Starting from <code>pos=0, neg=0</code>, what happens over three days with returns of <strong>+0.5%, −0.1%, +0.6%</strong> when <code>k = 0.3%</code>? When does <code>cusum_hit</code> become True?`,
+ concepts:[
+   {label:'Update rule for pos', terms:['pos = max(0','max(0, pos + r - k','positive cusum','upward']},
+   {label:'Update rule for neg', terms:['neg = min(0','min(0, neg + r + k','negative cusum','downward']},
+   {label:'Day-by-day trace', terms:['day 1','day 2','day 3','first','second','third','trace','0.5','0.6']},
+   {label:'cusum_hit triggered when pos>0 or neg<0', terms:['pos > 0','neg < 0','trigger','hit','true']},
+ ],
+ answer:`<h4>Model Answer</h4>
+CUSUM updates: <code>pos = max(0, pos + r - k)</code>; <code>neg = min(0, neg + r + k)</code>; cusum_hit = (pos > 0) or (neg < 0).
+<br><br>
+With k = 0.003 (0.3%):
+<table style="width:100%;border-collapse:collapse;margin:.5rem 0;font-size:.85rem">
+  <tr style="border-bottom:1px solid #2a3550"><th style="text-align:left;padding:.25rem .5rem">Day</th><th>r</th><th>r − k</th><th>pos = max(0, prev_pos + (r−k))</th><th>neg</th><th>hit?</th></tr>
+  <tr><td style="padding:.25rem .5rem">1</td><td>+0.5%</td><td>+0.2%</td><td>max(0, 0+0.002) = 0.002</td><td>min(0,0+0.008)=0</td><td>✓ pos&gt;0 → TRUE</td></tr>
+  <tr><td style="padding:.25rem .5rem">2</td><td>−0.1%</td><td>−0.4%</td><td>max(0, 0.002−0.004) = 0</td><td>min(0,0+0.002)=0</td><td>✗ both 0</td></tr>
+  <tr><td style="padding:.25rem .5rem">3</td><td>+0.6%</td><td>+0.3%</td><td>max(0, 0+0.003) = 0.003</td><td>min(0,0+0.009)=0</td><td>✓ pos&gt;0 → TRUE</td></tr>
+</table>
+cusum_hit is True on Day 1 (pos=0.002 > 0) and Day 3 (pos=0.003 > 0). Day 2 the spike is absorbed and pos resets to 0. Note: the implementation recomputes over the full history window each day, so it's not a running state — this logic runs fresh each period.`
+},
+
+{id:'wr-four-stress', type:'wr', channel:'cusum', channel_label:'CUSUM & Change Detection',
+ text:'Name the <strong>four stress signals</strong> in <code>walkforward_sim.py</code> that set <code>stress=True</code>. For each, describe what it detects and what the strategy does when <code>stress=True</code>.',
+ concepts:[
+   {label:'Realized vol threshold', terms:['vol','volatil','rolling std','risk_vol','high vol']},
+   {label:'Drawdown threshold', terms:['drawdown','dd','deep_dd','risk_dd','trough','fall']},
+   {label:'CUSUM change detection', terms:['cusum','cusum_hit','change point','drift']},
+   {label:'GMM / regime model', terms:['gmm','gaussian mixture','regime','gm_hit','hmm']},
+   {label:'Exposure scaled to zero when stress', terms:['scale','exposure','zero','reduce','exit','stress']},
+ ],
+ answer:`<h4>Model Answer</h4>
+From <code>walkforward_sim.py:315-317</code>:
+<ol style="margin:.5rem 0 .5rem 1.2rem;line-height:1.8">
+  <li><strong>high_vol</strong>: rolling realized volatility of market returns exceeds <code>risk_vol_threshold</code> (default 2.5% per day). Detects elevated vol regimes.</li>
+  <li><strong>deep_dd</strong>: current portfolio drawdown drops below <code>risk_dd_threshold</code> (default -10%). Detects a losing streak.</li>
+  <li><strong>cusum_hit</strong>: the CUSUM statistic on market returns drifts significantly above/below its slack band. Detects a structural shift in return distribution.</li>
+  <li><strong>gm_hit</strong>: a GaussianMixture model identifies today's return as belonging to the high-variance component (the "stress" regime). The component is identified by highest variance of the mixture components.</li>
+</ol>
+<strong>When stress=True:</strong> The strategy scales exposure to <strong>zero</strong> for that period — no new positions are entered (or all weights are set to 0). This is a binary off switch, not a gradual reduction.`
+},
+
+// ── ALPHA, BETA & CAPM ────────────────────────────────────────
+
+{id:'mc-alpha-calc', type:'mc', channel:'capm', channel_label:'Alpha, Beta & CAPM',
+ text:'A strategy returned <strong>20%</strong> over a year while the market (SPY) returned <strong>15%</strong>. The strategy\'s beta to SPY is <strong>1.3</strong>. What is the Jensen\'s alpha?',
+ options:[
+   {text:'α = 20% − (1.3 × 15%) = 20% − 19.5% = <strong>0.5%</strong>',correct:true,
+    why:'Jensen\'s alpha = r_strategy − β × r_market. α = 20% − 1.3×15% = 20% − 19.5% = 0.5%. The strategy barely beats its market-adjusted expectation.'},
+   {text:'α = 20% − 15% = <strong>5%</strong>, the excess return over the market',correct:false,
+    why:'Wrong — 5% is the raw outperformance, ignoring the fact that β=1.3 means the strategy was 30% more leveraged to market risk. The market-adjusted return is 1.3×15%=19.5%.'},
+   {text:'α = (20% − 15%) / 1.3 = <strong>3.8%</strong>',correct:false,
+    why:'Wrong — you subtract β×r_market, you don\'t divide the excess by β. The formula is α = r_s − β·r_m.'},
+   {text:'α = 20% / 1.3 − 15% = <strong>0.4%</strong>',correct:false,
+    why:'Wrong — β scales the market return, not the strategy return. The correct deduction is β×r_market = 1.3×15% = 19.5%.'},
+ ]},
+
+{id:'wr-alpha-vs-sharpe', type:'wr', channel:'capm', channel_label:'Alpha, Beta & CAPM',
+ text:'<strong>Jensen\'s alpha</strong> and the <strong>Sharpe ratio</strong> are both performance metrics, but they measure different things. Explain what each captures, when a strategy might have high Sharpe but zero alpha, and vice versa.',
+ concepts:[
+   {label:'Sharpe measures return per unit of total risk', terms:['sharpe','total risk','volatility','per unit','risk-adjusted']},
+   {label:'Alpha measures market-adjusted return', terms:['alpha','market-adjusted','beta','capm','residual','unexplained']},
+   {label:'High Sharpe, zero alpha: market exposure', terms:['high sharpe zero alpha','leveraged beta','beta exposure','market','replicate']},
+   {label:'Positive alpha, low Sharpe: high noise', terms:['positive alpha low sharpe','noisy','volatile','high vol','t-stat']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Sharpe ratio</strong> = (annualized return − r_f) / annualized volatility. It measures return per unit of <em>total</em> volatility, regardless of where that return comes from. It doesn't distinguish skill from market exposure.
+<br><br>
+<strong>Jensen's alpha</strong> = the CAPM regression intercept: the return the strategy earns <em>after</em> subtracting β × market return. Pure alpha can't be replicated by buying index ETFs.
+<br><br>
+<strong>High Sharpe, zero alpha:</strong> A strategy that invests 1.3× in SPY (β=1.3, α=0) can have a high Sharpe ratio if the market Sharpe is high. The Sharpe is rewarding market exposure, not skill. Anyone can do this.
+<br><br>
+<strong>Positive alpha, low Sharpe:</strong> A strategy might have genuine market-neutral skill (α > 0) but also high idiosyncratic volatility, producing a low Sharpe. The alpha is real but noisy — the t-stat of α is what matters, not the raw value.`
+},
+
+{id:'wr-beta-hedge-ratio', type:'wr', channel:'capm', channel_label:'Alpha, Beta & CAPM',
+ text:'Lesson 0028 noted that the <code>hedge_ratio</code> in <code>solutions/03_stat_arb_risk/pairs.py</code> and the CAPM <strong>beta</strong> are computed with the same OLS formula. Explain the structural similarity. What is different between them?',
+ concepts:[
+   {label:'Both are OLS regression slopes', terms:['ols','regression','slope','beta hat','least squares','lstsq']},
+   {label:'Both are cov(x,y)/var(x)', terms:['cov','var','covariance','variance','ratio','formula']},
+   {label:'Different x: spread vs market', terms:['spread','pairs','cointegration','market return','different x','regressand']},
+   {label:'Different purpose: hedging vs attribution', terms:['hedge','attribution','purpose','use','stat arb','pairs']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>Both are OLS slopes:</strong> β = cov(y, x) / var(x) = (XᵀX)⁻¹Xᵀy for a one-feature OLS.
+<br><br>
+<strong>hedge_ratio in pairs.py:</strong> y = asset A returns, x = asset B returns. The slope tells you how many shares of B to short per share of A to make the spread stationary.
+<br><br>
+<strong>Market beta:</strong> y = strategy returns, x = market (SPY) returns. The slope tells you the strategy's exposure to broad market moves.
+<br><br>
+<strong>Structurally identical math, different interpretation:</strong>
+<ul style="margin:.5rem 0 .5rem 1.2rem;line-height:1.8">
+  <li>Hedge ratio → use it to construct a spread portfolio</li>
+  <li>Beta → use it to measure/attribute performance, or to hedge the market out of a strategy</li>
+</ul>
+In fact, a long-short pairs trade with a proper hedge ratio <em>is</em> market-neutral because by construction the pair's beta to the market is near zero.`
+},
+
+{id:'wr-capm-decomp', type:'wr', channel:'capm', channel_label:'Alpha, Beta & CAPM',
+ text:'CAPM decomposes strategy returns as: <strong>r_s = α + β·r_m + ε</strong>. Explain what each term represents, and how you would estimate this using the existing tools in this repo.',
+ concepts:[
+   {label:'α: alpha — market-independent return', terms:['alpha','intercept','independent','skill','unexplained','residual return']},
+   {label:'β: market exposure', terms:['beta','market exposure','slope','sensitivity','b']},
+   {label:'ε: idiosyncratic noise', terms:['epsilon','residual','noise','idiosyncratic','error term']},
+   {label:'Estimation via OLS regression', terms:['ols','regression','lstsq','np.linalg','fit','estimate','regression']},
+   {label:'Repo assets to use', terms:['analyze_equity','walkforward','predict_next','pairs.py','equity','spy']},
+ ],
+ answer:`<h4>Model Answer</h4>
+<strong>r_s = α + β·r_m + ε</strong>:
+<ul style="margin:.5rem 0 .5rem 1.2rem;line-height:1.8">
+  <li><strong>α</strong> (alpha): the strategy's market-independent return — what's left after explaining away β units of market. The "skill" part that can't be cheaply replicated.</li>
+  <li><strong>β</strong> (beta): how much the strategy moves per unit of market move. β=1 → moves with the market; β=0 → market-neutral; β&gt;1 → leveraged to market.</li>
+  <li><strong>ε</strong>: the residual noise — day-to-day moves the model can't explain. var(ε) = idiosyncratic variance.</li>
+</ul>
+<strong>Estimation in this repo:</strong>
+<ol style="margin:.5rem 0 .5rem 1.2rem;line-height:1.8">
+  <li>Produce strategy equity from <code>walkforward-sim</code> or <code>paper-backtest</code>.</li>
+  <li>Download SPY returns over the same period (yfinance).</li>
+  <li>Use the <code>_ols()</code> function from <code>solutions/03_stat_arb_risk/pairs.py</code>: x = SPY returns, y = strategy returns → returns (β, α).</li>
+  <li>Report α in annualized terms and compute its t-stat to judge significance.</li>
+</ol>
+Lesson 0028 proposed adding an <code>alpha_beta()</code> function to <code>analyze_equity.py</code> — this is the pending self-assignment.`
+},
+
+]; // end ALL_QUESTIONS
+
+
+/* ============================================================
+   STATE
+============================================================ */
+let questions = [];
+let current = 0;
+let shuffleOn = true;
+let reviewMissedMode = false;
+
+// Per-question state (keyed by q.id)
+const state = {};
+function getState(id) {
+  if (!state[id]) state[id] = { answered: false, correct: null, typed: '', selfRated: null, revealed: false };
+  return state[id];
+}
+
+/* ============================================================
+   CHANNEL FILTERING
+============================================================ */
+const chips = document.querySelectorAll('#channel-chips .chip');
+let activeChannels = new Set(['returns','risk','cagr','cov','cusum','capm']);
+
+chips.forEach(chip => {
+  chip.addEventListener('click', () => {
+    const ch = chip.dataset.ch;
+    if (ch === 'all') {
+      const allActive = activeChannels.size === 6;
+      if (allActive) { activeChannels.clear(); chips.forEach(c => c.classList.remove('active')); chip.classList.add('active'); }
+      else { activeChannels = new Set(['returns','risk','cagr','cov','cusum','capm']); chips.forEach(c => c.classList.add('active')); }
+    } else {
+      if (activeChannels.has(ch)) { activeChannels.delete(ch); chip.classList.remove('active'); }
+      else { activeChannels.add(ch); chip.classList.add('active'); }
+    }
+  });
+});
+
+/* shuffle toggle */
+const toggleEl = document.getElementById('shuffle-toggle');
+toggleEl.addEventListener('click', () => { shuffleOn = !shuffleOn; toggleEl.classList.toggle('on', shuffleOn); });
+
+/* ============================================================
+   FISHER-YATES SHUFFLE
+============================================================ */
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/* ============================================================
+   START
+============================================================ */
+document.getElementById('start-btn').addEventListener('click', startDrill);
+
+function startDrill() {
+  reviewMissedMode = false;
+  questions = ALL_QUESTIONS.filter(q => activeChannels.has(q.channel));
+  if (shuffleOn) shuffle(questions);
+  current = 0;
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('question-screen').style.display = 'block';
+  renderQuestion();
+}
+
+/* ============================================================
+   RENDER
+============================================================ */
+function renderQuestion() {
+  const q = questions[current];
+  const qs = getState(q.id);
+
+  // Progress
+  const pct = ((current) / questions.length) * 100;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('q-counter').textContent = `Q ${current + 1} / ${questions.length}`;
+  document.getElementById('q-channel-tag').textContent = q.channel_label;
+  const typeTag = document.getElementById('q-type-tag');
+  typeTag.textContent = q.type === 'mc' ? 'Multiple Choice' : 'Written Recall';
+  typeTag.className = 'tag ' + (q.type === 'mc' ? 'tag-mc' : 'tag-wr');
+
+  // Question text
+  document.getElementById('q-text').innerHTML = q.text;
+
+  // Body
+  const body = document.getElementById('q-body');
+  if (q.type === 'mc') body.innerHTML = renderMC(q, qs);
+  else body.innerHTML = renderWR(q, qs);
+
+  // Re-attach events
+  if (q.type === 'mc') attachMCEvents(q, qs);
+  else attachWREvents(q, qs);
+
+  // Navigation
+  document.getElementById('btn-prev').disabled = current === 0;
+  const isLast = current === questions.length - 1;
+  document.getElementById('btn-next').style.display = isLast ? 'none' : 'inline-block';
+  document.getElementById('btn-finish').style.display = isLast ? 'block' : 'none';
+
+  // Answered indicator
+  const ind = document.getElementById('answered-indicator');
+  if (qs.answered) {
+    if (q.type === 'mc') ind.textContent = qs.correct ? '✓ answered correctly' : '✗ answered incorrectly';
+    else ind.textContent = qs.selfRated === 'knew' ? '✓ self-rated: knew it' : qs.selfRated === 'review' ? '⚑ self-rated: needs review' : qs.revealed ? '⚑ revealed' : '';
+  } else ind.textContent = '';
+}
+
+/* ── MC ─────────────────────────────────────────────────────── */
+function renderMC(q, qs) {
+  let html = '<ul class="options-list" id="mc-opts">';
+  // Shuffle options order (done in DOM after render using Fisher-Yates)
+  q.options.forEach((opt, idx) => {
+    let cls = '';
+    if (qs.answered) {
+      if (opt.correct) cls = 'show-correct';
+      // will be overridden for chosen below
+    }
+    html += `<li data-idx="${idx}" data-correct="${opt.correct}" class="${cls}">
+      ${opt.text}
+      <div class="option-why">${opt.why}</div>
+    </li>`;
+  });
+  html += '</ul>';
+  if (qs.answered) {
+    const cls = qs.correct ? 'mc-feedback correct' : 'mc-feedback wrong';
+    html += `<div class="${cls}" style="display:block">${qs.correct ? '✓ Correct.' : '✗ Incorrect.'}</div>`;
+  } else {
+    html += '<div class="mc-feedback" id="mc-fb"></div>';
+  }
+  return html;
+}
+
+function attachMCEvents(q, qs) {
+  const list = document.getElementById('mc-opts');
+  if (!list) return;
+
+  // Shuffle in DOM (Fisher-Yates on children)
+  if (!qs.answered) {
+    const items = [...list.children];
+    shuffle(items);
+    items.forEach(li => list.appendChild(li));
+  }
+
+  // Mark chosen option if already answered
+  if (qs.answered && qs.chosenIdx !== undefined) {
+    list.querySelectorAll('li').forEach(li => {
+      const idx = parseInt(li.dataset.idx);
+      const correct = li.dataset.correct === 'true';
+      if (idx === qs.chosenIdx) li.classList.add(correct ? 'correct-choice' : 'wrong-choice');
+      else if (correct) li.classList.add('show-correct');
+    });
+  }
+
+  if (qs.answered) return;
+
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (qs.answered) return;
+      const correct = li.dataset.correct === 'true';
+      qs.answered = true;
+      qs.correct = correct;
+      qs.chosenIdx = parseInt(li.dataset.idx);
+
+      list.querySelectorAll('li').forEach(item => {
+        const itemCorrect = item.dataset.correct === 'true';
+        if (item === li) item.classList.add(correct ? 'correct-choice' : 'wrong-choice');
+        else if (itemCorrect) item.classList.add('show-correct');
+        item.classList.add('answered');
+      });
+
+      const fb = document.getElementById('mc-fb');
+      if (fb) {
+        fb.className = 'mc-feedback ' + (correct ? 'correct' : 'wrong');
+        fb.textContent = correct ? '✓ Correct.' : '✗ Incorrect.';
+        fb.style.display = 'block';
+      }
+      document.getElementById('answered-indicator').textContent = correct ? '✓ answered correctly' : '✗ answered incorrectly';
+    });
+  });
+}
+
+/* ── Written Recall ──────────────────────────────────────────── */
+function renderWR(q, qs) {
+  return `
+    <textarea class="wr-textarea" id="wr-input" placeholder="Type your answer here...">${qs.typed || ''}</textarea>
+    <div class="wr-btns">
+      <button class="btn btn-check" id="wr-check">Check keywords</button>
+      <button class="btn btn-reveal" id="wr-reveal">Show model answer</button>
+    </div>
+    <div class="keyword-result" id="kw-result"></div>
+    <div class="model-answer" id="model-ans"></div>
+    <div class="self-rate" id="self-rate" style="display:none">
+      <button class="btn btn-knew" id="rate-knew">✓ Knew it</button>
+      <button class="btn btn-review" id="rate-review">⚑ Needs review</button>
+    </div>`;
+}
+
+function attachWREvents(q, qs) {
+  const ta = document.getElementById('wr-input');
+  if (!ta) return;
+
+  ta.addEventListener('input', () => { qs.typed = ta.value; });
+
+  // Restore state
+  const kwResult = document.getElementById('kw-result');
+  const modelAns = document.getElementById('model-ans');
+  const selfRate = document.getElementById('self-rate');
+
+  if (qs.revealed) {
+    modelAns.innerHTML = q.answer;
+    modelAns.style.display = 'block';
+    selfRate.style.display = 'flex';
+    showKeywords(q, qs, kwResult);
+  }
+  if (qs.selfRated) {
+    selfRate.style.display = 'flex';
+  }
+
+  document.getElementById('wr-check').addEventListener('click', () => {
+    qs.typed = ta.value;
+    showKeywords(q, qs, kwResult);
+  });
+
+  document.getElementById('wr-reveal').addEventListener('click', () => {
+    qs.revealed = true;
+    qs.answered = true;
+    modelAns.innerHTML = q.answer;
+    modelAns.style.display = 'block';
+    selfRate.style.display = 'flex';
+    showKeywords(q, qs, kwResult);
+    document.getElementById('answered-indicator').textContent = '⚑ revealed';
+  });
+
+  document.getElementById('rate-knew').addEventListener('click', () => {
+    qs.selfRated = 'knew';
+    qs.answered = true;
+    document.getElementById('answered-indicator').textContent = '✓ self-rated: knew it';
+  });
+  document.getElementById('rate-review').addEventListener('click', () => {
+    qs.selfRated = 'review';
+    qs.answered = true;
+    document.getElementById('answered-indicator').textContent = '⚑ self-rated: needs review';
+  });
+}
+
+function showKeywords(q, qs, container) {
+  const text = (qs.typed || '').toLowerCase();
+  const hits = q.concepts.map(c => ({
+    label: c.label,
+    hit: c.terms.some(t => text.includes(t.toLowerCase()))
+  }));
+  const got = hits.filter(h => h.hit).length;
+  const total = hits.length;
+  container.style.display = 'block';
+  const color = got === total ? '#22c55e' : got >= total * 0.6 ? '#f59e0b' : '#ef4444';
+  container.innerHTML = `<div class="tally" style="color:${color}">${got} / ${total} key concepts detected</div>` +
+    hits.map(h => `<div class="${h.hit ? 'kw-hit' : 'kw-miss'}">${h.hit ? '✓' : '✗'} ${h.label}</div>`).join('') +
+    `<div class="kw-note">Keyword scan is approximate — self-judge against the model answer.</div>`;
+}
+
+/* ============================================================
+   NAVIGATION
+============================================================ */
+document.getElementById('btn-prev').addEventListener('click', () => {
+  if (current > 0) { current--; renderQuestion(); }
+});
+document.getElementById('btn-next').addEventListener('click', () => {
+  if (current < questions.length - 1) { current++; renderQuestion(); }
+});
+document.getElementById('btn-finish').addEventListener('click', showResults);
+
+/* ============================================================
+   RESULTS
+============================================================ */
+function showResults() {
+  document.getElementById('question-screen').style.display = 'none';
+  document.getElementById('results-screen').style.display = 'block';
+
+  const mcQs = questions.filter(q => q.type === 'mc');
+  const mcCorrect = mcQs.filter(q => getState(q.id).correct === true).length;
+  const mcAnswered = mcQs.filter(q => getState(q.id).answered).length;
+
+  const wrQs = questions.filter(q => q.type === 'wr');
+  const wrKnew = wrQs.filter(q => getState(q.id).selfRated === 'knew').length;
+  const wrReview = wrQs.filter(q => getState(q.id).selfRated === 'review').length;
+  const wrAnswered = wrQs.filter(q => getState(q.id).answered).length;
+
+  document.getElementById('res-score').textContent = mcAnswered > 0 ? `MC: ${mcCorrect}/${mcAnswered}` : 'MC: —';
+  document.getElementById('res-sub').textContent =
+    `Written recall: ${wrKnew} knew · ${wrReview} needs review · ${wrQs.length - wrAnswered} unanswered`;
+
+  // Channel breakdown
+  const channels = [...new Set(questions.map(q => q.channel))];
+  const bd = document.getElementById('ch-breakdown');
+  bd.innerHTML = channels.map(ch => {
+    const chQs = questions.filter(q => q.channel === ch);
+    const mcC = chQs.filter(q => q.type === 'mc' && getState(q.id).correct).length;
+    const mcT = chQs.filter(q => q.type === 'mc').length;
+    const wrK = chQs.filter(q => q.type === 'wr' && getState(q.id).selfRated === 'knew').length;
+    const wrT = chQs.filter(q => q.type === 'wr').length;
+    const label = chQs[0].channel_label;
+    return `<div class="channel-stat">
+      <div class="ch-name">${label}</div>
+      <div class="ch-score">${mcT ? `MC ${mcC}/${mcT}` : ''}${mcT && wrT ? ' · ' : ''}${wrT ? `WR ${wrK}/${wrT} knew` : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('btn-retry').addEventListener('click', () => {
+  Object.keys(state).forEach(k => delete state[k]);
+  document.getElementById('results-screen').style.display = 'none';
+  document.getElementById('start-screen').style.display = 'block';
+});
+
+document.getElementById('btn-review-missed').addEventListener('click', () => {
+  const missed = questions.filter(q => {
+    const qs = getState(q.id);
+    if (q.type === 'mc') return qs.answered && !qs.correct;
+    return qs.selfRated === 'review' || (qs.answered && !qs.selfRated);
+  });
+  if (missed.length === 0) { alert('No missed questions to review!'); return; }
+  questions = missed;
+  current = 0;
+  document.getElementById('results-screen').style.display = 'none';
+  document.getElementById('question-screen').style.display = 'block';
+  renderQuestion();
+});
+
+/* initial render */
+document.getElementById('start-screen').style.display = 'block';
+</script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+{# Theme resolution: explicit ?theme= wins, else the ui_theme cookie, else
+   classic. Invalid values fall through — a bad query never poisons the
+   cookie. "lab" is the Streamlit-style look (see theme-lab.css);
+   "classic" is the original stylesheet, untouched. #}
+{% set _q = request.query_params.get('theme') %}
+{% set _c = request.cookies.get('ui_theme') %}
+{% set theme = _q if _q in ('lab', 'classic') else (_c if _c in ('lab', 'classic') else 'classic') %}
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AlgoTrade">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='/icons/icon-180.png') }}">
+  <link rel="manifest" href="{{ url_for('static', path='/manifest.json') }}">
+  <title>{{ title or "HFT Practice Web" }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+  {% if theme == 'lab' %}
+  <link rel="stylesheet" href="{{ url_for('static', path='/theme-lab.css') }}">
+  {% endif %}
+</head>
+<body class="theme-{{ theme }}">
+  {% if _q in ('lab', 'classic') %}
+  <script>document.cookie = "ui_theme={{ theme }};path=/;max-age=31536000;samesite=lax";</script>
+  {% endif %}
+  <header>
+    <h1>HFT Practice Web</h1>
+    <input type="checkbox" id="nav-toggle" class="nav-toggle">
+    <label for="nav-toggle" class="nav-hamburger" aria-label="Toggle navigation">&#9776;</label>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/walkforward">Walkforward</a>
+      <a href="/train">Train</a>
+      <a href="/universe">Universe</a>
+      <a href="/news">News</a>
+      <a href="/download">Download</a>
+      <a href="/execute">Execution</a>
+      <a href="/analyze">Analyze</a>
+      <a href="/arena">Arena</a>
+    </nav>
+    <a class="theme-toggle"
+       href="{{ request.url.path }}?theme={{ 'classic' if theme == 'lab' else 'lab' }}">
+      Theme: {{ 'Lab' if theme == 'lab' else 'Classic' }} &#8646;
+    </a>
+  </header>
+  <main>
+    {% if message %}
+      <div class="alert success">{{ message }}</div>
+    {% endif %}
+    {% if error %}
+      <div class="alert error">{{ error }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>
+    <small>Runs locally. Protect access before deploying to the internet.</small>
+  </footer>
+</body>
+</html>

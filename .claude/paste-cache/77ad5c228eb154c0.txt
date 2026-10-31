@@ -1,0 +1,64 @@
+Use the Opus model for this task specifically, not the default routing — this
+is cross-cutting creative/design judgment across the whole project, which is
+exactly the kind of work CLAUDE.md already reserves for Opus rather than Sonnet.
+
+Goal: A full creative and game-feel audit of this project, producing a
+prioritized, categorized backlog of design improvements — not code changes,
+not one feature, a design document I can react to and then feed into /idea
+one item at a time.
+
+Do not interrogate me with clarifying questions before starting. I don't have
+strong opinions yet on how this genre of game should look and feel — that's
+the point of this audit. Read the actual codebase, any existing plan
+documents, README, and git history to ground every recommendation in what
+this project actually is, then use your own judgment about what "good" looks
+like for a top-down, conversation-driven, LLM-NPC town game specifically —
+not generic game-polish advice that could apply to anything.
+
+Ground every recommendation in a real, named, findable source — a specific
+game, a GDC talk, a published design framework, or a usability heuristic —
+not generic best-practice phrasing. Web-search as needed rather than relying
+only on your own training. Specifically:
+- For game feel / "juice" critiques, ground in Steve Swink's Game Feel
+  framework and/or the "Juice It or Lose It" GDC talk (Jonasson & Purho).
+- For menu/UI/dialogue-flow critiques, ground in Nielsen Norman Group
+  usability heuristics where applicable.
+- For genre/pacing comparisons, name specific comparable games (e.g.
+  Stardew Valley and Animal Crossing for town pacing, Oxenfree and Night in
+  the Woods for dialogue-as-core-mechanic UX, Obra Dinn or Her Story if the
+  investigation angle is relevant) and say concretely what they do that
+  this project currently doesn't, not just that they're good examples.
+Every recommendation should be able to answer "compared to what, and where
+did that come from" — if you can't name a source, say the recommendation is
+your own judgment call explicitly, rather than presenting it with the same
+confidence as a sourced one.
+
+Cover, as separate sections:
+1. Visual style and art direction — cohesion, what's currently placeholder
+   vs. intentional, what a stronger visual identity would look like given
+   the existing size-contract and socket systems already in place.
+2. Game feel / "juice" — feedback on player actions, animation weight,
+   camera behavior, UI responsiveness — the small polish details that
+   separate "functional" from "satisfying" in this genre.
+3. UX and menu/dialogue flow — is the conversation interface actually
+   pleasant to use repeatedly, given that talking to NPCs is the core loop
+   here, not a side activity.
+4. Pacing and progression — what makes a town worth continuing to explore
+   past the first ten minutes; reference how other conversation-driven or
+   town-sim games handle this, and name what you're drawing on.
+5. Atmosphere and narrative texture — environmental storytelling,
+   ambient detail, anything that makes the world feel authored rather than
+   assembled.
+
+For each recommendation: state what's true now, what you'd change, why it
+matters specifically for THIS game (not a generic best-practice), and how
+it's sized (S/M/L) so I can gauge effort before committing to it.
+
+Be honest and specific rather than diplomatically vague — if something is
+currently weak, say so plainly. I'd rather get a real assessment than a
+softened one.
+
+Output: save this as docs/design/GAME_FEEL_AUDIT.md, structured so each
+recommendation could become its own /idea prompt later without further
+scoping work. Do not implement anything — this is audit and recommendation
+only.

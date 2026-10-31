@@ -1,0 +1,102 @@
+"""Draft PR for the sandbox milestone; close #109-#114."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Milestone #13 — a sandbox mode where the player builds maps from the
+game's own pieces, places NPCs from BOTH character pools, saves them as
+human-readable JSON, and plays them with dialogue fully working. Zero
+new runtime systems: placed pieces compile to normal `Building` rows, so
+collision (City) and rendering (Assets) are the existing paths. One
+atomic commit per issue.
+
+**#109 data contract** (`4d1dd03`) — 20-piece catalog (one data row per
+piece), version-gated map JSON (strict integer tiles: off-grid is
+impossible by construction; byte-stable round-trip), `validateMap`
+returning EVERY problem with retry-feedback-quality messages (the LLM
+world-gen plan reuses them verbatim), and `buildCity` via a new
+`City::fromBuildings` factory. Sandbox cities carry `hasStreets()=false`.
+
+**#110 repopulation seam** (`b4149dc`) — `World::loadCity` swaps
+contents in place (World can't be reassigned; the world bus deliberately
+survives); main's town spawning extracts into `spawnTownRoster` /
+`resetNpcSideArrays`. Town↔sandbox↔town round-trip pinned by test.
+
+**#111 asset identity** (`ce6230a`) — instance-suffixed ids
+(`bakery#2`) resolve base assets everywhere (model, size spec, and the
+fountain composite dispatch — the last one caught by a fixture
+screenshot rendering the fountain as a hashed generic building);
+`--map <file>` boots a fixture headlessly; renderer skips the authored
+downtown road/slab pass for sandbox cities.
+
+**#112 editor** (`4d787eb`) — tilted pan/zoom camera, mouse unprojected
+to the grid with a ghost of the current piece drawn through the NORMAL
+building paths (green/red by live validator verdict), click place /
+right-click delete / [ ] cycle, P to play (spawning at the first clear
+spot), Escape saves + restores the town. Menu gains a Sandbox page
+(logged v1 cut: New auto-names maps `map-N`; no name text field).
+
+**#113 NPC placement** (`4125982`) — `resolvePlacedNpc` (core, tested)
+is the one spawn door: `persona:<stem>` from the roster,
+`character:<id>` from the store, placement position/facing, schedules
+CLEARED (town coordinates are nonsense in custom maps — logged). Tab
+switches piece/NPC placement; ghosts are the character's real look.
+
+**#114 QA gate** (`fb3e0db`) — `--map` also spawns placed NPCs;
+visual-qa subagent verdict on the fixture village: **PASS** (real
+models at downtown-consistent scale, composite fountain, both placed
+NPCs matched to their authored looks, correct human-vs-doorway
+proportions). One finding, not a regression: the hot-dog cart resolves
+to the same generic crate it already uses downtown.
+
+## Verification
+- `make -C tests test` green at every commit; final **188 cases /
+  31,953 assertions** (format round-trip, all validator classes,
+  buildCity collision-parity, loadCity round-trip, placement
+  resolution).
+- Fixture screenshots at each step; QA set in
+  `docs/qa/screenshots/sandbox/` (local, gitignored).
+
+## Needs human verification (menu/mouse input isn't headless)
+- Editor FEEL: pan/zoom, ghost snapping, place/delete, Tab and [ ]
+  cycling, the Sandbox menu page.
+- Play-mode dialogue with a placed NPC (LLM present).
+
+## Notes
+- Base is `dev` (the consolidation line, PR #130). Merge order:
+  #130 → this. Do not merge; review only.
+- The map JSON is the LLM world-generation output contract (milestone
+  #16); its validator errors are written to be model retry feedback.
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="feat: sandbox map editor — build, populate, and play custom maps (#109-#114)",
+           body=BODY, base="dev", head="feature/sandbox-map-editor", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in range(109, 115):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/sandbox-map-editor`. Draft PR #{pr.number} open for review (base: dev). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: closed -> PR #{pr.number}")
+print("done")

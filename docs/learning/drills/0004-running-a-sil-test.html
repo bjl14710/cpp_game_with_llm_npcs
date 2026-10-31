@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drill 0004 — Running a Complete SIL Test</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0a0e17;--surf:#111827;--surf2:#1f2937;--surf3:#374151;
+  --accent:#34d399;--blue:#60a5fa;--yellow:#fbbf24;--red:#f87171;
+  --orange:#fb923c;--purple:#a78bfa;
+  --text:#d1fae5;--dim:#6b7280;--border:#1f2937;--code:#060a0f;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:#e5e7eb;font-size:15px;line-height:1.68;min-height:100vh}
+.screen{display:none;max-width:800px;margin:0 auto;padding:2rem 1.5rem 4rem}
+.screen.active{display:block}
+
+/* ── start ── */
+.hd{text-align:center;margin-bottom:2rem}
+.lbl{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.15em;
+     text-transform:uppercase;margin-bottom:.45rem}
+.ttl{font-size:2rem;color:#fff;margin-bottom:.4rem}
+.sub{color:var(--accent);font-size:.95rem;margin-bottom:.3rem}
+
+/* pipeline mini */
+.mini-pipe{display:flex;align-items:center;justify-content:center;
+           flex-wrap:wrap;gap:.4rem;margin:1.3rem 0 1.7rem}
+.mp{font-family:var(--mono);font-size:.75rem;padding:.3rem .7rem;
+    border-radius:4px;border:1px solid var(--border)}
+.mp.c{border-color:#7c3aed;color:#c4b5fd;background:rgba(124,58,237,.1)}
+.mp.p{border-color:var(--accent);color:var(--accent);background:rgba(52,211,153,.08)}
+.mp.r{border-color:var(--blue);color:var(--blue);background:rgba(96,165,250,.08)}
+.mp.d{border-color:var(--yellow);color:var(--yellow);background:rgba(251,191,36,.08)}
+.arr{color:var(--dim);font-size:1rem}
+
+.chips{display:flex;flex-wrap:wrap;gap:.55rem;justify-content:center;margin:1.2rem 0}
+.chip{font-family:var(--mono);font-size:.8rem;padding:.35rem .85rem;
+      border:1px solid var(--border);border-radius:20px;cursor:pointer;
+      background:var(--surf);color:var(--dim);user-select:none;transition:all .15s}
+.chip.on{border-color:var(--accent);color:var(--accent);background:rgba(52,211,153,.08)}
+.chip.all{border-color:var(--yellow);color:var(--yellow)}
+.chip.all.on{background:rgba(251,191,36,.07)}
+.smeta{text-align:center;color:var(--dim);font-size:.85rem;margin-bottom:.8rem}
+.shuf{display:flex;align-items:center;justify-content:center;gap:.65rem;
+      margin-bottom:1.3rem;font-size:.86rem;color:var(--dim)}
+.tog{position:relative;display:inline-block;width:36px;height:20px}
+.tog input{opacity:0;width:0;height:0}
+.sl{position:absolute;inset:0;background:var(--surf2);border-radius:20px;cursor:pointer;transition:background .2s}
+.sl:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;
+           background:#fff;border-radius:50%;transition:transform .2s}
+input:checked+.sl{background:var(--accent)}
+input:checked+.sl:before{transform:translateX(16px)}
+
+/* ── question ── */
+.qhdr{display:flex;align-items:center;gap:.8rem;margin-bottom:1.4rem;flex-wrap:wrap}
+.qnum{font-family:var(--mono);font-size:.78rem;color:var(--dim)}
+.pbar{flex:1;height:5px;background:var(--surf2);border-radius:3px;min-width:80px}
+.pfill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+.ctag{font-family:var(--mono);font-size:.7rem;padding:.18rem .55rem;
+      border:1px solid var(--border);border-radius:12px;color:var(--dim)}
+.ttag{font-family:var(--mono);font-size:.7rem;padding:.18rem .55rem;border-radius:12px}
+.ttag.mc{background:rgba(96,165,250,.12);color:var(--blue)}
+.ttag.wr{background:rgba(251,146,60,.12);color:var(--orange)}
+
+.qtxt{font-size:1.05rem;font-weight:600;color:#fff;margin-bottom:1rem;line-height:1.52}
+pre.snip{background:var(--code);border:1px solid var(--border);border-radius:6px;
+         padding:.85rem 1.1rem;overflow-x:auto;font-family:var(--mono);
+         font-size:.82rem;line-height:1.65;margin-bottom:1rem;display:none}
+.cm{color:#2d4255;font-style:italic}.kw{color:#a78bfa}.fn{color:#34d399}
+.str{color:#86efac}.cls{color:#fbbf24}.at{color:#93c5fd}.num{color:#fca5a5}
+.op{color:#6b7280}
+
+/* mc */
+.opts{list-style:none}
+.opts li{background:var(--surf);border:1px solid var(--border);border-radius:5px;
+         padding:.52rem .9rem;margin-bottom:.42rem;cursor:pointer;user-select:none;
+         transition:border-color .13s,background .13s;font-size:.9rem}
+.opts li:hover:not(.lk){border-color:var(--accent);background:rgba(52,211,153,.07)}
+.opts li:focus{outline:2px solid var(--accent);outline-offset:2px}
+.opts li.ok{border-color:var(--accent);background:rgba(52,211,153,.09);color:var(--accent)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.08);color:var(--red)}
+.opts li.lk{cursor:default}
+.mfb{margin-top:.6rem;font-size:.87rem;padding:.42rem .8rem;border-radius:4px;display:none}
+.mfb.ok{background:rgba(52,211,153,.09);color:var(--accent);border:1px solid rgba(52,211,153,.28)}
+.mfb.no{background:rgba(248,113,113,.08);color:var(--red);border:1px solid rgba(248,113,113,.28)}
+
+/* written */
+textarea{width:100%;min-height:108px;background:var(--surf);border:1px solid var(--border);
+         border-radius:6px;padding:.7rem .9rem;color:#e5e7eb;font-family:inherit;
+         font-size:.92rem;resize:vertical;line-height:1.55}
+textarea:focus{outline:2px solid var(--accent)}
+.wacts{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+.kwres{margin-top:.8rem;display:none}
+.tally{font-weight:700;margin-bottom:.4rem;font-size:.9rem}
+.kwchips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.5rem}
+.kc{font-family:var(--mono);font-size:.75rem;padding:.18rem .5rem;border-radius:12px}
+.kc.h{background:rgba(52,211,153,.12);color:var(--accent);border:1px solid rgba(52,211,153,.28)}
+.kc.m{background:rgba(248,113,113,.1);color:var(--red);border:1px solid rgba(248,113,113,.28)}
+.knote{color:var(--dim);font-size:.78rem}
+.modans{display:none;margin-top:.8rem;background:var(--surf);border:1px solid var(--border);
+        border-radius:6px;padding:.8rem 1rem;font-size:.9rem;line-height:1.65}
+.modlbl{font-family:var(--mono);font-size:.7rem;color:var(--dim);text-transform:uppercase;
+        letter-spacing:.08em;margin-bottom:.35rem}
+.sr{display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
+    font-size:.85rem;color:var(--dim);margin-top:.65rem}
+
+/* nav / buttons */
+.nav{display:flex;gap:.55rem;margin-top:1.4rem;flex-wrap:wrap;align-items:center}
+.spc{flex:1}
+.btn{font-family:var(--mono);font-size:.83rem;padding:.45rem 1rem;
+     border:1px solid transparent;border-radius:5px;cursor:pointer;
+     transition:opacity .15s;user-select:none}
+.btn:focus{outline:2px solid var(--accent);outline-offset:2px}
+.pri{background:var(--accent);color:#000}.pri:hover{opacity:.82}
+.sec{background:var(--surf2);color:#e5e7eb;border-color:var(--border)}.sec:hover{border-color:var(--accent)}
+.grn{background:var(--accent);color:#000}
+.gld{background:var(--yellow);color:#000}
+.red{background:var(--red);color:#fff}
+.sm{padding:.32rem .7rem;font-size:.77rem}
+
+/* results */
+.rhdr{text-align:center;margin-bottom:1.8rem}
+.sbig{font-size:3.4rem;font-family:var(--mono);color:var(--accent)}
+.slbl{color:var(--dim);font-size:.88rem;margin-top:.25rem}
+.rcols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.4rem 0}
+@media(max-width:520px){.rcols{grid-template-columns:1fr}}
+.rcard{background:var(--surf);border:1px solid var(--border);border-radius:7px;padding:.9rem 1.1rem}
+.rcard h3{font-family:var(--mono);font-size:.78rem;color:var(--dim);
+          text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem}
+.miss{background:var(--surf2);border-radius:4px;padding:.38rem .65rem;
+      margin-bottom:.38rem;font-size:.86rem}
+.mcorr{color:var(--accent);font-family:var(--mono);font-size:.8rem;display:block;margin-top:.2rem}
+</style>
+</head>
+<body>
+
+<!-- ═══ START ═══ -->
+<div id="S" class="screen active">
+<div class="hd">
+  <div class="lbl">Drill 0004 · Active Recall</div>
+  <div class="ttl">Running a SIL Test</div>
+  <div class="sub">20 questions — pipeline · parser · routing · SCPI flow · modes · traps</div>
+</div>
+<div class="mini-pipe">
+  <div class="mp c">firmware source</div><div class="arr">→</div>
+  <div class="mp p">CodeParser</div><div class="arr">→</div>
+  <div class="mp r">_run_commands()</div><div class="arr">→</div>
+  <div class="mp d">Device.process()</div>
+</div>
+<div class="chips" id="chips">
+  <div class="chip all on" data-ch="all">⚡ All</div>
+  <div class="chip on" data-ch="pipeline">Pipeline</div>
+  <div class="chip on" data-ch="parser">Parser &amp; ParsedCommand</div>
+  <div class="chip on" data-ch="routing">Routing &amp; broadcast</div>
+  <div class="chip on" data-ch="scpi">SCPI flow</div>
+  <div class="chip on" data-ch="modes">Snippet vs project</div>
+  <div class="chip on" data-ch="traps">Traps &amp; gotchas</div>
+</div>
+<p class="smeta" id="smeta">20 questions selected</p>
+<div class="shuf">Shuffle
+  <label class="tog"><input type="checkbox" id="sh" checked><span class="sl"></span></label>
+</div>
+<div style="text-align:center">
+  <button class="btn pri" onclick="go()" style="font-size:1rem;padding:.65rem 2rem">Begin →</button>
+</div>
+</div>
+
+<!-- ═══ QUESTION ═══ -->
+<div id="Q" class="screen">
+<div class="qhdr">
+  <span class="qnum" id="qn">Q 1 / 20</span>
+  <div class="pbar"><div class="pfill" id="pf" style="width:0%"></div></div>
+  <span class="ctag" id="ct"></span>
+  <span class="ttag mc" id="tt">MC</span>
+</div>
+<div class="qtxt" id="qt"></div>
+<pre class="snip" id="qs"></pre>
+<div id="MA" style="display:none"><ul class="opts" id="mo"></ul><div class="mfb" id="mf"></div></div>
+<div id="WA" style="display:none">
+  <textarea id="wa" placeholder="Type your answer here…"></textarea>
+  <div class="wacts">
+    <button class="btn sec sm" onclick="chkW()">Check keywords</button>
+    <button class="btn sec sm" onclick="showM()">Show model answer</button>
+  </div>
+  <div class="kwres" id="kr">
+    <div class="tally" id="kt"></div>
+    <div class="kwchips" id="kc"></div>
+    <div class="knote">⚠ Keyword check is fuzzy — judge honestly against the model answer.</div>
+  </div>
+  <div class="modans" id="md"><div class="modlbl">Model answer</div><div id="mt"></div></div>
+  <div class="sr" id="sr">
+    Rate yourself:
+    <button class="btn grn sm" onclick="rate('k')">✓ Knew it</button>
+    <button class="btn red sm" onclick="rate('r')">↺ Needs review</button>
+  </div>
+</div>
+<div class="nav">
+  <button class="btn sec sm" id="bp" onclick="prev()">← Prev</button>
+  <div class="spc"></div>
+  <button class="btn pri sm" id="bn" onclick="next()">Next →</button>
+  <button class="btn gld sm" id="bf" style="display:none" onclick="results()">Results</button>
+</div>
+</div>
+
+<!-- ═══ RESULTS ═══ -->
+<div id="R" class="screen">
+<div class="rhdr">
+  <div class="sbig" id="rb">—</div>
+  <div class="slbl" id="rl"></div>
+</div>
+<div class="rcols">
+  <div class="rcard"><h3>MC misses</h3><div id="rm"><em style="color:var(--dim);font-size:.86rem">None!</em></div></div>
+  <div class="rcard"><h3>Written — needs review</h3><div id="rw"><em style="color:var(--dim);font-size:.86rem">None flagged.</em></div></div>
+</div>
+<div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:.8rem">
+  <button class="btn sec" onclick="rev()">Review missed only</button>
+  <button class="btn pri" onclick="location.reload()">Restart</button>
+</div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// QUESTION BANK  (20 questions)
+// ════════════════════════════════════════════════════════════════
+const BANK = [
+
+// ─── PIPELINE ────────────────────────────────────────────────
+{id:'pl1',ch:'pipeline',type:'w',
+ q:'Name the four stages of the SIL test pipeline in order, giving the class or method name for each stage.',
+ c:[{l:'firmware source (input)',t:['source','firmware','c code','c/c++','python code']},
+    {l:'CodeParser (extracts SCPI calls)',t:['codeparser','code_parser','base_parser','parser']},
+    {l:'_run_commands() / CodeInputBlock (routes)',t:['_run_commands','run_commands','codeinputblock','route']},
+    {l:'Device.process() (simulates instrument)',t:['device.process','process','instrument','device']}],
+ m:`1. Firmware source — the raw C, C++, or Python code you paste (input).
+2. CodeParser (code_parser/base_parser.py) — extracts SCPI command strings into ParsedCommand objects.
+3. CodeInputBlock._run_commands() (gui/blocks/code_input_block.py:163) — iterates parsed commands and broadcasts each to every connected instrument block.
+4. Device.process(cmd) — the simulated instrument (e.g. PowerSupply, Oscilloscope) receives the command string, looks it up in its handler table, and returns a response.`
+},
+
+{id:'pl2',ch:'pipeline',type:'mc',
+ q:'Which class acts as the bridge between the parsed firmware commands and the instrument device layer?',
+ opts:[
+  {t:'CodeInputBlock — its _run_commands() sends each ParsedCommand to every connected block via block.send_command().',c:true,
+   w:'Correct. CodeInputBlock holds the list of ParsedCommand objects and is wired to instrument blocks via OUT ports. _run_commands() does the fan-out.'},
+  {t:'ScpiParser — it translates raw strings into ScpiCommand objects that the device layer consumes.',c:false,
+   w:'ScpiParser parses individual SCPI command strings inside the device layer. It doesn\'t hold firmware commands or know about blocks.'},
+  {t:'CanvasScene — it routes signals between blocks using its _wires dictionary.',c:false,
+   w:'CanvasScene manages the visual wire graph and emits wire_added/wire_removed signals. It does not participate in SCPI command routing.'},
+  {t:'CodeParser — after extraction it calls device.process() directly for each ParsedCommand.',c:false,
+   w:'CodeParser only extracts SCPI strings into ParsedCommand objects. It has no knowledge of blocks or devices — that routing is CodeInputBlock\'s job.'},
+ ]
+},
+
+{id:'pl3',ch:'pipeline',type:'w',
+ q:'What is the difference between ParsedCommand (from CodeParser) and ScpiCommand (from ScpiParser)? What transformation happens between them?',
+ c:[{l:'ParsedCommand holds the raw extracted string + source metadata',t:['parsedcommand','raw string','source','line_number','metadata','firmware']},
+    {l:'ScpiCommand holds the normalised path, is_query flag, and params list',t:['scpicommand','path','is_query','params','normalise','upcase']},
+    {l:'Device.process() calls ScpiParser.parse() to turn the string into ScpiCommand',t:['device.process','scpiparser','parse','process','turns into','converts']}],
+ m:`ParsedCommand (base_parser.py) is a dataclass holding: scpi_command (the raw extracted string, e.g. "VOLT 5.0"), line_number, source_language, context, is_query, variable_name. It is about WHERE the command came from in the firmware source.
+ScpiCommand (scpi/parser.py) is what the device layer works with: path (e.g. "VOLT" normalised/uppercased), is_query (bool), params (e.g. ["5.0"]).
+The transformation: when device.process(cmd) is called with the raw string, it internally calls ScpiParser.parse(cmd) which splits on ";", strips "?", uppercases the path, and splits out the parameter tokens.`
+},
+
+// ─── PARSER ──────────────────────────────────────────────────
+{id:'pa1',ch:'parser',type:'w',
+ q:'List three C/C++ function call patterns that CodeParser recognises (from C_WRITE_PATTERNS). For each, give the exact function name.',
+ c:[{l:'viWrite or viPrintf',t:['viwrite','viprintf','vi_write','vi_printf']},
+    {l:'visa_write',t:['visa_write']},
+    {l:'scpi_send / ibwrt / GPIB_write',t:['scpi_send','ibwrt','gpib_write','instrument_write','cmd_write']}],
+ m:`From C_WRITE_PATTERNS in base_parser.py, recognised C/C++ write functions include:
+• viWrite / viPrintf
+• visa_write
+• scpi_send
+• send_command
+• ibwrt
+• GPIB_write
+• instrument_write
+• scpi_write
+• cmd_write
+• fprintf / sprintf (with SCPI-like literal strings)
+Any of these (plus the C_QUERY_PATTERNS: viQueryF, visa_query, scpi_query, query_command) will be extracted if the string argument passes the _looks_like_scpi() heuristic.`
+},
+
+{id:'pa2',ch:'parser',type:'mc',
+ q:'What does _looks_like_scpi() check, and which string would it reject?',
+ snip:`<span class="cm"># base_parser.py</span>
+SCPI_HEURISTIC = re.compile(
+    <span class="str">r'^(\*[A-Z]+|[A-Z][A-Z0-9_]+(?::[A-Z0-9_]+)*)[\s?]'</span>,
+    re.IGNORECASE
+)
+
+<span class="kw">def</span> <span class="fn">_looks_like_scpi</span>(self, s: <span class="cls">str</span>) -> <span class="cls">bool</span>:
+    s = s.strip()
+    <span class="kw">if not</span> s <span class="op">or</span> len(s) < <span class="num">2</span>: <span class="kw">return False</span>
+    <span class="kw">return bool</span>(self.SCPI_HEURISTIC.match(s + <span class="str">" "</span>))`,
+ opts:[
+  {t:'"Hello, World!" — starts with a capital but is not SCPI-structured (no : separator or trailing ?).',c:true,
+   w:'Correct. The heuristic matches strings starting with *WORD or WORD[: or space or ?]. "Hello, World!" starts with H followed by lowercase — the pattern requires an uppercase word followed by colon, space, or ?, so it fails.'},
+  {t:'"*IDN?" — starts with * followed by uppercase letters.',c:false,
+   w:'*IDN? matches the first alternative: ^\\*[A-Z]+. It would be recognised as SCPI.'},
+  {t:'"MEAS:VOLT:DC?" — uppercase word followed by colons and a query suffix.',c:false,
+   w:'MEAS:VOLT:DC? matches [A-Z][A-Z0-9_]+(?::[A-Z0-9_]+)* perfectly and ends with ?. It would be recognised.'},
+  {t:'"VOLT 5.0" — uppercase word followed by a space and a number.',c:false,
+   w:'VOLT 5.0 matches: VOLT is [A-Z][A-Z0-9_]+ and the space that follows is the \\s in [\\s?]. It would be recognised as SCPI.'},
+ ]
+},
+
+{id:'pa3',ch:'parser',type:'w',
+ q:'Name the six fields of ParsedCommand and what each stores.',
+ snip:`<span class="at">@dataclass</span>
+<span class="kw">class</span> <span class="cls">ParsedCommand</span>:
+    scpi_command: <span class="cls">str</span>
+    line_number:  <span class="cls">int</span>
+    source_language: <span class="cls">str</span>
+    context:  <span class="cls">str</span> = <span class="str">""</span>
+    is_query: <span class="cls">bool</span> = <span class="op">False</span>
+    variable_name: <span class="cls">Optional</span>[<span class="cls">str</span>] = <span class="op">None</span>`,
+ c:[{l:'scpi_command — the extracted SCPI string',t:['scpi_command','command string','extracted']},
+    {l:'line_number — source line where it appeared',t:['line_number','line number','lineno']},
+    {l:'source_language — "c" or "python"',t:['source_language','language','c" or "python','c or python']},
+    {l:'context — first 80 chars of the original line',t:['context','80','original line','surrounding']},
+    {l:'is_query — True if ends with ?',t:['is_query','query','ends with ?','bool']},
+    {l:'variable_name — the variable assigned the query result',t:['variable_name','variable','assigned','result']}],
+ m:`scpi_command (str) — the extracted SCPI string, e.g. "VOLT 5.0" or "MEAS:VOLT:DC?"
+line_number (int) — line in the source file where the call appeared
+source_language (str) — "c" or "python"
+context (str) — up to the first 80 characters of the original source line (for display)
+is_query (bool) — True if the command ends with "?" (it expects a response)
+variable_name (Optional[str]) — for query assignments like "result = viQueryF(...)", stores "result"; None for writes`
+},
+
+{id:'pa4',ch:'parser',type:'mc',
+ q:'When does CodeParser._parse_python() also run an AST-based extraction pass, and what does it find that regex alone might miss?',
+ snip:`<span class="cm"># base_parser.py:_parse_python()</span>
+<span class="kw">try</span>:
+    ast_cmds = self.<span class="fn">_parse_python_ast</span>(code)
+    cmds.extend(ast_cmds)
+<span class="kw">except</span> SyntaxError:
+    <span class="kw">pass</span>`,
+ opts:[
+  {t:'Always — after the regex pass it walks the Python AST for string constants that look like SCPI, catching literals the regex missed due to indentation or multi-line strings.',c:true,
+   w:'Correct. _parse_python_ast() uses ast.parse() + ast.walk() to find ast.Constant nodes whose value is a string passing _looks_like_scpi(). This catches string literals used outside of recognised call patterns.'},
+  {t:'Only when language is set to "auto" — when the user sets "python" explicitly, AST is skipped as redundant.',c:false,
+   w:'The AST pass runs after every regex pass in _parse_python(), regardless of how the language was detected.'},
+  {t:'Only when the regex pass returns zero results — the AST pass is a fallback for completely unrecognised code styles.',c:false,
+   w:'The AST pass always runs (try/except SyntaxError). It supplements the regex results, not replaces them.'},
+  {t:'Only for Python 3.9+ — on earlier Python versions the ast.Constant node type is not available.',c:false,
+   w:'ast.Constant has been available since Python 3.8 (it replaced ast.Str). The code doesn\'t version-guard it.'},
+ ]
+},
+
+// ─── ROUTING ─────────────────────────────────────────────────
+{id:'ro1',ch:'routing',type:'w',
+ q:'Write out _run_commands() logic in plain English, step by step. What does it do with each parsed command and each connected block?',
+ snip:`<span class="kw">def</span> <span class="fn">_run_commands</span>(self) -> <span class="cls">None</span>:
+    <span class="kw">if not</span> self._parsed_commands:
+        <span class="kw">return</span>
+    connected_blocks = self.<span class="fn">_get_connected_blocks</span>()
+    <span class="kw">for</span> parsed_cmd <span class="kw">in</span> self._parsed_commands:
+        <span class="kw">for</span> block <span class="kw">in</span> connected_blocks:
+            block.<span class="fn">send_command</span>(parsed_cmd.scpi_command)`,
+ c:[{l:'exits early if no parsed commands',t:['early return','no parsed','if not','empty','nothing to send']},
+    {l:'gets list of all connected instrument blocks',t:['_get_connected_blocks','connected','instrument block','all connected']},
+    {l:'nested loop: every command × every block = broadcast',t:['nested','every command','every block','broadcast','fan-out','all blocks']}],
+ m:`1. If _parsed_commands is empty, return immediately — nothing to send.
+2. Call _get_connected_blocks() to get a list of all instrument blocks wired to any of the three OUT ports.
+3. Outer loop: for each ParsedCommand in the list (in order, as extracted).
+4. Inner loop: for each connected block, call block.send_command(parsed_cmd.scpi_command).
+Result: every parsed command is broadcast to every connected instrument. There is no routing by instrument type or by which port the wire is on — it's a full fan-out.`
+},
+
+{id:'ro2',ch:'routing',type:'mc',
+ q:'Code Input OUT1 is wired to an Oscilloscope. OUT2 is wired to a Power Supply. OUT3 is unused. Your firmware only talks to the Power Supply. What happens when you run parsed commands?',
+ opts:[
+  {t:'All commands go to both the Oscilloscope and the Power Supply — _run_commands broadcasts to all connected blocks regardless of which OUT port the wire uses.',c:true,
+   w:'Correct. _get_connected_blocks() iterates all three OUT ports and adds any connected block to the list. Both instruments end up in the list, so both receive every command.'},
+  {t:'Commands go only to the Power Supply because it\'s on OUT2 and the firmware is directed at OUT2.',c:false,
+   w:'There is no port-based routing in _run_commands(). It doesn\'t know or care which OUT port connects to which instrument.'},
+  {t:'Commands go only to OUT1 (Oscilloscope) because it has the lowest port index.',c:false,
+   w:'_get_connected_blocks() collects ALL connected blocks, not just the first one. Port index doesn\'t determine routing priority.'},
+  {t:'An error is raised because sending a Power Supply command to an Oscilloscope is invalid.',c:false,
+   w:'Silmulator doesn\'t raise on unknown commands. The Oscilloscope will receive the command and silently ignore it (return empty string from its handler lookup).'},
+ ]
+},
+
+{id:'ro3',ch:'routing',type:'w',
+ q:'What does _get_connected_blocks() return and how does it find the blocks? Walk through its logic.',
+ snip:`<span class="kw">def</span> <span class="fn">_get_connected_blocks</span>(self) -> List[<span class="cls">BaseBlock</span>]:
+    blocks = []
+    <span class="kw">for</span> port <span class="kw">in</span> self._ports:
+        <span class="kw">if</span> port.connected_to:
+            parent = port.connected_to.parent_block
+            <span class="kw">if</span> parent <span class="kw">is not</span> self:
+                blocks.append(parent)
+    <span class="kw">return</span> blocks`,
+ c:[{l:'iterates all ports (OUT1, OUT2, OUT3)',t:['port','_ports','out1','out2','out3','iterate']},
+    {l:'checks if port.connected_to is set (wire present)',t:['connected_to','wire','connected']},
+    {l:'gets parent_block of the peer port',t:['parent_block','parent','peer']},
+    {l:'excludes self (prevents self-loop)',t:['is not self','self','exclude','not self']}],
+ m:`_get_connected_blocks() iterates self._ports (the three OUT ports: OUT1, OUT2, OUT3).
+For each port: if port.connected_to is not None (i.e. a wire exists), it gets connected_to.parent_block — the block on the other end of that wire.
+The guard "if parent is not self" prevents a self-loop edge case where OUT1 is somehow wired to another port on the same block.
+The result is a list of all instrument blocks that any OUT port is wired to. If OUT1→Oscilloscope and OUT2→PowerSupply, the result is [Oscilloscope, PowerSupply].`
+},
+
+// ─── SCPI FLOW ───────────────────────────────────────────────
+{id:'sc1',ch:'scpi',type:'w',
+ q:'Trace what happens to the string "MEAS:VOLT:DC?" as it travels through ScpiParser.parse(). What does each step produce?',
+ snip:`<span class="cm"># scpi/parser.py</span>
+<span class="at">@dataclass</span>
+<span class="kw">class</span> <span class="cls">ScpiCommand</span>:
+    path:     <span class="cls">str</span>         <span class="cm"># e.g. "MEAS:VOLT:DC"</span>
+    is_query: <span class="cls">bool</span>
+    params:   List[<span class="cls">str</span>]`,
+ c:[{l:'split_compound on ";" (produces one part)',t:['split','split_compound','semicolon',';']},
+    {l:'strip "?" → path = "MEAS:VOLT:DC", is_query = True',t:['strip','?','is_query','path','meas:volt:dc']},
+    {l:'normalize_header uppercases each segment',t:['normalize','uppercase','upper','header']},
+    {l:'params = [] (no parameters after the path)',t:['params','empty','no param','[]']}],
+ m:`1. split_compound("MEAS:VOLT:DC?") splits on ";". Only one segment, no compound — produces ["MEAS:VOLT:DC?"].
+2. _parse_single("MEAS:VOLT:DC?"): detects trailing "?" → is_query=True, strips it → header "MEAS:VOLT:DC".
+3. normalize_header("MEAS:VOLT:DC") splits on ":", uppercases each part, rejoins → "MEAS:VOLT:DC" (already uppercase here).
+4. No tokens after the header → params=[].
+Result: ScpiCommand(path="MEAS:VOLT:DC", is_query=True, params=[])`
+},
+
+{id:'sc2',ch:'scpi',type:'mc',
+ q:'ScpiParser.parse("VOLT 5.0; OUTP ON") is called. How many ScpiCommand objects does it return?',
+ opts:[
+  {t:'Two — split_compound() splits on ";", producing "VOLT 5.0" and "OUTP ON" as separate commands.',c:true,
+   w:'Correct. split_compound() iterates character by character, splitting on ";" outside quotes. The result is two segments → two _parse_single() calls → two ScpiCommand objects.'},
+  {t:'One — SCPI compound commands are combined into a single ScpiCommand with multiple params.',c:false,
+   w:'SCPI compound semantics mean each ";" is a separate command. split_compound() produces a list; each element is parsed independently.'},
+  {t:'Three — "VOLT", "5.0", and "OUTP ON" are each treated as separate commands.',c:false,
+   w:'Only ";" is the compound separator, not spaces. "VOLT 5.0" is one command: path=VOLT, params=["5.0"].'},
+  {t:'Zero — ScpiParser only accepts query commands (ending with ?); it discards write commands.',c:false,
+   w:'ScpiParser handles both writes and queries. is_query=False for "VOLT 5.0" and "OUTP ON"; they are returned as valid ScpiCommand objects.'},
+ ]
+},
+
+{id:'sc3',ch:'scpi',type:'w',
+ q:'A firmware query "result = viQueryF(session, "MEAS:VOLT:DC?")" is extracted. What value does the simulated Power Supply return for MEAS:VOLT:DC? and why is it not exactly 5.0?',
+ c:[{l:'returns ~5.00001 (set value + small Gaussian noise)',t:['5.00001','noise','gaussian','~5.0','1e-5','small noise']},
+    {l:'noise is intentional — mimics real instrument behavior',t:['intentional','design','real instrument','mimic','fidelity']}],
+ m:`The simulated Power Supply returns the value you set (5.0 via "VOLT 5.0") plus a small Gaussian noise term of approximately 1e-5 relative magnitude. For 5.0 V that's ~0.00001, giving something like 5.00001 or 4.99998.
+This is intentional — stated in the README under "Simulation fidelity": "Measurements return the configured/injected values plus a small Gaussian noise term (≈1e-5 relative), mimicking real instrument behavior." Real benchtop instruments have noise floors, digitisation error, and measurement uncertainty. The simulation adds this so your firmware's response-parsing code behaves the same way it would against real hardware.`
+},
+
+// ─── MODES ───────────────────────────────────────────────────
+{id:'mo1',ch:'modes',type:'w',
+ q:'Describe the two input modes for the Code Input block. For each: how do you activate it, what does it parse, and when would you use it?',
+ c:[{l:'Snippet: double-click, single buffer, quick experiments',t:['snippet','double-click','double click','single buffer','paste','quick']},
+    {l:'Project: right-click → Load project folder, parses all .c/.cpp/.py files',t:['project','right-click','load project','folder','all files','.c','.cpp','.py']}],
+ m:`Snippet mode: double-click the Code Input block → editor opens. Paste a single text buffer on the left. Click Parse to see extracted commands. Best for quick experiments, one-off command sequences, or testing a single function.
+Project mode: right-click → "Load project folder…" → choose a directory. The block parses every .c, .cpp, and .py file it finds in the tree, collecting SCPI calls in file/line order — the way a real SIL test driver would replay firmware execution. Best for full firmware trees (RTOS, flight software). "Refresh project" re-parses without reopening.`
+},
+
+{id:'mo2',ch:'modes',type:'mc',
+ q:'The Code Input block face shows "Files: 12/47". What do these two numbers represent?',
+ opts:[
+  {t:'"12/47" means 12 files were successfully parsed out of 47 total source files found in the project folder.',c:true,
+   w:'Correct. 47 is the total count of .c, .cpp, .py files found in the directory tree. 12 of them were actually parsed (the others may have no SCPI calls or encountered parse errors).'},
+  {t:'"12/47" means 12 SCPI commands were found across 47 total lines of code scanned.',c:false,
+   w:'SCPI calls found is shown separately as a third line. The "Files: X/Y" counter is about file counts, not command or line counts.'},
+  {t:'"12/47" means 12 OUT port connections are active out of a maximum of 47 supported.',c:false,
+   w:'The Code Input block has exactly 3 OUT ports. Files: X/Y is a file-count indicator for project mode.'},
+  {t:'"12/47" means 12 files are loaded so far; clicking Refresh will load the remaining 35.',c:false,
+   w:'All 47 files are discovered immediately on Load. The 12/47 split is parsed vs. total, not loaded vs. pending.'},
+ ]
+},
+
+{id:'mo3',ch:'modes',type:'w',
+ q:'In project mode, what does right-click → "Refresh project" do, and when is it useful?',
+ c:[{l:'re-parses all files in the folder without reopening the block',t:['re-parse','reparse','refresh','without reopening','without closing']},
+    {l:'useful after editing firmware source files',t:['edit','edited','firmware','changed','modify','source change']}],
+ m:`"Refresh project" calls _refresh_project() which re-runs the full project parse: re-discovers all .c/.cpp/.py files in the same root folder and re-extracts SCPI commands. This updates _parsed_commands and the block face display without the user having to close and reopen the block.
+It's useful during active firmware development: you edit a .c file, save it, switch back to Silmulator, right-click Refresh, and immediately re-run the updated command sequence without having to re-open the project folder picker.`
+},
+
+// ─── TRAPS ───────────────────────────────────────────────────
+{id:'tr1',ch:'traps',type:'mc',
+ q:'Your firmware C code has: sprintf(buf, "VOLT %f", voltage); visa_write(dev, buf);. What does CodeParser extract and why?',
+ opts:[
+  {t:'It extracts "VOLT %f" (the format string literal) because the parser matches string literals in the call, not the runtime value of variables.',c:true,
+   w:'Correct. The parser\'s regex matches the string inside visa_write(). Here the argument is buf (a variable), but sprintf(buf, "VOLT %f", ...) is also in C_WRITE_PATTERNS (sprintf), so the format string "VOLT %f" is what\'s extracted as the literal.'},
+  {t:'It extracts nothing — visa_write() with a variable argument (buf) is not matched by any pattern.',c:false,
+   w:'The sprintf pattern is in C_WRITE_PATTERNS and matches the "VOLT %f" format string. The parser extracts that literal even though the variable buf holds the final value at runtime.'},
+  {t:'It extracts "VOLT <value_of_voltage>" because the parser evaluates C expressions at parse time.',c:false,
+   w:'The parser is a heuristic regex tool, not a C interpreter. It cannot evaluate runtime variable values.'},
+  {t:'It extracts "VOLT 0.0" because the parser assumes uninitialized floats are zero.',c:false,
+   w:'The parser makes no assumptions about variable values. It matches string literals only.'},
+ ]
+},
+
+{id:'tr2',ch:'traps',type:'w',
+ q:'Parse produces zero results for C code with visa_write() calls. The language combo is on "auto". Walk through why this happens and give two fixes.',
+ c:[{l:'auto-detect may classify the code as Python, skipping C_WRITE_PATTERNS',t:['auto','detect','python','c_write','skip','classify']},
+    {l:'fix 1: set dropdown to "c" or "cpp"',t:['set language','dropdown','c" or "cpp','set to c','set dropdown']},
+    {l:'fix 2: add a C marker (#include) so auto-detection picks C',t:['#include','marker','include','auto detect','hint']}],
+ m:`Auto-detection in _detect_language() checks for #include, viWrite, ibwrt (→ cpp), "def " / "import " / ".write(" (→ python). If none of those markers are present in your snippet, it returns "auto" — which runs both C and Python parsers, but if the C patterns still fail to match, you get zero results.
+Fix 1: explicitly set the language dropdown to "c" or "cpp" — this routes directly to _parse_c() and its C_WRITE_PATTERNS.
+Fix 2: add a C marker at the top of the snippet (e.g. "#include <visa.h>") so _detect_language() returns "cpp" automatically.`
+},
+
+{id:'tr3',ch:'traps',type:'mc',
+ q:'You send a Power Supply SCPI command via the SCPI Console and observe a response of 5.00001 V instead of 5.0 V. This is NOT the same situation as "Run parsed commands" producing wrong values. What is different?',
+ opts:[
+  {t:'Both behave the same — the noise is added in the device layer regardless of whether the command came from Run or from the Console.',c:true,
+   w:'Correct. The Gaussian noise is applied in the device layer (power_supply.py) when MEAS:VOLT:DC? is processed. It doesn\'t matter whether the command arrived via _run_commands() or typed manually in the Console — the device layer adds the same noise.'},
+  {t:'The Console uses the C++ SCPI parser which adds noise; Run uses the Python fallback which does not.',c:false,
+   w:'Both paths call the same device.process() method. The SCPI parser (C++ or Python) has no knowledge of noise — noise is added in the measurement simulation inside the device class.'},
+  {t:'The Console path bypasses _run_commands() and calls device.process() directly, skipping the noise model.',c:false,
+   w:'The Console does call send_command() → device.process() directly, but the noise is inside device.process() itself. It can\'t be bypassed.'},
+  {t:'Run adds a rounding error when building the command string; the Console sends the string as-is.',c:false,
+   w:'_run_commands() passes parsed_cmd.scpi_command (the original string) to block.send_command() without modification. No rounding happens in the routing layer.'},
+ ]
+},
+
+{id:'tr4',ch:'traps',type:'w',
+ q:'You have two firmware functions: init_psu() with "VOLT 3.3; OUTP ON" and measure() with "MEAS:VOLT:DC?". You paste both into Snippet mode and click Parse then Run. What is the execution order of the extracted commands, and what potential issue does this cause?',
+ c:[{l:'order follows line order as extracted by the parser',t:['line order','file order','source order','extraction order','line_number']},
+    {l:'VOLT 3.3 and OUTP ON run before MEAS:VOLT:DC? (if init is first in source)',t:['before','order','volt first','init first']},
+    {l:'problem: interleaving if functions are mixed in source, or if Run is clicked before init commands are physically sent',t:['interleav','mix','out of order','single pass','no function call order']}],
+ m:`CodeParser extracts commands in line number order across the entire snippet. If init_psu() appears before measure() in the source, the order will be: "VOLT 3.3", "OUTP ON", "MEAS:VOLT:DC?" — which is correct.
+The risk: if the functions appear in the wrong order in the file, or if your firmware calls measure() before init_psu() at runtime (which the parser doesn't know), the extracted sequence won't match real execution. The parser follows source structure, not runtime call order. For complex firmware with conditional logic, loops, or function-pointer dispatch, the extracted sequence may differ significantly from what actually runs on hardware.`
+},
+
+]; // end BANK
+
+// ════════════════════════════════════════════════════════════════
+const CHS=['pipeline','parser','routing','scpi','modes','traps'];
+let active=new Set(CHS),qs=[],idx=0,saved={},mcR={},wR={};
+
+document.querySelectorAll('.chip:not(.all)').forEach(c=>{
+  c.addEventListener('click',()=>{
+    const ch=c.dataset.ch;
+    active.has(ch)?active.delete(ch):active.add(ch);
+    c.classList.toggle('on',active.has(ch));
+    document.querySelector('.chip.all').classList.toggle('on',active.size===CHS.length);
+    upMeta();
+  });
+});
+document.querySelector('.chip.all').addEventListener('click',()=>{
+  const allOn=active.size===CHS.length;
+  allOn?active.clear():CHS.forEach(c=>active.add(c));
+  document.querySelectorAll('.chip:not(.all)').forEach(c=>c.classList.toggle('on',!allOn));
+  document.querySelector('.chip.all').classList.toggle('on',!allOn);
+  upMeta();
+});
+function upMeta(){const n=BANK.filter(q=>active.has(q.ch)).length;document.getElementById('smeta').textContent=`${n} question${n===1?'':'s'} selected`;}
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function go(){qs=BANK.filter(q=>active.has(q.ch));if(document.getElementById('sh').checked)shuf(qs);if(!qs.length)return;idx=0;saved={};mcR={};wR={};show('Q');render();}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+function render(){
+  const q=qs[idx],n=qs.length;
+  document.getElementById('qn').textContent=`Q ${idx+1} / ${n}`;
+  document.getElementById('pf').style.width=((idx+1)/n*100)+'%';
+  document.getElementById('ct').textContent=q.ch;
+  const tt=document.getElementById('tt');tt.textContent=q.type==='mc'?'MC':'Written';tt.className='ttag '+(q.type==='mc'?'mc':'wr');
+  document.getElementById('qt').innerHTML=q.q;
+  const sn=document.getElementById('qs');if(q.snip){sn.style.display='block';sn.innerHTML=q.snip;}else sn.style.display='none';
+  document.getElementById('MA').style.display=q.type==='mc'?'block':'none';
+  document.getElementById('WA').style.display=q.type!=='mc'?'block':'none';
+  q.type==='mc'?renderMC(q):renderW(q);
+  document.getElementById('bp').disabled=idx===0;
+  const last=idx===n-1;
+  document.getElementById('bn').style.display=last?'none':'inline-block';
+  document.getElementById('bf').style.display=last?'inline-block':'none';
+}
+function renderMC(q){
+  const list=document.getElementById('mo');list.innerHTML='';
+  const fb=document.getElementById('mf');fb.style.display='none';
+  const prev=mcR[q.id];
+  shuf([...q.opts]).forEach(o=>{
+    const li=document.createElement('li');li.tabIndex=0;
+    li.dataset.correct=o.c?'true':'false';li.dataset.why=o.w;li.textContent=o.t;
+    if(prev)li.classList.add('lk');
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('ok');
+      mcR[q.id]=ok?'ok':'no';
+      fb.style.display='block';fb.className='mfb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+    });
+    li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')li.click();});
+    list.appendChild(li);
+  });
+  if(prev){fb.style.display='block';fb.className='mfb '+(prev==='ok'?'ok':'no');fb.textContent=prev==='ok'?'✓ Marked correct.':'✗ Marked incorrect.';}
+}
+function renderW(q){
+  const sv=saved[q.id]||{};
+  document.getElementById('wa').value=sv.t||'';
+  const kr=document.getElementById('kr');kr.style.display=sv.kr?'block':'none';
+  if(sv.kr){document.getElementById('kt').innerHTML=sv.kr.tally;document.getElementById('kc').innerHTML=sv.kr.chips;}
+  document.getElementById('md').style.display=sv.ms?'block':'none';
+  if(sv.ms)document.getElementById('mt').textContent=q.m;
+  document.getElementById('sr').style.display=sv.ms?'flex':'none';
+}
+function saveW(){const q=qs[idx];if(!q||q.type!=='w')return;if(!saved[q.id])saved[q.id]={};saved[q.id].t=document.getElementById('wa').value;}
+function chkW(){
+  const q=qs[idx];const txt=(document.getElementById('wa').value||'').toLowerCase();
+  const hits=q.c.map(c=>({l:c.l,h:c.t.some(t=>txt.includes(t.toLowerCase()))}));
+  const got=hits.filter(h=>h.h).length;
+  const tally=`<strong>${got} / ${hits.length} key concepts detected</strong>`;
+  const chips=hits.map(h=>`<span class="kc ${h.h?'h':'m'}">${h.h?'✓':'✗'} ${h.l}</span>`).join('');
+  document.getElementById('kt').innerHTML=tally;document.getElementById('kc').innerHTML=chips;document.getElementById('kr').style.display='block';
+  if(!saved[q.id])saved[q.id]={};saved[q.id].kr={tally,chips};saved[q.id].t=document.getElementById('wa').value;
+}
+function showM(){
+  const q=qs[idx];document.getElementById('mt').textContent=q.m;document.getElementById('md').style.display='block';document.getElementById('sr').style.display='flex';
+  if(!saved[q.id])saved[q.id]={};saved[q.id].ms=true;saved[q.id].t=document.getElementById('wa').value;
+}
+function rate(v){wR[qs[idx].id]=v;if(!saved[qs[idx].id])saved[qs[idx].id]={};saved[qs[idx].id].rate=v;document.getElementById('sr').querySelectorAll('button').forEach(b=>b.style.opacity='.35');const tgt=v==='k'?document.getElementById('sr').children[1]:document.getElementById('sr').children[2];if(tgt)tgt.style.opacity='1';}
+function prev(){saveW();if(idx>0){idx--;render();}}
+function next(){saveW();if(idx<qs.length-1){idx++;render();}}
+function results(){
+  saveW();
+  const mcTotal=qs.filter(q=>q.type==='mc').length;const mcOk=Object.values(mcR).filter(v=>v==='ok').length;const pct=mcTotal?Math.round(mcOk/mcTotal*100):0;
+  document.getElementById('rb').textContent=`${mcOk}/${mcTotal}`;
+  document.getElementById('rl').textContent=(pct===100?'Perfect MC!':pct>=60?`${pct}% — review misses below`:`${pct}% — revisit lesson 0004`)+` · Written: check self-ratings`;
+  const misses=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const rm=document.getElementById('rm');rm.innerHTML=misses.length?misses.map(q=>`<div class="miss">${q.q.slice(0,70)}…<span class="mcorr">✓ ${q.opts.find(o=>o.c).t.slice(0,55)}</span></div>`).join(''):'<em style="color:var(--dim);font-size:.86rem">None!</em>';
+  const revW=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const rw=document.getElementById('rw');rw.innerHTML=revW.length?revW.map(q=>`<div class="miss">${q.q.slice(0,70)}…</div>`).join(''):'<em style="color:var(--dim);font-size:.86rem">None flagged.</em>';
+  show('R');
+}
+function rev(){
+  const mc=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');const wr=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');const all=[...mc,...wr];if(!all.length)return;
+  mc.forEach(q=>delete mcR[q.id]);wr.forEach(q=>{delete wR[q.id];delete saved[q.id];});
+  qs=all;idx=0;show('Q');render();
+}
+</script>
+</body>
+</html>

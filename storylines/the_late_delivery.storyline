@@ -1,0 +1,61 @@
+# The Late Delivery — the first playable mystery.
+#
+# Authored against storylines/README.md. Three witnesses give three accounts of
+# the culprit's evening, one of them the culprit's own alibi, and the journal
+# flags all of them against each other — the behaviour #214 fixed.
+id = the_late_delivery
+title = The Late Delivery
+min_residents = 4
+
+role = culprit
+  kind = killer
+  note = the part the already-chosen killer plays; casting binds it
+
+role = neighbour
+  kind = witness
+  note = was out late and saw the alley
+
+role = rival
+  kind = red_herring
+  note = argued with the victim that afternoon, unrelated
+
+clue = 1
+  zone = bakery_block
+  caption = The bakery's back door was unlocked all evening.
+  points_at_killer = true
+
+clue = 2
+  zone = coffee_block
+  caption = Two cups on the counter, one of them untouched.
+  slot = rival
+  points_at_killer = false
+
+clue = 3
+  zone = bakery_block
+  caption = A delivery ledger with the last entry torn out.
+  slot = culprit
+  points_at_killer = true
+
+# Three accounts of one person's evening. The culprit places themselves at the
+# coffee counter; the neighbour puts them at the alley door at the same hour;
+# the rival insists nobody was there at all. All three land on the culprit's
+# whereabouts subject, so the journal flags every one of them and says nothing
+# about which is false. That is the whole puzzle.
+
+witness = culprit
+  zone = coffee_block
+  hour = 21.5
+  about = culprit
+  observed = closing up over a coffee, alone, till gone eleven
+
+witness = neighbour
+  zone = bakery_block
+  hour = 21.5
+  about = culprit
+  observed = someone hurrying out through the alley door
+
+witness = rival
+  zone = bakery_block
+  hour = 21.6
+  about = culprit
+  observed = nobody at all come or go that whole evening

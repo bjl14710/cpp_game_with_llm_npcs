@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Triage stale weapons/combat issues 7-13 to needs-human before the raylib run."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+COMMENT = (
+    "Skipped overnight (triage): this issue predates two large in-flight "
+    "efforts and can't be attempted safely as written:\n\n"
+    "1. It was scoped for the pre-multiplayer codebase — the Multiplayer v1 "
+    "draft-PR stack (#28-#34) rewrites `src/app/main.cpp` and adds "
+    "server-authoritative NPC state that combat would need to respect.\n"
+    "2. Milestone 3 (issues #35-#42) replaces the entire renderer this issue "
+    "targets (`Renderer3D` is deleted in #42), so any weapon/HUD drawing "
+    "written now would be thrown away.\n"
+    "3. Related work may already exist on the unmerged "
+    "`7-weapons-money-and-mayhem` branch — needs a human decision on whether "
+    "to rescue or restart it.\n\n"
+    "Suggested path: re-scope after the raylib milestone merges, on top of the "
+    "new renderer and the multiplayer thread contract. Re-label `ready-for-ai` "
+    "once updated."
+)
+
+for number in range(7, 14):
+    issue = repo.get_issue(number)
+    if issue.state != "open":
+        print(f"#{number} already closed — skipping")
+        continue
+    labels = [l.name for l in issue.labels]
+    if "ready-for-ai" not in labels:
+        print(f"#{number} not ready-for-ai ({labels}) — skipping")
+        continue
+    for attempt in range(3):
+        try:
+            issue.remove_from_labels("ready-for-ai")
+            issue.add_to_labels("needs-human")
+            issue.create_comment(COMMENT)
+            print(f"#{number} -> needs-human: {issue.title}")
+            break
+        except GithubException as e:
+            print(f"#{number} attempt {attempt+1} failed ({e.status}); retrying")
+            time.sleep(5)

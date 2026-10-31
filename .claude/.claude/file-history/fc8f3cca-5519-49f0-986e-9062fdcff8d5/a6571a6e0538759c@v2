@@ -1,0 +1,48 @@
+"""API free-tier budget accounting and cap enforcement (paper Part 1)."""
+
+import pytest
+
+from oil_alpha.analysis.costs import transaction_cost_bp
+from oil_alpha.data.budget import APIBudget, BudgetExceeded
+
+
+def test_uncapped_source_accumulates_without_limit():
+    b = APIBudget()
+    for _ in range(50):
+        b.charge("yfinance")
+    slot = b.usage["yfinance"]
+    assert slot.used == 50
+    assert slot.remaining is None      # no hard cap
+    assert b.total_requests() == 50
+
+
+def test_capped_source_tracks_remaining():
+    b = APIBudget(caps={"alpha_vantage": 25})
+    b.charge("alpha_vantage", 10)
+    slot = b.usage["alpha_vantage"]
+    assert slot.used == 10
+    assert slot.remaining == 15
+    assert slot.fraction == pytest.approx(0.4)
+
+
+def test_cap_exceeded_raises():
+    b = APIBudget(caps={"alpha_vantage": 25})
+    b.charge("alpha_vantage", 25)
+    with pytest.raises(BudgetExceeded):
+        b.charge("alpha_vantage", 1)
+
+
+def test_cap_not_enforced_when_disabled():
+    b = APIBudget(caps={"fmp": 250})
+    b.charge("fmp", 250)
+    slot = b.charge("fmp", 5, enforce=False)   # allowed past the cap
+    assert slot.used == 255
+    assert slot.remaining == 0
+
+
+def test_transaction_cost_round_trip_and_drag():
+    est = transaction_cost_bp("energy_etf", turnover_per_year=252.0)
+    # half_spread 1.0 + commission 0.5, doubled for round trip = 3.0 bp.
+    assert est.round_trip_bp == pytest.approx(3.0)
+    # drag = 3.0 * (252/2) = 378 bp.
+    assert est.annual_drag_bp == pytest.approx(378.0)

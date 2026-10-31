@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0017 — Market Making</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:32px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0017</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>Market Making</h1>
+<p class="lead">Why this matters: <code>fpga/market_maker.vhd</code> is named for this strategy. Lessons 0001 and 0016 sketched the idea; this lesson formalizes it — the P&amp;L model, the two killers (adverse selection + inventory risk), and the canonical Avellaneda-Stoikov framework.</p>
+
+<h2>1. The strategy in one sentence</h2>
+<p>A market maker continuously posts both a bid (to buy) and an ask (to sell) on a venue and earns the <strong>spread</strong> when both sides fill before the underlying price moves.<sup><a class="fn" href="#fn-1">[1]</a></sup></p>
+
+<h3>Toy P&amp;L</h3>
+<pre>// Post bid at 99.99, ask at 100.01 — 2-cent spread.
+// Buyer hits your ask: +1 unit at 100.01, P&L = +100.01 short
+// Seller hits your bid: -1 unit at 99.99,  P&L = -99.99   long
+// Net inventory back to flat. Net P&L = +$0.02 per round-trip.</pre>
+<p>Multiply that 2-cent edge across <em>millions</em> of round-trips per day. That's the entire economic engine of a high-frequency market maker.</p>
+
+<h2>2. The two killers</h2>
+
+<h3>Killer 1: Adverse selection</h3>
+<p>The trader who lifted your offer at 100.01 may have known something you didn't — informed flow that's about to push the price to 100.10. You sold low; the market moved against you; the spread you earned (2¢) gets wiped out by the loss on inventory (9¢).</p>
+<p>Adverse selection is the reason market makers <em>cancel</em> orders aggressively. If new information arrives (a related instrument moved, a news headline hit, the order-book imbalance flipped), the market maker pulls its quotes faster than the competing takers can lift them.<sup><a class="fn" href="#fn-1">[1]</a></sup> Cancellation speed is half of why latency matters.</p>
+
+<h3>Killer 2: Inventory risk</h3>
+<p>When fills are imbalanced — many buy fills, few sell fills — the market maker accumulates inventory (long or short). That inventory has mark-to-market exposure: if the price drifts, P&amp;L moves with it, unhedged.</p>
+<p>The fix is to <strong>skew</strong> quotes based on current inventory: if you're long 100 contracts, lower your bid (less aggressive on buying more) and lower your ask (more aggressive on selling). The optimal quote is no longer symmetric around the mid.</p>
+
+<h2>3. The Avellaneda-Stoikov framework</h2>
+<p>The canonical mathematical treatment.<sup><a class="fn" href="#fn-2">[2]</a></sup> Given mid-price <code>s</code>, inventory <code>q</code>, volatility <code>σ</code>, risk-aversion <code>γ</code>, and time-to-horizon <code>T-t</code>, the optimal quotes are:</p>
+<pre>reservation_price = s - q * γ * σ² * (T - t)         // skewed by inventory
+optimal_spread    = γ * σ² * (T - t) + (2/γ) * ln(1 + γ/k)
+
+bid = reservation_price - optimal_spread / 2
+ask = reservation_price + optimal_spread / 2</pre>
+<p>Three intuitions packed in:</p>
+<ul>
+<li><strong>Reservation price ≠ mid</strong>. When long inventory, your "fair value" shifts down to reflect that you want to sell.</li>
+<li><strong>Spread grows with volatility</strong>. Higher σ → higher adverse-selection risk → wider quotes needed to compensate.</li>
+<li><strong>Spread grows with risk aversion</strong>. Higher γ → you tolerate less inventory risk → wider quotes.</li>
+</ul>
+
+<div class="callout"><strong>The repo's <code>market_maker.vhd</code> doesn't do any of this.</strong> It computes a simple <code>mid ± spread/2</code> with constant spread and zero inventory tracking. That's the <em>arithmetic</em> shell of market making; the actual strategy needs inventory state and adverse-selection awareness. Adding those is the obvious next step.</p></div>
+
+<h2>4. Where market makers earn the rest of their money</h2>
+<p>Beyond the headline spread capture, three secondary income streams matter:</p>
+<div class="grid2">
+<div class="card"><h4>Maker rebates</h4><p>Most exchanges pay liquidity providers a rebate per filled lot — typically a fraction of a cent per share or a few cents per futures contract. For high-volume MMs this is a major revenue stream.</p></div>
+<div class="card"><h4>Designated market maker (DMM) fees</h4><p>Some venues pay a fixed monthly fee to MMs that meet quoting obligations (e.g. quote 90% of the day in size X). Stable, lower-margin business; floor for the strategy.</p></div>
+<div class="card"><h4>Order-flow analytics</h4><p>Seeing your own fill pattern gives a window into broader market microstructure. Not directly monetized; informs other strategies inside the firm.</p></div>
+<div class="card"><h4>Cross-venue arbitrage</h4><p>MMs often see slight price differences between venues (NASDAQ vs ARCA vs IEX) and capture the basis. Adjacent strategy that shares the same infrastructure.</p></div>
+</div>
+
+<h2>5. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Market making vs Stat arb</h4><p><strong>MM</strong>: directionally neutral, earns spread, worries about inventory. <strong>Stat arb</strong>: directional bet based on a statistical signal (Lesson 0018). Different P&amp;L drivers, different risk profile.</p></div>
+<div class="card"><h4>Designated MM vs Voluntary MM</h4><p><strong>Designated</strong>: has formal obligations (continuous quoting, max spread, min size) in exchange for benefits. <strong>Voluntary</strong>: makes markets when conditions are favorable, leaves when they aren't.</p></div>
+<div class="card"><h4>Quote vs Order</h4><p>A <strong>quote</strong> is a market maker's intent to buy/sell at a price. An <strong>order</strong> is the exchange-level message that makes the quote real (NewOrderSingle in FIX terms).</p></div>
+<div class="card"><h4>Spread capture vs Mid-price prediction</h4><p>An MM <em>doesn't predict the mid</em>; they make money on the round-trip. Stat arb predicts the mid. Both can be wrong about direction; the MM survives if inventory stays flat.</p></div>
+</div>
+
+<h2>6. Practice</h2>
+<div class="question" data-question><p class="q">Q1. A market maker quotes 99.99/100.01 in size 10. A buyer lifts the ask, taking 10 lots at 100.01. Within 50ms the mid moves to 100.10. What just happened?</p><ul class="options">
+<li data-correct="false" data-why="The MM made 2¢/lot on the spread but lost 9¢/lot on the inventory move — net -7¢ per lot, not a win.">The MM made $0.02 × 10 = $0.20 risk-free.</li>
+<li data-correct="true" data-why="Right. The 2¢ spread captured at fill is offset by the 9¢ mark-to-market loss on the 10 short lots when mid jumped to 100.10. Net P&L is -7¢ per lot — adverse selection. The lift was probably informed flow.">Adverse selection: the MM captured 2¢ spread but lost 9¢ on the short position when mid moved against them — net -7¢/lot.</li>
+<li data-correct="false" data-why="A 50 ms move is short but doesn't make the fill 'free.' The MM is short 10 lots immediately and exposed to subsequent moves.">The MM is risk-free because the fill happens in 50 ms.</li>
+<li data-correct="false" data-why="The buyer is the counterparty — by definition profitable trades have a loser. The buyer made money; the MM didn't.">Both sides profit because the MM holds inventory only briefly.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. In the Avellaneda-Stoikov framework, the reservation price is shifted away from the mid by what?</p><ul class="options">
+<li data-correct="true" data-why="Right — reservation price = s - q·γ·σ²·(T-t). When q is positive (long), the price the MM treats as 'fair' shifts DOWN so the MM is more eager to sell and less eager to buy. This is the inventory-skewing mechanism.">By inventory q multiplied by risk aversion γ, volatility σ² and time-to-horizon.</li>
+<li data-correct="false" data-why="The order-book imbalance is a different signal — not what shifts the reservation price in AS. It can be used as an input but the canonical formula uses inventory.">By the order-book imbalance only.</li>
+<li data-correct="false" data-why="No — the spread paid is the output, not the input. Reservation price drives the spread, not the other way around.">By the spread the MM expects to capture on the next round-trip.</li>
+<li data-correct="false" data-why="Time of day might influence parameters but isn't the load-bearing variable in the formula. Inventory is.">By the time of day (more skew at the open).</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Why do market makers cancel orders far more than they execute them?</p><ul class="options">
+<li data-correct="false" data-why="Exchanges DO meter OTR but the underlying behavior comes from adverse-selection avoidance, not from exchange flexibility.">Because exchanges encourage cancellation as a fee model.</li>
+<li data-correct="true" data-why="Right. When new information arrives (a related instrument moves, news hits, imbalance flips), the MM must pull stale quotes faster than informed takers can lift them. Otherwise the MM is structurally adversely-selected. Cancel rates of 50:1 or 100:1 vs trades are normal.">Because adverse selection means stale quotes that don't reflect new information are negative-EV — the MM cancels faster than the taker can lift.</li>
+<li data-correct="false" data-why="Cancellation isn't a strategy for blocking competitors. It's defensive against informed flow.">Because they're spoofing — placing orders they don't intend to execute.</li>
+<li data-correct="false" data-why="Cancellation is fast but not free — every cancel costs latency and CPU. It's not done for the sake of doing it.">Because cancellation is essentially free and faster to fix than to leave alone.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. <code>fpga/market_maker.vhd</code> computes <code>mid ± spread/2</code> with constant spread and no inventory tracking. What's the most important missing piece for a real strategy?</p><ul class="options">
+<li data-correct="true" data-why="Right. Without inventory state the MM cannot skew quotes when it accumulates positions, and is exposed to unbounded directional risk. Adding inventory tracking + reservation-price skew (Avellaneda-Stoikov-style) is the single biggest architectural gap.">An inventory accumulator and inventory-based quote skewing (reservation price), so quotes shift as inventory accumulates.</li>
+<li data-correct="false" data-why="Tighter spreads alone would just make adverse selection worse. The problem isn't the static value of the spread; it's the lack of state-aware quoting.">A wider spread to compensate for being slow.</li>
+<li data-correct="false" data-why="LLM-based quote optimization is exactly the wrong tier — Lesson 0008 covered why LLMs can't sit in the hot path.">An LLM-based quote-optimization layer.</li>
+<li data-correct="false" data-why="Cross-venue routing is a separate strategy. The basic single-venue MM still needs inventory tracking and adverse-selection awareness first.">Cross-venue routing.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>7. Scenarios</h2>
+<details class="scenario"><summary>S1. A MM strategy backtest shows steady spread capture but live P&amp;L is negative. Diagnose.</summary>
+<p>Almost certainly adverse selection. The backtest assumed the MM was filled at the recorded prices, but in reality only the unfavorable fills happen — the favorable ones get arbitraged away by faster participants. Common test: split historical fills into "MM was at the front of the queue" vs "MM was not." The backtest implicitly assumes the former; live skews toward the latter. Fix: model queue position explicitly and assume you only fill when you're at the front, or reduce the strategy to a tier where queue position is achievable (slower instrument, less competitive venue).</p></details>
+
+<details class="scenario"><summary>S2. You add inventory-aware skewing to <code>market_maker.vhd</code>. After deployment, fill rate drops 40% but P&amp;L per fill is much better. Should you ship it?</summary>
+<p>Probably yes, but verify with a P&amp;L attribution. Lower fill rate means the new quotes don't sit at the inside as often — that's expected when you skew defensively. The key questions: (1) Is the per-fill P&amp;L improvement coming from reduced adverse selection, or just from a small sample? Need ~10× more fills than the variance suggests. (2) Are exchange rebates also dropping? In some venues maker rebates are a significant revenue stream that's proportional to fill count. (3) Is the overall realized Sharpe better? That's the headline. If yes to all three, ship.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf">High-frequency trading in a limit order book — Avellaneda &amp; Stoikov (Cornell)</a></li>
+<li id="fn-2"><a href="https://web.stanford.edu/class/msande448/2018/Final/Reports/gr5.pdf">Optimal High-Frequency Market Making — Stanford MS&amp;E 448 report</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

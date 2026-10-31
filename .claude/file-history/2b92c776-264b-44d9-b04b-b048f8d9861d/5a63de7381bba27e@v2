@@ -1,0 +1,113 @@
+"""Draft PR for the worldgen milestone; close #125-#129.
+Reads the bench table from bench/out/schema_results.json."""
+import json, os, pathlib, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+results = json.loads(pathlib.Path("bench/out/schema_results.json").read_text())
+table = "| model | valid | first-try | mean s |\n|---|---|---|---|\n"
+winner, best = None, -1.0
+for model, r in sorted(results.items(), key=lambda kv: -kv[1]["validity_rate"]):
+    table += (f"| {model} | {r['validity_rate']:.0%} | "
+              f"{r['first_attempt_rate']:.0%} | {r['mean_seconds']:.1f} |\n")
+    if r["validity_rate"] > best:
+        winner, best = model, r["validity_rate"]
+
+BODY = f"""## Summary
+Milestone #16 — describe a map or cast in natural language and a local
+LLM generates it, by FILLING SCHEMAS the game already loads: the sandbox
+map JSON and the persona/look/trait record formats. The model never
+places anything; a validator gates the one load path, its errors go back
+to the model verbatim (cap 3), and results open as editable drafts. One
+atomic commit per issue.
+
+**#125 validation layer** (`a4c9881`) — validateCast wraps the EXISTING
+loaders and adds generation needs: nearest-valid-id suggestions (edit
+distance over the catalog), inline valid-trait lists, batch name
+uniqueness; extractJsonObject pulls balanced JSON out of fences/prose;
+renderRetryFeedback formats errors for the next attempt. All offline —
+every scaffold stub across all four of tonight's milestones is now a
+live test.
+
+**#126 cast generation + CLI** (`6038380`) — prompt builders with
+closed-world vocabulary blocks; `worldgen_cli` drives the full headless
+loop (gen-cast / gen-map / gen-village / validate-*) and emits a
+machine-readable stats line the bench keys on.
+
+**#128 the measured iteration** (`b3277d5`) — the milestone's real
+story: ALL THREE local models failed the first contract identically →
+the contract was at fault (persona text inside JSON strings); switching
+to one JSON object per character fixed it everywhere at once. Then
+"style-consistent" kept failing → the vocabulary never said which
+family a part belongs to; annotating ids took qwen3:8b from
+0-for-3-attempts to **valid on the first attempt**. No auto-repair
+anywhere (wrapper normalization only, logged).
+
+**#127 the benchmark** — `bench_schema_models.py` shells the SAME C++
+validator through the CLI (one contract everywhere) over a fixed
+corpus. Measured results:
+
+{table}
+Measured winner: **{winner}** — which already IS the configured dialogue
+model, so generation shares the one client (documented in llm.cfg; a
+separate worldgen client gets built when the winners diverge). Picked by
+measurement per the brief — the suggested coding model isn't pulled
+locally, so it's noted as untested in bench/REPORT.md, not assumed.
+
+**#129 in-game entry** (`7f74e76`) — a describe-a-map field on the
+Sandbox page; the async generate-validate-retry chain runs over internal
+requests with a status line; valid villages persist their characters
+under gen_ ids (filtered from the town roster — generated villagers
+belong to their maps), save as a normal map file, and open in EDIT mode:
+always a hand-fixable draft.
+
+## Verification
+- `make -C tests test` green at every commit; final **204 cases /
+  32,078 assertions**, only llm_live skipped.
+- Live end-to-end: "a grumpy old sailor who runs the docks, and two
+  curious kids who pester him" → valid cast on attempt 1 (Captain Elias
+  Grimsby, Dockmaster, blocky angry look, trait grumpy).
+
+## Needs human verification
+- The in-game Generate flow feel (typing, status line, editor handoff).
+- Judge a generated village's LAYOUT quality by eye — validity ≠ good
+  urbanism; the editor exists to fix taste.
+
+## Notes
+- Stacked on `feature/group-conversations` (PR #133). Merge order:
+  #130 → #131 → #132 → #133 → this. Do not merge; review only.
+- Cast `position` isn't bounds-checked (village placements are) —
+  logged follow-up.
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="feat: LLM world generation — validated maps and casts from natural language (#125-#129)",
+           body=BODY, base="feature/group-conversations",
+           head="feature/llm-world-generation", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in range(125, 130):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/llm-world-generation`. Draft PR #{pr.number} open for review (base: feature/group-conversations). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: closed -> PR #{pr.number}")
+print("done")

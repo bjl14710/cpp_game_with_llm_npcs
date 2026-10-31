@@ -1,0 +1,125 @@
+-- flat_book.vhd — hardware flat-array order book, SIMULATION ONLY.
+-- Plan: .claude/plans/vhdl-flat-book.md.
+--
+-- Mirrors cpp/itch/order_book_flat.hpp's LEVEL update rule: ADD/REMOVE shares
+-- at (side, tick_index), REMOVE clamps at zero on a true underflow (removing
+-- more than the level holds — the phantom-depth rule from _remove_level). Best
+-- bid/ask come from a priority scan over the per-side level state: bid from the
+-- HIGH index down, ask from the LOW index up (same directions as the C++
+-- scans). In hardware this is a parallel priority encoder over an occupancy
+-- bitmask — constant cycles at any DEPTH, which is the whole comparison against
+-- the software O(range) scan. In functional simulation the unrolled loop stands
+-- in for that encoder; every op completes in exactly one clock regardless of
+-- DEPTH (the range-independence the DEPTH sweep demonstrates).
+--
+-- Behaviour at op_index >= DEPTH is undefined-by-contract: the golden-vector
+-- generator bounds-checks, matching the C++ book's error-count rejection.
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity flat_book is
+  generic (
+    DEPTH    : positive := 4096;  -- price levels per side
+    SHARES_W : positive := 32     -- shares counter width
+  );
+  port (
+    clk       : in  std_logic;
+    rst       : in  std_logic;
+    -- one level operation per cycle when op_valid
+    op_valid  : in  std_logic;
+    op_kind   : in  std_logic;                          -- '0' ADD, '1' REMOVE
+    op_side   : in  std_logic;                          -- '0' BID, '1' ASK
+    op_index  : in  unsigned(11 downto 0);              -- tick index (DEPTH<=4096)
+    op_shares : in  unsigned(SHARES_W - 1 downto 0);
+    -- best-of-book outputs (registered)
+    best_bid_valid  : out std_logic;
+    best_bid_index  : out unsigned(11 downto 0);
+    best_bid_shares : out unsigned(SHARES_W - 1 downto 0);
+    best_ask_valid  : out std_logic;
+    best_ask_index  : out unsigned(11 downto 0);
+    best_ask_shares : out unsigned(SHARES_W - 1 downto 0);
+    -- pulses when a REMOVE clamped at zero (mirrors error_count semantics)
+    err_underflow_clamped : out std_logic
+  );
+end entity flat_book;
+
+architecture rtl of flat_book is
+  subtype share_t is unsigned(SHARES_W - 1 downto 0);
+  type level_array is array(0 to DEPTH - 1) of share_t;
+  constant ZERO_SHARES : share_t := (others => '0');
+begin
+  -- Single clocked process. The level arrays are process VARIABLES so an
+  -- update is visible to the best-scan in the same cycle; the outputs are
+  -- registered signal drives, valid immediately after the clock edge.
+  process(clk)
+    variable bid_lv : level_array := (others => (others => '0'));
+    variable ask_lv : level_array := (others => (others => '0'));
+    variable idx    : integer range 0 to DEPTH - 1;
+    variable clamp  : std_logic;
+    variable found  : boolean;
+  begin
+    if rising_edge(clk) then
+      clamp := '0';
+      if rst = '1' then
+        bid_lv := (others => (others => '0'));
+        ask_lv := (others => (others => '0'));
+      elsif op_valid = '1' then
+        idx := to_integer(op_index);
+        if op_side = '0' then                    -- BID
+          if op_kind = '0' then                  -- ADD
+            bid_lv(idx) := bid_lv(idx) + op_shares;
+          elsif op_shares > bid_lv(idx) then      -- REMOVE underflow
+            bid_lv(idx) := (others => '0');
+            clamp := '1';
+          else
+            bid_lv(idx) := bid_lv(idx) - op_shares;
+          end if;
+        else                                     -- ASK
+          if op_kind = '0' then
+            ask_lv(idx) := ask_lv(idx) + op_shares;
+          elsif op_shares > ask_lv(idx) then
+            ask_lv(idx) := (others => '0');
+            clamp := '1';
+          else
+            ask_lv(idx) := ask_lv(idx) - op_shares;
+          end if;
+        end if;
+      end if;
+      err_underflow_clamped <= clamp;
+
+      -- Best bid: highest occupied index (priority encoder, high-to-low).
+      found := false;
+      for i in DEPTH - 1 downto 0 loop
+        if not found and bid_lv(i) /= ZERO_SHARES then
+          best_bid_valid  <= '1';
+          best_bid_index  <= to_unsigned(i, 12);
+          best_bid_shares <= bid_lv(i);
+          found := true;
+        end if;
+      end loop;
+      if not found then
+        best_bid_valid  <= '0';
+        best_bid_index  <= (others => '0');
+        best_bid_shares <= (others => '0');
+      end if;
+
+      -- Best ask: lowest occupied index (priority encoder, low-to-high).
+      found := false;
+      for i in 0 to DEPTH - 1 loop
+        if not found and ask_lv(i) /= ZERO_SHARES then
+          best_ask_valid  <= '1';
+          best_ask_index  <= to_unsigned(i, 12);
+          best_ask_shares <= ask_lv(i);
+          found := true;
+        end if;
+      end loop;
+      if not found then
+        best_ask_valid  <= '0';
+        best_ask_index  <= (others => '0');
+        best_ask_shares <= (others => '0');
+      end if;
+    end if;
+  end process;
+end architecture rtl;

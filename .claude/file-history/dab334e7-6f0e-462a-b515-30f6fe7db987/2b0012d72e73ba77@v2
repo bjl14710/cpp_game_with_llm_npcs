@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Real-time signal watcher (entry point: live-watch).
+
+Polls recent intraday bars for a set of tickers and runs an intraday
+strategy (e.g. the 2-candle engulfing) on the latest COMPLETED bars,
+printing a quote line per ticker and highlighting fresh BUY/SELL signals —
+a paper-trading tape watcher, not an execution engine.
+
+Honesty notes, because "real time" carries baggage:
+  - yfinance intraday bars arrive with roughly a minute of delay and the
+    newest bar is still forming until its interval elapses. The watcher
+    therefore evaluates only completed bars — signaling off a half-formed
+    candle is lookahead's ugly cousin (the candle can un-engulf before it
+    closes). Professionals pay for tick feeds (Polygon, Alpaca, IEX,
+    exchange direct); this gives you the same *workflow* on a free feed.
+  - Signals print to the console/GUI. Nothing is ordered anywhere —
+    execution remains rh-exec's job, gated behind --no_dry_run.
+
+Usage:
+    uv run live-watch --tickers AAPL,MSFT --interval 5m --refresh 30
+    uv run live-watch --tickers AAPL --once        # single pass, then exit
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import time
+from typing import Callable, Dict, List, Tuple
+
+import pandas as pd
+
+from intraday_sim import STRATEGIES, VALID_INTERVALS
+from strategies.base import BaseStrategy, Signal
+
+_INTERVAL_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "60m": 60}
+
+
+def completed_bars(df: pd.DataFrame, interval: str, now: dt.datetime | None = None) -> pd.DataFrame:
+    """Drop the still-forming final bar, if it is still forming.
+
+    A bar stamped T covers [T, T+interval); it is complete once
+    now >= T + interval. After the session closes the last bar is complete
+    and must NOT be dropped — a naive "always drop the last row" would
+    permanently hide the day's final signal.
+    """
+    if df.empty:
+        return df
+    minutes = _INTERVAL_MINUTES[interval]
+    last_start = df.index[-1]
+    if now is None:
+        now = dt.datetime.now(tz=getattr(last_start, "tz", None))
+    bar_end = last_start + dt.timedelta(minutes=minutes)
+    if now < bar_end:
+        return df.iloc[:-1]
+    return df
+
+
+def evaluate_latest(df: pd.DataFrame, strategy: BaseStrategy) -> Tuple[pd.Timestamp, Signal] | None:
+    """Run the 2-bar strategy on the last two completed bars.
+
+    Returns (bar_timestamp, Signal) or None when fewer than 2 bars exist.
+    """
+    if len(df) < 2:
+        return None
+    prev, curr = df.iloc[-2], df.iloc[-1]
+    return df.index[-1], strategy.generate_signal(prev, curr)
+
+
+def format_tick_line(ticker: str, bar_ts, price: float, signal: Signal, fresh: bool) -> str:
+    """One human-readable tape line; fresh non-hold signals shout."""
+    ts = pd.Timestamp(bar_ts).strftime("%H:%M")
+    base = f"{ticker:6s} bar {ts}  close={price:,.2f}  {signal.direction}"
+    if fresh and signal.direction != "HOLD":
+        return f"{base}   <<< NEW SIGNAL"
+    return base
+
+
+def watch_once(tickers: List[str], strategy: BaseStrategy, interval: str,
+               fetch: Callable[[str, str], pd.DataFrame],
+               seen: Dict[str, pd.Timestamp],
+               now: dt.datetime | None = None) -> List[str]:
+    """One polling pass over all tickers. Mutates ``seen`` (last bar per
+    ticker) so a bar only ever counts as a fresh signal once.
+
+    Returns the formatted lines (pure-ish: printing is the caller's job,
+    which keeps this testable and lets the GUI reuse it verbatim).
+    """
+    lines = []
+    for ticker in tickers:
+        try:
+            df = fetch(ticker, interval)
+        except Exception as exc:  # one dead ticker must not kill the tape
+            lines.append(f"{ticker:6s} fetch error: {exc}")
+            continue
+        df = completed_bars(df, interval, now=now)
+        result = evaluate_latest(df, strategy)
+        if result is None:
+            lines.append(f"{ticker:6s} waiting for bars...")
+            continue
+        bar_ts, signal = result
+        fresh = seen.get(ticker) != bar_ts
+        seen[ticker] = bar_ts
+        lines.append(format_tick_line(ticker, bar_ts, float(df["Close"].iloc[-1]), signal, fresh))
+    return lines
+
+
+def _default_fetch(ticker: str, interval: str) -> pd.DataFrame:
+    """Fetch ~2 days of intraday bars (network path, excluded from tests)."""
+    import yfinance as yf
+
+    df = yf.download(ticker, period="2d", interval=interval,
+                     auto_adjust=True, progress=False)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
+
+
+def main() -> None:
+    """CLI entry point for live-watch."""
+    p = argparse.ArgumentParser(description="Watch live intraday bars and print strategy signals")
+    p.add_argument("--tickers", type=str, required=True, help="Comma-separated, e.g. AAPL,MSFT")
+    p.add_argument("--interval", type=str, default="5m", choices=sorted(VALID_INTERVALS))
+    p.add_argument("--strategy", type=str, default="engulfing", choices=list(STRATEGIES))
+    p.add_argument("--refresh", type=int, default=30, help="Seconds between polls (default 30)")
+    p.add_argument("--once", action="store_true", help="Single pass, then exit")
+    args = p.parse_args()
+
+    tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+    strategy = STRATEGIES[args.strategy]()
+    seen: Dict[str, pd.Timestamp] = {}
+
+    print(f"Watching {', '.join(tickers)} on {args.interval} bars with '{args.strategy}' "
+          f"(refresh {args.refresh}s; completed bars only; Ctrl-C to stop)")
+    while True:
+        stamp = dt.datetime.now().strftime("%H:%M:%S")
+        for line in watch_once(tickers, strategy, args.interval, _default_fetch, seen):
+            print(f"[{stamp}] {line}")
+        if args.once:
+            break
+        try:
+            time.sleep(args.refresh)
+        except KeyboardInterrupt:
+            print("\nstopped")
+            break
+
+
+if __name__ == "__main__":
+    main()

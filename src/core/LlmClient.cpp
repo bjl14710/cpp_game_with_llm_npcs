@@ -1,5 +1,7 @@
 #include "LlmClient.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <utility>
 
 #include "LlmBackend.hpp"
@@ -34,16 +36,32 @@ void LlmClient::enqueue(ChatRequest req) {
 
 std::uint64_t LlmClient::submit(std::string systemPrompt,
                                 std::vector<ChatTurn> history,
-                                std::string userMessage) {
+                                std::string userMessage,
+                                const std::string& speakerId,
+                                Familiarity familiarity) {
     ChatRequest req;
     req.id = nextId_.fetch_add(1);
     req.systemPrompt = std::move(systemPrompt);
     req.history = std::move(history);
     req.userMessage = std::move(userMessage);
 
+    // The bank is consulted here, on the calling thread, because the lookup is
+    // microseconds of string work — pushing it to the worker would add a thread
+    // hop to the one path that exists to be fast. An empty speakerId (group
+    // turns, world generation) never reaches the bank at all.
+    if (lineBank_ && !speakerId.empty()) {
+        if (auto banked = lineBank_->lookup(speakerId, familiarity, req.userMessage)) {
+            req.bankedReply = std::move(*banked);
+        }
+    }
+
     const std::uint64_t id = req.id;
     enqueue(std::move(req));
     return id;
+}
+
+void LlmClient::setLineBank(std::unique_ptr<LineBank> bank) {
+    lineBank_ = std::move(bank);
 }
 
 void LlmClient::warmUp() {
@@ -96,7 +114,45 @@ void LlmClient::workerLoop() {
     }
 }
 
+ChatReply LlmClient::streamBanked(const ChatRequest& req) {
+    ChatReply reply;
+    reply.id = req.id;
+    reply.ok = true;
+    reply.content = req.bankedReply;
+
+    // Six bytes is small enough to look like generation and large enough that
+    // a long reply is not thousands of queue pushes.
+    constexpr std::size_t kChunk = 6;
+    const int cps = config_.lineBankCps > 0 ? config_.lineBankCps : 1;
+    const auto perChunk = std::chrono::microseconds(
+        static_cast<long long>(1000000.0 * static_cast<double>(kChunk) / cps));
+
+    const std::string& text = req.bankedReply;
+    for (std::size_t at = 0; at < text.size();) {
+        // Never split a UTF-8 sequence: a continuation byte is 10xxxxxx, and a
+        // half-written glyph would flicker in the frame that lands mid-chunk.
+        std::size_t end = std::min(at + kChunk, text.size());
+        while (end < text.size() &&
+               (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) {
+            ++end;
+        }
+        {
+            std::lock_guard<std::mutex> lock(replyMutex_);
+            deltas_.push_back(ChatDelta{req.id, text.substr(at, end - at)});
+        }
+        at = end;
+        // The first chunk goes out with no delay, so time-to-first-token stays
+        // effectively zero — that is the number this feature exists to beat.
+        // On shutdown, stop pacing and flush the rest so the reply is still
+        // complete and the destructor's join() does not wait on sleeps.
+        if (at < text.size() && !stop_.load()) std::this_thread::sleep_for(perChunk);
+    }
+    return reply;
+}
+
 ChatReply LlmClient::processOne(const ChatRequest& req) {
+    if (!req.bankedReply.empty()) return streamBanked(req);
+
     ChatReply reply;
     reply.id = req.id;
 

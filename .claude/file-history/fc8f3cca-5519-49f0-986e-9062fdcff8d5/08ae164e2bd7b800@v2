@@ -1,0 +1,69 @@
+# HFT_Trading_Practice_Repo — Crude-Oil Lead-Lag Lab
+
+A beginner-friendly quant-research starter kit: a **daily CL-vs-XLE lead-lag
+study** (does WTI futures lead the energy ETF?) with a **Streamlit dashboard**
+that shows live pipeline progress and projected costs.
+
+Grounded in [`crude_oil_research.txt`](crude_oil_research.txt) — Parts 1–2 (free
+data sources + lead-lag methodology) and the Stage 1–3 recommendations.
+
+## What it does
+
+1. **Download** daily closes (`CL=F`, `XLE`, `USO`, `XOM`, `CVX`) from yfinance —
+   no API key — and cross-check WTI against FRED `DCOILWTICO` spot.
+2. **Clean** for the paper's known traps: the April 2020 negative-WTI print
+   (which breaks log returns) and `CL=F` front-month roll-day jumps.
+3. **Analyze**: cross-correlation (CCF), Granger causality both directions, and
+   cointegration (Engle-Granger + Johansen) on price levels.
+4. **Cost it**: API free-tier budget used/remaining, a hypothetical
+   transaction-cost estimate (bp), and per-stage compute time.
+
+The expected result under a stable window: **CL (futures) leads XLE** at short
+lags (paper Stage-3). The opposite usually means a sign/alignment bug.
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # optional — default pipeline needs no keys
+```
+
+## Run
+
+GUI:
+
+```bash
+streamlit run app/dashboard.py
+```
+
+Headless (prints stage progress + a summary):
+
+```bash
+PYTHONPATH=src python -m oil_alpha.pipeline
+```
+
+Tests:
+
+```bash
+pytest
+```
+
+## Layout
+
+```
+src/oil_alpha/
+  config.py            symbols, date range, free-tier caps, cost model
+  data/                sources (yfinance/FRED/Stooq), APIBudget, parquet cache
+  clean.py             returns + Apr-2020 + roll-day handling
+  analysis/            leadlag (CCF/Granger), cointegration, costs
+  pipeline.py          generator yielding progress events (GUI + CLI share it)
+  metrics.py           per-stage compute timing
+app/dashboard.py       Streamlit UI
+tests/                 cleaning guards, CCF sign convention, budget accounting
+```
+
+## Out of scope (future milestones)
+
+Microstructure alpha (Kyle's λ, OFI, microprice, Avellaneda-Stoikov) and
+intraday/Hayashi-Yoshida lead-lag — both need order-book/tick data the free
+daily sources don't provide.

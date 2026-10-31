@@ -1,0 +1,44 @@
+# Learning Progress
+
+Tracks which concepts have been covered with lesson, drill, and vocab files.
+
+---
+
+## Covered
+
+### 0001 — pybind11 + CMake FetchContent: Compiling a C++ Extension Importable from Python
+
+**Date added:** 2026-06-28
+**Status:** Complete
+
+**Context:** Added after the repo received its first C++ build layer — the `oil_volume_cpp` extension exposing `rolling_mean(values, window)` via pybind11 + scikit-build-core.
+
+**Files:**
+- Lesson: [lessons/0001-pybind11-cmake-extension.html](lessons/0001-pybind11-cmake-extension.html)
+- Drill: [drills/0001-pybind11-cmake-extension.html](drills/0001-pybind11-cmake-extension.html)
+- Vocab: [vocab/0001-pybind11-cmake-extension.html](vocab/0001-pybind11-cmake-extension.html)
+
+**Key concepts covered:**
+- Why C++ extensions in a Python trading system (performance, memory layout, SIMD, GIL release)
+- How pybind11 works: PYBIND11_MODULE macro, type casters, py::arg, return_value_policy
+- CMake structure: root CMakeLists.txt + subdirectory, pybind11_add_module
+- PYBIND11_FINDPYTHON=ON vs legacy FindPythonLibs
+- FetchContent vs find_package hybrid strategy
+- scikit-build-core as the pyproject.toml build backend
+- The editable install flow and its limitations for C++ code
+- The parity test pattern: C++ result vs NumPy reference within 1e-9
+- ABI tags and why upgrading Python requires a recompile
+
+**Source files studied:**
+- `cpp/oil_volume/bindings.cpp`
+- `cpp/oil_volume/CMakeLists.txt`
+- `CMakeLists.txt` (root)
+- `pyproject.toml`
+- `scripts/build_cpp.sh`
+- `tests/test_cpp_bridge.py`
+
+---
+
+## Backlog
+
+_(Add future concepts here as the repo grows)_

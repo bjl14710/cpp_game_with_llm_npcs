@@ -1,0 +1,107 @@
+"""Tests for the lab/classic web theme plumbing and the /arena page.
+
+First webapp tests in the repo. Offline: FastAPI TestClient, no network,
+arena data seeded into a tmp SQLite DB via ArenaState.
+"""
+import pytest
+from fastapi.testclient import TestClient
+
+from webapp.main import app
+
+client = TestClient(app)
+
+GET_ROUTES = ["/", "/walkforward", "/train", "/universe", "/news",
+              "/download", "/execute", "/analyze", "/arena"]
+
+
+# ---------------------------------------------------------------------------
+# Theme resolution: query > cookie > classic default
+# ---------------------------------------------------------------------------
+
+def test_default_is_classic_and_lab_css_absent():
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert 'class="theme-classic"' in resp.text
+    assert "theme-lab.css" not in resp.text
+
+
+def test_query_param_selects_lab():
+    resp = client.get("/?theme=lab")
+    assert 'class="theme-lab"' in resp.text
+    assert "theme-lab.css" in resp.text
+    assert "ui_theme=lab" in resp.text  # the cookie-persist snippet rendered
+
+
+def test_cookie_selects_lab_without_query():
+    resp = client.get("/", cookies={"ui_theme": "lab"})
+    assert 'class="theme-lab"' in resp.text
+    assert "theme-lab.css" in resp.text
+
+
+def test_query_overrides_cookie():
+    resp = client.get("/?theme=classic", cookies={"ui_theme": "lab"})
+    assert 'class="theme-classic"' in resp.text
+    assert "theme-lab.css" not in resp.text
+
+
+def test_invalid_theme_falls_back_and_never_persists_garbage():
+    resp = client.get("/?theme=banana", cookies={"ui_theme": "lab"})
+    assert 'class="theme-lab"' in resp.text     # cookie still wins
+    assert "ui_theme=banana" not in resp.text   # no garbage cookie write
+    resp2 = client.get("/?theme=banana")
+    assert 'class="theme-classic"' in resp2.text  # no cookie -> classic
+
+
+@pytest.mark.parametrize("route", GET_ROUTES)
+@pytest.mark.parametrize("theme", ["classic", "lab"])
+def test_every_page_renders_in_both_themes(route, theme):
+    resp = client.get(f"{route}?theme={theme}")
+    assert resp.status_code == 200, f"{route} failed in {theme}"
+    assert f'class="theme-{theme}"' in resp.text
+
+
+def test_toggle_link_points_at_the_other_theme():
+    resp = client.get("/analyze?theme=lab")
+    assert "?theme=classic" in resp.text
+    resp = client.get("/analyze?theme=classic")
+    assert "?theme=lab" in resp.text
+
+
+def test_no_external_urls_in_rendered_pages():
+    """PWA offline guarantee: no CDN fonts/scripts introduced."""
+    for route in GET_ROUTES:
+        text = client.get(f"{route}?theme=lab").text
+        assert "https://fonts." not in text
+        assert "cdn." not in text
+
+
+# ---------------------------------------------------------------------------
+# /arena page
+# ---------------------------------------------------------------------------
+
+def test_arena_empty_state_when_db_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARENA_DB", str(tmp_path / "nope.db"))
+    resp = client.get("/arena")
+    assert resp.status_code == 200
+    assert "No arena data yet" in resp.text
+    assert "arena-run backtest" in resp.text
+
+
+def test_arena_renders_seeded_db_with_badges_and_metrics(tmp_path, monkeypatch):
+    from strategy_arena import ArenaState
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    state.record_backtest("tsmom", "PASS", {"Sharpe": 1.2, "CAGR": 0.2, "MaxDD": -0.08})
+    state.record_backtest("engulfing", "REFERENCE", {"Sharpe": 0.1, "CAGR": 0.01, "MaxDD": -0.2})
+    state.append_ledger("tsmom", [("2026-07-01", 100000.0), ("2026-07-02", 100500.0),
+                                  ("2026-07-03", 101000.0)], [])
+    monkeypatch.setenv("ARENA_DB", db)
+
+    resp = client.get("/arena?theme=lab")
+    assert resp.status_code == 200
+    assert "tsmom" in resp.text
+    assert "status-pass" in resp.text
+    assert "status-reference" in resp.text
+    assert "metric-card" in resp.text  # headline cards rendered
+    assert "Strategies tracked" in resp.text

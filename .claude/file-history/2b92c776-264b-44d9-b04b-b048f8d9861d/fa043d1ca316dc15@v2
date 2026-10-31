@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Draft PRs for gossip (#83-#86) and journal (#87-#88)."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+GOSSIP_BODY = (
+    "Closes #83, closes #84, closes #85, closes #86 (milestone #8). Stacks "
+    "on #82 (base = `feature/world-time`); plan: "
+    "`.claude/plans/gossip-facts.md`.\n\n"
+    "## What this delivers\n"
+    "Tell the baker a secret and — given time and proximity — the hardware "
+    "store owner can plausibly bring it up. Facts are structured records "
+    "`{factId, subject, content, source, learnedAtSeconds}` on the SAME "
+    "WorldState bus as the clock, with per-agent knowledge sets. The "
+    "journal PR reads this store with zero new wiring.\n\n"
+    "## Design\n"
+    "- **Propose → validate → commit**: on dialogue close the NPC's model "
+    "proposes ≤2 facts as strict JSON ({subject, content, direction}); "
+    "`validateProposedFacts` rejects anything malformed with NO side "
+    "effects. Model output never writes to the bus directly.\n"
+    "- **Conservative spread** (per the autonomy instruction): a 15-second "
+    "tick lets NPC pairs within 6 units pass at most ONE fact each way, "
+    "only after the teller has known it 30+ game minutes, on a 35% roll. "
+    "Schedules (PR #82) make NPCs actually meet, so gossip follows the "
+    "town's routine. No NPC→NPC message channel exists — propagation only "
+    "flips knowledge bits on the shared store.\n"
+    "- **Read path**: `renderSystemPrompt(memory, gossip)` injects exactly "
+    "the facts THAT NPC knows, before the action protocol.\n"
+    "- **Persistence**: FactStore (saves/facts.sqlite3, ConversationStore "
+    "pattern) write-through on commit and spread; a journal wiped every "
+    "restart would be useless.\n"
+    "- Subjects normalize to `[a-z0-9_]`; fact ids hash subject+content so "
+    "re-commits are idempotent and the first teller's stamp survives.\n\n"
+    "## Verification\n"
+    "Suite 157/1504 at this commit (validation accept/reject table, "
+    "radius/age/chance/one-per-pair propagation under a seeded rng, "
+    "idempotent commits, store round-trip + degradation, prompt-block "
+    "placement). Live LLM extraction quality is the part to watch in "
+    "play — malformed output degrades to 'no facts', never a crash.\n\n"
+    "## Logged limitations\n"
+    "Host-local in multiplayer (guests' chats already route through host "
+    "NPCs; knowledge replication lands with a protocol bump). No content "
+    "mutation in transit, no forgetting, exact-subject matching only.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+JOURNAL_BODY = (
+    "Closes #87, closes #88 (milestone #9). Stacks on the gossip PR "
+    "(base = `feature/gossip-facts`); plan: "
+    "`.claude/plans/player-journal.md`.\n\n"
+    "## What this delivers\n"
+    "A Journal page in the pause menu: every fact the player was "
+    "personally told, grouped by subject with 'heard from X at HH:MM' "
+    "attribution — and when two NPCs' accounts of the same subject "
+    "disagree, both rows are tinted and marked **[conflicting "
+    "accounts]**.\n\n"
+    "## Design\n"
+    "- **Pure read path**: header-only core helpers filter (player in "
+    "knowers AND source ≠ player — so it never spoils gossip the player "
+    "wasn't part of), group, sort, and flag; the menu renders injected "
+    "display rows and never touches WorldState; nothing writes. The "
+    "gossip schema needed no new fields — the read-only constraint held.\n"
+    "- **Conflict v1** = same normalized subject, different content (both "
+    "flagged; two tellers agreeing reads as corroboration). Semantic "
+    "contradiction detection is the logged upgrade path.\n"
+    "- Paging + empty state; same Page/Hit menu machinery as Creator.\n\n"
+    "## Verification\n"
+    "Suite 160/1517 green (visibility filter, corroboration vs conflict, "
+    "grouping order, HH:MM label). The page itself needs a human eyeball "
+    "pass (smoke runs can't click menus) — flagged like the Creator page.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+gossip_pr = retry(lambda: repo.create_pull(
+    title="feat(gossip): structured facts on the world bus with conservative spread",
+    body=GOSSIP_BODY, head="feature/gossip-facts", base="feature/world-time",
+    draft=True), "gossip pr")
+print(f"gossip PR #{gossip_pr.number}: {gossip_pr.html_url}")
+
+journal_pr = retry(lambda: repo.create_pull(
+    title="feat(journal): player journal over the fact store with conflict flags",
+    body=JOURNAL_BODY, head="feature/player-journal", base="feature/gossip-facts",
+    draft=True), "journal pr")
+print(f"journal PR #{journal_pr.number}: {journal_pr.html_url}")
+
+for number, pr in ((83, gossip_pr), (84, gossip_pr), (85, gossip_pr),
+                   (86, gossip_pr), (87, journal_pr), (88, journal_pr)):
+    issue = retry(lambda: repo.get_issue(number), f"issue {number}")
+    retry(lambda: issue.add_to_labels("ai-completed"), "label")
+    try:
+        issue.remove_from_labels("ai-in-progress")
+    except GithubException:
+        pass
+    retry(lambda: issue.create_comment(
+        f"Implemented in draft PR #{pr.number}."), "comment")
+    retry(lambda: issue.edit(state="closed"), "close")
+    print(f"issue #{number} closed")

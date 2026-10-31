@@ -1,0 +1,140 @@
+# Plan: C++ Core — Oil-Volume Reader + ITCH Order-Book Perf Lab
+Date: 2026-06-28
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: XL (split into two shippable tracks below)
+
+## The Idea (one paragraph)
+The repo today is a pure-Python crude-oil lead-lag research kit (`src/oil_alpha`,
+Streamlit GUI in `app/dashboard.py`). Two GitHub tickets push it toward the
+"systems / performance" side of HFT, in C++. **Issue #1** ("famous oil drum
+investigation") wants the heavy compute for *reading the physical size of oil*
+— aggregating EIA/FRED storage-volume and production series into clean,
+fast-to-compute volume metrics — written in C++ and surfaced in the existing
+GUI. **Issue #2** wants a C++ **Nasdaq TotalView-ITCH parser + order-book
+engine**, then a measure→optimize→measure loop (perf stat, HdrHistogram tail
+latencies, data-structure swaps) to drive down tick-to-trade latency, using
+Claude to explain *why* each change got faster. Both tickets need the same new
+foundation: a **CMake + pybind11 C++ build layer** added to the repo once and
+shared by both. That shared foundation is Track 0.
+
+## Goal
+A user can (a) compute oil storage/production "size" metrics from real EIA data
+via a fast C++ core exposed to the Streamlit GUI, and (b) run a C++ binary that
+parses real ITCH messages, rebuilds the L2/L3 book, and prints p50/p99/p99.9
+tick-to-trade latency — then re-run it after an optimization and see the tail
+shrink, with a written explanation of the cause.
+
+## Out of Scope (this version)
+- FPGA / hardware acceleration (the "Level 2/3" follow-on is explicitly later).
+- Live exchange connectivity or real order routing — replay/synthetic only.
+- SIMD/branchless micro-optimization of ITCH parsing in the *first* pass
+  (captured as a later issue once the baseline + harness exist).
+- Rewriting the existing Python lead-lag analytics in C++ — only the new
+  oil-volume compute is C++.
+- Windows/macOS support for the perf harness (`perf`/HdrHistogram target Linux,
+  which matches the dev environment).
+
+## Affected Areas
+- New `cpp/` top-level tree (C++17):
+  - `cpp/CMakeLists.txt` — root build; pybind11 + two targets (oil core lib,
+    ITCH bench binary).
+  - `cpp/oil_volume/` — `volume_metrics.{hpp,cpp}` (storage/production
+    aggregation), `bindings.cpp` (pybind11 module `oil_volume_cpp`).
+  - `cpp/itch/` — `itch_parser.{hpp,cpp}`, `order_book.{hpp,cpp}`,
+    `signal.{hpp,cpp}`, `bench_main.cpp` (the tick-to-trade benchmark).
+  - `cpp/common/` — `latency_histogram.hpp` (HdrHistogram wrapper),
+    arena/preallocation helpers used later.
+  - `cpp/third_party/` — pybind11 + HdrHistogram_c as submodules or
+    `FetchContent`.
+- `src/oil_alpha/data/sources.py` — add `fetch_eia()` for storage/production
+  volume series (key already stubbed in `.env.example` as `EIA_API_KEY`).
+- `src/oil_alpha/oil_volume.py` — thin Python wrapper that calls the
+  `oil_volume_cpp` extension (with a pure-Python fallback if the ext isn't built).
+- `app/dashboard.py` — new "Oil Size / Volume" panel.
+- `scripts/perf_stat.sh` — wraps `perf stat` (cycles, instructions, IPC,
+  cache-misses, branch-misses) around the ITCH bench.
+- `requirements.txt` / `pyproject.toml` — add `pybind11`, build config.
+- New: `cpp/README.md`, `docs/perf/` (where measure→optimize→measure write-ups land).
+- `tests/test_oil_volume.py`, `cpp/tests/` (gtest or simple asserts).
+
+## Implementation Order
+Each step is independently committable.
+
+**Track 0 — Shared C++ build foundation**
+1. Add `cpp/CMakeLists.txt` + pybind11 via `FetchContent`; a trivial
+   `oil_volume_cpp` module exposing `add(a,b)` that imports from Python. Wire
+   `pyproject.toml` so `pip install -e .` builds it. Produces: a working
+   C++→Python bridge proven by one passing test.
+
+**Track A — Oil-volume reader (Issue #1)**
+2. `fetch_eia()` in `sources.py` — pull Cushing/storage + production volume
+   series (paginated EIA v2), cached via existing `data/cache.py`, charged via
+   existing `APIBudget`.
+3. C++ `volume_metrics` — aggregation/rolling computations over the volume
+   series (capacity utilization %, days-of-supply, fill-rate); pybind11-exposed.
+4. `oil_volume.py` wrapper + Streamlit "Oil Size / Volume" panel rendering the
+   metrics and a time series. Produces: GUI shows oil "size" from real data via
+   the C++ core.
+
+**Track B — ITCH order-book perf lab (Issue #2)**
+5. `itch_parser` — decode the TotalView-ITCH 5.0 message subset needed for the
+   book (Add/Delete/Replace/Execute); fed by a downloaded Nasdaq sample file.
+6. `order_book` — baseline **hash-map by price level** L2/L3 reconstruction;
+   `signal` emits a trivial top-of-book signal. Correctness tested against a
+   tiny hand-built message sequence.
+7. `latency_histogram` + `bench_main` — measure per-message tick-to-trade
+   latency, print p50/p99/p99.9; `scripts/perf_stat.sh` captures CPU counters.
+   Produces: a baseline number + the full measurement loop.
+8. First optimization commit: swap hash-map → **flat array indexed by price
+   level**; re-run; record before/after in `docs/perf/01-flat-book.md` with
+   Claude's explanation of the cache-miss drop. Produces: the "got faster + why"
+   artifact the ticket asks for.
+
+## Acceptance Criteria
+- [ ] `pip install -e .` builds the C++ extension; `import oil_volume_cpp` works.
+- [ ] Given EIA storage data, the GUI "Oil Size / Volume" panel renders capacity
+      utilization % and a volume time series computed by the C++ core.
+- [ ] C++ oil metrics match a Python reference within 1e-9 (parity test).
+- [ ] Given a Nasdaq ITCH sample file, `bench_main` reconstructs the book and
+      prints p50/p99/p99.9 tick-to-trade latency without crashing.
+- [ ] Order book reconstruction passes a unit test on a known message sequence
+      (correct best bid/ask after Add/Execute/Delete).
+- [ ] `scripts/perf_stat.sh` prints cycles, instructions, IPC, cache-misses,
+      branch-misses for the bench run.
+- [ ] After the flat-array swap, p99 latency drops vs. the hash-map baseline and
+      `docs/perf/01-flat-book.md` documents the before/after + cause.
+- [ ] Tests pass: `pytest` (Python) and `ctest`/`cpp/tests` (C++).
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| C++ extension not built | `oil_volume.py` falls back to a pure-Python implementation and the GUI shows a "running unoptimized" notice |
+| `EIA_API_KEY` missing | `fetch_eia()` raises a clear, actionable error; GUI panel shows setup hint (consistent with existing keyless-FRED pattern) |
+| ITCH file truncated / unknown message type | Parser skips unknown types, logs a count, never reads past buffer end |
+| Malformed book op (delete missing order) | Engine ignores + increments an error counter, does not corrupt the book |
+| `perf` not permitted (`perf_event_paranoid`) | Script detects non-zero exit, prints the sysctl fix, still emits HdrHistogram latencies (which don't need perf) |
+| Negative/zero storage values in EIA series | Filtered like the existing `clean.py` positive-price guard |
+
+## Open Questions
+- **Binding tool**: plan assumes **pybind11 + CMake (FetchContent)**. If you'd
+  rather use `nanobind` or `scikit-build-core`, flag before Track 0.
+- **ITCH sample source**: assumes a downloaded Nasdaq TotalView-ITCH 5.0 sample
+  (e.g. the public `emi.nasdaq.com` sample). Confirm you can obtain one, or we
+  start Track B on a synthetic ITCH generator and swap in the real file later.
+- **C++ test framework**: GoogleTest vs. a header-only assert harness — default
+  to GoogleTest via FetchContent unless you want zero extra deps.
+
+## Suggested GitHub Issues
+For `/plan-github`:
+1. **C++ build foundation (CMake + pybind11)** — Track 0; `cpp/` tree, trivial
+   bound module, `pip install -e .` builds it, one passing parity test.
+2. **EIA oil-volume data source + C++ metrics core** — Track A steps 2–3;
+   `fetch_eia()`, `volume_metrics`, parity test.
+3. **Oil Size / Volume GUI panel** — Track A step 4; Streamlit panel + Python
+   fallback wrapper.
+4. **ITCH parser + baseline (hash-map) order book** — Track B steps 5–6;
+   correctness test on a known message sequence.
+5. **Tick-to-trade latency harness (HdrHistogram + perf stat)** — Track B step 7;
+   p50/p99/p99.9 + CPU-counter script.
+6. **Optimization #1: flat-array book + perf write-up** — Track B step 8;
+   before/after doc in `docs/perf/`.

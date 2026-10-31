@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "Renderer3D deleted (-607 lines); all functional SFML references scrubbed from "
+    "docs, launch scripts, and comments. DEVELOPER.md's architecture/module/build "
+    "sections now describe the raylib world; README gains the fetch_assets step.\n\n"
+    "**Merge gate (from #39):** the mood-face side-by-side check — the six baked "
+    "emote faces vs the legacy renderer's — is satisfied by the 1:1 geometry port; "
+    "confirm during review of this draft, since merging this removes the legacy "
+    "reference implementation (it remains in git history).\n\n"
+    "**Verified:** build + 60-frame smoke run clean, suite green, `grep -ri sfml` "
+    "over src/core, scripts, and build files is empty.\n\n"
+    "**Stack position:** bases on #52 — the raylib migration's final PR.\n\n"
+    "Closes #42\n\n---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(title="chore(render): delete the legacy GL renderer and SFML remnants",
+                              body=body, head="feature/issue-42-raylib-cleanup",
+                              base="feature/issue-40-raylib-ui-parity", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)
+
+issue = repo.get_issue(42)
+issue.remove_from_labels("ready-for-ai")
+issue.add_to_labels("ai-completed")
+issue.create_comment(f"Implemented. Draft PR: #{pr.number} — closes on merge. "
+                     "NOTE: merging deletes the legacy renderer; do the #39 face "
+                     "side-by-side eyeball during this review.")
+print("issue 42 ai-completed")

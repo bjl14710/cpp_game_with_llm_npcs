@@ -1,0 +1,50 @@
+// Scaffolded stubs for group conversations (plan: group-conversations).
+// Un-skip each in the commit that implements its step. All headless — the
+// LLM side runs against the FakeBackend pattern from test_llm_client.
+#include "GroupSession.hpp"
+#include "doctest.h"
+
+using namespace llm_npc;
+
+TEST_CASE("addressing: named participant gets the turn, else round-robin" *
+          doctest::skip()) {
+    // Step 2. TODO(groups): "Marge, what do you think?" -> Marge's index;
+    // unaddressed -> round-robin advancing per turn; a name matching
+    // nobody is treated as unaddressed (no error); full-name match wins
+    // over first-name on ties.
+}
+
+TEST_CASE("NPC-to-NPC turns cap at kMaxConsecutiveNpcTurns" * doctest::skip()) {
+    // Step 2. TODO(groups): after 2 consecutive NPC turns,
+    // npcMayTakeFloor() is false until notePlayerTurn(); the floor
+    // returns to the player (input unlocked).
+}
+
+TEST_CASE("transcript lines carry speakers; prompts render per-speaker" *
+          doctest::skip()) {
+    // Step 2/3. TODO(groups): every GroupLine is labeled; the prompt
+    // assembled for NPC A contains A's persona/memory and the transcript
+    // with names, with the last other-speaker line as the user turn.
+}
+
+TEST_CASE("mood-gated follow: hostile or afraid NPCs refuse" * doctest::skip()) {
+    // Step 1. TODO(groups): the existing `follow` action keyword passes
+    // validation for a willing NPC and is rejected in-character for
+    // Hostile/Afraid (propose-validate-commit gate, tested at the
+    // validation layer — may live in test_npc_action.cpp instead; keep
+    // or move).
+}
+
+TEST_CASE("per-participant memories and attributed facts" * doctest::skip()) {
+    // Step 4. TODO(groups): on close, each participant's summary request
+    // routes with their own perspective prompt; a fact stated by NPC X
+    // lands on the world bus with source == X's persona name.
+}
+
+TEST_CASE("participant removal: death or player leaving closes cleanly" *
+          doctest::skip()) {
+    // Step 3. TODO(groups): a dead/arrested participant is dropped with a
+    // transcript note; <2 remaining closes the session; solo
+    // DialogueSession behavior stays byte-identical (existing tests
+    // untouched are the real guard).
+}

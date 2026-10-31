@@ -1,0 +1,7 @@
+"""Crude-oil lead-lag quant research starter kit.
+
+Grounded in ``crude_oil_research.txt`` Parts 1-2 (data sources + lead-lag
+methodology) and the Stage 1-3 recommendations.
+"""
+
+__version__ = "0.1.0"

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Analyze + elaborate + run the flat-book testbench against a golden-vector
+# file. Plan: .claude/plans/vhdl-flat-book.md.
+#
+# Usage: ./scripts/run_vhdl_sim.sh <golden.csv> [DEPTH]
+#
+# GHDL's exit code IS the parity result: 0 = the VHDL book matched the C++
+# oracle on every op, nonzero = an assertion (mismatch) or a build error.
+# All ghdl steps run inside the gitignored workdir so `ghdl -r` finds the
+# elaborated design regardless of the backend (mcode or llvm). The workdir is
+# shared, so invocations must run sequentially (they do today — pytest runs
+# these tests serially); parallelizing would need a per-run `mktemp -d` workdir
+# to avoid a race in the ghdl work library.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+VECTORS="${1:?usage: run_vhdl_sim.sh <golden.csv> [DEPTH]}"
+DEPTH="${2:-4096}"
+
+if ! command -v ghdl >/dev/null 2>&1; then
+    echo "ghdl not found — run scripts/setup-vhdl.sh" >&2
+    exit 3
+fi
+
+# Absolutize the vectors path (we cd into the workdir below).
+VECTORS="$(cd "$(dirname "$VECTORS")" && pwd)/$(basename "$VECTORS")"
+if [ ! -f "$VECTORS" ]; then
+    echo "golden-vector file not found: $VECTORS" >&2
+    exit 3
+fi
+
+WORK="$REPO_ROOT/hw/vhdl/work"
+mkdir -p "$WORK"
+cd "$WORK"
+
+ghdl -a --std=08 "$REPO_ROOT/hw/vhdl/flat_book.vhd" "$REPO_ROOT/hw/vhdl/flat_book_tb.vhd"
+ghdl -e --std=08 flat_book_tb
+ghdl -r --std=08 flat_book_tb -gVECTORS="$VECTORS" -gDEPTH="$DEPTH"

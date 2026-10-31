@@ -1,0 +1,67 @@
+# Overnight Build Report
+Date: 2026-07-14
+Session: overnight #2 — "Research Ideas" milestone #4
+Issues attempted: 8 (#64–#71) — all completed
+
+## Summary
+Every issue in milestone #4 implemented on `feature/research-batch` (stacked
+on the gui branch → #63 → #53 → #52), one commit per issue, suite green after
+each. Final: **235 passed, zero skips** — every scaffold stub from the
+planning session is now live, tested code. Draft **PR #72** open; all 8
+issues labeled `ai-completed` with PR links. Lesson 0039 + drill 0008 written
+on the session's unifying concept (the position-sizing pipeline).
+
+## Completed ✅
+| Issue | Feature | Commit |
+|-------|---------|--------|
+| #64 | Vol-targeted sizing (`sizing=vol_target`, ledger-vol multiplier, never levers) | cf94842 |
+| #65 | ATR trailing-stop overlay + portfolio-level breaker (`resume --all`) | 6a02962 |
+| #66 | TSMOM trend following (long-only, skip-month, vol-scaled confidence) | 7e7cc2f |
+| #67 | Low-volatility selection (confidence = 1/σ, structural top-N ranking) | 7e7cc2f |
+| #68 | PEAD + `refresh-earnings` budgeted AV cache + `df.attrs` ticker identity | ef4eb32 |
+| #69 | Fractional Kelly gross scaling (λ ∈ [0.25, 0.5], in-window estimation) | 1a4a81c |
+| #70 | Indicators demoted: REFERENCE status, `demote` cmd, ConfirmedStrategy, 2 new GBM features | 80dbf08 |
+| #71 | Pairs stat-arb: Engle–Granger (no new deps), z-band engine, RESEARCH tier | f38730a |
+
+## Failed ❌ / Skipped ⏭
+None.
+
+## Documented deviations from the plans 🔍
+1. **#65:** `--portfolio_dd` disables independently (`0` = off) rather than
+   sharing `--no_breaker` — the two protections arm separately.
+2. **#69:** Kelly estimates from the run's own in-window trade history in
+   BOTH backtest and live (not the stored trades table) — preserves the
+   deterministic-replay invariant with one code path.
+3. **#71:** no `--i_have_margin` override — live pairs execution is itself
+   out of scope, so an unlock into a nonexistent engine would be theater;
+   the live-skip message names the requirements instead.
+
+## Action items for you ⚠️
+- **Retrain + ONNX re-export + C++ rebuild** before the GBM trades live on
+  the new `engulf_signal`/`macd_hist_norm` features (#70; CLAUDE.md rule).
+  Old bundles keep working unchanged until you do.
+- **PEAD needs its cache seeded**: `uv run refresh-earnings --tickers_file
+  <liquid-100 file> --budget 20` daily for ~5 days (AV free tier).
+- The PR stack is now 5 deep (#52 → #53 → #63 → gui branch → #72).
+  Reviewing bottom-up and merging would be a kindness to future-you.
+
+## Learning Materials
+| Concept | Lesson | Drill |
+|---------|--------|-------|
+| Position-sizing pipeline: relative weights × gross multipliers, ≤1 composition, determinism | ✅ 0039 | ✅ 0008 |
+
+Index rebuilt (11 lessons, 8 drills).
+`open docs/learning/lessons/0039-position-sizing-pipeline.html`
+
+## Test Status
+`uv run pytest tests/ -m "not exercise"` → **235 passed, 0 skipped, 0 failed**.
+
+## Suggested First Move
+Skim PR #72's "Changes by Issue" section, then try the new machinery end to
+end on real data:
+`arena-run backtest --strategies tsmom,lowvol --start 2023-01-01 --end 2025-01-01 --sizing vol_target --cost_model realistic`
+
+## Draft PRs Awaiting Review
+- #52 arena strategy layer → #53 orchestrator → #63 July-6 batch →
+  (gui/live-signals branch, no PR yet) → **#72 research batch (this session)**
+- Game repo #56 — conflict resolved earlier, still awaiting your merge

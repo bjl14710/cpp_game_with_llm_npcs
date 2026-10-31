@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0011 — Low-Latency vs Ultra-Low-Latency</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .illus { color: var(--accent-2); font-size: 12px; font-style: italic; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  /* Ladder visualisation */
+  .ladder {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px; margin: 16px 0;
+  }
+  .rung {
+    display: grid; grid-template-columns: 200px 1fr 110px 110px; gap: 12px;
+    align-items: center; padding: 10px 12px; border-radius: 6px; margin: 4px 0;
+    font-size: 13.5px;
+  }
+  .rung .tier { color: var(--accent); font-weight: 600; }
+  .rung .desc { color: var(--ink); font-size: 13px; }
+  .rung .t2t { text-align: right; font-family: "JetBrains Mono", monospace; color: var(--accent-2); }
+  .rung .cost { text-align: right; font-family: "JetBrains Mono", monospace; color: var(--ink-dim); font-size: 12px; }
+  .rung.tier-0 { background: rgba(248, 113, 113, .07); }
+  .rung.tier-1 { background: rgba(255, 212, 121, .07); }
+  .rung.tier-2 { background: rgba(74, 222, 128, .04); }
+  .rung.tier-3 { background: rgba(74, 222, 128, .08); }
+  .rung.tier-4 { background: rgba(124, 196, 255, .07); }
+  .rung.tier-5 { background: rgba(124, 196, 255, .12); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0011</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 Definitions</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 The ladder</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 Six techniques</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 Measuring honestly</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 The cost cliff</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>Low-Latency vs Ultra-Low-Latency</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: across Lessons 0001/0002/0004/0009/0010
+    you've seen the same arithmetic from microsecond to nanosecond viewpoints. This
+    lesson formalizes the terminology — what counts as "low-latency" vs "ultra-low-latency"
+    — and gives you the decision framework for which tier a strategy needs to live at.
+    Once you have the ladder, the techniques that move you down it become straightforward.
+  </p>
+
+  <p class="illus">
+    Note: per the new repo guidance, code blocks in this lesson are <em>illustrative</em>,
+    not always from the repo. We'll backfill into real code as we build it out.
+  </p>
+
+  <!-- ===================== §1 DEFINITIONS ===================== -->
+  <h2>1. Definitions — there's no formal standard, but a strong industry consensus</h2>
+
+  <p>
+    "Low-latency" and "ultra-low-latency" are <strong>marketing terms</strong> with no
+    formal standards body to bless them. But the trading industry has settled on
+    rough conventions that map cleanly onto the technology tiers:
+  </p>
+
+  <table>
+    <tr><th>Term</th><th>Typical tick-to-trade range</th><th>What the system looks like</th></tr>
+    <tr>
+      <td><strong>"Fast" / standard</strong></td>
+      <td>milliseconds (1 ms+)</td>
+      <td>Default Python or untuned C++ over kernel TCP. Your FastAPI webapp.</td>
+    </tr>
+    <tr>
+      <td><strong>Low-latency (LL)</strong></td>
+      <td>microseconds (1–100 µs)</td>
+      <td>Tuned C++ on Linux with isolated cores, lock-free queues, occasional kernel bypass. This is Lessons 0009–0010 territory.</td>
+    </tr>
+    <tr>
+      <td><strong>Ultra-low-latency (ULL)</strong></td>
+      <td>nanoseconds (10 ns – 1 µs)</td>
+      <td>FPGA tick-to-trade, kernel-bypass NICs, colocation, microwave/RF links across cities, hardware timestamping.</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <strong>The most useful single discriminator:</strong> if your hot path crosses the
+    Linux kernel even once, you're in LL territory at best. If your hot path lives
+    entirely on the FPGA or in user-space against a kernel-bypass NIC, you're
+    in ULL territory. The kernel boundary is the rough dividing line.
+  </div>
+
+  <!-- ===================== §2 THE LADDER ===================== -->
+  <h2>2. The latency ladder, end-to-end</h2>
+
+  <p>
+    Each rung swaps a technique for a faster one. Tick-to-trade numbers are
+    representative — they're a moving target as silicon and tooling improve, but
+    the <em>ratios</em> between rungs are stable.
+  </p>
+
+  <div class="ladder">
+    <div class="rung tier-0">
+      <div class="tier">Tier 0 — Web app</div>
+      <div class="desc">Python/Node over public internet. Your FastAPI dev server.</div>
+      <div class="t2t">~50 ms</div>
+      <div class="cost">$10/mo</div>
+    </div>
+    <div class="rung tier-0">
+      <div class="tier">Tier 1 — Retail</div>
+      <div class="desc">Tuned Python or untuned C++ over kernel TCP from a co-region cloud instance.</div>
+      <div class="t2t">~1–5 ms</div>
+      <div class="cost">$100/mo</div>
+    </div>
+    <div class="rung tier-1">
+      <div class="tier">Tier 2 — LL CPU</div>
+      <div class="desc">Tuned C++ + lock-free queues + isolated cores (Lesson 0010). Kernel TCP.</div>
+      <div class="t2t">~50–200 µs</div>
+      <div class="cost">~$1k/mo</div>
+    </div>
+    <div class="rung tier-2">
+      <div class="tier">Tier 3 — Kernel bypass</div>
+      <div class="desc">DPDK or Solarflare OpenOnload — user-space drives the NIC directly.</div>
+      <div class="t2t">~750 ns – 5 µs</div>
+      <div class="cost">~$5k/mo</div>
+    </div>
+    <div class="rung tier-3">
+      <div class="tier">Tier 4 — FPGA tick-to-trade</div>
+      <div class="desc">Strategy logic synthesized into HDL on the NIC (the repo's <code>fpga/</code> direction).</div>
+      <div class="t2t">~100–300 ns</div>
+      <div class="cost">~$50k/mo</div>
+    </div>
+    <div class="rung tier-4">
+      <div class="tier">Tier 5 — Hardware MAC pipeline</div>
+      <div class="desc">Parsing happens inside the PHY/MAC itself; multiple parallel decoders.</div>
+      <div class="t2t">~20–100 ns</div>
+      <div class="cost">~$100k+/mo</div>
+    </div>
+    <div class="rung tier-5">
+      <div class="tier">Tier 6 — Custom ASIC + microwave</div>
+      <div class="desc">Tape-out silicon for the matching logic; line-of-sight microwave between data centers.</div>
+      <div class="t2t">~10 ns + RF</div>
+      <div class="cost">$M/year</div>
+    </div>
+  </div>
+
+  <p>
+    Two things worth noticing about this ladder:
+  </p>
+  <ul>
+    <li>The jump from Tier 2 (LL) to Tier 3 (ULL) is <strong>~100×</strong> latency.
+      Below Tier 3 every further rung is ~3–10×. The big cliff is the kernel boundary.</li>
+    <li><strong>Cost is roughly geometric.</strong> Each rung is order-of-magnitude
+      more expensive than the one above. ULL is a financial decision, not just an
+      engineering one.</li>
+  </ul>
+
+  <!-- ===================== §3 SIX TECHNIQUES ===================== -->
+  <h2>3. The six techniques that buy you ULL</h2>
+
+  <p>Roughly in the order they pay off:</p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>1. Colocation</h4>
+      <p>
+        Rent rack space inside the exchange's data center so your wire to the
+        matching engine is meters, not kilometers. Cuts ~100 µs of fiber latency
+        for free (speed of light is 5 µs/km in glass). Step zero before any of the
+        below makes sense.
+      </p>
+    </div>
+    <div class="card">
+      <h4>2. Kernel bypass (DPDK, OpenOnload)</h4>
+      <p>
+        Route packets from NIC DMA rings directly into your user-space process,
+        skipping the kernel TCP stack (Lesson 0004). Saves ~50 µs per round-trip.
+        Mandatory entry to ULL territory on CPU.
+      </p>
+    </div>
+    <div class="card">
+      <h4>3. FPGA tick-to-trade</h4>
+      <p>
+        Synthesize the strategy into HDL on the NIC itself (Lesson 0002).
+        Parsing → decision → order all happen on-chip in nanoseconds.
+        The biggest single jump in the ladder.
+      </p>
+    </div>
+    <div class="card">
+      <h4>4. CPU/kernel discipline</h4>
+      <p>
+        <code>isolcpus</code>, <code>nohz_full</code>, busy polling,
+        thread pinning, mlockall (Lesson 0010). Cuts jitter — the tail of the
+        latency distribution — to near zero on the CPU paths that remain.
+      </p>
+    </div>
+    <div class="card">
+      <h4>5. Cross-market microwave / RF links</h4>
+      <p>
+        For arbitrage between geographically separated venues, line-of-sight
+        microwave links beat fiber. Light through air ≈ 1.0c; through glass ≈
+        0.67c. Chicago↔New Jersey: ~8 ms one-way over microwave vs ~13 ms over
+        fiber — a 5 ms edge that funded an entire industry of tower-builders in
+        the 2010s.
+      </p>
+    </div>
+    <div class="card">
+      <h4>6. Custom silicon (ASIC)</h4>
+      <p>
+        At the top of the ladder, the biggest firms tape out application-specific
+        chips that hard-code parsing, decision, and risk-check in fewer cycles
+        than an FPGA can. Multi-million-dollar capex; only the largest desks
+        justify it.
+      </p>
+    </div>
+  </div>
+
+  <h3>A worked example — measuring where the time goes</h3>
+
+  <p>
+    A hypothetical tick-to-trade breakdown at each tier, so you can see what each
+    technique removes:
+  </p>
+
+  <table>
+    <tr><th>Stage</th><th>Tier 2 (LL CPU)</th><th>Tier 3 (Kernel bypass)</th><th>Tier 4 (FPGA)</th></tr>
+    <tr><td>Packet on wire → host</td><td>~2 µs</td><td>~2 µs</td><td>~25 ns</td></tr>
+    <tr><td>Kernel network stack</td><td>~50 µs</td><td><em>skipped</em></td><td><em>skipped</em></td></tr>
+    <tr><td>User-space parse</td><td>~1 µs</td><td>~1 µs</td><td>~25 ns (on-chip)</td></tr>
+    <tr><td>Strategy decision</td><td>~500 ns</td><td>~500 ns</td><td>~10 ns</td></tr>
+    <tr><td>Order encode + TX</td><td>~5 µs</td><td>~1 µs</td><td>~50 ns</td></tr>
+    <tr><th>Total tick-to-trade</th><th>~60 µs</th><th>~5 µs</th><th>~110 ns</th></tr>
+  </table>
+
+  <p>
+    Notice that once kernel and userland are skipped (Tier 4), <em>the parse and
+    decision stages dominate again</em> — and shaving them is exactly what
+    <code>fpga/linear_regression_predictor.vhd</code> and
+    <code>fpga/market_maker.vhd</code> in this repo do, in nanoseconds.
+  </p>
+
+  <!-- ===================== §4 MEASURING HONESTLY ===================== -->
+  <h2>4. How you actually measure latency — and the numbers that lie</h2>
+
+  <p>
+    "Our system is 5 µs" is the wrong sentence. The right sentence has a
+    <em>distribution</em>, an <em>endpoint pair</em>, and a <em>clock source</em>.
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Distribution, not average</h4>
+      <p>
+        The mean is almost meaningless. HFT lives on the tail. Quote
+        <strong>p50 / p99 / p99.9 / p99.99</strong> — the latencies that 50%,
+        99%, etc. of events come in under. A 5 µs mean with a 500 µs p99.9 will
+        lose money even on a fast median; the tail is the killer.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Endpoint pair (be precise)</h4>
+      <p>
+        <strong>Wire-to-wire</strong>: last bit of incoming packet → first bit of
+        outgoing order at the NIC. <strong>App-to-app</strong>: feature extracted →
+        decision made (your code only). <strong>Inside-the-FPGA</strong>: single-cycle
+        registered output. State which one or comparisons mean nothing.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Clock source</h4>
+      <p>
+        <code>clock_gettime(CLOCK_MONOTONIC)</code> has 10–30 ns resolution but
+        burns a syscall and can step. <code>rdtsc</code> reads the TSC register
+        in ~10 ns but needs <code>tsc_reliable</code> and per-core sync.
+        <strong>Hardware timestamps</strong> (NIC or FPGA-side) are the only
+        truth at ULL — they have ns resolution and are immune to OS noise.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Jitter, not just latency</h4>
+      <p>
+        <strong>Jitter</strong> = the variability of latency, often quoted as
+        <em>p99.99 − p50</em> or as the standard deviation. ULL systems live
+        on low jitter; a deterministic 5 µs beats an "average 1 µs" with a
+        wild tail every time, because risk models price the worst case.
+      </p>
+    </div>
+  </div>
+
+  <p>A minimum-viable measurement snippet (illustrative):</p>
+<pre><span class="kw">struct</span> Sample { <span class="ty">uint64_t</span> t_in_ns; <span class="ty">uint64_t</span> t_out_ns; };
+std::<span class="ty">array</span>&lt;Sample, <span class="num">1</span> &lt;&lt; <span class="num">20</span>&gt; samples;   <span class="com">// 1M-sample ring of timing pairs</span>
+
+<span class="kw">inline</span> <span class="ty">uint64_t</span> <span class="fn">now_ns</span>() <span class="kw">noexcept</span> {
+    timespec ts; <span class="fn">clock_gettime</span>(CLOCK_MONOTONIC_RAW, &amp;ts);
+    <span class="kw">return</span> <span class="ty">uint64_t</span>(ts.tv_sec) * <span class="num">1'000'000'000ull</span> + ts.tv_nsec;
+}
+
+<span class="com">// Per tick: record entry, do work, record exit, store the pair, never log.</span>
+samples[i].t_in_ns  = <span class="fn">now_ns</span>();
+strategy.<span class="fn">onTick</span>(tick);
+samples[i].t_out_ns = <span class="fn">now_ns</span>();
+</pre>
+
+  <p>
+    Offline (cold path), sort the deltas and compute the quantiles. Plot the
+    histogram. The story is always in the tail.
+  </p>
+
+  <!-- ===================== §5 COST CLIFF ===================== -->
+  <h2>5. The cost cliff — and how to decide what tier you actually need</h2>
+
+  <p>
+    Each rung of the ladder is ~10× more expensive than the one above. The
+    decision of which tier to target is an economic argument, not a technical
+    one. Ask three questions before committing:
+  </p>
+
+  <ol>
+    <li><strong>What's your competition's tier?</strong>
+      If everyone on your venue is at FPGA tick-to-trade and you're at CPU,
+      your fills will be adversely selected (you trade only when faster traders
+      didn't want to) and your P&L is structurally negative. Conversely, if
+      everyone is at LL CPU, paying for FPGA buys you nothing.
+    </li>
+    <li><strong>What's your strategy's natural cadence?</strong>
+      A daily-rebalance equity model (this repo's GBM) is at Tier 0–1 by design;
+      moving it to Tier 4 is malpractice. A market-making strategy on a liquid
+      futures contract starts to need Tier 3 to be viable and Tier 4 to be
+      competitive.
+    </li>
+    <li><strong>What's the marginal P&L of one less microsecond?</strong>
+      In a market-making strategy, less latency means winning more queue
+      positions, fewer adverse fills, and a bigger fraction of the spread captured.
+      For a directional next-day model: zero marginal P&L from sub-µs latency.
+      Drawing this curve is what justifies the spend.
+    </li>
+  </ol>
+
+  <div class="callout warn">
+    <strong>The single most common HFT-firm misallocation:</strong> a junior
+    engineer rebuilds a Tier 1 strategy as a Tier 4 system on the assumption
+    that "faster is better." It's not. Faster is more expensive, harder to
+    debug, and only pays off when the strategy itself is latency-bound.
+    Profile first. Tier the strategy intentionally.
+  </div>
+
+  <h3>Where this repo's pieces sit (today and where they could go)</h3>
+  <table>
+    <tr><th>Module</th><th>Today</th><th>Reasonable target</th></tr>
+    <tr><td><code>paper_trading_sim.py</code> / <code>predict_next.py</code></td><td>Tier 0–1 (daily Python)</td><td>Stay there. Daily horizon doesn't reward more.</td></tr>
+    <tr><td><code>webapp/main.py</code></td><td>Tier 0 (kernel HTTP)</td><td>Stay there. Web UI; latency irrelevant.</td></tr>
+    <tr><td><code>scripts/robinhood_executor.py</code></td><td>Tier 0 (HTTPS REST)</td><td>Tier 0 — Robinhood's API floors it anyway.</td></tr>
+    <tr><td><code>gradient_boosting/main.cpp</code> (ONNX inference)</td><td>Tier 1–2 (CPU C++)</td><td>Tier 2 with the Lesson 0010 architecture, or Tier 4 via hls4ml.</td></tr>
+    <tr><td><code>fpga/*.vhd</code></td><td>Tier 4 in design</td><td>Tier 4–5 once the 10 GbE UDP + risk pieces from the roadmap are built.</td></tr>
+  </table>
+
+  <p>
+    Every module lives at the tier its strategy demands. Mixing tiers is not a
+    sign of inconsistency; it's a sign of intentional design.
+  </p>
+
+  <!-- ===================== §6 OFTEN CONFUSED ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>Latency vs Jitter</h4>
+      <p>
+        <strong>Latency</strong>: how long one event takes (p50, p99…).
+        <strong>Jitter</strong>: how variable that is (p99.99 − p50, or stddev).
+        ULL systems often sacrifice average latency for lower jitter; risk
+        models care about the worst case.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Latency vs Throughput</h4>
+      <p>
+        <strong>Latency</strong>: time per event. <strong>Throughput</strong>:
+        events per second. HFT optimizes for latency; market-data plants
+        optimize for throughput. They often trade off — busy polling cuts
+        latency by burning a core, lowering throughput per watt.
+      </p>
+    </div>
+    <div class="card">
+      <h4>p50 vs p99 vs p99.99</h4>
+      <p>
+        <strong>p50</strong> (median): what the typical event experiences.
+        <strong>p99</strong>: 1-in-100 events are slower. <strong>p99.99</strong>:
+        1-in-10,000 events are slower. At market-data rates of 100k+
+        messages/sec, p99.99 events happen several times a second.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Round-trip vs One-way</h4>
+      <p>
+        <strong>Round-trip</strong> tick-to-trade includes the order leaving
+        your NIC. <strong>One-way</strong> sometimes refers to wire-to-wire
+        latency or to inbound parsing only. Most published "tick-to-trade"
+        numbers are wire-to-wire round-trip; always confirm.
+      </p>
+    </div>
+    <div class="card">
+      <h4>LL vs ULL vs Real-time</h4>
+      <p>
+        <strong>Real-time</strong> in OS terms means "bounded latency" not
+        "fast." A 10 ms deterministic system is real-time; a 100 ns average
+        with a 10 ms tail is not. ULL systems aim to be real-time first and
+        fast second.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Speed vs Edge</h4>
+      <p>
+        <strong>Speed</strong> is a capability (your tier). <strong>Edge</strong>
+        is the advantage that capability gives you on a particular strategy.
+        Speed without edge is wasted spend; speed with edge is alpha.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. What's the single most useful discriminator between LL and ULL?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Both LL and ULL systems live in colocation. Colocation is the entry ticket to both, not a discriminator between them.">Whether the system is colocated at the exchange.</li>
+      <li data-correct="true"  data-why="Right. The Linux kernel network stack costs ~50–120 µs round-trip — fundamentally incompatible with sub-µs targets. Kernel-bypass / FPGA / hardware MAC pipelines all share the property that the hot path never crosses the kernel. That single architectural fact separates LL (~10s of µs through tuned CPU + kernel) from ULL (~ns through user-space DMA or hardware).">Whether the hot path crosses the Linux kernel even once.</li>
+      <li data-correct="false" data-why="Programming language can vary inside both tiers — there are Rust LL systems, Verilog ULL systems, C++ in both. The architectural divider is the kernel boundary, not the language.">Whether the system is written in C++ versus a higher-level language.</li>
+      <li data-correct="false" data-why="ULL systems use commercial FPGAs, not custom ASICs in most cases. ASICs are an even higher tier above ULL. The dividing line between LL and ULL is the kernel.">Whether the system uses application-specific integrated circuits.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. Your daily-rebalance GBM strategy in <code>paper_trading_sim.py</code> takes ~200 ms end-to-end. A teammate proposes rewriting it in FPGA for "ultra-low latency." Best response?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Faster is not always better. Daily-cadence strategies don't earn extra P&L from sub-microsecond latency because they only act once per day. Spending on Tier 4 here is malpractice — high engineering cost, zero marginal alpha.">"Great idea, faster is always better — the new latency will reduce slippage.</li>
+      <li data-correct="true"  data-why="Right. The strategy makes one decision per day. Cutting that decision from 200 ms to 100 ns saves zero P&L because nothing about the next 24 hours depends on it. Tier choice should be driven by the strategy's natural cadence and the marginal P&L per microsecond, not by 'faster is more impressive'.">"Wrong tier — the strategy acts once per day, so the marginal P&L from sub-µs latency is zero. FPGA cost would be wasted; stay at Tier 0–1.</li>
+      <li data-correct="false" data-why="The model itself is the wrong thing to deploy to FPGA — 100-tree GBMs don't fit cleanly in HDL (see Lesson 0003), but that's a separate issue. The bigger problem is that even a perfect FPGA implementation wouldn't help a daily-cadence strategy.">"Sure, but only if we first convert the model to a single decision tree.</li>
+      <li data-correct="false" data-79="Cost is part of the analysis but the dominant fact is that the strategy doesn't benefit from lower latency. Even if the FPGA were free, the strategy still wouldn't earn more.">"Only if the FPGA license is under $1000.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. Two systems are benchmarked. System A: mean 800 ns, p99.99 = 12 µs. System B: mean 1.2 µs, p99.99 = 2 µs. Which would an HFT market-making team typically prefer?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The mean comparison is misleading here. A market maker's risk is paying for adverse fills in the tail — System A's 12 µs p99.99 means it gets caught flat-footed thousands of times per trading day at HFT message rates.">System A — it has the lower mean latency.</li>
+      <li data-correct="true"  data-why="Right. At HFT message rates (100k+/sec) a p99.99 event happens several times a second. System A's 12 µs tail means a meaningful fraction of ticks land in adverse-selection territory, even though the mean is faster. System B's 2 µs p99.99 means the worst case is bounded — risk models can price the strategy. ULL teams pick determinism over headline speed.">System B — bounded p99.99 is what risk models price; System A's tail will systematically lose money on the tail events.</li>
+      <li data-correct="false" data-why="The two metrics describe orthogonal properties. p50 (median) and p99.99 (tail) together describe a distribution. A market maker cannot ignore either.">Doesn't matter — both numbers describe the same thing.</li>
+      <li data-correct="false" data-why="Lower variance is good but only if the tail doesn't blow up. The right question is the specific p99.99 number, not just 'is variance lower'.">Whichever has the lower variance, regardless of which metric.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. The Chicago↔NJ microwave link beats fiber by ~5 ms one-way. Why?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Bandwidth is actually lower on microwave links than on fiber. The win is latency, and it comes from speed-of-light physics, not bandwidth.">Because microwaves carry more bandwidth than fiber.</li>
+      <li data-correct="true"  data-why="Correct. Light travels through glass at about 0.67c and through air at nearly 1c. Microwave links also travel in straighter lines (line-of-sight) while fiber routes follow railroad/utility paths. Together those effects shave a few milliseconds across ~1180 km — which funded an entire industry of microwave-tower builders in the 2010s.">Because light travels faster through air than through glass, and the line-of-sight path is shorter than fiber's routed path.</li>
+      <li data-correct="false" data-why="The exchanges process every order the same way regardless of how the order arrived. The latency advantage is purely in transit between Chicago and NJ.">Because exchanges process microwave-delivered orders faster than fiber-delivered ones.</li>
+      <li data-correct="false" data-why="Microwave links operate within ms over 1000+ km. They are very fast but well above ns scale.">Because microwaves operate on the nanosecond scale natively.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. Which of these is the cheapest tier-upgrade you can make to a Tier 2 (LL CPU) system to start moving toward ULL?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="A microwave link only helps cross-market arbitrage; for a single-venue system it's irrelevant. And it's a tier-5/6 capex commitment, not a cheap upgrade.">Lease a microwave link to the next data center.</li>
+      <li data-correct="true"  data-why="Right. Kernel bypass via DPDK or Solarflare OpenOnload is software-and-NIC, not silicon, and removes the kernel network stack — the biggest single CPU-side latency contributor (~50–100 µs). It's the cheapest jump on the ladder and the textbook first step into ULL territory.">Switch to a kernel-bypass NIC + DPDK/OpenOnload so the hot path skips the kernel network stack.</li>
+      <li data-correct="false" data-why="Tape-out is at the top of the ladder, multi-million dollar capex. The cheapest *first* upgrade is kernel bypass.">Tape out a custom ASIC for parsing the exchange protocol.</li>
+      <li data-correct="false" data-why="A second strategy thread doesn't reduce latency — it adds throughput. The single per-tick decision still goes through the same network stack.">Add a second strategy thread to run in parallel.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. Your strategy team reports a Sharpe of 2.0 in backtest on a Tier 2 system, but Sharpe of −0.3 when live. The latency was identical to backtest. What's the most likely cause and how does the tier conversation help?</summary>
+    <p>
+      Adverse selection. In backtest, you "fill" every order at the recorded price.
+      Live, faster participants see the same signal microseconds before you and
+      lift the offers you wanted — leaving you with only the bad fills (the ones
+      no one else wanted, where the price was about to move against you). The
+      backtest assumed you were the only player; the market is full of Tier 4
+      players. Tier conversation: either accept that this strategy needs Tier 3+
+      to be viable, or pick a different strategy whose alpha doesn't depend on
+      being faster than other participants — e.g. multi-day signals where the
+      first-fill advantage is irrelevant.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. You measure p50 = 700 ns and p99.99 = 3 µs on a kernel-bypass system. A new release ships and p50 drops to 500 ns, but p99.99 jumps to 25 µs. Should you ship the new release?</summary>
+    <p>
+      No — and the question is itself a teaching moment about what to optimize.
+      A 200 ns mean win is mathematically beaten by a 22 µs tail blow-up because
+      the tail events happen thousands of times per day at typical market-data
+      rates, and each one likely loses money on adverse selection. The new
+      release also implies you've introduced some jitter source (a new
+      allocation, a new branch on a rare path, a cache eviction pattern, a
+      removed busy-poll). Diagnose what's causing the tail before shipping;
+      revert if necessary. The ULL maxim: <em>median is vanity, tail is sanity</em>.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. The repo's <code>fpga/market_maker.vhd</code> targets ~4 ns per stage. If you wrap it in a Linux user-space C++ harness that polls the FPGA over PCIe for every quote, what tier does the combined system actually live at, and why?</summary>
+    <p>
+      Whatever the slowest link is. PCIe Gen3 round-trip from a CPU to a card
+      sitting in a PCIe slot is typically 500 ns – 2 µs, dominated by the
+      driver, the user-space polling pattern, and the bus itself. So even
+      though the FPGA does its arithmetic in ~4 ns, a CPU-in-the-loop system
+      operates at Tier 3 (kernel-bypass-ish, ~µs) — not Tier 4. To live at
+      Tier 4 the orders must <em>leave the FPGA directly</em> over the SFP+
+      port, with the CPU only used as a slow-path configurator. That's why
+      the README's roadmap groups "10 GbE UDP stack" and "PCIe DMA interface"
+      as separate items: one is the ULL path, the other is the slow-path
+      management interface.
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson in your queue: <strong>DMA (Direct Market Access)</strong>.
+    After that: hardware acceleration, alternative data, order-book dynamics,
+    market making, stat-arb, order-to-trade ratio, more alt-data examples,
+    then the AI/CV concepts (preprocessing, object detection, segmentation,
+    geometric calculus).
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

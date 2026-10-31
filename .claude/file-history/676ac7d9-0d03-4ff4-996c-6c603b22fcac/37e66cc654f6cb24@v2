@@ -1,0 +1,21 @@
+# Checkpoint
+Session started: 2026-07-15 (overnight)
+Goal: Work through all ready-for-ai issues (MSP430 Compliance Fixes milestone)
+Status: IN PROGRESS
+Mainline: master (orphan `main` was deleted 2026-07-08 — all workflow refs to
+"main" map to master)
+Branch strategy: stacked — all six issues edit silmulator/devices/msp430.py,
+so each branch is cut from the previous one; PRs target the predecessor
+branch and auto-retarget to master as they merge bottom-up.
+
+Issues to process: [#18, #19, #20, #21, #22, #23]
+Issues completed: []
+Issues failed: []
+Issues skipped: []
+
+Notes: graphify not installed (skipped). git-historian agent not available
+in this environment — orientation done via direct code/audit reading
+(hot files known: silmulator/devices/msp430.py,
+tests/test_msp430_edge_cases.py xfails, docs/audits/msp430-compliance-report.md).
+Open drafts predating tonight: PR #25 (visual tests), #26 (wire sync),
+#27 (panning) — no file overlap with msp430 work.

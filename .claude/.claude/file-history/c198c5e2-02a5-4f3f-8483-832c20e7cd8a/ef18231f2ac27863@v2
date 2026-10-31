@@ -1,0 +1,33 @@
+## What to change
+Add an interaction test: simulate dragging a PSU block from the device
+palette onto the canvas, then verify the resulting canvas state visually.
+
+## Specifically
+1. Add to `tests/visual/test_gui_canvas.py`:
+   - `test_canvas_empty_state()` → golden: canvas_empty.png
+   - `test_canvas_with_psu_block()`:
+     - Launch MainWindow
+     - Simulate clicking the PSU button in the device palette (qtbot.mouseClick)
+     - Wait for block to appear (qtbot.waitUntil)
+     - processEvents
+     - compare_screenshot(canvas, "canvas_with_psu_block")
+2. Generate and commit golden images
+
+## How to verify it's done
+`pytest tests/visual/test_gui_canvas.py -v` passes.
+Two golden images committed.
+The canvas_with_psu_block.png shows a PSU block on the canvas.
+
+## Constraints
+Use qtbot.waitUntil with a timeout of 3000ms — not time.sleep().
+The test must pass headlessly. If palette/drag API doesn't exist yet,
+test the canvas in isolation and leave a comment about what's missing.
+
+## Code economy note
+QTest and qtbot are the right tools — no pyautogui or screen coordinates.
+
+## Branch name
+`feature/issue-N-visual-test-canvas-interaction`
+
+## Concept for learning materials
+"Simulating user interactions in Qt tests with QTest and qtbot"

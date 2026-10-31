@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0038 — The GUI, and the Three Ways to Run a Trading Method</title>
+<style>
+  :root { --bg:#0f1419; --panel:#161d26; --ink:#e6e1d7; --dim:#9aa4b2; --accent:#e8a33d;
+          --good:#4cc38a; --bad:#e5534b; --code-bg:#1c2530; --border:#2a3644; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#faf8f4; --panel:#ffffff; --ink:#1f2933; --dim:#5b6572; --accent:#b06f0e;
+            --good:#0e7a4f; --bad:#c0362c; --code-bg:#f0ede6; --border:#ddd6c8; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.65 Georgia, 'Times New Roman', serif; }
+  main { max-width:47rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.65rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size:1.25rem; margin:2.6rem 0 .8rem; color:var(--accent);
+       border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  h3 { font-size:1.02rem; margin:1.6rem 0 .5rem; }
+  .kicker { color:var(--dim); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; }
+  .why { background:var(--panel); border-left:4px solid var(--accent); padding:.8rem 1rem;
+         margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; overflow-x:auto; font:13.5px/1.55 'SF Mono', Menlo, Consolas, monospace; }
+  code { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:.88em;
+         background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  .cm { color:var(--dim); font-style:italic; }
+  .path { font-family:'SF Mono', Menlo, monospace; font-size:.8em; color:var(--dim);
+          display:block; margin-bottom:.4rem; }
+  table { border-collapse:collapse; width:100%; font-size:.9em; margin:1rem 0; }
+  th, td { border:1px solid var(--border); padding:.45rem .65rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .options { list-style:none; padding:0; }
+  .options li { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                padding:.6rem .9rem; margin:.45rem 0; cursor:pointer; }
+  .options li:hover { border-color:var(--accent); }
+  .options li.picked-right { border-color:var(--good); }
+  .options li.picked-wrong { border-color:var(--bad); }
+  .feedback { font-size:.92em; padding:.5rem .8rem; border-radius:6px; background:var(--panel); }
+  .question { margin:2rem 0; }
+  #score { font-weight:bold; }
+  .scenario { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+              padding:1rem 1.2rem; margin:1rem 0; }
+  .scenario summary { cursor:pointer; color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">HFT Practice · Lesson 0038</p>
+<h1>The GUI, and the Three Ways to Run a Trading Method (like the 2-Candle)</h1>
+<div class="why"><strong>Why this matters:</strong> "run the 2-candle strategy" means
+three different things in this codebase depending on the engine you pick — and the
+desktop GUI, which predates the strategies package, runs none of them. Knowing which
+door leads where saves you from hunting the GUI for a button that doesn't exist.</div>
+
+<h2 id="s1">1 · The mental model: one pattern, three engines</h2>
+<p>The <em>pattern</em> (bullish/bearish engulfing — a red candle whose body is
+swallowed by the next green one, or vice versa) is defined exactly once, in
+<code>strategies/engulfing.py</code>. Three engines can drive it:</p>
+<table>
+<tr><th>Engine</th><th>Command</th><th>Bar frequency</th><th>Exit logic</th><th>Persists?</th></tr>
+<tr><td>Intraday PaperEngine</td><td><code>intraday-sim</code></td><td>1m–60m bars</td><td>Stop-loss / take-profit / forced end-of-day close</td><td>CSV files per run</td></tr>
+<tr><td>Arena backtest</td><td><code>arena-run backtest</code></td><td>Daily</td><td>One-bar hold, next close</td><td>Verdict in arena.db</td></tr>
+<tr><td>Arena live</td><td><code>arena-run live</code></td><td>Daily</td><td>One-bar hold, next close</td><td>Ongoing ledger in arena.db</td></tr>
+</table>
+<p>The GUI is a <em>fourth</em> thing entirely: a Tkinter front-end over the
+<strong>GBM/mean-variance pipeline</strong> (train, walk-forward, news, universe,
+execution, metrics). It was built before <code>strategies/</code> existed and has no
+engulfing/arena tabs.</p>
+
+<h2 id="s2">2 · The GUI tour</h2>
+<pre><code>uv run gui-hft     <span class="cm"># Docker users: MPLBACKEND=Agg is already set in docker-compose.yml</span></code></pre>
+<p><span class="path">gui_app.py — class App(tk.Tk), six ttk.Notebook tabs</span>
+Each tab is a form wrapped around one CLI's functionality, run on a background
+thread so the window doesn't freeze:</p>
+<table>
+<tr><th>Tab</th><th>Wraps</th><th>What you do there</th></tr>
+<tr><td><strong>Walkforward</strong></td><td><code>walkforward-sim</code></td><td>Pick a .joblib bundle + tickers file + dates, optionally pre-download OHLCV, hit <em>Run Walkforward</em></td></tr>
+<tr><td><strong>Train/Backtest</strong></td><td><code>paper-backtest</code></td><td>Train the GBM and save the bundle (<em>Run Backtest + Save Model</em>)</td></tr>
+<tr><td><strong>Universe Builder</strong></td><td><code>universe-builder</code></td><td>Scrape S&amp;P 500 / NASDAQ ticker lists into <code>tickers/</code></td></tr>
+<tr><td><strong>News</strong></td><td><code>news-fetch</code> / <code>news-features</code></td><td>Pull Alpha Vantage sentiment, engineer features (needs <code>ALPHAVANTAGE_API_KEY</code>)</td></tr>
+<tr><td><strong>Execution</strong></td><td><code>rh-exec</code></td><td>Predict + allocate + (dry-run) submit. The <em>"Dry run (no orders)"</em> checkbox defaults to CHECKED — unticking it is the GUI's real-money gate</td></tr>
+<tr><td><strong>Analyze Equity</strong></td><td><code>analyze-equity</code></td><td>Point at any equity CSV, get Sharpe/CAGR/MaxDD</td></tr>
+</table>
+<p>Rule of thumb: anything the GUI does, the CLI does too (the tabs call the same
+functions) — but not the reverse. Strategies, the arena, stress tests, SHAP, and
+drift checks are CLI-only today.</p>
+
+<h2 id="s3">3 · Running the 2-candle, both ways</h2>
+<h3>Intraday, with stops (the PaperEngine path)</h3>
+<pre><code>uv run intraday-sim --tickers AAPL,MSFT --start 2026-06-20 \
+    --interval 5m --strategy engulfing \
+    --position_dollars 1000 --stop_loss_pct 0.005 --take_profit_pct 0.01
+<span class="cm"># outputs equity.csv + trades.csv; --no_short to go long-only
+# intervals: 1m 5m 15m 30m 60m — yfinance only serves ~7 days of 1m bars</span></code></pre>
+<p>Mechanics (<code>strategies/paper_engine.py</code>): a signal on bar N enters at bar
+N+1's open; each later bar checks stop-loss first (it wins ties with take-profit);
+any open position force-closes on the day's last bar — never hold overnight.</p>
+
+<h3>Daily, in the arena (screen → live → compare)</h3>
+<pre><code>uv run arena-run backtest --start 2023-01-01 --end 2025-01-01 \
+    --strategies engulfing            <span class="cm"># or engulfing,technical,meanrev</span>
+uv run arena-run live                 <span class="cm"># daily tick; breaker + divergence watching</span>
+uv run arena-run report</code></pre>
+<p>Same pattern code, adapted to daily bars by
+<code>strategies/candlestick_daily.py</code> (last two daily candles). One behavioral
+difference to expect: the regime gate keeps engulfing out of <em>trending</em>
+markets — a reversal pattern is a mean-reversion bet, so on trending days it holds
+by design (disable with <code>--no_regime_gate</code> to experiment).</p>
+
+<h2 id="s4">4 · Often confused</h2>
+<table>
+<tr><th>Pair</th><th>The difference</th></tr>
+<tr><td>GUI Execution tab vs <code>rh-exec</code></td><td>Same engine — the tab is a form over the executor. Both default to dry-run; the checkbox and <code>--no_dry_run</code> are the same gate wearing two outfits.</td></tr>
+<tr><td><code>intraday-sim</code> engulfing vs arena engulfing</td><td>Identical pattern detector, different worlds: 5-minute bars with SL/TP/EOD exits vs daily bars with one-bar holds, costs, sizing, and watchdogs. Their results are NOT comparable to each other.</td></tr>
+<tr><td>Train/Backtest tab vs Walkforward tab</td><td>Train/Backtest fits the model once on a single split (optimistic, produces the bundle); Walkforward replays history without ever training on the traded day (honest validation). Lesson 0037's rule: validate with the second.</td></tr>
+<tr><td>"strategy" in <code>intraday-sim --strategy</code> vs arena <code>--strategies</code></td><td>Two separate registries: intraday_sim.STRATEGIES (intraday contract, engulfing only today) vs strategies/registry.py (daily contract: engulfing, technical, meanrev, gbm).</td></tr>
+</table>
+
+<h2 id="s5">5 · Practice</h2>
+<p>Score: <span id="score">0 / 0</span></p>
+
+<div class="question" data-question>
+  <p><strong>Q1.</strong> You open the GUI looking for a "run engulfing strategy" button. Where is it?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The Walkforward tab drives the GBM model bundle, not rule strategies.">Walkforward tab, under strategy dropdown</li>
+    <li data-correct="true" data-why="Right — the GUI predates the strategies package and wraps only the GBM pipeline. The 2-candle runs via intraday-sim (intraday) or arena-run (daily), both CLI.">Nowhere — the GUI doesn't drive rule strategies; use intraday-sim or arena-run</li>
+    <li data-correct="false" data-why="The Execution tab wraps rh-exec (model predictions → orders), not pattern strategies.">Execution tab, strategy picker</li>
+    <li data-correct="false" data-why="Universe Builder scrapes ticker lists — nothing to do with running strategies.">Universe Builder tab</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q2.</strong> In an intraday-sim run, a bar triggers BOTH the stop-loss and the take-profit. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Optimistic and wrong — the engine is deliberately conservative on ambiguous bars.">Take-profit wins — you get the gain</li>
+    <li data-correct="true" data-why="PaperEngine checks stop-loss first by design: when a bar's range spans both exits you can't know which hit first, so the engine assumes the worse outcome.">Stop-loss wins — the engine assumes the worse fill</li>
+    <li data-correct="false" data-why="Positions do force-close at end of day, but that's a separate rule for the day's LAST bar.">The position rides until end of day</li>
+    <li data-correct="false" data-why="No averaging — one exit fires, and it's the pessimistic one.">The two exits average out</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q3.</strong> Arena-run live shows engulfing holding on a day when you can SEE a textbook engulfing pattern on the chart. Most likely reason?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The daily adapter delegates to the exact same detector that flagged your chart pattern.">The daily adapter uses a different pattern definition</li>
+    <li data-correct="true" data-why="The regime gate: engulfing's compatible_regimes is {mean_reverting, neutral}, so on a day classified as trending (or high_vol) it holds no matter what the candles say. Check the regime_log table, or rerun with --no_regime_gate.">That day's market regime was classified trending/high_vol, so the gate held it out</li>
+    <li data-correct="false" data-why="PAUSED would show in the report and it would skip the strategy entirely, not just one day.">The circuit breaker paused it</li>
+    <li data-correct="false" data-why="Doji filtering exists, but a 'textbook' engulfing implies real bodies — and it wouldn't explain regime-correlated holds.">Both candles were dojis</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q4.</strong> Why does <code>--interval 1m</code> only work for recent dates?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The engine handles any interval it's given — the constraint is upstream.">PaperEngine can't process that many bars</li>
+    <li data-correct="true" data-why="yfinance serves roughly the last 7 days of 1-minute bars — the CLI help says so explicitly. Use 5m+ for longer lookbacks.">yfinance only provides ~7 days of 1-minute history</li>
+    <li data-correct="false" data-why="No such gate exists; the limit is the data source's.">A repo setting blocks intervals under 5m</li>
+    <li data-correct="false" data-why="Alpha Vantage is the NEWS source; prices come from yfinance.">Alpha Vantage rate limits</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q5.</strong> The GUI Execution tab's dry-run checkbox: what's its default, and what does unticking it mean?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backwards — safety is the default state.">Unchecked by default; ticking it simulates</li>
+    <li data-correct="true" data-why="exec_dry_var = BooleanVar(value=True): checked (simulate) by default. Unticking it is the GUI equivalent of rh-exec --no_dry_run — real Robinhood orders with your RH_* credentials.">Checked by default; unticking sends REAL orders via Robinhood</li>
+    <li data-correct="false" data-why="It affects order submission only — predictions run either way.">It toggles whether predictions run at all</li>
+    <li data-correct="false" data-why="The arena is untouched by the GUI; this checkbox gates brokerage orders.">It switches between arena paper and live ledgers</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2 id="s6">6 · Check your understanding (scenarios)</h2>
+<div class="scenario"><details><summary><strong>Scenario A.</strong> You want to know whether the 2-candle works better with tighter stops. Which engine, which flags, and what do you compare?</summary>
+<p>Intraday engine — stops only exist there. Two runs differing only in
+<code>--stop_loss_pct</code> (e.g. 0.005 vs 0.003), same tickers/dates/interval,
+distinct <code>--out_csv</code> names, then <code>analyze-equity --equity_csv</code> on each.
+The arena can't answer this: its daily one-bar hold has no stop-loss concept.</p></details></div>
+<div class="scenario"><details><summary><strong>Scenario B.</strong> Your friend wants to try the platform but is command-line-averse. What CAN you honestly give them via the GUI, and where's the line?</summary>
+<p>The full GBM lifecycle: train a model (Train/Backtest), validate it (Walkforward),
+build ticker lists, pull news, compute metrics, and even dry-run executions — all
+point-and-click. The line: anything strategy-arena related (2-candle, technical,
+meanrev, ensembles, breaker, reports) is CLI-only today. A GUI arena tab would be a
+reasonable future issue.</p></details></div>
+<div class="scenario"><details><summary><strong>Scenario C.</strong> intraday-sim's engulfing made money last week but the arena's engulfing is EXCLUDED. Contradiction?</summary>
+<p>No — different games. Intraday: 5-minute bars, SL/TP risk control, flat overnight.
+Arena: daily bars, one-bar holds, transaction costs, screened over years of history.
+A pattern can have intraday edge and no daily edge (or vice versa). The two results
+answer different questions and neither invalidates the other.</p></details></div>
+
+<script>
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+let answered = 0, right = 0;
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = q.querySelector('.feedback');
+  let done = false;
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      const correct = li.dataset.correct === 'true';
+      if (!done){ answered++; if (correct) right++; done = true; }
+      li.classList.add(correct ? 'picked-right' : 'picked-wrong');
+      feedback.hidden = false;
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      document.getElementById('score').textContent = right + ' / ' + answered;
+    });
+  });
+});
+</script>
+</main>
+</body>
+</html>

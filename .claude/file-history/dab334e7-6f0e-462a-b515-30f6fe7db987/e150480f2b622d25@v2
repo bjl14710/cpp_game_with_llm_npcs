@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0035 — Feature Contracts at Inference: Train/Serve Skew &amp; the Last-Bar Problem</title>
+<style>
+  :root { --bg:#0f1419; --panel:#161d26; --ink:#e6e1d7; --dim:#9aa4b2; --accent:#e8a33d;
+          --good:#4cc38a; --bad:#e5534b; --code-bg:#1c2530; --border:#2a3644; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#faf8f4; --panel:#ffffff; --ink:#1f2933; --dim:#5b6572; --accent:#b06f0e;
+            --good:#0e7a4f; --bad:#c0362c; --code-bg:#f0ede6; --border:#ddd6c8; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.65 Georgia, 'Times New Roman', serif; }
+  main { max-width:46rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.7rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size:1.25rem; margin:2.8rem 0 .8rem; color:var(--accent);
+       border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  .kicker { color:var(--dim); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; }
+  .why { background:var(--panel); border-left:4px solid var(--accent); padding:.8rem 1rem;
+         margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; overflow-x:auto; font:13.5px/1.5 'SF Mono', Menlo, Consolas, monospace; }
+  code { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:.88em;
+         background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  .cm { color:var(--dim); font-style:italic; }
+  .kw { color:var(--accent); }
+  .st { color:var(--good); }
+  .path { font-family:'SF Mono', Menlo, monospace; font-size:.8em; color:var(--dim);
+          display:block; margin-bottom:.4rem; }
+  table { border-collapse:collapse; width:100%; font-size:.92em; margin:1rem 0; }
+  th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .done-row { display:flex; align-items:center; gap:.5rem; margin:1.6rem 0 0;
+              color:var(--dim); font-size:.85rem; font-family:Menlo, monospace; }
+  .options { list-style:none; padding:0; }
+  .options li { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                padding:.6rem .9rem; margin:.45rem 0; cursor:pointer; }
+  .options li:hover { border-color:var(--accent); }
+  .options li.picked-right { border-color:var(--good); }
+  .options li.picked-wrong { border-color:var(--bad); }
+  .feedback { font-size:.92em; padding:.5rem .8rem; border-radius:6px; background:var(--panel); }
+  .question { margin:2rem 0; }
+  #score { font-weight:bold; }
+  .scenario { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+              padding:1rem 1.2rem; margin:1rem 0; }
+  .scenario summary { cursor:pointer; color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">HFT Practice · Lesson 0035</p>
+<h1>Feature Contracts at Inference: Train/Serve Skew and the Last-Bar Problem</h1>
+<div class="why"><strong>Why this matters here:</strong> your model bundles are saved as
+<code>{"model": ..., "features": [...]}</code> and CLAUDE.md warns that the
+<code>features</code> list "defines exact column order at inference." This lesson explains
+what that contract really is, how <code>build_features</code> silently eats the one row you
+most want to predict on, and why <code>strategies/gbm_adapter.py</code> pads the frame with a
+copy of the last bar.</div>
+
+<h2 id="s1">1 · The concept: a feature contract</h2>
+<p>When you train a model on a table of features, you implicitly sign a contract with your
+future self. At inference time you must reproduce:</p>
+<table>
+<tr><th>Clause</th><th>Meaning</th><th>What breaks if violated</th></tr>
+<tr><td><strong>Names</strong></td><td>The same columns exist</td><td><code>KeyError</code>, or silently missing features filled with garbage</td></tr>
+<tr><td><strong>Order</strong></td><td>Columns feed the model in training order</td><td>No error at all — sklearn sees a bare numpy array and happily multiplies RSI by the coefficient it learned for volume. Predictions are nonsense.</td></tr>
+<tr><td><strong>Semantics</strong></td><td>Each column is computed the same way</td><td>Subtle drift: RSI via rolling mean ≠ RSI via EMA (Wilder). Same name, different number.</td></tr>
+<tr><td><strong>Availability</strong></td><td>Every input is knowable at decision time</td><td>Lookahead bias (using tomorrow) or inference lag (using yesterday when today exists)</td></tr>
+</table>
+<p>Violating any clause produces <strong>train/serve skew</strong>: the model runs on inputs
+distributionally different from what it was trained on. The insidious part is that clauses
+2–4 usually fail <em>silently</em> — the code runs, numbers come out, and the equity curve
+quietly rots.</p>
+
+<h2 id="s2">2 · Minimal standalone example</h2>
+<pre><code><span class="cm"># The last-bar problem in eight lines.</span>
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+close = pd.Series([100, 102, 101, 105], name=<span class="st">"close"</span>)
+df = pd.DataFrame({<span class="st">"close"</span>: close})
+df[<span class="st">"ret_1d"</span>]     = df[<span class="st">"close"</span>].pct_change()   <span class="cm"># backward-looking: fine today</span>
+df[<span class="st">"fwd_ret_1d"</span>] = df[<span class="st">"ret_1d"</span>].shift(-1)      <span class="cm"># the TARGET: tomorrow's return</span>
+
+<span class="cm"># Row 3 (today, close=105) has fwd_ret_1d = NaN — tomorrow hasn't happened.</span>
+<span class="cm"># That is CORRECT for training: you can't learn from an unknown label.</span>
+clean = df.dropna()   <span class="cm"># ...but dropna() just deleted TODAY —</span>
+                      <span class="cm"># the only row you actually want to predict on.</span></code></pre>
+<p>The target column <em>must</em> be NaN on the newest bar (anything else is lookahead).
+A blanket <code>dropna()</code> is right for building a training set and wrong for building
+an inference row. One function serving both callers is where the bug lives.</p>
+
+<h2 id="s3">3 · In this project</h2>
+
+<p><span class="path">paper_trading_sim.py:48–69 — the contract's single source of truth</span>
+<code>build_features()</code> produces <code>close, ret_1d, ma_5, ma_10, ma_gap, vol_10,
+rsi_14</code> plus the target <code>fwd_ret_1d = ret_1d.shift(-1)</code>, then ends with
+<code>return out.dropna()</code>. Every feature is backward-looking; only the target looks
+forward. So on any frame, the final returned row is at best <em>yesterday</em>.</p>
+
+<p><span class="path">predict_next.py:136–144 — a live one-day inference lag (pre-existing quirk)</span></p>
+<pre><code>feats = build_features(df).dropna()
+<span class="cm"># ...</span>
+latest = feats.iloc[-1]   <span class="cm"># ← looks like "today", is actually YESTERDAY:</span>
+                          <span class="cm">#   build_features' dropna removed today's row</span>
+                          <span class="cm">#   because today's TARGET is NaN.</span></code></pre>
+<p>The production predictor therefore forecasts tomorrow using features as of the most
+recent <em>complete</em> bar — a full day stale. Availability clause violated in the
+conservative direction: no cheating, but the model trades on old information.
+(Found during the 2026-07-05 overnight session; deliberately not changed there because it
+alters live behaviour — it deserves its own reviewed fix.)</p>
+
+<p><span class="path">strategies/gbm_adapter.py — the padding fix used by the Strategy Arena</span></p>
+<pre><code>padded = pd.concat([df, df.iloc[[-1]]])   <span class="cm"># duplicate the newest bar</span>
+feats = build_features(padded)</code></pre>
+<p>After padding, the <em>real</em> newest bar is no longer last, so its target becomes a
+finite dummy (return vs. its own copy = 0) and it survives the dropna. The copy, now the
+final row, inherits the NaN target and is dropped instead. Because every feature only
+looks backward, the copy cannot contaminate the real bar's inputs. Result: true
+same-day features from the <em>unmodified</em> production pipeline — the semantics clause
+holds because there is still exactly one implementation of the features.</p>
+
+<p><span class="path">strategies/gbm_adapter.py — honouring the order clause</span></p>
+<pre><code>X = row[self._feat_cols].astype(float).values.reshape(1, -1)
+yhat = float(self._model.predict(X)[0])</code></pre>
+<p><code>self._feat_cols</code> comes from the bundle's <code>features</code> list — never
+from "whatever columns the frame has." Reindexing by the saved list is what enforces
+name + order every single time.</p>
+
+<h2 id="s4">4 · Often confused with</h2>
+<table>
+<tr><th></th><th>Lookahead bias</th><th>Inference lag</th></tr>
+<tr><td><strong>What leaks</strong></td><td>Future information leaks <em>into</em> features/decisions</td><td>Nothing leaks — features are merely <em>stale</em></td></tr>
+<tr><td><strong>Effect on backtest</strong></td><td>Backtest looks <em>better</em> than reality (the killer)</td><td>Backtest and live both look slightly <em>worse</em> than necessary</td></tr>
+<tr><td><strong>Direction of error</strong></td><td>Optimistic — you will lose real money finding out</td><td>Pessimistic/conservative — you leave edge on the table</td></tr>
+<tr><td><strong>In this repo</strong></td><td>Guarded by <code>shift(-1)</code> targets and walk-forward retraining cutoffs (<code>f.index &lt; dt</code>)</td><td><code>predict_next.py</code> predicting off yesterday's row</td></tr>
+</table>
+<p>Both are violations of the same <em>availability</em> clause — in opposite directions.
+Lesson 0032 covered lookahead in candlestick detection; this is its mirror image.
+Separately, don't confuse <strong>train/serve skew</strong> (inputs differ between training
+and inference) with <strong>overfitting</strong> (model memorises noise in training data).
+A perfectly regularised model still fails under skew, and the arena's
+backtest-vs-live divergence column is designed to surface exactly that.</p>
+
+<h2 id="s5">5 · Practice</h2>
+<p>Click an answer. Options are shuffled on every load. Score: <span id="score">0 / 0</span></p>
+
+<div class="question" data-question>
+  <p><strong>Q1.</strong> A saved bundle has <code>features = ["close","ret_1d","rsi_14"]</code>.
+  At inference you build a frame whose columns happen to be
+  <code>["rsi_14","close","ret_1d"]</code> and call
+  <code>model.predict(frame.values)</code>. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="sklearn only sees a bare numpy array — it has no column names to compare, so nothing raises.">sklearn raises a feature-name mismatch error</li>
+    <li data-correct="true" data-why="Exactly — no error, but each value is multiplied by weights learned for a different column. This is why the adapter reindexes with row[self._feat_cols] first.">It runs without error and returns garbage predictions</li>
+    <li data-correct="false" data-why="pandas aligns on names only during frame-to-frame operations, not when you export .values to numpy.">pandas silently reorders the columns to match training</li>
+    <li data-correct="false" data-why="Predictions change badly, but nothing about the array is invalid, so no NaNs appear.">The predictions come back as NaN</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q2.</strong> Why is <code>fwd_ret_1d</code> NaN on the newest bar of every frame
+  <code>build_features</code> sees?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="yfinance delivers complete OHLCV rows; the NaN is created by build_features itself, not the data source.">Because yfinance hasn't finished downloading the latest row</li>
+    <li data-correct="false" data-why="rsi_14 needs 14 bars of history, so it's NaN at the START of the frame, not the end.">Because RSI needs 14 bars of warmup</li>
+    <li data-correct="true" data-why="Right — the target is ret_1d.shift(-1): tomorrow's return. For the newest bar, tomorrow doesn't exist yet, and any finite value there would be lookahead.">Because the target is tomorrow's return, and tomorrow hasn't happened</li>
+    <li data-correct="false" data-why="Rolling windows make the OLDEST rows NaN. The newest bar's backward-looking features are all computable.">Because rolling windows make the newest row incomplete</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q3.</strong> In <code>gbm_adapter.py</code>, why can't the duplicated last bar
+  contaminate the real last bar's features?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The copy is NOT removed before computation — it's present during build_features and dropped after, by dropna. The protection comes from direction, not removal order.">Because the copy is removed before features are computed</li>
+    <li data-correct="true" data-why="Correct — every feature (returns, MAs, vol, RSI) is computed from bars at or before its own row. The copy sits AFTER the real bar, so it can only influence rows after itself — and it is itself dropped.">Because every feature only looks backward, and the copy sits after the real bar</li>
+    <li data-correct="false" data-why="build_features has no dedup logic; duplicate index entries flow straight through rolling computations.">Because pandas deduplicates repeated index dates automatically</li>
+    <li data-correct="false" data-why="The dummy target on the real bar is 0, and it IS in the frame — it's just never used as a model input, which is a different safeguard.">Because the copy's target is NaN, so its features are ignored</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q4.</strong> Your arena report shows a strategy whose live Sharpe collapses far
+  below its backtest Sharpe. Feature code is identical in both paths. Which contract clause
+  is the FIRST suspect?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Same build_features implementation in both paths means semantics are identical by construction here.">Semantics — the indicator formulas drifted</li>
+    <li data-correct="true" data-why="Yes — identical code can still see different DATA timing: the backtest predicts on same-day rows while live (like predict_next.py) may run on yesterday's row, or on partial/unsettled bars. Availability skew is invisible in code review; you find it by comparing decision timestamps.">Availability — live decisions use rows from a different time than backtest decisions</li>
+    <li data-correct="false" data-why="A name violation crashes loudly with KeyError — it doesn't produce a quietly worse Sharpe.">Names — a feature column went missing in live</li>
+    <li data-correct="false" data-why="Possible in general, but the bundle's features list pins order in both paths here; and order bugs usually destroy performance entirely rather than degrade it.">Order — columns swapped between the two paths</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q5.</strong> Lookahead bias vs. inference lag — which statement is true?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backwards: lookahead INFLATES backtests. Lag deflates live edge but doesn't flatter the backtest.">Inference lag inflates backtest results; lookahead deflates them</li>
+    <li data-correct="false" data-why="predict_next.py's quirk is lag (stale inputs), not lookahead — no future data enters any feature.">predict_next.py's iloc[-1] quirk is a lookahead bias</li>
+    <li data-correct="true" data-why="Exactly. Lookahead = optimistic error (backtest lies to you, costs real money later). Lag = conservative error (you trade on old info, leaving edge unused). Same availability clause, opposite directions.">Lookahead makes results look too good; lag merely makes them stale and conservative</li>
+    <li data-correct="false" data-why="They're both violations of the availability clause of the feature contract — that's precisely why they're worth contrasting.">They are unrelated problems from different contract clauses</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2 id="s6">6 · Check your understanding (scenarios)</h2>
+<div class="scenario"><details><summary><strong>Scenario A.</strong> You add a <code>news_sent_3d</code> feature and retrain. Six months later a teammate "optimises" news_features.py to use a 5-day window but keeps the column name. What breaks, and would any test catch it?</summary>
+<p>The <em>semantics</em> clause breaks: same name, different number, so the saved bundle
+silently runs on a distribution it never trained on. Nothing crashes. A characterisation
+test pinning known input → known feature values (like the golden values in
+test_paper_trading.py) is the only automatic catch; otherwise it surfaces as unexplained
+live-vs-backtest divergence in the arena report.</p></details></div>
+<div class="scenario"><details><summary><strong>Scenario B.</strong> To "fix" the last-bar problem someone changes build_features to <code>fillna(0)</code> the target instead of dropping. Why is that worse than the padding trick?</summary>
+<p>Every training set now contains a final row whose label claims "tomorrow's return was
+exactly 0%" — a fabricated label fed into every retrain (including walkforward_sim's
+rolling retrains, which call the same function). The padding trick keeps the fabricated
+value <em>outside</em> the training path because it only exists in the inference call's
+frame, and even there it's never used as an input.</p></details></div>
+<div class="scenario"><details><summary><strong>Scenario C.</strong> The FPGA/C++ ONNX path (gradient_boosting/) re-implements feature computation in C++. Which clauses are at risk and what's the cheapest guard?</summary>
+<p>Semantics (two implementations of RSI/MA can drift) and order (the ONNX input tensor is
+positional). Cheapest guard: a golden-file test — one fixed OHLCV frame, feature vectors
+computed by both Python and C++, asserted equal to tolerance. CLAUDE.md's rule "re-export
+ONNX after changing build_features" exists exactly because of this risk.</p></details></div>
+
+<div class="done-row">
+  <label><input type="checkbox" class="sec-done"> concept</label>
+  <label><input type="checkbox" class="sec-done"> example</label>
+  <label><input type="checkbox" class="sec-done"> in-project</label>
+  <label><input type="checkbox" class="sec-done"> contrasts</label>
+  <label><input type="checkbox" class="sec-done"> quiz</label>
+  <label><input type="checkbox" class="sec-done"> scenarios</label>
+  <span id="sections-done"></span>
+</div>
+
+<script>
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+let answered = 0, right = 0;
+const total = document.querySelectorAll('[data-question]').length;
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = q.querySelector('.feedback');
+  let done = false;
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      const correct = li.dataset.correct === 'true';
+      if (!done){ answered++; if (correct) right++; done = true; }
+      li.classList.add(correct ? 'picked-right' : 'picked-wrong');
+      feedback.hidden = false;
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      document.getElementById('score').textContent = right + ' / ' + answered +
+        (answered === total ? '  (of ' + total + ' questions)' : '');
+    });
+  });
+});
+const boxes = document.querySelectorAll('.sec-done');
+boxes.forEach(b => b.addEventListener('change', () => {
+  const n = [...boxes].filter(x => x.checked).length;
+  document.getElementById('sections-done').textContent =
+    n === boxes.length ? ' — lesson complete ✓' : ' — ' + n + '/' + boxes.length;
+}));
+</script>
+</main>
+</body>
+</html>

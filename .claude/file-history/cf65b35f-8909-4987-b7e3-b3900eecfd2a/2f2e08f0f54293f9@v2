@@ -1,0 +1,129 @@
+"""Tests for the Hayashi-Yoshida lead-lag estimator.
+
+Same discipline as test_leadlag.py's synthetic-lead CCF test: the sign
+convention (peak at l > 0 => x leads y) is pinned by generating asynchronous
+tick data with a KNOWN injected lead and requiring the scan to recover both
+its direction and its magnitude. The estimator is never trusted on real data
+until it passes the known-answer check.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from oil_alpha.analysis.hayashi_yoshida import (
+    HYLeadLagResult,
+    default_lag_grid_ns,
+    hy_correlation,
+    hy_leadlag_scan,
+)
+
+#: Injected ground truth: y is x delayed by 250 ms.
+TRUE_LEAD_NS = 250_000_000
+
+
+def _asynchronous_pair(
+    lead_ns: int = TRUE_LEAD_NS,
+    seed: int = 11,
+    session_s: float = 600.0,
+    x_rate_hz: float = 20.0,
+    y_rate_hz: float = 15.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two asynchronously sampled tick series driven by one latent price.
+
+    A latent log-price random walk W is sampled by x at Poisson times t and
+    by y at independent Poisson times, but y observes the DELAYED path
+    W(t - lead_ns): x genuinely leads y by lead_ns. Small i.i.d. noise on y
+    plays the role of microstructure noise.
+    """
+    rng = np.random.default_rng(seed)
+    horizon_ns = int(session_s * 1e9)
+
+    def poisson_times(rate_hz: float) -> np.ndarray:
+        n = rng.poisson(rate_hz * session_s)
+        return np.sort(rng.integers(0, horizon_ns, n).astype(np.int64))
+
+    tx = poisson_times(x_rate_hz)
+    ty = poisson_times(y_rate_hz)
+
+    # Latent walk evaluated at every needed time via one sorted grid.
+    latent_times = np.unique(np.concatenate((tx, ty - lead_ns)))
+    steps = rng.normal(0.0, 1.0, len(latent_times))
+    # Scale increments with sqrt of elapsed time so it's a proper random walk.
+    dt = np.diff(latent_times, prepend=latent_times[0]).astype(float)
+    walk = np.cumsum(steps * np.sqrt(np.maximum(dt, 1.0)) * 1e-6)
+    level = dict(zip(latent_times.tolist(), walk.tolist()))
+
+    px = np.exp([level[t] for t in tx]) * 100.0
+    noise = rng.normal(0.0, 2e-7, len(ty))
+    py = np.exp([level[t - lead_ns] + e for t, e in zip(ty, noise)]) * 100.0
+    return tx, px, ty, py
+
+
+def _grid(step_ms: int = 25, max_ms: int = 500) -> np.ndarray:
+    return np.arange(-max_ms, max_ms + 1, step_ms, dtype=np.int64) * 1_000_000
+
+
+def test_recovers_injected_lead_direction_and_magnitude() -> None:
+    """Peak must land at +250 ms (x leads) within one grid step."""
+    tx, px, ty, py = _asynchronous_pair()
+    res = hy_leadlag_scan(tx, px, ty, py, _grid(), x_name="oil", y_name="etf")
+    assert isinstance(res, HYLeadLagResult)
+    assert res.x_leads, f"expected x to lead, got peak at {res.peak_lag_ns} ns"
+    assert res.leader == "oil"
+    assert abs(res.peak_lag_ns - TRUE_LEAD_NS) <= 25_000_000
+    assert res.peak_corr > 0.5
+
+
+def test_swapping_series_flips_the_sign() -> None:
+    """corr-HY symmetry: if x leads y by L, then y 'leads' x by -L."""
+    tx, px, ty, py = _asynchronous_pair()
+    res = hy_leadlag_scan(ty, py, tx, px, _grid(), x_name="etf", y_name="oil")
+    assert not res.x_leads
+    assert res.leader == "oil"
+    assert abs(res.peak_lag_ns + TRUE_LEAD_NS) <= 25_000_000
+
+
+def test_synchronous_identical_series_has_unit_correlation() -> None:
+    """HY at zero shift on identical synchronous ticks is exactly 1."""
+    rng = np.random.default_rng(3)
+    t = np.sort(rng.integers(0, int(1e9), 500).astype(np.int64))
+    t = np.unique(t)
+    p = np.exp(np.cumsum(rng.normal(0, 1e-4, len(t)))) * 50.0
+    assert hy_correlation(t, p, t, p, 0) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_independent_walks_have_near_zero_correlation() -> None:
+    """No common driver => |rho_HY| stays small at every scanned lag."""
+    rng = np.random.default_rng(7)
+
+    def series(seed_offset: int):
+        r = np.random.default_rng(100 + seed_offset)
+        t = np.unique(np.sort(r.integers(0, int(600e9), 8000).astype(np.int64)))
+        p = np.exp(np.cumsum(r.normal(0, 1e-5, len(t)))) * 100.0
+        return t, p
+
+    tx, px = series(1)
+    ty, py = series(2)
+    res = hy_leadlag_scan(tx, px, ty, py, _grid())
+    assert float(np.nanmax(np.abs(res.corr))) < 0.2
+    _ = rng  # noqa: F841 - reserved for future perturbations
+
+
+def test_default_grid_straddles_zero_and_is_sorted() -> None:
+    """The convenience grid must include 0 and be strictly increasing."""
+    grid = default_lag_grid_ns(max_lag_s=5.0, points_per_side=10)
+    assert 0 in grid
+    assert np.all(np.diff(grid) > 0)
+    assert grid[0] == -grid[-1]
+
+
+def test_too_few_ticks_raise() -> None:
+    """Degenerate inputs fail loudly, never fit silently."""
+    good_t = np.array([1, 2, 3], dtype=np.int64)
+    good_p = np.array([10.0, 10.1, 10.2])
+    with pytest.raises(ValueError):
+        hy_correlation(np.array([1], dtype=np.int64), np.array([10.0]), good_t, good_p)
+    with pytest.raises(ValueError):
+        hy_leadlag_scan(good_t, good_p, good_t, good_p, np.array([], dtype=np.int64))

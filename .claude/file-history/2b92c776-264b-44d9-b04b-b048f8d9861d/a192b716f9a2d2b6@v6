@@ -1,0 +1,49 @@
+# Centralized LLM settings shared by every NPC.
+# Edit and re-run the game; no rebuild needed.
+
+host = localhost
+port = 11434
+
+# Any Ollama tag works. Pull it first with: ollama pull <model>
+model = gemma3:4b
+
+# Reasoning models only: "false" answers at chat speed (qwen3 measured
+# 24s -> 2.7s to first token). Remove the line for models without thinking.
+think = false
+
+# 0.0 = deterministic. 0.7-0.9 = natural chat. 1.0+ = chaotic.
+temperature = 0.8
+
+# How long to wait for a single reply before giving up.
+request_timeout_s = 60
+
+# How long Ollama should keep the model resident after the last request.
+# Use Go duration syntax (e.g. 30s, 5m, 1h). Longer keeps latency low but
+# holds VRAM.
+keep_alive = 10m
+
+# World generation (sandbox "Generate...") uses THIS same model. Measured
+# winner of tools/bench_schema_models.py (2026-07-14): qwen3:8b, 50% valid
+# vs 25%/0% for qwen2.5:3b/gemma3:4b — re-run the bench before changing.
+
+# --- Provider -----------------------------------------------------------------
+# Where chat requests go. Default is local Ollama (offline, no key, no TLS).
+#   ollama      -> local Ollama at host:port above
+#   openrouter  -> cloud, one key reaches Claude/GPT/Gemini and 300+ others
+#   openai      -> any OpenAI-compatible endpoint (set base_url)
+provider = ollama
+
+# OpenAI-compatible base URL (ignored when provider = ollama). Leave blank to
+# use OpenRouter's default. Tip: point this at the local Ollama OpenAI shim to
+# test the cloud code path with no key and no TLS:
+#   base_url = http://localhost:11434/v1
+# base_url = https://openrouter.ai/api/v1
+
+# For cloud providers, the model is the provider's id, e.g.:
+#   model = anthropic/claude-haiku-4.5      (talk)
+#   model = google/gemini-2.5-flash         (cheap)
+#   model = openai/gpt-5-mini               (cheapest)
+
+# Name of the environment variable holding your API key. The key itself is read
+# from that variable (or from config/secrets.cfg) and is never stored here.
+api_key_env = OPENROUTER_API_KEY

@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0002 · HFT System Map &amp; Usage</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131824;
+    --panel2: #1a2130;
+    --line: #263048;
+    --ink: #e6edf5;
+    --muted: #8b98ab;
+    --faint: #5a6578;
+    --green: #2ecc8f;   /* pass / hit — "uptick" */
+    --red: #ff5c6c;     /* fail / miss — "downtick" */
+    --amber: #f2b04c;
+    --cyan: #39c5e0;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 1.6rem 1.1rem 6rem; }
+  /* signature element: scrolling ticker tape */
+  .tape {
+    font-family: var(--mono); font-size: .72rem; white-space: nowrap; overflow: hidden;
+    border-bottom: 1px solid var(--line); color: var(--muted); padding: .35rem 0;
+    user-select: none;
+  }
+  .tape span { display: inline-block; padding-right: 3rem; animation: tick 40s linear infinite; }
+  @keyframes tick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .tape span { animation: none; } }
+  .up { color: var(--green); } .dn { color: var(--red); }
+  header.drill { margin: 1.4rem 0 1.6rem; }
+  .kicker {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--cyan);
+  }
+  h1 { font-size: 1.55rem; margin: .25rem 0 .3rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: .95rem; margin: 0; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 1.2rem 1.3rem; margin: 1rem 0;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0 1rem; }
+  .chip {
+    font-family: var(--mono); font-size: .78rem; cursor: pointer;
+    border: 1px solid var(--line); color: var(--muted); background: var(--panel2);
+    border-radius: 999px; padding: .3rem .85rem;
+  }
+  .chip.on { border-color: var(--cyan); color: var(--cyan); background: #10222b; }
+  .rowline { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin: .6rem 0; }
+  label.toggle { font-size: .85rem; color: var(--muted); display: flex; gap: .45rem; align-items: center; cursor: pointer; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--ink);
+    padding: .5rem 1.1rem; font-size: .9rem;
+  }
+  button.primary { background: var(--cyan); border-color: var(--cyan); color: #06222b; font-weight: 700; }
+  button.ghost { background: none; }
+  button:disabled { opacity: .4; cursor: default; }
+  button:focus-visible, .chip:focus-visible, li:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  /* quiz screen */
+  .meta { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; font-family: var(--mono); font-size: .74rem; }
+  .tag { border: 1px solid var(--line); border-radius: 5px; padding: .12rem .55rem; color: var(--amber); }
+  .tag.type { color: var(--cyan); }
+  .bar { height: 6px; background: var(--panel2); border-radius: 4px; margin: .7rem 0 1.1rem; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--green)); width: 0; transition: width .25s; }
+  .qtext { font-size: 1.03rem; font-weight: 600; }
+  pre {
+    background: #0d1117; border: 1px solid var(--line); color: #d8dee9;
+    padding: .85rem 1rem; border-radius: 8px; overflow-x: auto;
+    font-family: var(--mono); font-size: .8rem; line-height: 1.55;
+  }
+  .src { font-family: var(--mono); font-size: .72rem; color: var(--muted); margin-top: -.4rem; }
+  ul.opts { list-style: none; padding: 0; margin: .9rem 0 0; }
+  ul.opts li {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel2);
+    padding: .55rem .85rem; margin: .5rem 0; cursor: pointer; font-size: .93rem;
+  }
+  ul.opts li:hover { border-color: var(--cyan); }
+  ul.opts li.right { border-color: var(--green); background: #0e2a20; }
+  ul.opts li.wrong { border-color: var(--red); background: #2c1218; }
+  ul.opts li.locked { cursor: default; }
+  .fb { font-size: .88rem; margin-top: .7rem; }
+  .fb.good { color: var(--green); } .fb.bad { color: var(--red); }
+  textarea {
+    width: 100%; min-height: 120px; resize: vertical; border-radius: 8px;
+    background: #0d1117; color: var(--ink); border: 1px solid var(--line);
+    font: inherit; font-size: .92rem; padding: .7rem .8rem; margin-top: .8rem;
+  }
+  .concepts { margin: .7rem 0 0; padding: 0; list-style: none; font-size: .87rem; }
+  .concepts li { margin: .2rem 0; }
+  .hit::before { content: "▲ "; color: var(--green); font-family: var(--mono); }
+  .miss::before { content: "▼ "; color: var(--red); font-family: var(--mono); }
+  .model {
+    border-left: 3px solid var(--cyan); background: var(--panel2);
+    padding: .6rem .9rem; border-radius: 0 8px 8px 0; margin-top: .8rem; font-size: .92rem;
+  }
+  .note { font-size: .76rem; color: var(--muted); font-style: italic; }
+  .nav { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .hidden { display: none !important; }
+  /* results */
+  .stat { font-family: var(--mono); font-size: 1.6rem; }
+  .statline { display: flex; gap: 2.2rem; flex-wrap: wrap; margin: .8rem 0; }
+  .statline .lbl { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  table.res { border-collapse: collapse; width: 100%; font-size: .85rem; margin-top: .8rem; }
+  table.res td, table.res th { border-bottom: 1px solid var(--line); padding: .4rem .5rem; text-align: left; }
+  .pill { font-family: var(--mono); font-size: .72rem; border-radius: 999px; padding: .1rem .6rem; }
+  .pill.ok { background: #0e2a20; color: var(--green); }
+  .pill.no { background: #2c1218; color: var(--red); }
+  .pill.skip { background: var(--panel2); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="tape" aria-hidden="true"><span>
+  CL=F 63.72 <b class="up">▲0.41</b> &nbsp; XLE 91.18 <b class="dn">▼0.22</b> &nbsp; USO 74.05 <b class="up">▲0.15</b> &nbsp;
+  BOOK p50 42ns <b class="up">▲−49%</b> &nbsp; p99 459ns <b class="up">▲−21%</b> &nbsp; GRANGER x→y p=0.43 <b class="dn">n.s.</b> &nbsp;
+  ITCH A/E/X/D/U &nbsp; MID=(BID+ASK)/2 &nbsp; ρ(k)=corr(x_t, y_{t+k}) &nbsp;
+  CL=F 63.72 <b class="up">▲0.41</b> &nbsp; XLE 91.18 <b class="dn">▼0.22</b> &nbsp; USO 74.05 <b class="up">▲0.15</b> &nbsp;
+  BOOK p50 42ns <b class="up">▲−49%</b> &nbsp; p99 459ns <b class="up">▲−21%</b> &nbsp; GRANGER x→y p=0.43 <b class="dn">n.s.</b> &nbsp;
+  ITCH A/E/X/D/U &nbsp; MID=(BID+ASK)/2 &nbsp; ρ(k)=corr(x_t, y_{t+k}) &nbsp;
+</span></div>
+
+<div class="wrap">
+<header class="drill">
+  <div class="kicker">Drill 0002 · retention check</div>
+  <h1>HFT System Map &amp; Usage</h1>
+  <p class="sub">Companion drill to Lesson 0002. Mostly written recall — type before you peek.</p>
+</header>
+
+<!-- ══════════ START SCREEN ══════════ -->
+<div id="start" class="card">
+  <p style="margin-top:0">Pick channels, then begin. <span class="note">The keyword checker is rough — always self-judge against the model answer.</span></p>
+  <div class="chips" id="chips"></div>
+  <div class="rowline">
+    <label class="toggle"><input type="checkbox" id="chk-all" checked> all channels</label>
+    <label class="toggle"><input type="checkbox" id="chk-shuffle" checked> shuffle question order</label>
+    <span class="spacer"></span>
+    <button class="primary" id="btn-begin">Begin drill ▸</button>
+  </div>
+</div>
+
+<!-- ══════════ QUESTION SCREEN ══════════ -->
+<div id="quiz" class="card hidden">
+  <div class="meta">
+    <span id="q-num"></span>
+    <span class="tag" id="q-cat"></span>
+    <span class="tag type" id="q-type"></span>
+  </div>
+  <div class="bar"><i id="q-bar"></i></div>
+  <div id="q-body"></div>
+  <div class="nav">
+    <button class="ghost" id="btn-prev">◂ prev</button>
+    <span class="spacer"></span>
+    <button class="ghost" id="btn-next">next ▸</button>
+    <button class="primary hidden" id="btn-finish">Finish → results</button>
+  </div>
+</div>
+
+<!-- ══════════ RESULTS SCREEN ══════════ -->
+<div id="results" class="card hidden">
+  <h2 style="margin-top:0">Session results</h2>
+  <div class="statline">
+    <div><div class="stat" id="r-mc">–</div><div class="lbl">multiple choice</div></div>
+    <div><div class="stat" id="r-wr">–</div><div class="lbl">written · self-rated solid</div></div>
+  </div>
+  <table class="res"><thead><tr><th>#</th><th>Channel</th><th>Question</th><th>Result</th></tr></thead>
+  <tbody id="r-rows"></tbody></table>
+  <div class="nav">
+    <button id="btn-review">Review only what I missed ▸</button>
+    <span class="spacer"></span>
+    <button class="ghost" id="btn-restart">Back to start</button>
+  </div>
+  <p class="note" id="r-note" style="margin-bottom:0"></p>
+</div>
+
+<script>
+(function () {
+"use strict";
+
+/* ─── channels ─────────────────────────────────────────────── */
+var CHANNELS = {
+  run:   "Running the app",
+  arch:  "Architecture & layers",
+  cpp:   "Order book, ITCH & latency",
+  stats: "Lead-lag statistics",
+  code:  "Reading real code"
+};
+
+/* ─── question bank ───────────────────────────────────────────
+   type "mc": options [{t, correct, why}] — correctness is a flag,
+   options are shuffled at session start, never position-coded.
+   type "w": written recall with keyword concepts + model answer. */
+var BANK = [
+
+  /* ---- run ---- */
+  { ch:"run", type:"mc",
+    q:"You want the full CL-vs-XLE study in a terminal, no browser. Which command?",
+    opts:[
+      { t:"PYTHONPATH=src python -m oil_alpha.pipeline", correct:true,
+        why:"pipeline.py has a __main__ block that drains run_pipeline() and prints stages plus a summary. PYTHONPATH=src is needed because the package lives under src/." },
+      { t:"streamlit run app/dashboard.py --headless", correct:false,
+        why:"--server.headless only stops the browser auto-opening; it still starts the web app server, not a terminal report." },
+      { t:"pytest tests/ -k pipeline --verbose", correct:false,
+        why:"pytest exercises the guards and conventions with fixtures; it never downloads data or prints a study summary." },
+      { t:"python src/oil_alpha/pipeline.py --headless", correct:false,
+        why:"Running the file directly breaks the package-relative imports; the module form (-m oil_alpha.pipeline) is required, and there is no --headless flag." }
+    ]},
+
+  { ch:"run", type:"w",
+    q:"Name the six pipeline stages in the order run_pipeline() executes them.",
+    concepts:[
+      { label:"download", terms:["download"] },
+      { label:"spot-check vs FRED", terms:["spot"] },
+      { label:"clean", terms:["clean"] },
+      { label:"lead-lag (CCF + Granger)", terms:["lead-lag","lead lag","leadlag","ccf","granger"] },
+      { label:"cointegration", terms:["coint"] },
+      { label:"costs", terms:["cost"] }
+    ],
+    model:"download → spot-check → clean → lead-lag → cointegration → costs. Defined in the _STAGES list in src/oil_alpha/pipeline.py; each stage is timed with StageTimer and yields ProgressEvents." },
+
+  { ch:"run", type:"w",
+    q:"The GUI dashboard and the headless CLI never drift apart in behaviour. What single design decision in pipeline.py guarantees that?",
+    concepts:[
+      { label:"run_pipeline is a generator", terms:["generator","yield"] },
+      { label:"it yields progress events", terms:["progressevent","progress event","event"] },
+      { label:"both front-ends consume the same stream", terms:["same","both","shared","consume"] },
+      { label:"final event carries the result payload", terms:["done","payload","pipelineresult","result"] }
+    ],
+    model:"run_pipeline() is a generator that yields ProgressEvent objects (stage, status, pct, message, payload). Streamlit and the CLI both iterate the same event stream, so there is one code path; the final event (stage=\"done\") carries the full PipelineResult." },
+
+  { ch:"run", type:"w",
+    q:"After a completed run you hold a PipelineResult. Name at least four of its fields and what they contain.",
+    concepts:[
+      { label:"leadlag (CCF result)", terms:["leadlag","lead-lag","ccf"] },
+      { label:"granger dict (both directions)", terms:["granger"] },
+      { label:"prices / returns frames", terms:["prices","returns"] },
+      { label:"budget (API accounting)", terms:["budget"] },
+      { label:"metrics / warnings", terms:["metric","warning","timing"] }
+    ],
+    model:"PipelineResult carries: prices and returns DataFrames, flags, leadlag (LeadLagResult), granger ({\"x->y\", \"y->x\"}), eg_coint / johansen_coint, rolling_corr / rolling_beta, spot_check, cost_estimates, budget (APIBudget), metrics (ComputeMetrics), warnings." },
+
+  /* ---- arch ---- */
+  { ch:"arch", type:"mc",
+    q:"Which part of this repo is doing genuinely HFT-style work?",
+    opts:[
+      { t:"src/oil_alpha/pipeline.py, which processes market data end to end", correct:false,
+        why:"The pipeline is daily-frequency statistical research; a run takes ~30 seconds and nobody cares. That's quant research, not HFT." },
+      { t:"cpp/itch/, the feed parser, order books and latency benchmarks", correct:true,
+        why:"Parsing a binary exchange feed, maintaining a book, and measuring per-message nanosecond latency is exactly the tick-to-trade path HFT optimises." },
+      { t:"app/dashboard.py, which streams live updates while stages run", correct:false,
+        why:"Streamlit re-renders in hundreds of milliseconds; the dashboard is a research UI with nothing latency-critical in it." },
+      { t:"src/oil_alpha/data/cache.py, which serves parquet reads locally", correct:false,
+        why:"The parquet cache avoids repeat API calls between runs — operational hygiene at human timescales, not a low-latency path." }
+    ]},
+
+  { ch:"arch", type:"w",
+    q:"Explain the two-layer split of this repo: what each layer is, what question it answers, and what \"fast\" means in each.",
+    concepts:[
+      { label:"Python research layer / alpha", terms:["research","alpha","signal","predict"] },
+      { label:"C++ execution-style layer / latency", terms:["latency","nanosecond","ns","speed","fast path","microstructure"] },
+      { label:"research asks: does a tradeable relationship exist", terms:["lead","relationship","tradeable","exist","granger","ccf"] },
+      { label:"HFT asks: can we process the market fast enough", terms:["process","react","fast enough","messages","order book","feed"] }
+    ],
+    model:"Layer 1 (src/oil_alpha, Python): daily-frequency quant research asking \"does a predictive CL→XLE relationship exist?\" — speed irrelevant, statistical correctness everything. Layer 2 (cpp/, C++): HFT-style engineering asking \"can we parse the feed and maintain the book fast enough?\" — measured in nanoseconds per message. pybind11 bridges them." },
+
+  { ch:"arch", type:"w",
+    q:"The README lists future milestones: Kyle's λ, OFI, microprice, Avellaneda-Stoikov. Why can't the current repo compute any of them?",
+    concepts:[
+      { label:"they need order-book / tick data", terms:["order book","order-book","tick","intraday","microstructure","book data"] },
+      { label:"current data is daily closes", terms:["daily","close","yfinance","free"] },
+      { label:"free sources don't provide it", terms:["free","don't provide","not available","no access","paid"] }
+    ],
+    model:"All four are microstructure quantities — they need order-book or tick-level data (depth, order flow, quotes). The pipeline's free sources (yfinance/FRED/Stooq) only provide daily closes, so those signals are out of scope until intraday/book data exists. The C++ ITCH layer is practice for exactly that future." },
+
+  /* ---- cpp ---- */
+  { ch:"cpp", type:"mc",
+    q:"The flat-array book halved p50 latency vs the std::map baseline. The dominant mechanism?",
+    opts:[
+      { t:"Cache locality: one contiguous array replaced pointer-chasing through heap tree nodes", correct:true,
+        why:"std::map traverses heap-allocated red-black tree nodes — each hop a likely cache miss (~40–100 ns). The whole flat array (~117 KB) sits in L2; docs/perf/01-flat-book.md attributes the win to this." },
+      { t:"Asymptotics: O(log n) lookups became O(1) index arithmetic on every update", correct:false,
+        why:"True but not dominant — for ~100 price levels log₂(n) ≈ 7 cheap comparisons. The write-up pins the win on memory behaviour, not big-O." },
+      { t:"Branch prediction: the sorted array lets the CPU predict comparisons better", correct:false,
+        why:"Branchiness barely changed; the level update is an unconditional add either way. The eliminated cost was memory stalls, not mispredicts." },
+      { t:"Allocation: the vector reserves capacity so growth never triggers a realloc", correct:false,
+        why:"Half right — no per-order heap allocation helps — but the vector is fixed-size from construction; realloc was never in the hot path for either book." }
+    ]},
+
+  { ch:"cpp", type:"mc",
+    q:"An ITCH Add-Order carries price 1000500. What does the wire format say that means?",
+    opts:[
+      { t:"$100.05 — prices are fixed-point integers, dollars × 10000, sent big-endian", correct:true,
+        why:"ITCH uses 4-decimal fixed point (itch_parser.hpp: \"price * 10000\") and all multi-byte fields are big-endian. 1000500 / 10000 = $100.05." },
+      { t:"$1000.50 — prices are fixed-point integers, dollars × 1000, sent big-endian", correct:false,
+        why:"ITCH's equity price fields carry four decimal places, not three — the divisor is 10000." },
+      { t:"$100.05 — prices are IEEE-754 floats scaled by 10000, sent little-endian", correct:false,
+        why:"Right dollar value, wrong encoding: ITCH never sends floats (exact integers avoid rounding), and the byte order is big-endian, not little." },
+      { t:"$10.005 — prices are fixed-point integers, cents × 1000, sent big-endian", correct:false,
+        why:"The unit is dollars with 4 implied decimals, not cents with 3 — that misread would corrupt every price by 10×." }
+    ]},
+
+  { ch:"cpp", type:"w",
+    q:"How does OrderBookFlat turn a raw price into a storage location, and what constraint does that design impose?",
+    concepts:[
+      { label:"index = (price − min_price) / tick_size", terms:["min_price","min price","(price","- min","subtract","offset"] },
+      { label:"O(1) array access", terms:["o(1)","constant","direct index","array index"] },
+      { label:"price range fixed at construction", terms:["range","bounds","construction","declared","fixed","min and max"] },
+      { label:"out-of-range → error_count, not stored", terms:["error_count","error count","out of range","out-of-range","rejected"] }
+    ],
+    model:"Index = (price_raw − min_price_raw) / tick_size into a std::vector<uint32_t> of level volumes — an O(1) lookup with no allocation. The cost: [min, max] must be declared at construction, memory covers the whole range even if sparse, and any out-of-range price is rejected with error_count++ (order_book_flat.hpp:124-127)." },
+
+  { ch:"cpp", type:"w",
+    q:"Why do the benchmarks headline p99 and p99.9 instead of mean latency? And what dominates the max value?",
+    concepts:[
+      { label:"tail latency is what costs money", terms:["tail","spike","worst","rare slow"] },
+      { label:"fleeting opportunities get missed", terms:["fleeting","miss","opportunit"] },
+      { label:"mean hides rare stalls", terms:["mean hides","average hides","not the mean","skew","distort"] },
+      { label:"max dominated by OS scheduling jitter", terms:["jitter","schedul","os","preempt","interrupt"] }
+    ],
+    model:"Trading opportunities are fleeting: if 1 message in 100 stalls for 584 ns you miss exactly the moments that matter, and the mean smooths that invisible. So the tail (p99/p99.9) is the engineering target. Max is excluded from headlines because it's dominated by OS scheduling jitter, not the book engine (docs/perf/01-flat-book.md)." },
+
+  { ch:"cpp", type:"w",
+    q:"From memory: roughly what were the before/after p50 numbers of the map→flat-array optimisation, and what happened to correctness?",
+    concepts:[
+      { label:"p50 ~83 ns before", terms:["83"] },
+      { label:"p50 ~42 ns after (≈ halved)", terms:["42","half","49%","−49","-49"] },
+      { label:"p99 also improved (~21%)", terms:["p99","459","21"] },
+      { label:"zero correctness regression, tests pass", terms:["15/15","tests pass","no regression","zero regression","still pass","correctness"] }
+    ],
+    model:"p50 went 83 ns → 42 ns (−49%), p99 584 → 459 ns (−21%), p99.9 −35% — with zero correctness regression (15/15 unit tests still passing). Numbers from docs/perf/01-flat-book.md, measured over 100k synthetic Add-Orders." },
+
+  { ch:"cpp", type:"w",
+    q:"The ITCH parser deliberately skips message types it doesn't recognise, counts them, and \"never reads past the end of the buffer.\" Why is that paranoia essential in a feed handler?",
+    concepts:[
+      { label:"malformed/unknown input must not crash the system", terms:["crash","take down","abort","fail","survive","robust"] },
+      { label:"skip using declared length, keep framing", terms:["length","framing","advance","skip"] },
+      { label:"count what was skipped/errored for observability", terms:["count","skipped_count","error_count","stats","observab"] },
+      { label:"buffer overrun = undefined behaviour/security", terms:["overrun","past the end","out of bounds","undefined","memory safety"] }
+    ],
+    model:"A live feed will eventually contain message types you don't handle and truncated packets. Reading past the buffer is undefined behaviour; crashing the feed handler takes the whole trading system dark mid-session. So the parser advances by each message's declared length, bounds-checks every read, and increments skipped_count/error_count so problems are visible without being fatal (itch_parser.hpp:74-84)." },
+
+  /* ---- stats ---- */
+  { ch:"stats", type:"mc",
+    q:"ccf_leadlag(x=CL_returns, y=XLE_returns) reports peak_lag = +2. What does that claim?",
+    opts:[
+      { t:"Today's CL return correlates most with XLE's return two days later — CL leads", correct:true,
+        why:"The convention is ρ(k) = corr(x_t, y_{t+k}); positive k pairs today's x with future y, so a +2 peak means x (CL) leads y (XLE) by 2 days." },
+      { t:"Today's XLE return correlates most with CL's return two days later — XLE leads", correct:false,
+        why:"Backwards: that pattern would peak at k = −2 under this convention, since negative k pairs past y with current x." },
+      { t:"The two series' returns move together most strongly on the same trading day", correct:false,
+        why:"Contemporaneous co-movement is exactly k = 0; a +2 peak says the strongest alignment is offset in time." },
+      { t:"The lead-lag relationship clears the 2% significance level in both directions", correct:false,
+        why:"peak_lag carries no significance claim at all — p-values come from the separate Granger tests, not the CCF peak position." }
+    ]},
+
+  { ch:"stats", type:"w",
+    q:"State this repo's CCF sign convention precisely, and explain why leadlag.py computes the correlation by hand instead of calling a library CCF.",
+    concepts:[
+      { label:"ρ(k) = corr(x_t, y_{t+k})", terms:["y_{t+k}","y_t+k","t+k","corr(x"] },
+      { label:"peak at k>0 ⇒ x leads y", terms:["k > 0","k>0","positive","x leads"] },
+      { label:"library lag conventions differ / can flip signs", terms:["convention","library","flip","differ","ambiguous","trust"] },
+      { label:"pinned by a unit test with a synthetic known lead", terms:["test","synthetic","known lead","pinned","drift"] }
+    ],
+    model:"ρ(k) = corr(x_t, y_{t+k}) for k in [−max_lag, +max_lag]; a peak at k > 0 means x leads y. It's computed directly with mean-removed, unit-variance dot products because libraries disagree on which series gets shifted — the research paper warns to verify the lag convention against a known lead. A unit test with a synthetic lead pins the convention so it \"can't silently drift\" (src/oil_alpha/analysis/leadlag.py:39-59)." },
+
+  { ch:"stats", type:"w",
+    q:"Your run prints: Granger CL→XLE p=0.43 (n.s.) but XLE→CL p=0.0006 (significant). Someone concludes \"XLE causes oil futures to move.\" Give the two reasons that conclusion overreaches.",
+    concepts:[
+      { label:"Granger = predictive precedence, not causation", terms:["precedence","not caus","predict","≠ caus","not true caus"] },
+      { label:"common driver can hit one market first", terms:["common","third","confound","news","factor","both driven"] },
+      { label:"that's why both directions are always run", terms:["both direction","reverse","two direction"] }
+    ],
+    model:"(1) Granger significance only means past XLE returns add predictive information about CL beyond CL's own history — \"predictive precedence, not true causation\" per the granger_both_directions docstring. (2) A common factor (oil news, macro shocks) could drive both, reaching one market's price first. Running both directions exists precisely to keep you honest about this." },
+
+  { ch:"stats", type:"w",
+    q:"Why does clean.py fall back from log returns to simple returns for CL=F, and what specific historical event forces this?",
+    concepts:[
+      { label:"April 2020 negative WTI settlement", terms:["2020","negative"] },
+      { label:"CLK20 settled at −$37.63", terms:["37.63","-37","−37"] },
+      { label:"log of a non-positive price is undefined", terms:["log","undefined","nan","non-positive","ln"] },
+      { label:"simple returns stay defined", terms:["simple return","fallback","fall back","still defined","works"] }
+    ],
+    model:"On 2020-04-20 the expiring WTI contract (CLK20) settled at −$37.63/bbl. Log returns need ln(P_t / P_{t−1}), which is undefined when a price is ≤ 0, so the cleaner falls back to simple returns over the negative-price window and records a flag plus a pipeline warning. The default date range deliberately spans this event so the guard is always exercised." },
+
+  { ch:"stats", type:"w",
+    q:"The pipeline runs CCF and Granger on returns, but Engle-Granger and Johansen on price levels. Why the split?",
+    concepts:[
+      { label:"CCF/Granger need stationary series", terms:["stationar"] },
+      { label:"returns are (approximately) stationary; prices are not", terms:["returns are","prices are not","unit root","random walk","drift","trend"] },
+      { label:"cointegration is about levels sharing a long-run equilibrium", terms:["level","long-run","long run","equilibrium","spread","mean-revert","mean revert"] }
+    ],
+    model:"Correlation and Granger tests assume stationarity — on trending price levels they produce spurious results, so they run on returns. Cointegration asks the opposite question: whether two non-stationary level series share a long-run equilibrium (a stationary spread), so it must run on levels. Same data, two transformations, two different questions." },
+
+  /* ---- code ---- */
+  { ch:"code", type:"w",
+    q:"From src/oil_alpha/pipeline.py — what does this recurring stage pattern accomplish? Name the three separate concerns it wires together.",
+    code:
+"yield ProgressEvent(\"download\", \"start\", 0 / n, \"Fetching daily closes from yfinance\")\n" +
+"with StageTimer(metrics, \"download\") as t:\n" +
+"    prices = sources.fetch_prices(keys, cfg.start, cfg.end, budget=budget, use_cache=cfg.use_cache)\n" +
+"    t.rows = len(prices)\n" +
+"if prices.empty or LEAD not in prices or LAG not in prices:\n" +
+"    yield ProgressEvent(\"download\", \"error\", 1 / n, \"No price data for CL=F/XLE -- check network\")\n" +
+"    ...",
+    src:"src/oil_alpha/pipeline.py:73-80",
+    concepts:[
+      { label:"progress reporting via yielded events", terms:["progress","yield","event","ui","report"] },
+      { label:"per-stage compute timing (StageTimer→metrics)", terms:["stagetimer","timing","timer","metric","how long"] },
+      { label:"graceful failure instead of crashing", terms:["error","graceful","degrade","abort","warn","doesn't crash","without crash","fail"] },
+      { label:"budget/cache threading through the fetch", terms:["budget","cache"] }
+    ],
+    model:"Each stage (1) yields ProgressEvents so any consumer (GUI/CLI) can render live progress, (2) wraps the work in StageTimer so per-stage compute time and row counts land in ComputeMetrics for the cost panel, and (3) checks results and yields an \"error\"/\"warn\" event and returns early instead of raising — the pipeline degrades gracefully. The fetch also threads through the APIBudget and parquet cache." },
+
+  { ch:"code", type:"w",
+    q:"From cpp/itch/order_book_flat.hpp — best bid scans backwards but best ask scans forwards. Why?",
+    code:
+"// Best bid: highest price index with non-zero shares.\n" +
+"for (std::size_t i = bid_levels_.size(); i-- > 0;) {\n" +
+"    if (bid_levels_[i] > 0) { /* best bid */ break; }\n" +
+"}\n" +
+"// Best ask: lowest price index with non-zero shares.\n" +
+"for (std::size_t i = 0; i < ask_levels_.size(); ++i) {\n" +
+"    if (ask_levels_[i] > 0) { /* best ask */ break; }\n" +
+"}",
+    src:"cpp/itch/order_book_flat.hpp:86-105",
+    concepts:[
+      { label:"array index encodes price, ascending", terms:["index","ascending","low to high","price order","encodes"] },
+      { label:"best bid = highest willing buy price", terms:["highest","best bid","top","buyer"] },
+      { label:"best ask = lowest willing sell price", terms:["lowest","best ask","seller","cheapest"] },
+      { label:"linear scans are prefetcher/cache friendly", terms:["prefetch","cache","sequential","linear","contiguous"] }
+    ],
+    model:"The array index encodes price ascending (index i = min_price + i·tick). The best bid is the HIGHEST price anyone will pay → first non-zero from the back; the best ask is the LOWEST price anyone will sell at → first non-zero from the front. Both are sequential sweeps over contiguous memory, which the hardware prefetcher handles far better than std::map's pointer walks." },
+
+  { ch:"code", type:"w",
+    q:"From _remove_level in cpp/itch/order_book_flat.hpp — why clamp to zero instead of just writing lv -= shares?",
+    code:
+"auto& lv = (side == 'B') ? bid_levels_[idx] : ask_levels_[idx];\n" +
+"if (lv <= shares) lv = 0;\n" +
+"else lv -= shares;",
+    src:"cpp/itch/order_book_flat.hpp:136-138",
+    concepts:[
+      { label:"lv is unsigned (uint32_t)", terms:["unsigned","uint32"] },
+      { label:"subtracting below zero wraps around", terms:["wrap","underflow","overflow","4 billion","huge","wraps"] },
+      { label:"a wrapped level poisons the whole book", terms:["corrupt","poison","phantom","wrong best","garbage","bad top","invalid book"] },
+      { label:"defensive: feed may double-remove", terms:["defensive","double","duplicate","malformed","inconsistent","already removed"] }
+    ],
+    model:"lv is a uint32_t. If a malformed or duplicated feed message tries to remove more shares than the level holds, plain subtraction would wrap to ~4 billion — a phantom level that silently poisons best-bid/ask forever. Clamping to zero makes the worst case an empty level. Same defensive philosophy as the parser's error_count: bad input degrades, never corrupts." },
+
+  { ch:"code", type:"mc",
+    q:"In config.py the study is wired as LEAD = \"wti_fut\" (CL=F) and LAG = \"energy_etf\" (XLE). What are these two constants actually declaring?",
+    opts:[
+      { t:"The hypothesis under test — which series is the candidate leader vs follower", correct:true,
+        why:"They name the paper's Stage-3 hypothesis (futures lead the ETF). The pipeline passes returns[LEAD] as x and returns[LAG] as y, so the CCF sign convention tests exactly this claim." },
+      { t:"The confirmed empirical result — which series was measured to lead historically", correct:false,
+        why:"Nothing is confirmed by a constant; the whole pipeline exists to test it. A live run can and does disagree over some windows." },
+      { t:"The download priority — which ticker is fetched first when the budget is tight", correct:false,
+        why:"fetch_prices takes the full symbol list at once; LEAD/LAG never influence request ordering or budget spend." },
+      { t:"The trade legs — which instrument gets bought vs sold in the cost model", correct:false,
+        why:"Cost estimates come from COST_MODEL's per-asset spread/commission entries and are computed for both assets symmetrically." }
+    ]}
+];
+
+/* ─── state ─────────────────────────────────────────────────── */
+var session = [];        // indices into BANK for this session
+var cur = 0;
+var state = {};          // per-BANK-index: {typed, mcPicked, mcRight, checked, rated}
+var reviewMode = false;
+
+/* ─── helpers ───────────────────────────────────────────────── */
+function $(id){ return document.getElementById(id); }
+function shuffle(a){ for (var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+function esc(s){ var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+/* shuffle every MC's options ONCE per page load — position carries no signal */
+BANK.forEach(function(q){ if (q.type==="mc") shuffle(q.opts); });
+
+/* ─── start screen ──────────────────────────────────────────── */
+var chipEls = {};
+Object.keys(CHANNELS).forEach(function(key){
+  var n = BANK.filter(function(q){ return q.ch===key; }).length;
+  var c = document.createElement("span");
+  c.className = "chip on"; c.tabIndex = 0;
+  c.textContent = CHANNELS[key] + " · " + n;
+  c.addEventListener("click", function(){ c.classList.toggle("on"); syncAll(); });
+  c.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); c.click(); }});
+  chipEls[key] = c;
+  $("chips").appendChild(c);
+});
+function syncAll(){
+  var allOn = Object.keys(chipEls).every(function(k){ return chipEls[k].classList.contains("on"); });
+  $("chk-all").checked = allOn;
+}
+$("chk-all").addEventListener("change", function(){
+  var on = this.checked;
+  Object.keys(chipEls).forEach(function(k){ chipEls[k].classList.toggle("on", on); });
+});
+
+$("btn-begin").addEventListener("click", function(){
+  var chans = Object.keys(chipEls).filter(function(k){ return chipEls[k].classList.contains("on"); });
+  if (!chans.length) { alert("Pick at least one channel."); return; }
+  session = [];
+  BANK.forEach(function(q,i){ if (chans.indexOf(q.ch)>=0) session.push(i); });
+  if ($("chk-shuffle").checked) shuffle(session);
+  state = {}; cur = 0; reviewMode = false;
+  showScreen("quiz"); render();
+});
+
+/* ─── screens ───────────────────────────────────────────────── */
+function showScreen(name){
+  ["start","quiz","results"].forEach(function(s){ $(s).classList.toggle("hidden", s!==name); });
+}
+
+/* ─── question rendering ────────────────────────────────────── */
+function st(bi){ return state[bi] || (state[bi] = { typed:"", mcPicked:-1, mcRight:null, checked:false, rated:null, revealed:false }); }
+
+function render(){
+  var bi = session[cur], q = BANK[bi], s = st(bi);
+  $("q-num").textContent = "Q " + (cur+1) + " / " + session.length + (reviewMode ? " · review" : "");
+  $("q-cat").textContent = CHANNELS[q.ch];
+  $("q-type").textContent = q.type==="mc" ? "multiple choice" : "written recall";
+  $("q-bar").style.width = ((cur+1)/session.length*100) + "%";
+  $("btn-prev").disabled = (cur===0);
+  var last = (cur === session.length-1);
+  $("btn-next").classList.toggle("hidden", last);
+  $("btn-finish").classList.toggle("hidden", !last);
+
+  var body = $("q-body");
+  body.innerHTML = "";
+  var p = document.createElement("p"); p.className="qtext"; p.textContent = q.q; body.appendChild(p);
+  if (q.code){
+    var pre = document.createElement("pre"); pre.textContent = q.code; body.appendChild(pre);
+    var src = document.createElement("p"); src.className="src"; src.textContent = "— " + q.src; body.appendChild(src);
+  }
+  if (q.type==="mc") renderMC(q, s, body); else renderWritten(q, s, body);
+}
+
+function renderMC(q, s, body){
+  var ul = document.createElement("ul"); ul.className="opts";
+  var fb = document.createElement("p"); fb.className="fb"; fb.hidden = true;
+  q.opts.forEach(function(opt, oi){
+    var li = document.createElement("li"); li.tabIndex = 0;
+    li.textContent = opt.t;
+    function commit(){
+      if (s.mcPicked >= 0) return;                    // locked after first commit
+      s.mcPicked = oi;
+      s.mcRight = !!opt.correct;                      // flag, never position
+      paint();
+    }
+    li.addEventListener("click", commit);
+    li.addEventListener("keydown", function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); commit(); }});
+    ul.appendChild(li);
+  });
+  function paint(){
+    Array.prototype.forEach.call(ul.children, function(li, oi){
+      li.classList.add("locked");
+      if (q.opts[oi].correct) li.classList.add("right");
+      if (oi===s.mcPicked && !q.opts[oi].correct) li.classList.add("wrong");
+    });
+    var picked = q.opts[s.mcPicked];
+    fb.hidden = false;
+    fb.className = "fb " + (s.mcRight ? "good" : "bad");
+    fb.textContent = (s.mcRight ? "▲ Correct. " : "▼ Not quite. ") + picked.why;
+  }
+  body.appendChild(ul); body.appendChild(fb);
+  if (s.mcPicked >= 0) paint();                       // restore on prev/next
+}
+
+function renderWritten(q, s, body){
+  var ta = document.createElement("textarea");
+  ta.placeholder = "Type your answer from memory before checking…";
+  ta.value = s.typed;
+  ta.addEventListener("input", function(){ s.typed = ta.value; });
+  body.appendChild(ta);
+
+  var row = document.createElement("div"); row.className="nav";
+  var bCheck = document.createElement("button"); bCheck.textContent = "Check my answer";
+  var bShow  = document.createElement("button"); bShow.className="ghost"; bShow.textContent = "Show me the answer";
+  row.appendChild(bCheck); row.appendChild(bShow);
+  body.appendChild(row);
+
+  var out = document.createElement("div"); body.appendChild(out);
+
+  function renderCheck(){
+    var text = (s.typed||"").toLowerCase();
+    var hits = q.concepts.map(function(c){
+      return { c:c, hit: c.terms.some(function(t){ return text.indexOf(t.toLowerCase())>=0; }) };
+    });
+    var got = hits.filter(function(h){ return h.hit; }).length;
+    var html = '<p class="fb '+(got===q.concepts.length?"good":(got?"":"bad"))+'" style="margin-bottom:.2rem">'+
+               got+' / '+q.concepts.length+' key concepts detected</p><ul class="concepts">';
+    hits.forEach(function(h){
+      html += '<li class="'+(h.hit?"hit":"miss")+'">'+esc(h.c.label)+'</li>';
+    });
+    html += '</ul><p class="note">Keyword scan is rough — judge yourself against the model answer.</p>';
+    out.innerHTML = html;
+    s.checked = true;
+    if (s.revealed) renderModel();
+  }
+  function renderModel(){
+    s.revealed = true;
+    var m = document.createElement("div"); m.className="model";
+    m.innerHTML = "<strong>Model answer.</strong> " + esc(q.model);
+    out.appendChild(m);
+    var rate = document.createElement("div"); rate.className="nav";
+    var bKnew = document.createElement("button"); bKnew.textContent = "✓ knew it";
+    var bRev  = document.createElement("button"); bRev.textContent = "↻ needs review";
+    function mark(v){
+      s.rated = v;
+      bKnew.style.borderColor = v==="solid" ? "var(--green)" : "var(--line)";
+      bKnew.style.color       = v==="solid" ? "var(--green)" : "var(--ink)";
+      bRev.style.borderColor  = v==="review" ? "var(--red)" : "var(--line)";
+      bRev.style.color        = v==="review" ? "var(--red)" : "var(--ink)";
+    }
+    bKnew.addEventListener("click", function(){ mark("solid"); });
+    bRev.addEventListener("click", function(){ mark("review"); });
+    rate.appendChild(bKnew); rate.appendChild(bRev);
+    out.appendChild(rate);
+    if (s.rated) mark(s.rated);
+  }
+  bCheck.addEventListener("click", renderCheck);
+  bShow.addEventListener("click", function(){
+    out.innerHTML = ""; if (s.checked) renderCheck(); else { s.checked = true; }
+    if (!s.revealed || !out.querySelector(".model")) renderModel();
+  });
+  /* restore state on prev/next */
+  if (s.checked) renderCheck();
+  if (s.revealed && !out.querySelector(".model")) renderModel();
+}
+
+/* ─── navigation ────────────────────────────────────────────── */
+$("btn-prev").addEventListener("click", function(){ if (cur>0){ cur--; render(); } });
+$("btn-next").addEventListener("click", function(){ if (cur<session.length-1){ cur++; render(); } });
+$("btn-finish").addEventListener("click", showResults);
+
+/* ─── results ───────────────────────────────────────────────── */
+function showResults(){
+  var mcTot=0, mcGot=0, wrTot=0, wrSolid=0, rows="";
+  session.forEach(function(bi, i){
+    var q = BANK[bi], s = st(bi), pill;
+    if (q.type==="mc"){
+      mcTot++;
+      if (s.mcRight===true){ mcGot++; pill='<span class="pill ok">correct</span>'; }
+      else if (s.mcPicked>=0){ pill='<span class="pill no">missed</span>'; }
+      else pill='<span class="pill skip">unanswered</span>';
+    } else {
+      wrTot++;
+      if (s.rated==="solid"){ wrSolid++; pill='<span class="pill ok">knew it</span>'; }
+      else if (s.rated==="review"){ pill='<span class="pill no">needs review</span>'; }
+      else pill='<span class="pill skip">unrated</span>';
+    }
+    rows += "<tr><td>"+(i+1)+"</td><td>"+esc(CHANNELS[q.ch])+"</td><td>"+esc(q.q.slice(0,70))+(q.q.length>70?"…":"")+"</td><td>"+pill+"</td></tr>";
+  });
+  $("r-mc").textContent = mcGot + " / " + mcTot;
+  $("r-wr").textContent = wrSolid + " / " + wrTot;
+  $("r-rows").innerHTML = rows;
+  var missed = missedIndices();
+  $("btn-review").disabled = (missed.length===0);
+  $("r-note").textContent = missed.length
+    ? missed.length + " item(s) flagged for review — a gap found is the drill doing its job."
+    : "Nothing flagged. Report your channels + scores back in the /drill-me chat so PROGRESS.md can be updated.";
+  showScreen("results");
+}
+function missedIndices(){
+  return session.filter(function(bi){
+    var q=BANK[bi], s=st(bi);
+    if (q.type==="mc") return s.mcPicked>=0 ? !s.mcRight : true;
+    return s.rated!=="solid";
+  });
+}
+$("btn-review").addEventListener("click", function(){
+  var missed = missedIndices();
+  if (!missed.length) return;
+  /* reset per-question state for a clean re-attempt */
+  missed.forEach(function(bi){ delete state[bi]; if (BANK[bi].type==="mc") shuffle(BANK[bi].opts); });
+  session = missed.slice(); cur = 0; reviewMode = true;
+  showScreen("quiz"); render();
+});
+$("btn-restart").addEventListener("click", function(){ showScreen("start"); });
+
+})();
+</script>
+</body>
+</html>

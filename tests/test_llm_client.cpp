@@ -1,9 +1,13 @@
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "FakeOllama.hpp"
+#include "LineBank.hpp"
 #include "LlmClient.hpp"
 #include "doctest.h"
 #include "json.hpp"
@@ -201,4 +205,113 @@ TEST_CASE("LlmClient omits think entirely by default") {
     const auto bodies = fake.requestBodies();
     REQUIRE(!bodies.empty());
     CHECK_FALSE(json::parse(bodies.back()).contains("think"));
+}
+
+// --- Line bank integration (issue #150) -------------------------------------
+//
+// "Served without touching the network" is proved by fake.requestBodies()
+// being empty, never by timing — a timing assertion would flake.
+
+namespace {
+
+namespace fs = std::filesystem;
+
+// Two variants so a single lookup is unambiguous about which one it served.
+constexpr const char* kBankText =
+    "persona = Marge Holloway\n"
+    "\n"
+    "topic = greeting_first\n"
+    "  familiarity = first\n"
+    "  trigger = hello\n"
+    "  trigger = hi there\n"
+    "  reply = Well, good morning! [[MOOD: happy]]\n"
+    "  reply = Morning, love. Sourdough's just out. [[MOOD: happy]]\n";
+
+fs::path bankDirWith(const char* stem, const char* text) {
+    const fs::path dir = fs::temp_directory_path() / (std::string("llm_npc_cbank_") + stem);
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "marge.bank") << text;
+    return dir;
+}
+
+std::unique_ptr<LineBank> bankAt(const fs::path& dir) {
+    return std::make_unique<LineBank>(dir, 0.6f);
+}
+
+}  // namespace
+
+TEST_CASE("a banked hit streams deltas and replies without reaching the backend") {
+    FakeOllama fake;
+    LlmConfig config = testConfig(fake.port());
+    // Pacing is a design property, not something worth spending suite seconds
+    // on; run it fast here and keep the streaming assertion on delta COUNT.
+    config.lineBankCps = 4000;
+    LlmClient client(config);
+    client.setLineBank(bankAt(bankDirWith("hit", kBankText)));
+
+    std::vector<ChatDelta> deltas;
+    const auto id = client.submit("sys", {}, "hello", "Marge Holloway", Familiarity::First);
+    const ChatReply reply = waitForReply(client, id, &deltas);
+
+    CHECK(reply.ok);
+    CHECK(reply.content.find("good morning") != std::string::npos);
+    CHECK(fake.requestBodies().empty());  // never reached the network
+
+    // A banked reply must arrive like a generated one, not in one frame.
+    CHECK(deltas.size() >= 2);
+    std::string assembled;
+    for (const auto& d : deltas) {
+        CHECK(d.id == id);
+        assembled += d.text;
+    }
+    CHECK(assembled == reply.content);
+}
+
+TEST_CASE("a banked miss reaches the backend unchanged") {
+    FakeOllama fake;
+    const LlmConfig config = testConfig(fake.port());
+    const std::string unmatched = "what did you think of the election";
+
+    LlmClient withBank(config);
+    withBank.setLineBank(bankAt(bankDirWith("miss", kBankText)));
+    waitForReply(withBank,
+                 withBank.submit("sys", {}, unmatched, "Marge Holloway", Familiarity::First));
+
+    LlmClient without(config);
+    waitForReply(without, without.submit("sys", {}, unmatched));
+
+    // Byte-identical request bodies: a miss must leave behaviour exactly as it
+    // was before the feature existed.
+    const auto bodies = fake.requestBodies();
+    REQUIRE(bodies.size() == 2);
+    CHECK(bodies[0] == bodies[1]);
+}
+
+TEST_CASE("submitting without a speakerId never consults the bank") {
+    // Group turns and world generation pass no speakerId, so they bypass the
+    // bank BY CONSTRUCTION rather than by a flag someone can forget to set.
+    FakeOllama fake;
+    LlmClient client(testConfig(fake.port()));
+    client.setLineBank(bankAt(bankDirWith("nospeaker", kBankText)));
+
+    // "hello" would hit outright if a speaker were named.
+    waitForReply(client, client.submit("sys", {}, "hello"));
+
+    CHECK_FALSE(fake.requestBodies().empty());  // went to the backend
+    REQUIRE(client.lineBank() != nullptr);
+    CHECK(client.lineBank()->stats().hits == 0);
+    CHECK(client.lineBank()->stats().misses == 0);  // not even looked up
+}
+
+TEST_CASE("with no line bank installed every request reaches the backend") {
+    // What `line_bank = off` produces: main.cpp never constructs a bank, so no
+    // bank file is read and no code path changes.
+    FakeOllama fake;
+    LlmClient client(testConfig(fake.port()));
+    CHECK(client.lineBank() == nullptr);
+
+    waitForReply(client, client.submit("sys", {}, "hello", "Marge Holloway",
+                                       Familiarity::First));
+    CHECK_FALSE(fake.requestBodies().empty());
 }

@@ -1,0 +1,104 @@
+"""Central configuration: symbols, date range, free-tier caps, cost params.
+
+Symbol choices follow the paper's "cleanest free stack" recommendation
+(Part 1, bottom line): yfinance for CL=F/XLE/USO/XOM/CVX cross-checked against
+FRED DCOILWTICO.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+from dataclasses import dataclass, field
+
+# --- Symbols -----------------------------------------------------------------
+# yfinance tickers. NOTE: do NOT use bare "WTI" -- on Yahoo that is W&T Offshore
+# (an oil *company*), not crude. CL=F is the rolled continuous front-month WTI.
+SYMBOLS: dict[str, str] = {
+    "wti_fut": "CL=F",   # WTI futures, rolled continuous front-month
+    "energy_etf": "XLE",  # Energy Select Sector SPDR
+    "oil_etf": "USO",     # United States Oil Fund (positive across Apr-2020)
+    "xom": "XOM",
+    "cvx": "CVX",
+}
+
+# The lead-lag study's two protagonists.
+LEAD = "wti_fut"   # candidate leader (CL)
+LAG = "energy_etf"  # candidate follower (XLE)
+
+# FRED economic series (daily). DCOILWTICO = WTI spot, Cushing OK, $/bbl, from 1986.
+FRED_SERIES: dict[str, str] = {
+    "wti_spot": "DCOILWTICO",
+    "brent_spot": "DCOILBRENTEU",
+}
+
+# Stooq fallback for equities/ETFs only (commodity futures broken via API since ~2021).
+STOOQ_SUFFIX = ".US"
+
+# --- Date range --------------------------------------------------------------
+# Default window deliberately spans the Apr-2020 negative-price event so the
+# cleaning guards are exercised. Override per-run from the dashboard/CLI.
+DEFAULT_START = "2015-01-01"
+
+
+def default_end() -> str:
+    """Today, as ISO date. Kept a function so it is evaluated at call time."""
+    return _dt.date.today().isoformat()
+
+
+# The April 2020 negative WTI settlement window (paper Part 2.1). CLK20 settled
+# at -$37.63/bbl on 2020-04-20; the surrounding days are also distorted.
+NEGATIVE_PRICE_EVENT = _dt.date(2020, 4, 20)
+NEGATIVE_PRICE_WINDOW = ("2020-04-17", "2020-04-30")
+
+# --- Free-tier request caps (paper Part 1, as of 2026; vendor-approximate) ----
+# Used by APIBudget to show "requests used / remaining" on the dashboard.
+FREE_TIER_CAPS: dict[str, int | None] = {
+    "yfinance": None,        # no hard documented cap (throttled if abused)
+    "fred": None,            # generous; keyless CSV
+    "stooq": None,           # generous
+    "alpha_vantage": 25,     # per day (fell 500 -> 100 -> 25)
+    "twelve_data": 800,      # per day (8 credits/min)
+    "fmp": 250,              # per day
+    "tiingo": 50,            # ~symbols/hour
+}
+
+
+@dataclass(frozen=True)
+class AssetCost:
+    """Round-trip transaction-cost assumptions for a tradeable asset, in basis points."""
+
+    half_spread_bp: float
+    commission_bp: float
+
+    @property
+    def round_trip_bp(self) -> float:
+        # Cross the spread twice (in + out) and pay commission twice.
+        return 2 * (self.half_spread_bp + self.commission_bp)
+
+
+# Illustrative liquid-large-cap / liquid-ETF assumptions for the hypothetical
+# trade. These are display-only estimates, not calibrated to live quotes.
+COST_MODEL: dict[str, AssetCost] = {
+    "energy_etf": AssetCost(half_spread_bp=1.0, commission_bp=0.5),
+    "oil_etf": AssetCost(half_spread_bp=1.5, commission_bp=0.5),
+    "wti_fut": AssetCost(half_spread_bp=0.5, commission_bp=0.2),
+    "xom": AssetCost(half_spread_bp=1.0, commission_bp=0.5),
+    "cvx": AssetCost(half_spread_bp=1.0, commission_bp=0.5),
+}
+
+
+@dataclass
+class RunConfig:
+    """Per-run knobs, surfaced in the dashboard sidebar / CLI."""
+
+    start: str = DEFAULT_START
+    end: str = field(default_factory=default_end)
+    return_kind: str = "log"          # "log" or "simple"
+    max_lag: int = 10                 # CCF / Granger max lag in trading days
+    rolling_window: int = 60          # rolling correlation / beta window
+    drop_roll_days: bool = True       # drop CL=F front-month roll-day returns
+    use_cache: bool = True
+    turnover_per_year: float = 252.0  # hypothetical daily-rebalanced signal
+
+
+CACHE_DIR = "data_cache"

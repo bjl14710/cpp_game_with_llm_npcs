@@ -1,0 +1,36 @@
+"""Grading wrapper — Exercise 04: C++ RingMA + SpscRing.
+
+Compiles and runs the C++ tests in tests/exercises/cpp/ via run_cpp.sh.
+HFT_EXERCISE_TARGET is inherited by the subprocess, so the same
+exercises-vs-solutions switch applies.
+
+Run:  uv run pytest tests/exercises/test_04_spsc_ring.py -v
+"""
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+CPP_DIR = Path(__file__).resolve().parent / "cpp"
+
+
+def _run_cpp_test(name: str) -> None:
+    if shutil.which("g++") is None:
+        pytest.skip("g++ not installed")
+    proc = subprocess.run(
+        ["bash", str(CPP_DIR / "run_cpp.sh"), name],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 42:
+        pytest.skip("Exercise not implemented yet — fill in the TODO")
+    assert proc.returncode == 0, f"\n{proc.stdout}\n{proc.stderr}"
+
+
+def test_ring_ma():
+    _run_cpp_test("test_ring_ma")
+
+
+def test_spsc_ring():
+    _run_cpp_test("test_spsc_ring")

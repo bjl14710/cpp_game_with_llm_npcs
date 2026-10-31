@@ -1,0 +1,326 @@
+# Overnight Build Reports
+
+## Session 2026-07-17 — Stack Convergence (issue #35)
+
+Issues attempted: 1 of 1 — completed. Queue is empty.
+
+### Summary
+Resolved the PROGRESS.md "Session 3" collision that made PR #28
+CONFLICTING, repaired the session numbering the collision cascaded through
+the stack (now Sessions 1–10, unique, chronological), and converged the
+six stacked branches with master and with Brandon's live top-down PR
+merges (#29–#33, merged mid-session). **PR #28 now carries the entire
+MSP430 Compliance milestone in one conflict-free merge to master.**
+
+### The convergence
+Brandon rolled the stack down (merging #33→#32→#31→#30→#29 into their
+base branches) while this session cascaded the master-merge + renumber
+up — the two met at the issue-20 branch. There, an auto-merge had
+*silently* produced a duplicate "Session 4" heading and an off-by-one
+tail (textual success, semantic violation — the night's teachable
+moment), plus an add/add conflict between two independently generated
+index.html files, resolved by regenerating from the merged directory.
+All branches (issue-18/19/20) now point at the same converged history;
+21/22/23 are strictly contained in it.
+
+### Verification
+- Full suite on the converged tree: **408 passed, 3 xfailed** + the 9
+  visual-golden failures that are pre-existing on macOS (identical on
+  bare master — Linux-rendered goldens; not a regression).
+- Audit gate: 139 families, 0 unscored, 0 stale.
+- PROGRESS.md invariants: Sessions 1–10 unique/increasing; zero conflict
+  markers; `git merge-tree` of PR #28 vs master: clean.
+
+### Morning recipe (one click each)
+1. **Merge PR #28** — it delivers issues #18–#23, learning sets
+   0009–0015, the rebuilt index, and this report to master.
+2. Delete the six `feature/issue-1[89]*`/`feature/issue-2[0-3]*`
+   branches (all content is in #28; the local `issue-19` duplicate-commit
+   warning from the 07-15 report is obsolete — that branch ref is now
+   converged).
+3. Triage **PR #34** (`claude/silmulator-app-init-js9obc`) — it appeared
+   from a claude.ai cloud session and was not reviewed by this session.
+
+### Learning Materials Created
+| Concept | Lesson | Drill | Vocab |
+|---------|--------|-------|-------|
+| Three-way merge semantics for append-only logs (0015) | ✅ | ✅ | ✅ |
+
+Also committed `scripts/build_learning_index.py` (the index generator the
+lesson cites — previously ad-hoc) and rebuilt the index: 10 lessons,
+10 drills, 7 vocab sets. Note: the June index had listed lessons
+0003–0007, but those files were never committed to the repo (they exist
+only on local disk, per the 06-28 report) — the rebuilt index reflects
+what is actually tracked.
+
+---
+
+## Session 2026-07-15 — MSP430 Compliance Fixes (issues #18–#23)
+
+Issues attempted: 6 of 6 — all completed, six stacked draft PRs.
+Mainline is `master` (orphan `main` deleted 2026-07-08).
+
+### Summary
+Worked the entire "MSP430 Compliance Fixes" milestone: every
+NON_COMPLIANT/ACCEPTS_INVALID finding queued from the July 5 audit is now
+fixed, doc-cited, and probe-verified. The compliance score rose from
+**19.8% → 42.7%** (44 of 103 scored families COMPLIANT), the strict-xfail
+captured-failure list shrank **16 → 3**, the vendor-doc diff reached
+**CONFLICT 0** (MATCH 13 → 18), and the suite grew 358 → **388 passed**.
+Five new lesson/drill/vocab sets (0010–0014) plus a rebuilt learning index.
+
+### Completed ✅
+| Issue | Title | Branch | PR | Concept taught |
+|-------|-------|--------|----|----------------|
+| #18 | ADC reference-aware conversion | feature/issue-18-adc-reference-scaling | #28 | ADC reference as the conversion's unit of measure (0009) |
+| #19 | Timer_A/B widths, divider, CAP, PERIOD=CCR0 | feature/issue-19-timer-compliance | #29 | Register width & encoding constraints (0010) |
+| #20 | Clock source sets, dividers, source-aware freq | feature/issue-20-clock-compliance | #30 | Clock trees: frequency follows the source (0011) |
+| #21 | GPIO PxREN pull model | feature/issue-21-gpio-pxren | #31 | PxREN: enable bit + direction in another register (0012) |
+| #22 | LPM3.5, 20-bit CPUX, reset-vector PC | feature/issue-22-cpu-pmm-compliance | #32 | MSP430X: 20-bit registers on a 16-bit ISA (0013) |
+| #23 | I2C/WDT/interrupts (3 commits) | feature/issue-23-i2c-wdt-interrupts | #33 | Password registers & PUC semantics (0014) |
+
+**Merge order matters:** the PRs are stacked — merge bottom-up
+#28 → #29 → #30 → #31 → #32 → #33. Each auto-retargets to master as its
+base merges.
+
+### Failed ❌
+None.
+
+### Skipped (needs human) ⏭
+None.
+
+### Test Status
+Full suite: **388 passed, 3 xfailed** (the 3 remaining xfails are
+deliberate: ADC12ENC gate, invalid-channel convert, TA0 CCR3 —
+next-milestone material). Audit gate: 139 families, 0 unscored,
+0 stale. Vendor-doc diff: MATCH 18 / CONFLICT 0.
+
+### Notable decisions and deviations
+- **All PRs are stacked** because all six issues edit `msp430.py`;
+  independent branches would cascade merge conflicts.
+- **Learning materials 0010–0014 live on the stack tip** (PR #33), not on
+  each issue branch — same June precedent (#11): per-branch edits to the
+  shared GLOSSARY/PROGRESS would conflict at every stacked merge. 0009
+  (#18) predates the stack and is on its own branch safely.
+- A leftover local-only duplicate of the 0010 learning commit (18efa05)
+  sits on the local `feature/issue-19-timer-compliance` branch — do NOT
+  push it; the same content is on the tip as f9227f3. Safe to drop with
+  `git branch -f feature/issue-19-timer-compliance origin/feature/issue-19-timer-compliance`.
+- Issue #19's implementer agent was cut off by a session limit
+  mid-verification; the finishing work (xfail deletion, audit rescore for
+  Timer_A **and** Timer_B, vendor-diff test) was completed and re-verified
+  in the main session.
+- Issue #20's core implementation was **pre-staged interactively by
+  Brandon mid-session**; the session verified it end-to-end and shipped it.
+- Repeated API connection failures (~04:30–05:00) killed three
+  learning-material generation attempts; the batch was deferred and later
+  completed via a parallel 4-agent workflow.
+- During #18 verification a crash was found and fixed beyond the issue's
+  letter: malformed `ADC:REFERENCE VEREF,<v>` voltages now queue `-104`
+  instead of raising an unhandled ValueError.
+- Audit prose said the timer divider rejects with `-222`; the handler
+  raises `-224` (set membership). Prose corrected on the tip (4fe0988);
+  code unchanged.
+
+### Learning Materials Created
+| Concept | Lesson | Drill | Vocab |
+|---------|--------|-------|-------|
+| ADC reference transfer functions (0009) | ✅ | ✅ | ✅ |
+| Register width & encoding constraints (0010) | ✅ | ✅ | ✅ |
+| Clock trees / source-aware frequency (0011) | ✅ | ✅ | ✅ |
+| PxREN pull-resistor semantics (0012) | ✅ | ✅ | ✅ |
+| MSP430X 20-bit registers (0013) | ✅ | ✅ | ✅ |
+| Password registers & PUC (0014) | ✅ | ✅ | ✅ |
+
+Index rebuilt: `docs/learning/index.html` (8 lessons, 8 drills, 6 vocab
+sets, lesson↔drill↔vocab bound by slug).
+
+### Suggested First Move
+Merge the stack bottom-up from
+[PR #28](https://github.com/bjl14710/Silmulator/pull/28) — each merge is
+one click, and #33 lands the learning materials and this report. Then run
+a drill over coffee: `docs/learning/index.html`. The three remaining
+xfails are the seed of the next milestone.
+
+### Draft PRs Awaiting Review
+- **#28** fix(#18): ADC reference-aware conversion → master
+- **#29** fix(#19): Timer_A/B compliance → #28's branch
+- **#30** fix(#20): clock system compliance → #29's branch
+- **#31** fix(#21): GPIO PxREN pull model → #30's branch
+- **#32** fix(#22): LPM3.5 + CPUX + reset vector → #31's branch
+- **#33** fix(#23): I2C/WDT/interrupts (+ learning 0010–0014, index, this report) → #32's branch
+- Older, unrelated, still open: **#25** (visual tests → master), **#26** (wire sync), **#27** (canvas panning)
+
+---
+
+## Session 2026-07-05 — MSP430 Quality Suite
+
+Session mode: local (GitHub API unavailable — gh not installed, GH_TOKEN is a
+placeholder, GITHUB_USERNAME unset; nothing was pushed or published)
+Branch: `feature/msp430-quality-suite` (5 commits on top of `fix_hardware_connectors`)
+Issues attempted: 5 of 5 (the five simulator_plans.zip plans, as local issues)
+
+### Summary
+All five plans from `simulator_plans.zip` were implemented, tested, and
+committed. The TI MSP430FR5994 documentation (SLAU367P + SLASE54D) was
+downloaded into `hardware_docs/ti/` and every deliverable is grounded in it:
+a compliance audit scoring the simulated MSP430 at **19.8% compliant** with
+doc citations for every finding, an edge-case test suite that pins those
+findings as strict xfails, a worst-case-within-spec fault/drift mode, a
+sequencing reviewer for pasted user code, and a vendor-doc→block-spec
+generator with a probe-based diff against the hand-built model.
+
+### Completed ✅
+| Plan | Deliverables | Commit | Verify |
+|------|--------------|--------|--------|
+| scpi-compliance-auditor | `scripts/audit_msp430.py`, `docs/audits/msp430-compliance-report.md` (724 lines, 137 families, 28 self-verifying probes) | 172fb20 | `python scripts/audit_msp430.py` |
+| spec-driven-test-generation | `tests/test_msp430_edge_cases.py` (34 doc-cited tests; 16 strict xfails = captured failure list) | bf91a66 | `uv run pytest tests/test_msp430_edge_cases.py` |
+| fault-drift-modeling | `silmulator/devices/msp430_faults.py` + FAULT:*:PROFILE commands, TIMERn:INTERVAL?, UARTn:BAUD:ACTUAL?; `tests/test_msp430_fault_modeling.py` | bb29013 | `uv run pytest tests/test_msp430_fault_modeling.py` |
+| code-input-semantic-reviewer | `silmulator/code_parser/semantic_review.py` (4 rules, LOW_CONFIDENCE downgrade), warnings in the Code Input block/editor; `tests/test_semantic_review_msp430.py` | ac59eb3 | `uv run pytest tests/test_semantic_review_msp430.py` |
+| vendor-doc-block-generator | `silmulator/custom_blocks/msp430fr5994_generated.json` (loadable, cited), `diff_report.py` (MATCH 13 / CONFLICT 5 / MISSING_FROM_MODEL 16 / MISSING_FROM_GENERATED 20), MD+JSON reports; `tests/test_vendor_doc_diff.py` | aefc5dc | `uv run python -m silmulator.custom_blocks.diff_report` |
+
+### Failed ❌
+None.
+
+### Skipped (needs human) ⏭
+None remaining. Both deferred legs completed 2026-07-06 after GitHub auth was fixed
+(`gh` installed, token verified as bjl14710):
+
+- **Pushed + draft PR:** [PR #12](https://github.com/bjl14710/Silmulator/pull/12)
+  (base `fix_hardware_connectors`; expect a trivial rebase over the visual-test merges).
+- **Issue trail:** #13–#17 created and closed against PR #12 (milestone "MSP430
+  Quality Suite").
+- **Next queue:** #18–#23 created `ready-for-ai` (milestone "MSP430 Compliance
+  Fixes") — the audit's NON_COMPLIANT/ACCEPTS_INVALID findings as six self-contained
+  overnight issues, each with verify steps tied to xfail flips and probe STALEs.
+- **Learning materials:** lesson + drill 0008 "Doc-Grounded Compliance Auditing"
+  generated (the session's primary concept, spanning plans 1/5/2); index rebuilt
+  (8 lessons, 8 drills); PROGRESS.md session 8 logged. The remaining five concepts
+  are attached to issues #18–#23 for their implementing sessions to teach.
+
+### Test Status
+Full suite green: **358 passed, 16 xfailed** (`uv run python -m pytest tests/`).
+The 16 xfails are intentional — each records a doc-cited gap in `msp430.py`
+matching the compliance audit; fixing the model flips them loudly (strict mode).
+Audit gate clean: 137/137 families scored, 0 stale probes.
+
+### Notable decisions and corrections
+- Plan 2's premise was wrong: no custom-block wizard existed. Built the
+  extraction output + comparator from scratch (user-approved before start).
+- Declared ground truth: SLAU367P / SLASE54D (recorded in
+  `hardware_docs/ti/MSP430FR5994/notes.md` and both report headers).
+- NOMINAL fault profile is bit-identical to prior behavior (regression-swept);
+  CORNER sits exactly at datasheet maxima with per-instance deterministic signs.
+- CONFLICT items warn and never block; UNDOCUMENTED commands sit outside the
+  compliance score.
+
+### Suggested First Move
+Read `docs/audits/msp430-compliance-report.md` (start at the Score table and
+CONFLICT-adjacent sections). The natural next milestone is "msp430 compliance
+fixes": work the 23 NON_COMPLIANT + 23 ACCEPTS_INVALID findings, deleting
+xfail markers as they flip — the test suite will tell you when each fix lands.
+
+---
+
+## Session 2026-06-28 — Visual Regression Testing Epic
+
+Session: visual regression testing epic (all `ready-for-ai` issues)
+
+### Summary
+Implemented the entire visual regression testing epic for the Silmulator
+PyQt6 GUI — five issues (#2–#6), each shipped as a reviewed-ready **draft PR**.
+The suite grew from 292 to **303 passing tests** (11 new GUI visual tests),
+all running headlessly with a single `pytest tests/ -v`. A paired lesson +
+drill on the new concept were generated and the learning index rebuilt.
+
+### ⚠️ Read first — base branch deviation
+The issues say "base: main", but `main` is divergent and **does not contain
+the application code** (no `silmulator/gui/...`). The app lives on `master`,
+and the current branch `fix_hardware_connectors` is 3 commits ahead of it with
+the latest GUI fixes. The visual tests import `MainWindow`, the blocks, and
+`CanvasScene`, so they can only be built on a branch that has the GUI.
+
+**Decision:** feature branches are based on `fix_hardware_connectors` and
+**stacked** (each PR targets the previous one), because #3–#6 all depend on
+#2's `conftest`. Review/merge them bottom-up:
+
+```
+PR #7  (#2 infra)    -> fix_hardware_connectors
+PR #8  (#3 window)   -> feature/issue-2-...
+PR #9  (#4 blocks)   -> feature/issue-3-...
+PR #10 (#5 canvas)   -> feature/issue-4-...
+PR #11 (#6 docs)     -> feature/issue-5-...   (also carries the learning materials)
+```
+If you'd rather have one flat PR into `master`/`main`, say so and I'll squash
+the stack onto a single branch.
+
+### Completed ✅
+| Issue | Title | Branch | PR | Concept |
+|-------|-------|--------|----|---------|
+| #2 | Visual testing infrastructure | feature/issue-2-visual-test-infrastructure | #7 | golden-image comparison harness |
+| #3 | Main window visual test | feature/issue-3-visual-test-main-window | #8 | headless PyQt6 widget capture |
+| #4 | Block component visual tests | feature/issue-4-visual-test-block-components | #9 | QGraphicsItem rendering + determinism |
+| #5 | Canvas interaction visual test | feature/issue-5-visual-test-canvas-interaction | #10 | qtbot click/waitUntil interactions |
+| #6 | Headless overnight integration | feature/issue-6-visual-test-overnight-integration | #11 | offscreen + pytest-xvfb, no DISPLAY |
+
+### Failed ❌
+None.
+
+### Skipped (needs human) ⏭
+None.
+
+### Notable implementation decisions (please sanity-check in review)
+- **Blocks are `QGraphicsItem`s, not `QWidget`s.** The skill's example assumed
+  `block.show()/grab()`. `compare_screenshot` was extended to render graphics
+  items through a `QGraphicsScene` instead. (#2/#4)
+- **Window title test relaxed.** Issue #3 asks `windowTitle() == "Silmulator"`,
+  but the real title is `"Silmulator — SIL/HIL/CIL Hardware Simulator"`. The
+  test asserts the **prefix** rather than changing the app's title (out of scope).
+- **Multimeter render is non-deterministic** — it paints a reading with random
+  Gaussian noise. The block test freezes `_get_reading` to a constant so its
+  golden is reproducible. (#4)
+- **Auto-placed blocks land off-screen.** The canvas test calls the app's own
+  `fit_all()` so the PSU block is actually visible in the golden. (#5)
+- **pytest config in `pyproject.toml`, not a new `pytest.ini`** — a `pytest.ini`
+  would take precedence and silently drop the existing `testpaths`. (#2)
+- **`.gitignore` paths anchored under `Silmulator/`** (the Python project is a
+  subdirectory of the git root); also added `.venv`/pycache hygiene.
+
+### Learning Materials Created
+| Concept | Lesson | Drill | Vocab |
+|---------|--------|-------|-------|
+| Visual regression testing with golden images | ✅ 0008 | ✅ 0008 | — (folded into lesson §) |
+
+One thorough paired lesson+drill was generated for the epic's core concept
+(grounded in the real `tests/visual/` code) rather than five thin ones for
+near-duplicate concepts. Index rebuilt (`docs/learning/index.html`: 8 lessons,
+8 drills). A standalone vocab/glossary entry was not generated — say the word
+and I'll add `/terms` materials for the headless-testing and qtbot concepts too.
+
+### Test Status
+`pytest tests/ -v` → **303 passed**, headless (`QT_QPA_PLATFORM=offscreen`).
+Every golden was generated and then re-compared across 2–3 reruns to confirm
+determinism before committing.
+
+### Environment notes
+To run locally you need the dev deps and Qt system libraries:
+```bash
+pip install -r Silmulator/requirements.txt -r Silmulator/requirements-dev.txt
+./Silmulator/scripts/setup-visual-testing.sh   # one-time, Linux/EC2
+cd Silmulator && pytest tests/ -v
+```
+The learning files `0003-0007` (lessons & drills) are present on disk but were
+already **untracked** before this session — left as-is (outside tonight's scope).
+The rebuilt index links them; they exist in your working tree.
+
+### Suggested First Move
+Review **PR #7** first (the infra). It is the foundation the other four stack
+on; everything above it is mechanical once the `compare_screenshot` contract
+is approved. Pay attention to the QWidget-vs-QGraphicsItem capture split.
+
+### Draft PRs Awaiting Review
+- **#7** feat(#2): visual regression testing infrastructure
+- **#8** test(#3): main window visual test
+- **#9** test(#4): visual tests for hardware block components
+- **#10** test(#5): canvas interaction visual test
+- **#11** docs(#6): headless overnight integration (+ learning materials)

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Optional pre-PUSH hook running the bench-history regression check.
+# Plan: .claude/plans/bench-latency-history.md.
+#
+# Pre-push, not pre-commit: the benches take ~10s x K runs and should not
+# tax every commit. The hook runs `bench_history.py --check-only` and blocks
+# the push only on a real regression (exit 1). Build/parse trouble (exit 2)
+# prints and ALLOWS — a broken toolchain must not hold a push hostage.
+#
+# Idempotent: safe to re-run; overwrites the hook it previously wrote and
+# refuses to clobber an unrelated pre-push hook it did not author.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+HOOK="$REPO_ROOT/.git/hooks/pre-push"
+MARKER="# installed by scripts/install_bench_hook.sh"
+
+if [ ! -d "$REPO_ROOT/.git" ]; then
+    echo "not a git working tree: $REPO_ROOT" >&2
+    exit 1
+fi
+
+if [ -e "$HOOK" ] && ! grep -qF "$MARKER" "$HOOK"; then
+    echo "refusing to overwrite an existing pre-push hook not written by this script:" >&2
+    echo "  $HOOK" >&2
+    echo "remove or back it up first, then re-run." >&2
+    exit 1
+fi
+
+cat > "$HOOK" <<'HOOK_BODY'
+#!/usr/bin/env bash
+# installed by scripts/install_bench_hook.sh
+# Block a push only on a measured latency regression (exit 1). A build or
+# parse failure (exit 2) prints and lets the push through.
+set -uo pipefail
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+python3 "$REPO_ROOT/scripts/bench_history.py" --check-only
+status=$?
+if [ "$status" -eq 1 ]; then
+    echo "pre-push: latency regression detected — push blocked." >&2
+    echo "  re-run scripts/bench_history.py to inspect, or push with --no-verify to override." >&2
+    exit 1
+fi
+if [ "$status" -eq 2 ]; then
+    echo "pre-push: bench check could not run (build/parse) — allowing push." >&2
+fi
+exit 0
+HOOK_BODY
+
+chmod +x "$HOOK"
+echo "installed pre-push hook: $HOOK"
+echo "it runs scripts/bench_history.py --check-only and blocks on regression only."
+echo "bypass any time with: git push --no-verify"

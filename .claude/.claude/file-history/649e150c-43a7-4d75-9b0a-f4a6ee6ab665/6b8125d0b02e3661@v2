@@ -1,0 +1,52 @@
+"""Exercise 03 (part 1): pairs-trading utilities — numpy only, no statsmodels.
+
+Implement every function below. Grade yourself with:
+
+    uv run pytest tests/exercises/test_03_stat_arb_risk.py -v
+
+See README.md for the spec and lesson 0018
+(docs/learning/lessons/0018-statistical-arbitrage.html) for the theory.
+
+Hint: write one private OLS helper that returns (coefficients, standard
+errors) given y and a design matrix X that already includes the intercept
+column — every function here is a regression in disguise.
+np.linalg.lstsq solves the fit; the standard errors come from
+sqrt(diag(sigma2 * inv(X'X))) with sigma2 = RSS / (n - n_params).
+"""
+import numpy as np  # noqa: F401
+
+
+def hedge_ratio(y, x) -> float:
+    """OLS slope of y on x (with intercept): how many units of x hedge one
+    unit of y."""
+    raise NotImplementedError
+
+
+def spread_series(y, x, beta: float) -> np.ndarray:
+    """Residual spread e_t = y_t - beta * x_t."""
+    raise NotImplementedError
+
+
+def zscore(spread) -> np.ndarray:
+    """Standardized spread: (e - mean(e)) / std(e), sample std (ddof=1)."""
+    raise NotImplementedError
+
+
+def dickey_fuller_stat(e) -> float:
+    """Lag-0 Dickey-Fuller t-statistic (with constant).
+
+    Regress de_t = alpha + delta * e_{t-1} + eps and return t = delta / se.
+    Strongly negative values reject the unit root (the spread mean-reverts);
+    the 5% critical value with a constant is about -2.86.
+    """
+    raise NotImplementedError
+
+
+def half_life(e) -> float:
+    """Mean-reversion half-life from an AR(1) fit.
+
+    de_t = alpha + delta * e_{t-1} implies rho = 1 + delta and
+    half_life = -ln(2) / ln(rho). Return inf when the series does not
+    mean-revert (delta >= 0).
+    """
+    raise NotImplementedError

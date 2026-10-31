@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Draft PR for issue #66 + issue bookkeeping."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+body = (
+    "Closes #66. Third PR of the city-polish milestone; stacks on #69 "
+    "(base = `feature/issue-65-road-tiles`), one commit.\n\n"
+    "## What changed\n"
+    "- **Five parked cars** (2 sedans, 2 hatchbacks, and the police car "
+    "beside its station block) and **three alley props** (dumpster + trash "
+    "in the SW apartment alley, a bin in the coffee/office alley) authored "
+    "in `City::makeDowntown` with real collision AABBs, rendered through "
+    "the existing curated-stem + SizeSpec path exactly like the taxi. Pure "
+    "data + one preload stem (`trash_B`); zero new rendering code, per the "
+    "issue's economy note.\n"
+    "- **Orientation constraint (decision logged)**: KayKit cars are Z-long "
+    "at identity and the Uniform draw path doesn't rotate, so all parking "
+    "spots sit curbside on the two Z-running streets (x = ±32). The police "
+    "car therefore parks on the street flanking its station block rather "
+    "than the station-front street — the pure-data alternative to adding "
+    "rotation support.\n"
+    "- **Collision honesty**: boxes hug the curb and are sized to the "
+    "visual car (~4 units) — no invisible walls, no mid-lane parking "
+    "(screenshot round-trip caught the first draft sitting mid-lane in "
+    "oversized boxes).\n"
+    "- **Two test locks**: the obstacle-completeness table gains all 8 new "
+    "ids, and a new case asserts every persona home spot and the four "
+    "zebra-crossing centers keep a clear walking circle — set dressing can "
+    "never trap an NPC.\n\n"
+    "## Verification\n"
+    "- Suite green: 128 cases / 886 assertions.\n"
+    "- Screenshots: police car curbside beside the station, sedan by the "
+    "park, dumpster + trash bag in the apartment alley.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+pr = retry(lambda: repo.create_pull(
+    title="feat(city): street life — parked cars and alley props with colliders (#66)",
+    body=body,
+    head="feature/issue-66-street-dressing",
+    base="feature/issue-65-road-tiles",
+    draft=True), "create pr")
+print(f"PR #{pr.number}: {pr.html_url}")
+
+issue = retry(lambda: repo.get_issue(66), "issue")
+retry(lambda: issue.add_to_labels("ai-completed"), "label")
+try:
+    issue.remove_from_labels("ai-in-progress")
+except GithubException:
+    pass
+retry(lambda: issue.create_comment(
+    f"Implemented in draft PR #{pr.number} (stacked on #69). All 8 new "
+    "obstacles in the completeness test plus a new persona/crossing "
+    "clearance test; suite 128 cases / 886 assertions. Screenshots verified "
+    "curbside parking and alley props."), "comment")
+retry(lambda: issue.edit(state="closed"), "close")
+print("issue #66 closed")

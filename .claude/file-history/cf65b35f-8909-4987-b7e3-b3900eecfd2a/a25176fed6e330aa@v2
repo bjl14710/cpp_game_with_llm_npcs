@@ -1,0 +1,103 @@
+# Plan: ITCH Replay Clock — Deterministic, Speed-Controlled Playback
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+An infra-only C++ layer that steps through a framed ITCH sample day and
+delivers the exact same message sequence every run, at a controllable pace:
+max-speed batch (today's behaviour), wall-clock 1× (or any speed factor,
+paced by the messages' own ITCH timestamps), and single-step for debugging.
+It sits *below* the existing parser/order-book/signal stack: the replay layer
+owns "when is the next message delivered", consumers own "what happens to
+it". Anything latency-sensitive built later (live-style signal loops, the
+incremental-best book optimization's benchmarks) gets repeatable, identical
+input for free.
+
+## Goal
+A user can replay a real filtered ITCH day at 1× wall-clock, at max speed, or
+one message at a time — and every mode delivers the byte-identical sequence.
+
+## Resolved Decisions
+1. **Layer boundary:** the clock delivers RAW framed messages
+   (`const uint8_t* msg, uint16_t len`) plus the peeked ITCH timestamp; it
+   does NOT parse beyond the 2-byte length and the 6-byte timestamp at
+   offset 5. Consumers keep using `itch::parse_buffer`-style handling per
+   message. This keeps the replay layer signal-agnostic (infra-only).
+2. **Pacing:** wall-clock mode sleeps on the *delta between consecutive ITCH
+   timestamps* divided by the speed factor, with drift correction against
+   `std::chrono::steady_clock` (schedule = start + cumulative scaled delta,
+   never sleep-per-gap accumulation). Messages sharing a timestamp are
+   delivered back-to-back.
+3. **Determinism contract:** delivery ORDER and BYTES are identical across
+   all modes; only wall-clock timing differs. This is the property the tests
+   pin.
+4. **File handling:** whole-file gulp like `signals_cpp` (filtered days are
+   ~45 MB); the unfiltered multi-GB day stays out of scope, same rule as the
+   bridge.
+
+## Out of Scope (this version)
+- No new signals, books, or Python bindings — infra only, per the request.
+- No network replay (SoupBinTCP/MoldUDP64) — file-based.
+- No multi-file / multi-symbol merge (single stream in, single stream out).
+- No pause/seek/rewind beyond restarting a fresh ReplayClock.
+
+## Affected Areas
+- New: `cpp/itch/replay_clock.hpp` / `replay_clock.cpp` —
+  - `enum class ReplayMode { MaxSpeed, WallClock, SingleStep }`
+  - `using MessageSink = std::function<void(const uint8_t* msg, uint16_t len,
+    uint64_t timestamp_ns)>`
+  - `class ReplayClock { ReplayClock(std::vector<uint8_t> buffer);
+    static ReplayClock from_file(const std::string& path);
+    void run(MessageSink, ReplayMode, double speed=1.0);  // MaxSpeed/WallClock
+    bool step(MessageSink);                                // SingleStep; false at end
+    const ReplayStats& stats() const; }`
+  - `struct ReplayStats { messages_delivered, bytes_delivered,
+    first_timestamp_ns, last_timestamp_ns, zero_len_frames_skipped }`
+- `cpp/itch/CMakeLists.txt` — add `replay_clock.cpp` to `itch_lib`; new demo
+  executable `replay_main` (file + mode + speed from argv, wires the sink to
+  `parse_buffer` per message and prints ReplayStats + ParseStats).
+- New: `cpp/tests/test_replay_clock.cpp` (GoogleTest, registered in
+  `cpp/tests/CMakeLists.txt`) — see Acceptance Criteria.
+- NOT changed: parser, books, signal engine (consumers only).
+
+## Implementation Order
+1. `ReplayClock` with MaxSpeed + SingleStep (no timing code) + determinism
+   and framing tests — the value core, committable alone.
+2. WallClock pacing with drift-corrected schedule + coarse timing tests
+   (loose bounds so CI never flakes: 10 messages spaced 10 ms at 1× must
+   take ≥ 80 ms; at MaxSpeed < 20 ms).
+3. `replay_main` demo wired to the parser; run it against the AAPL fixture
+   and record throughput in the tool's --help/README note.
+
+## Acceptance Criteria
+- [ ] Given the same buffer, MaxSpeed, WallClock(any speed), and SingleStep
+      deliver byte-identical sequences (hash of concatenated deliveries
+      equal), with identical ReplayStats counts.
+- [ ] Given a synthetic stream with known timestamps, SingleStep delivers
+      exactly one message per step() and returns false exactly at the end.
+- [ ] Given messages spaced 10 ms apart, WallClock at 1× takes at least the
+      scaled span and MaxSpeed finishes near-instantly (loose bounds).
+- [ ] Zero-length padding frames are skipped and counted, truncated final
+      messages stop delivery cleanly (mirrors parse_buffer's paranoia).
+- [ ] `ctest` passes in full; `replay_main` replays the committed AAPL
+      fixture (269,742 messages) without error in both batch modes.
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|--------------------|
+| Empty file / buffer | run() returns immediately, stats all zero, no error |
+| Zero-length frame (padding) | Skipped, `zero_len_frames_skipped` incremented |
+| Truncated final message | Delivery stops cleanly before the partial frame (no over-read) |
+| Message too short to carry a timestamp (< 11 bytes) | Delivered with timestamp 0 — the clock never over-reads; pacing treats it as simultaneous |
+| Backwards timestamps in input | Delivered in file order; negative deltas clamp to 0 sleep (order beats clock) |
+| speed <= 0 in WallClock | throws std::invalid_argument |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `ReplayClock core: deterministic MaxSpeed + SingleStep playback` — class,
+   framing, determinism tests (step 1).
+2. `ReplayClock wall-clock pacing + replay_main demo` — drift-corrected 1×/N×
+   mode, coarse timing tests, demo binary against the AAPL fixture (steps 2–3).

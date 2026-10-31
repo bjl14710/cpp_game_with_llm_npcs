@@ -1,0 +1,107 @@
+"""Tests for shocks.py and run_shock_tests — all offline (fetch_history mocked)."""
+import json
+
+import numpy as np
+import pandas as pd
+import pytest
+
+import walkforward_sim
+from shocks import SHOCKS, load_shocks
+from strategies.daily import DailySignal, DailyStrategy
+from walkforward_sim import run_shock_tests
+
+
+class AlwaysLong(DailyStrategy):
+    name = "always-long"
+
+    def generate_signal(self, df):
+        return DailySignal(1, 1.0, "long")
+
+
+# ---------------------------------------------------------------------------
+# Registry + load_shocks
+# ---------------------------------------------------------------------------
+
+def test_builtin_registry_has_the_three_known_shocks():
+    assert set(SHOCKS) == {"covid_2020", "selloff_2022", "vol_spike_2018"}
+    assert SHOCKS["covid_2020"] == ("2020-02-15", "2020-04-15")
+
+
+def test_load_shocks_none_returns_builtins():
+    assert load_shocks(None) == SHOCKS
+
+
+def test_load_shocks_merges_and_overrides_by_name(tmp_path):
+    p = tmp_path / "custom.json"
+    p.write_text(json.dumps({
+        "covid_2020": ["2020-02-01", "2020-05-01"],       # override
+        "gfc_2008": ["2008-09-01", "2009-03-31"],          # addition
+    }))
+    merged = load_shocks(str(p))
+    assert merged["covid_2020"] == ("2020-02-01", "2020-05-01")
+    assert merged["gfc_2008"] == ("2008-09-01", "2009-03-31")
+    assert "selloff_2022" in merged  # built-ins retained
+
+
+def test_load_shocks_malformed_file_raises_not_fallback(tmp_path):
+    p = tmp_path / "broken.json"
+    p.write_text("{not json")
+    with pytest.raises(SystemExit, match="broken.json"):
+        load_shocks(str(p))
+
+
+# ---------------------------------------------------------------------------
+# run_shock_tests (DailyStrategy path, fetch_history mocked)
+# ---------------------------------------------------------------------------
+
+def _synthetic_window_data(start, end):
+    """Business-day OHLCV covering [start, end], gentle uptrend."""
+    idx = pd.bdate_range(start, end)
+    closes = 100.0 * np.cumprod([1.001] * len(idx))
+    return pd.DataFrame({"Open": closes, "High": closes * 1.01,
+                         "Low": closes * 0.99, "Close": closes,
+                         "Volume": [1e6] * len(idx)}, index=idx)
+
+
+def test_run_shock_tests_one_row_per_window(monkeypatch):
+    monkeypatch.setattr(walkforward_sim, "fetch_history",
+                        lambda tickers, start, end: {"AAA": _synthetic_window_data(start, end)})
+    shocks = {"w1": ("2020-01-01", "2020-03-01"), "w2": ("2021-01-01", "2021-03-01")}
+    table = run_shock_tests(AlwaysLong(), ["AAA"], shocks, top_n=1, trade_cost_bps=0.0)
+    assert list(table["period"]) == ["w1", "w2"]
+    assert "error" not in table.columns or table["error"].isna().all()
+    assert (table["n_days"] > 0).all()
+    assert {"sharpe", "cagr", "maxdd", "worst_day"} <= set(table.columns)
+
+
+def test_run_shock_tests_isolates_a_failing_window(monkeypatch):
+    """A window with no data reports an error row; other windows still run."""
+    def fake_fetch(tickers, start, end):
+        if start.startswith("1999"):
+            return {}  # nothing existed back then
+        return {"AAA": _synthetic_window_data(start, end)}
+
+    monkeypatch.setattr(walkforward_sim, "fetch_history", fake_fetch)
+    shocks = {"dead": ("1999-01-01", "1999-02-01"), "ok": ("2021-01-01", "2021-03-01")}
+    table = run_shock_tests(AlwaysLong(), ["AAA"], shocks, top_n=1, trade_cost_bps=0.0).set_index("period")
+    assert table.loc["dead", "error"] == "no bars in window"
+    assert pd.notna(table.loc["ok", "sharpe"])
+
+
+def test_run_shock_tests_bundle_path_dispatches_to_gbm_loop(monkeypatch, tmp_path):
+    """A str argument routes through simulate_walkforward — verified by
+    intercepting it rather than building a real bundle."""
+    calls = {}
+
+    def fake_simulate_walkforward(**kwargs):
+        calls.update(kwargs)
+        idx = pd.bdate_range(kwargs["start"], periods=5)
+        eq = pd.DataFrame({"equity": [100, 101, 102, 103, 104]}, index=idx)
+        return eq, pd.DataFrame()
+
+    monkeypatch.setattr(walkforward_sim, "simulate_walkforward", fake_simulate_walkforward)
+    table = run_shock_tests("some_bundle.joblib", ["AAA"],
+                            {"w": ("2020-01-01", "2020-02-01")}, top_n=3)
+    assert calls["bundle_path"] == "some_bundle.joblib"
+    assert calls["top_n"] == 3
+    assert pd.notna(table.iloc[0]["sharpe"])

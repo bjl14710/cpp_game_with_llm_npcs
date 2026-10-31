@@ -1,0 +1,113 @@
+"""Tests for the Streamlit dashboard's data layer (streamlit_app/data.py).
+
+Must run WITHOUT streamlit installed — data.py is pure by design.
+Arena data is seeded through ArenaState (the writer); the layer under test
+only ever reads.
+"""
+import sqlite3
+
+import pandas as pd
+import pytest
+
+from streamlit_app.data import (FriendlyDashboardError, STATUS_BADGES,
+                                _readonly_conn, arena_headline, arena_rows,
+                                equity_metrics, live_tape)
+
+
+def _seed(tmp_path, statuses):
+    """Arena DB with one strategy per requested status; returns db path."""
+    from strategy_arena import ArenaState
+
+    db = str(tmp_path / "arena.db")
+    state = ArenaState(db)
+    for i, status in enumerate(statuses):
+        name = f"s{i}_{status.lower()}"
+        state.record_backtest(name, "PASS", {"Sharpe": 0.5, "CAGR": 0.1, "MaxDD": -0.1})
+        if status != "PASS":
+            state.set_status(name, status)
+    return db
+
+
+def test_arena_rows_reads_seeded_db_with_badges(tmp_path):
+    """All six statuses map to their badges; rows carry the data columns."""
+    db = _seed(tmp_path, list(STATUS_BADGES))
+    rows = arena_rows(db)
+    assert len(rows) == 6
+    badges = {r["status"]: r["badge"] for r in rows}
+    for status, badge in STATUS_BADGES.items():
+        assert badges[status] == badge
+    assert all("backtest_sharpe" in r for r in rows)
+
+
+def test_arena_rows_is_read_only(tmp_path):
+    """The mode=ro connection: an attempted write raises at the SQLite level."""
+    db = _seed(tmp_path, ["PASS"])
+    conn = _readonly_conn(db)
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        conn.execute("UPDATE strategies SET status='EXCLUDED'")
+    conn.close()
+
+
+def test_arena_rows_missing_db_returns_empty_list(tmp_path):
+    assert arena_rows(str(tmp_path / "nope.db")) == []
+
+
+def test_arena_rows_non_arena_db_is_empty_state_not_error(tmp_path):
+    """A SQLite file without arena tables reads as 'nothing screened yet'."""
+    db = str(tmp_path / "other.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE misc (x INTEGER)")
+    conn.commit()
+    conn.close()
+    assert arena_rows(db) == []
+
+
+def test_arena_headline_counts(tmp_path):
+    db = _seed(tmp_path, ["PASS", "PASS", "PAUSED", "REFERENCE"])
+    rows = arena_rows(db)
+    counts = arena_headline(rows)
+    assert counts == {"tracked": 4, "live": 2, "diverged": 0}
+
+
+def test_equity_metrics_delegates_and_flags_missing_column(tmp_path):
+    idx = pd.bdate_range("2026-01-02", periods=30)
+    good = tmp_path / "eq.csv"
+    pd.DataFrame({"equity": 100000 * (1.001 ** pd.RangeIndex(30)),
+                  "equity_gross": 100000 * (1.0012 ** pd.RangeIndex(30))},
+                 index=idx).to_csv(good)
+    out = equity_metrics(str(good))
+    assert "Sharpe" in out["metrics"]
+    assert list(out["frame"].columns) == ["equity", "equity_gross"]
+
+    bad = tmp_path / "bad.csv"
+    pd.DataFrame({"wrong": [1, 2, 3]}, index=idx[:3]).to_csv(bad)
+    with pytest.raises(FriendlyDashboardError, match="'equity' column"):
+        equity_metrics(str(bad))
+    with pytest.raises(FriendlyDashboardError, match="not found"):
+        equity_metrics(str(tmp_path / "ghost.csv"))
+
+
+def test_live_tape_isolates_failing_ticker():
+    """watch_once's per-ticker error isolation flows through (injected fetch)."""
+    idx = pd.date_range("2026-07-13 09:30", periods=3, freq="5min")
+    good = pd.DataFrame({"Open": [100, 105, 99], "High": [106, 106, 111],
+                         "Low": [99, 99, 98], "Close": [100, 100, 106],
+                         "Volume": [1000] * 3}, index=idx)
+
+    def fetch(ticker, interval):
+        if ticker == "BAD":
+            raise RuntimeError("feed down")
+        return good
+
+    import datetime as dt
+    lines = live_tape(["BAD", "AAA"], "5m", "engulfing", fetch=fetch)
+    assert any("fetch error" in ln for ln in lines)
+    assert any("AAA" in ln for ln in lines)
+
+
+def test_data_module_imports_without_streamlit():
+    """The layer split's whole point: importable with no streamlit installed."""
+    import streamlit_app.data as data
+
+    assert set(data.STATUS_BADGES) == {
+        "PASS", "PROBATION", "PAUSED", "EXCLUDED", "REFERENCE", "RESEARCH"}

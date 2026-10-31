@@ -1,0 +1,66 @@
+# The payoff: the reveal, not the punishment.
+#
+# Mysterious and cartoony. The killer is led away; nothing violent happens on
+# screen. This is the ONE cutscene allowed to name them, because it plays after
+# MatchOver — the only message that ever carries the name.
+#
+# STRUCTURE IS DRIVEN BY PROTOTYPE BEATS. `found` is emitted once per clue the
+# players actually had, `missed` once per clue they never found, and anything
+# whose id starts with "missed" is dropped when there is nothing to show. So
+# this file does not know how long the chain is, and a template edit is a
+# composition change rather than a code change.
+#
+# Camera positions on the prototypes are OFFSETS FROM THE ZONE CENTRE, so one
+# framing serves all nine zones.
+#
+# Captions: {clue} is the step's text, {zone} its display name, {killer} the
+# name. ASCII only - the built-in font renders nothing else.
+name = You Were Right
+skippable = after_first
+letterbox = 110
+
+beat = open
+  camera = 0.0, 6.0, 26.0
+  yaw = 180
+  pitch = -12
+  hold = 1.6
+  ease = smooth
+  caption = It was {killer}.
+  fade_in = 1.0
+
+beat = found_title
+  hold = 1.2
+  ease = hold
+  caption = Here is how you knew.
+
+# Repeated once per clue the players found, in authored chain order.
+beat = found
+  camera = -20.0, 12.0, 20.0
+  yaw = 135
+  pitch = -24
+  hold = 1.8
+  ease = smooth
+  caption = {zone} - {clue}
+
+# Dropped entirely, title included, when the players missed nothing.
+beat = missed_title
+  hold = 1.2
+  ease = hold
+  caption = And here is what you walked past.
+
+beat = missed
+  camera = 18.0, 11.0, -18.0
+  yaw = 315
+  pitch = -24
+  hold = 1.2
+  ease = smooth
+  caption = {zone} - {clue}
+
+beat = away
+  camera = 0.0, 3.0, 18.0
+  yaw = 180
+  pitch = -6
+  hold = 1.6
+  ease = smooth
+  caption = They are led away. The town goes back to its morning.
+  fade_out = 1.2

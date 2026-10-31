@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0002 — Game Engines & the Game Loop</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --ink:#e6edf3; --dim:#8b949e;
+    --line:#30363d; --accent:#58a6ff; --accent2:#7ee787; --warn:#f0883e;
+    --good:#3fb950; --bad:#f85149;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    background-image:radial-gradient(circle at 12% -10%,#16203033,transparent 42%),
+                     radial-gradient(circle at 88% 0%,#1d2a1a33,transparent 46%);}
+  .wrap{max-width:880px;margin:0 auto;padding:30px 22px 90px}
+  h1{font-family:var(--mono);font-size:1.5rem;letter-spacing:.4px;margin:.1em 0 .15em}
+  h2{font-family:var(--mono);font-size:1.05rem;color:var(--accent2);margin-top:0;
+     display:flex;align-items:center;gap:10px}
+  h2 .n{font-size:.72rem;color:var(--bg);background:var(--accent2);border-radius:6px;
+        padding:2px 8px;font-weight:700}
+  .sub{color:var(--dim);font-family:var(--mono);font-size:.84rem;margin-bottom:8px}
+  .why{background:linear-gradient(90deg,#1f6feb22,transparent);border-left:3px solid var(--accent);
+       padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0 26px;font-size:.95rem}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+          padding:20px 22px;margin:18px 0;box-shadow:0 1px 0 #0006}
+  p{margin:.5em 0}
+  code{font-family:var(--mono);background:#0a0e14;border:1px solid var(--line);border-radius:5px;
+       padding:1px 5px;font-size:.86em}
+  pre{font-family:var(--mono);font-size:.81rem;background:#0a0e14;border:1px solid var(--line);
+      border-radius:9px;padding:14px 16px;overflow:auto;line-height:1.5}
+  pre .c{color:#6e7681}      /* comment */
+  pre .k{color:#ff7b72}      /* keyword */
+  pre .s{color:#a5d6ff}      /* string */
+  pre .f{color:#d2a8ff}      /* function/type */
+  pre .n{color:#79c0ff}      /* number/ident */
+  .path{font-family:var(--mono);font-size:.74rem;color:var(--accent);background:#1f6feb14;
+        border:1px solid #1f6feb44;border-radius:6px;padding:2px 8px;display:inline-block;margin-bottom:6px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cols .card{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+  .cols h3{margin:.1em 0 .4em;font-family:var(--mono);font-size:.92rem}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:.9rem}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#0a0e14;font-family:var(--mono);color:var(--accent2)}
+  ul.options{list-style:none;padding:0;margin:12px 0 0}
+  ul.options li{border:1px solid var(--line);background:#0d1117;border-radius:8px;padding:11px 14px;
+    margin-bottom:9px;cursor:pointer;transition:border-color .12s,background .12s}
+  ul.options li:hover{border-color:var(--accent)}
+  ul.options li.pick-ok{border-color:var(--good);background:#2ea04318}
+  ul.options li.pick-no{border-color:var(--bad);background:#f8514918}
+  ul.options li.reveal-ok{border-color:var(--good)}
+  ul.options li .why2{display:none;margin-top:7px;font-size:.83rem;color:var(--dim)}
+  .feedback{margin-top:10px;font-family:var(--mono);font-size:.82rem;min-height:1.2em}
+  .q{margin:18px 0;padding-top:6px;border-top:1px dashed var(--line)}
+  .q > p:first-child{font-weight:600}
+  .reveal{margin-top:8px}
+  .reveal .btn{font-family:var(--mono);font-size:.8rem;border:1px solid var(--line);
+    background:var(--panel2);color:var(--ink);padding:6px 12px;border-radius:7px;cursor:pointer}
+  .reveal .btn:hover{border-color:var(--accent)}
+  .reveal .ans{display:none;margin-top:10px;background:#0a0e14;border-left:3px solid var(--accent2);
+    border-radius:0 8px 8px 0;padding:10px 14px;font-size:.92rem}
+  .done{display:flex;align-items:center;gap:9px;margin-top:16px;font-family:var(--mono);
+    font-size:.82rem;color:var(--dim);cursor:pointer;user-select:none}
+  .done input{width:16px;height:16px;accent-color:var(--accent2)}
+  /* progress rail */
+  .rail{position:sticky;top:0;z-index:5;background:#0d1117ee;backdrop-filter:blur(6px);
+    border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:18px;
+    display:flex;align-items:center;gap:12px}
+  .bar{flex:1;height:8px;background:#0a0e14;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+  .bar > div{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s}
+  .rail .pct{font-family:var(--mono);font-size:.8rem;color:var(--accent2);min-width:3.2em;text-align:right}
+  .loopmotif{font-family:var(--mono);color:var(--dim);font-size:.8rem;text-align:center;margin:6px 0 0;letter-spacing:1px}
+  .score{font-family:var(--mono);font-size:.9rem;margin-top:14px;color:var(--accent2)}
+  a{color:var(--accent)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (max-width:640px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="rail">
+    <span style="font-family:var(--mono);font-size:.8rem">Lesson&nbsp;0002</span>
+    <div class="bar"><div id="barFill"></div></div>
+    <span class="pct" id="barPct">0%</span>
+  </div>
+
+  <h1>Game Engines &amp; the Game Loop</h1>
+  <div class="sub">cpp_game_with_llm_npcs · lesson 0002 · builds on 0001 (how to run &amp; develop)</div>
+  <div class="why"><b>Why this matters for your project:</b> you didn't import Unity or Unreal — you
+  <em>built</em> a small game engine by hand. The thing that ties your renderer, your NPCs, your
+  traffic, and your collision together into a running game is one loop in <code>main.cpp</code>.
+  Understanding it as "an engine" is what lets you add the next system (birds? weather? a day/night
+  cycle?) without guessing where it goes.</div>
+  <div class="loopmotif">poll input → update(dt) → render → repeat ↺</div>
+
+  <!-- 1. CONCEPT -->
+  <section>
+    <h2><span class="n">1</span> What a game engine actually is</h2>
+    <p>A <b>game engine</b> is the reusable machinery that sits beneath a specific game. It is not the
+    game's story, levels, or rules — it's the substrate that makes any game of its kind possible.
+    Strip away the LLM NPCs and the city, and what remains is engine:</p>
+    <table>
+      <tr><th>Engine subsystem</th><th>Its job</th><th>In your repo</th></tr>
+      <tr><td>Game loop</td><td>Run forever: read input, advance the world, draw it</td><td><code>main.cpp</code> <code>while(window.isOpen())</code></td></tr>
+      <tr><td>Renderer</td><td>Turn world state into pixels</td><td><code>Renderer3D</code></td></tr>
+      <tr><td>World / entities</td><td>Hold and simulate the things in the world</td><td><code>World</code>, <code>Npc</code>, <code>Traffic</code></td></tr>
+      <tr><td>Collision</td><td>Stop things passing through each other</td><td><code>City::resolveMovement</code></td></tr>
+      <tr><td>Input</td><td>Translate device events into intent</td><td><code>InputMap</code>, <code>KeyBindings</code></td></tr>
+      <tr><td>Time</td><td>Measure how much real time a frame took</td><td><code>sf::Clock frameClock</code></td></tr>
+    </table>
+    <p>Commercial engines (Unity, Unreal, Godot) bundle these plus an editor, an asset pipeline, and a
+    physics library. Yours is <b>hand-rolled</b> on SFML (window/input) + OpenGL (drawing): smaller, fully
+    yours, no editor — but the same anatomy. Knowing the anatomy is the transferable skill.</p>
+    <label class="done"><input type="checkbox" data-done> I understand what counts as "the engine."</label>
+  </section>
+
+  <!-- 2. MINIMAL EXAMPLE -->
+  <section>
+    <h2><span class="n">2</span> The loop, in 12 lines</h2>
+    <p>Every real-time game is this shape. The three phases never blur together: gather input, advance
+    the simulation by the elapsed time, then draw a snapshot.</p>
+<pre><span class="c">// The universal real-time game loop.</span>
+<span class="k">while</span> (running) {
+    <span class="f">float</span> dt = clock.<span class="f">restart</span>();        <span class="c">// (A) TIME: real seconds since last frame</span>
+
+    <span class="k">for</span> (Event e : pollEvents())     <span class="c">// (B) INPUT: drain the OS event queue</span>
+        handle(e);
+
+    world.<span class="f">update</span>(dt);                 <span class="c">// (C) UPDATE: advance state by dt — the simulation</span>
+
+    renderer.<span class="f">draw</span>(world);             <span class="c">// (D) RENDER: read state, paint pixels (changes nothing)</span>
+    window.<span class="f">display</span>();                <span class="c">// (E) PRESENT: show the finished frame</span>
+}</pre>
+    <p>The subtle star is <code>dt</code>. Multiply every movement by it (<code>pos += speed * dt</code>)
+    and your game runs the same real-world speed whether the machine renders 30 or 144 frames per second.
+    Forget it (<code>pos += speed</code>) and the game literally runs faster on faster computers.</p>
+    <label class="done"><input type="checkbox" data-done> I can name the five phases A–E.</label>
+  </section>
+
+  <!-- 3. IN THIS PROJECT -->
+  <section>
+    <h2><span class="n">3</span> Your actual loop, walked through</h2>
+    <span class="path">src/app/main.cpp</span>
+<pre><span class="n">327</span>  sf::Clock frameClock;
+<span class="n">328</span>  <span class="k">while</span> (window.<span class="f">isOpen</span>()) {                          <span class="c">// the loop runs until the window closes</span>
+<span class="n">330</span>      <span class="k">while</span> (window.<span class="f">pollEvent</span>(event)) { ... }         <span class="c">// (B) INPUT: keys, mouse, close, focus</span>
+        ...
+<span class="n">406</span>      <span class="k">const</span> <span class="f">float</span> dt = std::<span class="f">min</span>(<span class="n">0.03f</span>, frameClock.<span class="f">restart</span>().<span class="f">asSeconds</span>());  <span class="c">// (A) TIME</span>
+        ...
+<span class="n">408</span>      <span class="k">if</span> (mode == AppMode::Playing) { ... move the player by dt ... }   <span class="c">// (C) UPDATE: you</span>
+<span class="n">382</span>      <span class="k">for</span> (Npc&amp; npc : world.<span class="f">npcs</span>()) npc.<span class="f">update</span>(dt, camera.position, city);  <span class="c">// (C) UPDATE: NPCs</span>
+        traffic.<span class="f">update</span>(dt, camera.position);                  <span class="c">// (C) UPDATE: cars</span>
+        ...
+<span class="n">544</span>      renderer.<span class="f">beginFrame</span>(window, camera);                <span class="c">// (D) RENDER begins</span>
+<span class="n">545</span>      renderer.<span class="f">drawCity</span>(world.<span class="f">city</span>());
+        ... drawNpc(...) for each NPC, drawCar(...) for each car ...
+<span class="n">617</span>      window.<span class="f">display</span>();                                  <span class="c">// (E) PRESENT the frame</span>
+  }</pre>
+    <p>Three things worth noticing in <em>your</em> code:</p>
+    <ul>
+      <li><b>Update and render are strictly separate.</b> <code>npc.update(dt,…)</code> changes where an
+      NPC is; <code>drawNpc(…)</code> only reads that position and paints it. The renderer never decides an
+      arrest or moves a car — it's a camera, not a brain. That separation is why your whole
+      <code>core/</code> library can be unit-tested with no window at all.</li>
+      <li><b><code>dt</code> drives the simulation.</b> Cars (<code>kNpcWander * dt</code>), the walk-cycle
+      phase, mood/gesture timers — all scale by <code>dt</code>, so the city moves at a consistent speed
+      regardless of frame rate.</li>
+      <li><b>That <code>std::min(0.03f, …)</code> is a safety clamp.</b> If the game stalls (you opened the
+      pause menu, the OS hitched, the window lost focus), the next frame's real <code>dt</code> could be
+      seconds. Feeding that raw into <code>update</code> would teleport every car a city-block and let the
+      player tunnel through a wall. Clamping to 0.03&nbsp;s (~33&nbsp;ms) caps the biggest step the world
+      can take — the game briefly runs in slow-motion instead of exploding.</li>
+    </ul>
+    <p>The engine/platform boundary is real and visible here: everything that <code>update</code>s lives in
+    the SFML-free <code>src/core/</code> library; everything that draws or talks to the OS lives in
+    <code>src/app/</code> (<code>main.cpp</code>, <code>Renderer3D</code>). That line is why your tests build
+    without SFML at all.</p>
+    <label class="done"><input type="checkbox" data-done> I can point to phases A–E in my own main.cpp.</label>
+  </section>
+
+  <!-- 4. OFTEN CONFUSED WITH -->
+  <section>
+    <h2><span class="n">4</span> Often confused with…</h2>
+    <div class="cols">
+      <div class="card">
+        <h3>Update vs. Render</h3>
+        <p>Both run every frame, so they feel like one thing. They are not.</p>
+        <p><b>Update</b> mutates the world by <code>dt</code> (move NPCs, advance timers, resolve
+        collisions). <b>Render</b> only <em>reads</em> the world and draws it — it must change nothing.</p>
+        <p>Keep them separate and you can test update logic headlessly and swap the renderer freely. Blur
+        them (game logic inside <code>drawNpc</code>) and the world only advances when it's visible — a
+        classic bug.</p>
+      </div>
+      <div class="card">
+        <h3>Variable vs. Fixed timestep</h3>
+        <p>Your loop uses a <b>variable timestep</b>: each frame advances by however much real time passed
+        (clamped to 0.03&nbsp;s), capped near 60&nbsp;FPS by vsync. Simple, and fine for this game.</p>
+        <p>A <b>fixed timestep</b> instead advances the simulation in constant slices (say 1/60&nbsp;s),
+        running the update 0, 1, or several times per frame from an accumulator. It's what physics-heavy or
+        networked games use because identical steps are deterministic and stable.</p>
+        <p>The danger a fixed loop must guard against is the <b>spiral of death</b>: if simulating one step
+        takes longer than the step represents, you queue ever more steps and freeze. Your variable+clamp
+        approach sidesteps it by simply taking one bounded step per frame.</p>
+      </div>
+    </div>
+    <p style="margin-top:14px"><b>And: engine vs. game.</b> The <em>engine</em> is the loop, renderer,
+    world model, and collision — reusable for any city game. The <em>game</em> is the specific content:
+    LLM personas, the arrest rules, the downtown map. You could keep the engine and build a totally
+    different game on it.</p>
+    <label class="done"><input type="checkbox" data-done> I can distinguish update/render and fixed/variable timestep.</label>
+  </section>
+
+  <!-- 5. QUIZ -->
+  <section>
+    <h2><span class="n">5</span> Practice — instant feedback</h2>
+    <p class="sub">Options are shuffled on every open; there's no "always the first one." Click to answer.</p>
+    <div id="quiz">
+
+      <div class="q" data-question>
+        <p>In this game's loop, what is <code>dt</code>?</p>
+        <ul class="options">
+          <li data-correct="true"  data-why="dt = frameClock.restart().asSeconds(): the real time the last frame took. Movement multiplies by it so speed is frame-rate independent.">Real seconds elapsed since the previous frame, used to scale movement.</li>
+          <li data-correct="false" data-why="That would be a fixed timestep. This loop measures actual elapsed time each frame instead.">A fixed 1/60 s applied every frame regardless of timing.</li>
+          <li data-correct="false" data-why="That's a frame counter. dt is a duration, not a count.">A running count of frames rendered this session.</li>
+          <li data-correct="false" data-why="The LLM round-trip is handled off-thread and is unrelated to the frame interval.">How long the LLM took to reply this turn.</li>
+        </ul>
+        <p class="feedback" hidden></p>
+      </div>
+
+      <div class="q" data-question>
+        <p>Why is <code>dt</code> wrapped in <code>std::min(0.03f, …)</code>?</p>
+        <ul class="options">
+          <li data-correct="false" data-why="Vsync caps the frame rate; this line caps the step size. Different jobs.">To force the game to run at exactly 30 FPS.</li>
+          <li data-correct="true"  data-why="After a stall the raw dt can be seconds; clamping bounds the simulation step so cars don't jump a block and the player can't tunnel through walls — slow-motion instead of an explosion.">To cap the simulation step after a stall so nothing teleports or tunnels.</li>
+          <li data-correct="false" data-why="It limits dt, which if anything bounds movement per frame — it never speeds NPCs up.">To make the NPCs move faster.</li>
+          <li data-correct="false" data-why="It's a max-step guard, not floating-point rounding.">To round dt and avoid floating-point error.</li>
+        </ul>
+        <p class="feedback" hidden></p>
+      </div>
+
+      <div class="q" data-question>
+        <p>Which line is doing the <b>render</b> step, not the update step?</p>
+        <ul class="options">
+          <li data-correct="false" data-why="update() advances simulation state by dt — that's the update step.">npc.update(dt, camera.position, city)</li>
+          <li data-correct="false" data-why="This advances the cars — update, not render.">traffic.update(dt, camera.position)</li>
+          <li data-correct="true"  data-why="drawCar only reads a car's pose and paints it; it changes no game state. That's render.">renderer.drawCar(pos, heading, colorId)</li>
+          <li data-correct="false" data-why="resolveMovement is collision resolution, part of advancing the world — update.">city.resolveMovement(from, to, r)</li>
+        </ul>
+        <p class="feedback" hidden></p>
+      </div>
+
+      <div class="q" data-question>
+        <p>There's no Unity or Unreal here. In what sense is this still a game engine?</p>
+        <ul class="options">
+          <li data-correct="false" data-why="A visual editor is a convenience some engines ship; it isn't what makes something an engine.">It isn't — only software with a visual editor is an engine.</li>
+          <li data-correct="true"  data-why="An engine is the reusable runtime machinery — loop, renderer, world/entity model, input, collision — beneath the specific content. You hand-rolled exactly that.">It provides the reusable machinery (loop, renderer, world, input, collision) beneath the content.</li>
+          <li data-correct="false" data-why="Shipping/distribution has nothing to do with whether the runtime machinery is an engine.">It only becomes an engine once it ships to players.</li>
+          <li data-correct="false" data-why="It plainly has a loop, a renderer, and simulation subsystems — that's engine machinery, not a mere script.">It's just a script, not an engine at all.</li>
+        </ul>
+        <p class="feedback" hidden></p>
+      </div>
+
+      <div class="q" data-question>
+        <p>Where does the <b>engine/platform boundary</b> live in this repo?</p>
+        <ul class="options">
+          <li data-correct="true"  data-why="core/ (World, City, Npc, Traffic, LlmClient) is SFML-free portable logic; app/ (main, Renderer3D) is the platform/render shell. CMake builds core with no SFML, which is why tests run headless.">Between the SFML-free <code>core/</code> library and the <code>app/</code> layer that needs SFML/OpenGL.</li>
+          <li data-correct="false" data-why="core/ deliberately excludes SFML precisely so it compiles and tests without a window.">Nowhere — every file includes SFML.</li>
+          <li data-correct="false" data-why="It's the reverse: rules/simulation live in core; Renderer3D only draws.">Renderer3D holds the rules; main.cpp only draws.</li>
+          <li data-correct="false" data-why="Splitting .hpp from .cpp is ordinary C++ structure, not the engine/platform line.">Between header files and source files.</li>
+        </ul>
+        <p class="feedback" hidden></p>
+      </div>
+
+    </div>
+    <div class="score" id="score">Score: 0 / 5</div>
+  </section>
+
+  <!-- 6. CHECK UNDERSTANDING -->
+  <section>
+    <h2><span class="n">6</span> Check your understanding (scenarios)</h2>
+
+    <div class="reveal">
+      <p><b>Scenario 1.</b> You alt-tab away for 8 seconds, then return. The next frame's raw elapsed time
+      is ~8&nbsp;s. Without the clamp, what happens to the cars and the player — and why does the clamp fix it?</p>
+      <button class="btn" data-reveal>Show answer</button>
+      <div class="ans">Each car would move <code>speed × 8</code> units in one step — hundreds of units, leaping
+      across (and through) the map; collision, which only checks the start and end of a step, could be skipped
+      entirely, so the player could tunnel through a wall. <code>std::min(0.03f, dt)</code> caps that one step
+      to ~33&nbsp;ms of movement, so the world advances a normal amount and just appears to have paused.</div>
+    </div>
+
+    <div class="reveal">
+      <p><b>Scenario 2.</b> You want to add flocking birds. Which loop phases must you touch, and which stays
+      exactly as-is?</p>
+      <button class="btn" data-reveal>Show answer</button>
+      <div class="ans">Add a <code>Birds</code> system in <code>core/</code> with a <code>birds.update(dt, …)</code>
+      call in the UPDATE phase, and a <code>drawBird(…)</code> call in the RENDER phase. INPUT, TIME, and
+      PRESENT are untouched — that's the payoff of a clean loop: new systems plug into two well-known slots.</div>
+    </div>
+
+    <div class="reveal">
+      <p><b>Scenario 3.</b> Why is it deliberate that <code>Renderer3D</code> contains no game rules — that it
+      can't, say, decide an arrest?</p>
+      <button class="btn" data-reveal>Show answer</button>
+      <div class="ans">Because render must be a pure read of world state. Keeping rules out of it means the
+      simulation (in <code>core/</code>) is testable without a GPU, the renderer can be rewritten or replaced
+      without touching gameplay, and the world advances identically whether or not anything is on screen.</div>
+    </div>
+  </section>
+
+  <p class="loopmotif">↺ poll input → update(dt) → render → present → repeat</p>
+</div>
+
+<script>
+// ---- Quiz: shuffle options, score by attribute (never by position) ----
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+let score = 0;
+const answered = new Set();
+const scoreEl = document.getElementById('score');
+const questions = [...document.querySelectorAll('[data-question]')];
+questions.forEach((q, qi) => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));  // randomize DOM order on load
+  const fb = q.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li => {
+    // pre-build per-option explanation line
+    const why = document.createElement('span');
+    why.className = 'why2';
+    why.textContent = li.dataset.why;
+    li.appendChild(why);
+    li.addEventListener('click', () => {
+      if (answered.has(qi)) return;                 // lock after first answer
+      answered.add(qi);
+      const correct = li.dataset.correct === 'true';  // <-- correctness is the attribute, not the position
+      li.classList.add(correct ? 'pick-ok' : 'pick-no');
+      list.querySelectorAll('li').forEach(o => {
+        o.querySelector('.why2').style.display = 'block';
+        if (o.dataset.correct === 'true') o.classList.add('reveal-ok');
+      });
+      fb.hidden = false;
+      fb.textContent = correct ? '✓ Correct.' : '✗ Not quite — the right answer is highlighted.';
+      fb.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      if (correct) score++;
+      scoreEl.textContent = `Score: ${score} / ${questions.length}`;
+      if (answered.size === questions.length) {
+        scoreEl.textContent += score === questions.length ? '  — perfect run! ✦' : '  — review the highlighted answers.';
+      }
+      updateProgress();
+    });
+  });
+});
+
+// ---- Reveal buttons for scenarios ----
+document.querySelectorAll('[data-reveal]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ans = btn.nextElementSibling;
+    const open = ans.style.display === 'block';
+    ans.style.display = open ? 'none' : 'block';
+    btn.textContent = open ? 'Show answer' : 'Hide answer';
+    updateProgress();
+  });
+});
+
+// ---- Progress rail: sections marked done + quiz completion ----
+const checks = [...document.querySelectorAll('[data-done]')];
+const fill = document.getElementById('barFill');
+const pct = document.getElementById('barPct');
+function updateProgress(){
+  const total = checks.length + 1;                 // +1 for finishing the quiz
+  let got = checks.filter(c => c.checked).length;
+  if (answered.size === questions.length) got += 1;
+  const p = Math.round(100 * got / total);
+  fill.style.width = p + '%';
+  pct.textContent = p + '%';
+}
+checks.forEach(c => c.addEventListener('change', updateProgress));
+updateProgress();
+</script>
+</body>
+</html>

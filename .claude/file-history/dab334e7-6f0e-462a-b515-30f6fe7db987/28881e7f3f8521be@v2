@@ -1,0 +1,230 @@
+"""Create the 'implementing more strategies' issue batch on bjl14710/HFT_practice.
+
+Run with: uv run python create_arena_issues.py
+Requires a valid GH_TOKEN env var (repo scope). Idempotent: skips issues
+whose titles already exist open, reuses the milestone if present.
+"""
+import os
+import sys
+
+import requests
+
+REPO = "bjl14710/HFT_practice"
+USERNAME = "bjl14710"
+API = f"https://api.github.com/repos/{REPO}"
+
+MILESTONE_TITLE = "Strategy Arena — Strategy Layer"
+MILESTONE_DESC = (
+    "Implement the four DailyStrategy participants scaffolded from "
+    ".claude/plans/strategy-arena.md (plan steps 1-3). Interface, registry, "
+    "and test stubs already exist on disk; these issues fill in the stubs. "
+    "Later milestones cover the generic walk-forward, filter, live loop, and report."
+)
+
+ISSUE_TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/issue-{number}-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    {
+        "title": "feat(strategies): implement DailyEngulfingStrategy adapter",
+        "slug": "daily-engulfing-adapter",
+        "what": (
+            "Fill in `DailyEngulfingStrategy.generate_signal` in "
+            "`strategies/candlestick_daily.py` per its TODO docstring: return HOLD when "
+            "`len(df) < warmup_bars`; otherwise delegate to the existing intraday "
+            "`EngulfingStrategy` with `prev=df.iloc[-2]`, `curr=df.iloc[-1]` and map "
+            "BUY -> DailySignal(+1, 1.0, \"bullish engulfing\"), SELL -> DailySignal(-1, 1.0, "
+            "\"bearish engulfing\"), HOLD -> HOLD. Then remove the 4 `@pytest.mark.skip` "
+            "markers on the engulfing tests in `tests/test_daily_strategies.py` and make them pass."
+        ),
+        "where": "`strategies/candlestick_daily.py` (stub exists), `tests/test_daily_strategies.py` (stubs exist)",
+        "verify": (
+            "`uv run pytest tests/test_daily_strategies.py -v` — all engulfing tests pass, "
+            "none skipped. `uv run pytest tests/ -m \"not exercise\"` stays green, in particular "
+            "`tests/test_engulfing.py` and `tests/test_intraday_sim.py` unmodified and passing."
+        ),
+        "constraints": (
+            "Do NOT modify `strategies/engulfing.py`, `strategies/base.py`, or any intraday code. "
+            "No pattern logic in the adapter — delegation only. No live API calls in tests."
+        ),
+        "economy_note": (
+            "~15 lines inside one existing method plus deleting 4 skip decorators. "
+            "Zero new files, zero new abstractions."
+        ),
+        "concept": "Adapter pattern: bridging two incompatible interfaces without duplicating domain logic",
+    },
+    {
+        "title": "feat(strategies): implement TechnicalStrategy (RSI + MACD + MA crossover)",
+        "slug": "technical-strategy",
+        "what": (
+            "Implement `_rsi`, `_macd`, and `generate_signal` in `strategies/technical.py` "
+            "following the signal rules already spelled out in the class docstring "
+            "(LONG when fast MA > slow MA, MACD line > signal line, RSI < overbought; SHORT on "
+            "the mirror; else HOLD; confidence = normalized |MACD histogram|). Remove the 3 "
+            "skip markers on the technical tests in `tests/test_daily_strategies.py`."
+        ),
+        "where": "`strategies/technical.py` (skeleton with params and warmup_bars already wired), `tests/test_daily_strategies.py`",
+        "verify": "`uv run pytest tests/test_daily_strategies.py -k technical -v` — 3 tests pass, none skipped; full suite green.",
+        "constraints": (
+            "pandas-only indicators (`rolling`/`ewm`) — no TA-Lib or any new dependency. "
+            "Mirror the RSI formula already in `paper_trading_sim.build_features` (rolling-mean "
+            "gains/losses) so both code paths agree, but do not import build_features here."
+        ),
+        "economy_note": (
+            "Implement inside the existing skeleton methods (~60 lines total). "
+            "No new files, no indicator utility module — inline pandas is enough."
+        ),
+        "concept": "MACD and EMA-based momentum: indicator construction and signal-line crossover logic",
+    },
+    {
+        "title": "feat(strategies): implement MeanReversionStrategy (z-score fade + breakout override)",
+        "slug": "mean-reversion-strategy",
+        "what": (
+            "Implement `generate_signal` in `strategies/mean_reversion.py` per the class "
+            "docstring: breakout check first (close beyond the `breakout_lookback` high/low "
+            "channel, EXCLUDING the current bar from the channel), then z-score fade at "
+            "+/-`entry_z`, else HOLD. Confidence = min(|z|/entry_z, 2.0); breakouts get 1.0 and "
+            "a reason containing 'breakout'. Guard near-zero rolling std -> HOLD. Remove the 3 "
+            "skip markers on the meanrev tests."
+        ),
+        "where": "`strategies/mean_reversion.py` (skeleton exists), `tests/test_daily_strategies.py`",
+        "verify": "`uv run pytest tests/test_daily_strategies.py -k meanrev -v` — 3 tests pass, none skipped; full suite green.",
+        "constraints": (
+            "pandas rolling ops only, no new dependencies. Breakout must beat the fade when both "
+            "trigger (that ordering is the point of the strategy). Deterministic given df — no "
+            "randomness, no wall-clock reads."
+        ),
+        "economy_note": "One method (~40 lines) in the existing skeleton. No new files.",
+        "concept": "Z-score mean reversion vs channel breakout: resolving conflicting regime signals",
+    },
+    {
+        "title": "feat(strategies): implement GBMStrategy model-bundle adapter",
+        "slug": "gbm-bundle-adapter",
+        "what": (
+            "Implement `_ensure_loaded` and `generate_signal` in `strategies/gbm_adapter.py` per "
+            "the TODO docstrings: lazy `joblib.load` of the `{'model', 'features'}` bundle, "
+            "features via `paper_trading_sim.build_features`, predict on the LAST row, "
+            "HOLD when any feature is NaN (note: NaN `fwd_ret_1d` on the last row is the target, "
+            "not an input — expected), else position=sign(pred), confidence=abs(pred), "
+            "reason=f\"pred_ret={yhat:+.4%}\". Also implement the two test stubs "
+            "(`test_gbm_adapter_*`): train a throwaway 5-tree GradientBoostingRegressor on "
+            "synthetic data in-test, dump to tmp_path, assert signal shape."
+        ),
+        "where": "`strategies/gbm_adapter.py` (skeleton exists), `tests/test_daily_strategies.py`",
+        "verify": (
+            "`uv run pytest tests/test_daily_strategies.py -k gbm -v` — 2 tests pass, none "
+            "skipped, no network access, no model file committed to the repo."
+        ),
+        "constraints": (
+            "Do NOT modify `paper_trading_sim.py` or any saved model in `models/`. Import joblib "
+            "function-locally and build_features at module top only once implemented (keep "
+            "`import strategies` free of yfinance side effects). joblib.load only ever reads "
+            "locally-trained bundles — same trust model as walkforward_sim.py."
+        ),
+        "economy_note": (
+            "Two methods in the existing skeleton plus two test bodies. The test bundle is "
+            "built in-memory per test — never committed."
+        ),
+        "concept": "Feature-column contracts at inference time: preventing train/serve skew",
+    },
+]
+
+
+def main() -> None:
+    tok = os.environ.get("GH_TOKEN", "")
+    H = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
+    who = requests.get("https://api.github.com/user", headers=H)
+    if who.status_code != 200:
+        sys.exit("GH_TOKEN invalid — set a real token (repo scope) in your shell config first.")
+    print(f"Authenticated as {who.json()['login']}")
+
+    issues = requests.get(f"{API}/issues?state=open&per_page=100", headers=H).json()
+    existing_titles = {i["title"].lower() for i in issues if "pull_request" not in i}
+    print(f"Existing open issues: {len(existing_titles)}")
+
+    # ready-for-ai label
+    if requests.get(f"{API}/labels/ready-for-ai", headers=H).status_code == 404:
+        requests.post(f"{API}/labels", headers=H,
+                      json={"name": "ready-for-ai", "color": "0e8a16",
+                            "description": "Queued for the overnight session"}).raise_for_status()
+        print("Created label: ready-for-ai")
+
+    # milestone (reuse if present)
+    ms = requests.get(f"{API}/milestones?state=open&per_page=100", headers=H).json()
+    ms_num = next((m["number"] for m in ms if m["title"] == MILESTONE_TITLE), None)
+    if ms_num is None:
+        r = requests.post(f"{API}/milestones", headers=H,
+                          json={"title": MILESTONE_TITLE, "description": MILESTONE_DESC})
+        r.raise_for_status()
+        ms_num = r.json()["number"]
+        print(f"Created milestone #{ms_num}: {MILESTONE_TITLE}")
+    else:
+        print(f"Reusing milestone #{ms_num}: {MILESTONE_TITLE}")
+
+    created = []
+    for spec in SPECS:
+        if spec["title"].lower() in existing_titles:
+            print(f"Skipping (exists): {spec['title']}")
+            continue
+        body = ISSUE_TEMPLATE.format(number="N", **{k: spec[k] for k in
+                ("what", "where", "verify", "constraints", "economy_note", "slug", "concept")})
+        r = requests.post(f"{API}/issues", headers=H, json={
+            "title": spec["title"], "body": body, "labels": ["ready-for-ai"],
+            "assignees": [USERNAME], "milestone": ms_num,
+        })
+        r.raise_for_status()
+        issue = r.json()
+        fixed = body.replace("issue-N-", f"issue-{issue['number']}-")
+        requests.patch(f"{API}/issues/{issue['number']}", headers=H, json={"body": fixed}).raise_for_status()
+        print(f"  Created #{issue['number']}: {spec['title']}")
+        created.append({"number": issue["number"], "title": spec["title"],
+                        "concept": spec["concept"], "url": issue["html_url"]})
+
+    print("\n=== Tonight's ready-for-ai queue ===")
+    q = requests.get(f"{API}/issues?state=open&labels=ready-for-ai&per_page=100", headers=H).json()
+    for i in q:
+        if "pull_request" not in i:
+            print(f"  #{i['number']:3} {i['title']}\n       {i['html_url']}")
+    print(f"\nTotal queued: {sum(1 for i in q if 'pull_request' not in i)}")
+
+    # local summary for step 7
+    lines = ["# Issue Planning Summary",
+             "Repo: bjl14710/HFT_practice",
+             'Focus: "implementing more strategies"', "",
+             "## Issues Created"]
+    for c in created:
+        lines += [f"- #{c['number']}: {c['title']}",
+                  f"  Concept: {c['concept']}", f"  URL: {c['url']}", ""]
+    lines += ["## What Was NOT Planned",
+              "- Arena orchestrator, SQLite state, filter, live loop, comparison report",
+              "  (plan steps 4-7) — deliberately deferred to a separate milestone once the",
+              "  strategy layer lands, per the 'implementing more strategies' focus.",
+              "- webapp arena page — stretch, phase 2 in the plan.",
+              ""]
+    os.makedirs(".claude/memory", exist_ok=True)
+    with open(".claude/memory/planning-session.md", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print("Plan summary saved to .claude/memory/planning-session.md")
+
+
+if __name__ == "__main__":
+    main()

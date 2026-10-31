@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configuration Layer — readsb</title>
+<style>
+  :root {
+    --bg:#1a1b26; --surface:#1f2335; --border:#2f3549;
+    --text:#c0caf5; --muted:#565f89; --accent:#7aa2f7;
+    --green:#9ece6a; --red:#f7768e; --yellow:#e0af68;
+    --cyan:#7dcfff; --purple:#bb9af7; --orange:#ff9e64;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:Georgia,serif; line-height:1.75; padding:2rem 1rem; }
+  .container { max-width:820px; margin:0 auto; }
+  h1 { font-size:2rem; color:var(--accent); margin-bottom:0.25rem; }
+  .tagline { color:var(--muted); font-size:0.95rem; margin-bottom:2.5rem; font-style:italic; }
+  h2 { font-size:1.3rem; color:var(--cyan); margin:2.5rem 0 0.75rem; border-bottom:1px solid var(--border); padding-bottom:0.3rem; }
+  h3 { font-size:1.05rem; color:var(--yellow); margin:1.5rem 0 0.5rem; }
+  p { margin-bottom:1rem; }
+  a { color:var(--accent); }
+  code { font-family:'Courier New',monospace; font-size:0.88em; background:var(--border); padding:0.1em 0.35em; border-radius:3px; color:var(--orange); }
+  pre { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:1.25rem; overflow-x:auto; margin:1rem 0 1.5rem; font-family:'Courier New',monospace; font-size:0.85rem; line-height:1.6; }
+  .filepath { display:inline-block; background:var(--border); color:var(--purple); font-family:'Courier New',monospace; font-size:0.82rem; padding:0.15em 0.5em; border-radius:3px; margin-bottom:0.4rem; }
+  .kw{color:var(--purple);} .ty{color:var(--cyan);} .fn{color:var(--accent);}
+  .str{color:var(--green);} .cm{color:var(--muted);font-style:italic;} .num{color:var(--orange);} .pp{color:var(--yellow);}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1.25rem 1.5rem;font-family:'Courier New',monospace;font-size:0.83rem;line-height:1.6;margin:1rem 0 1.5rem;white-space:pre;overflow-x:auto;}
+  .callout{background:#202d3d;border-left:3px solid var(--accent);padding:0.75rem 1rem;border-radius:0 6px 6px 0;margin:1rem 0 1.5rem;font-size:0.93rem;}
+  .callout.warn{border-color:var(--yellow);} .callout.tip{border-color:var(--green);}
+  .section-header{display:flex;align-items:center;gap:0.75rem;cursor:pointer;user-select:none;}
+  .section-check{width:1.1rem;height:1.1rem;accent-color:var(--green);flex-shrink:0;}
+  .section-label{font-size:0.8rem;color:var(--muted);}
+  .quiz-block{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.5rem;margin:2rem 0;}
+  .question{margin-bottom:1.75rem;}
+  .question p{font-weight:bold;margin-bottom:0.75rem;}
+  .options{list-style:none;display:flex;flex-direction:column;gap:0.4rem;}
+  .options li{background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:0.55rem 0.9rem;cursor:pointer;transition:background 0.15s,border-color 0.15s;font-size:0.92rem;}
+  .options li:hover{border-color:var(--accent);background:#1e2540;}
+  .options li.correct{border-color:var(--green);background:#1c2d1c;color:var(--green);}
+  .options li.wrong{border-color:var(--red);background:#2d1c1c;color:var(--red);}
+  .options li.disabled{pointer-events:none;}
+  .feedback{margin-top:0.6rem;font-size:0.88rem;padding:0.4rem 0.7rem;border-radius:4px;background:var(--border);}
+  .feedback.correct-fb{color:var(--green);} .feedback.wrong-fb{color:var(--red);}
+  .score-area{text-align:center;padding:1rem;font-size:1.1rem;font-weight:bold;color:var(--cyan);border-top:1px solid var(--border);margin-top:1rem;}
+  #progress-bar-wrap{position:sticky;top:0;background:var(--bg);padding:0.4rem 0;z-index:10;border-bottom:1px solid var(--border);margin-bottom:1rem;}
+  #progress-bar{height:4px;background:var(--border);border-radius:2px;}
+  #progress-fill{height:100%;background:var(--green);border-radius:2px;transition:width 0.3s;width:0%;}
+  #progress-text{font-size:0.75rem;color:var(--muted);text-align:right;margin-top:0.2rem;}
+  table{width:100%;border-collapse:collapse;margin:1rem 0 1.5rem;font-size:0.9rem;}
+  th{background:var(--border);text-align:left;padding:0.5rem 0.75rem;}
+  td{padding:0.5rem 0.75rem;border-top:1px solid var(--border);}
+  tr:nth-child(even) td{background:var(--surface);}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div id="progress-bar-wrap">
+  <div id="progress-bar"><div id="progress-fill"></div></div>
+  <div id="progress-text">0 / 6 sections complete</div>
+</div>
+
+<h1>The Configuration Layer</h1>
+<p class="tagline">How CLI arguments become <code>Modes.*</code> fields — and how to debug when a flag isn't having the effect you expect.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="1">
+    <span>1. The <code>Modes</code> Global — The Program's Single Source of Truth</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>Almost every piece of global program state in readsb lives in one enormous struct: <code>struct _Modes Modes</code>, declared in <span class="filepath">readsb.h:550</span>. It holds everything from the selected SDR type to gain settings to debug flags to network client lists.</p>
+
+<p>This is a deliberate design choice: one place to look for any program state, no hidden globals, easy to pass to other threads as a pointer. The cost is that the struct is very large — over 1000 fields in a mature codebase like this.</p>
+
+<pre><span class="kw">struct</span> _Modes {
+    <span class="ty">sdr_type_t</span>  sdr_type;       <span class="cm">// which hardware driver is active</span>
+    <span class="ty">uint32_t</span>    freq;            <span class="cm">// 1090000000 Hz by default</span>
+    <span class="kw">int</span>         gain;            <span class="cm">// in tenths of dB, or MODES_AUTO_GAIN</span>
+    <span class="ty">int8_t</span>      debug_net;       <span class="cm">// set by --debug n</span>
+    <span class="ty">int8_t</span>      debug_cpr;       <span class="cm">// set by --debug P</span>
+    <span class="cm">/* ... ~1000 more fields ... */</span>
+};
+
+<span class="kw">extern struct</span> _Modes Modes;</pre>
+
+<div class="callout">
+  <strong>Initialization:</strong> <code>Modes</code> is zeroed by default (it's a global), then each SDR driver's <code>initConfig()</code> sets driver-specific defaults in its own sub-struct, and the main <code>modesInitConfig()</code> in <code>readsb.c</code> sets program-wide defaults (<code>Modes.freq = MODES_DEFAULT_FREQ</code>, <code>Modes.gain = MODES_MAX_GAIN</code>, etc.). Option parsing then overrides these defaults.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="2">
+    <span>2. The Three-Layer Option System</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p>readsb uses GNU argp for command-line parsing. Three files form the configuration pipeline:</p>
+
+<div class="diagram">  Layer 1 — Declaration (help.h)
+    struct argp_option optionsReadsb[] = {
+        {"gain", OptGain, "&lt;db&gt;", 0, "Set gain", 1},
+        {"debug", OptDebug, "&lt;flags&gt;", 0, "Debug mode", 1},
+        …
+    };
+    → Defines what flags exist, their names, arg types, and help text.
+
+  Layer 2 — Key Enum (readsb.h:1252)
+    enum { OptDeviceType = 700, OptDevice, OptGain, OptFreq, …, OptDebug, OptDevel, … };
+    → Integer keys starting at 700 so they don't collide with ASCII character codes.
+      argp maps "--gain" → OptGain (701) before calling parse_opt().
+
+  Layer 3 — Handler (readsb.c:1678)
+    static error_t parse_opt(int key, char *arg, struct argp_state *state) {
+        switch (key) {
+            case OptGain:  Modes.gainArg = strdup(arg);  break;
+            case OptFreq:  Modes.freq = strtoll(arg,…);  break;
+            …
+        }
+    }
+    → Translates the key+arg into a Modes.* field assignment.</div>
+
+<h3>How the three layers connect</h3>
+<pre><span class="cm">// help.h — the option TABLE entry:</span>
+{ <span class="str">"freq"</span>, <span class="num">OptFreq</span>, <span class="str">"&lt;hz&gt;"</span>, <span class="num">0</span>, <span class="str">"Set frequency (default: 1090 MHz)"</span>, <span class="num">1</span> }
+<span class="cm">//  ↑ long name  ↑ integer key  ↑ arg label  ↑ flags  ↑ help string  ↑ group</span>
+
+<span class="cm">// readsb.h — the key definition (auto-incremented from 700):</span>
+<span class="kw">enum</span> { OptDeviceType = <span class="num">700</span>, OptDevice, OptGain, OptFreq, … };
+<span class="cm">// OptFreq = 703 (700 + 3 positions)</span>
+
+<span class="cm">// readsb.c — the handler:</span>
+<span class="kw">case</span> OptFreq:
+    Modes.freq = (<span class="kw">int</span>) strtoll(arg, NULL, <span class="num">10</span>);
+    <span class="kw">break</span>;</pre>
+
+<div class="callout tip">
+  <strong>Why start at 700?</strong> GNU argp uses integer keys for both long options (your enum values) and short options (single characters like <code>-g</code> for <code>--gain</code>). Characters are integers too: 'a'=97, 'z'=122. Starting the enum at 700 ensures no collision with any printable ASCII character. Many programs use 128, 256, or 512 as their offset for the same reason.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="3">
+    <span>3. The --debug Flag — Multi-Flag in One Argument</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p><code>--debug</code> is a single option that takes a string of flag characters, each enabling a different <code>Modes.debug_X</code> boolean. The handler iterates over every character — <span class="filepath">readsb.c:2306</span>:</p>
+
+<pre><span class="kw">case</span> OptDebug:
+    <span class="kw">for</span> (<span class="kw">int</span> j = <span class="num">0</span>; arg[j]; j++) {
+        <span class="kw">switch</span> (arg[j]) {
+            <span class="kw">case</span> <span class="str">'n'</span>: Modes.debug_net = <span class="num">1</span>;            <span class="kw">break</span>;
+            <span class="kw">case</span> <span class="str">'N'</span>: Modes.debug_nextra = <span class="num">1</span>;         <span class="kw">break</span>;
+            <span class="kw">case</span> <span class="str">'P'</span>: Modes.debug_cpr = <span class="num">1</span>;            <span class="kw">break</span>;
+            <span class="kw">case</span> <span class="str">'S'</span>: Modes.debug_speed_check = <span class="num">1</span>;   <span class="kw">break</span>;
+            <span class="kw">case</span> <span class="str">'G'</span>: Modes.debug_garbage = <span class="num">1</span>;        <span class="kw">break</span>;
+            <span class="kw">case</span> <span class="str">'K'</span>: Modes.debug_sampleCounter = <span class="num">1</span>;  <span class="kw">break</span>;
+            <span class="kw">case</span> <span class="str">'R'</span>: Modes.debug_receiver = <span class="num">1</span>;       <span class="kw">break</span>;
+            <span class="cm">/* ... more ... */</span>
+        }
+    }
+    <span class="kw">break</span>;</pre>
+
+<p>So <code>--debug nPS</code> enables net, CPR, and speed-check debug simultaneously with one flag. You can combine any characters in any order.</p>
+
+<h3>Complete debug flag reference</h3>
+<table>
+  <thead><tr><th>Char</th><th>Field set</th><th>What it debugs</th></tr></thead>
+  <tbody>
+    <tr><td><code>n</code></td><td><code>debug_net</code></td><td>TCP network connections, data flow</td></tr>
+    <tr><td><code>N</code></td><td><code>debug_nextra</code></td><td>Extra network detail</td></tr>
+    <tr><td><code>P</code></td><td><code>debug_cpr</code></td><td>CPR position decoding steps</td></tr>
+    <tr><td><code>S</code></td><td><code>debug_speed_check</code></td><td>Position validity speed-check rejections</td></tr>
+    <tr><td><code>G</code></td><td><code>debug_garbage</code></td><td>Timed-out receiver garbage handling</td></tr>
+    <tr><td><code>K</code></td><td><code>debug_sampleCounter</code></td><td>Sample timestamp from USB callback</td></tr>
+    <tr><td><code>R</code></td><td><code>debug_receiver</code></td><td>Receiver tracking state</td></tr>
+    <tr><td><code>T</code></td><td><code>debug_traceCount</code></td><td>Aircraft trace count changes</td></tr>
+    <tr><td><code>t</code></td><td><code>debug_traceAlloc</code></td><td>Trace memory allocation</td></tr>
+    <tr><td><code>U</code></td><td><code>debug_dbJson</code></td><td>Aircraft database JSON loading</td></tr>
+    <tr><td><code>A</code></td><td><code>debug_ACAS</code></td><td>ACAS/TCAS messages</td></tr>
+    <tr><td><code>C</code></td><td><code>debug_recent</code></td><td>Recent aircraft tracking</td></tr>
+    <tr><td><code>s</code></td><td><code>debug_squawk</code></td><td>Squawk code changes</td></tr>
+    <tr><td><code>c</code></td><td><code>debug_callsign</code></td><td>Callsign updates</td></tr>
+    <tr><td><code>u</code></td><td><code>debug_uuid</code></td><td>UUID assignment and feeder tracking</td></tr>
+    <tr><td><code>b</code></td><td><code>debug_bogus</code></td><td>Bogus position rejection</td></tr>
+    <tr><td><code>m</code></td><td><code>debug_maxRange</code></td><td>Max range position rejection</td></tr>
+    <tr><td><code>X</code></td><td><code>debug_receiverRangeLimit</code></td><td>Receiver range limit filtering</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="4">
+    <span>4. The --devel Flag — Runtime Debugging Strings</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<p><code>--devel</code> is a more powerful but undocumented developer flag. It accepts a string that is tokenized and parsed at runtime. Unlike <code>--debug</code> characters, devel modes can carry parameters — <span class="filepath">readsb.c:2149</span>:</p>
+
+<pre><span class="kw">case</span> OptDevel:
+    <span class="cm">// tokenize the string by spaces or '='</span>
+    n = tokenize(arg, token, maxTokens);
+
+    <span class="kw">if</span> (n >= <span class="num">2</span> &amp;&amp; !strcmp(token[<span class="num">0</span>], <span class="str">"lastStatus"</span>)) {
+        Modes.debug_lastStatus = atoi(token[<span class="num">1</span>]);
+        fprintf(stderr, <span class="str">"lastStatus: %d\n"</span>, Modes.debug_lastStatus);
+    }
+    <span class="cm">/* ... many more string comparisons ... */</span>
+
+    <span class="kw">case</span> <span class="str">'n'</span>: Modes.debug_net = <span class="num">1</span>; <span class="kw">break</span>;  <span class="cm">// single-char fallthrough</span>
+    <span class="kw">case</span> <span class="str">'f'</span>: Modes.debug_flush = <span class="num">1</span>; <span class="kw">break</span>;
+    <span class="kw">case</span> <span class="str">'g'</span>: Modes.debug_gps = <span class="num">1</span>; <span class="kw">break</span>;
+    <span class="kw">case</span> <span class="str">'z'</span>: Modes.debug_zstd = <span class="num">1</span>; <span class="kw">break</span>;
+    <span class="cm">/* ... */</span></pre>
+
+<p>Example usage: <code>--devel lastStatus=2</code> or <code>--devel planefinder</code>. Because the option help says "see source for options", these are developer-only escape hatches — search <code>readsb.c</code> around line 2149 for the current list.</p>
+
+<div class="callout warn">
+  <strong>--devel can be specified multiple times.</strong> Each invocation adds more debug flags. The option table marks it without <code>OPTION_HIDDEN</code> in readsb (but not in viewadsb), so it shows up in <code>--help</code> for readsb.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="5">
+    <span>5. Debugging Configuration Problems</span>
+    <span class="section-label">(read)</span>
+  </label>
+</h2>
+
+<h3>The commented-out parse_opt trace</h3>
+<p>The very first line of <code>parse_opt()</code> is a commented-out print — <span class="filepath">readsb.c:1679</span>:</p>
+<pre><span class="kw">static</span> <span class="ty">error_t</span> <span class="fn">parse_opt</span>(<span class="kw">int</span> key, <span class="kw">char</span> *arg, <span class="kw">struct</span> argp_state *state) {
+    <span class="cm">//fprintf(stderr, "parse_opt(%d, %s, argp_state*)\n", key, arg);</span></pre>
+
+<p>Uncomment this to see every option key and value as it's parsed. This immediately reveals: (1) which options are actually being seen by the parser, (2) what value they carry, (3) whether an option you think you're passing is silently being swallowed by a different handler first.</p>
+
+<h3>The device-type ordering bug</h3>
+<p>The help text for <code>--device-type</code> says: <em>"this needs to be placed on the command line before any SDR type specific options"</em>. Why? Because <code>sdrHandleOption()</code> is called for every unknown option, and it dispatches to the currently-selected driver's handler. If <code>--gain</code> appears before <code>--device-type hackrf</code>, the gain is processed by the wrong driver (or by the default/none driver).</p>
+
+<p>To debug: add the parse_opt trace above and look for the order of <code>OptDeviceType</code> vs <code>OptGain</code>.</p>
+
+<h3>Gain parsing is deferred</h3>
+<p>Notice that <code>parse_opt</code>'s <code>OptGain</code> case only <em>stores the string</em>:</p>
+<pre><span class="kw">case</span> OptGain:
+    sfree(Modes.gainArg);
+    Modes.gainArg = strdup(arg);   <span class="cm">// store the raw string, don't parse yet</span>
+    <span class="kw">break</span>;</pre>
+
+<p>The actual gain value is parsed later in <code>modesInitConfig()</code> after the driver is fully selected. The raw string lets the code handle special values like <code>"auto"</code> and <code>"auto-verbose"</code>. If a gain change seems to have no effect, the place to look is around <span class="filepath">readsb.c:1621</span> where the deferred parsing happens.</p>
+
+<h3>Checking what Modes fields contain at runtime</h3>
+<p>There's no built-in "print my config" command, but you can add one cheaply. After <code>modesInitConfig()</code> completes, add a temporary block:</p>
+
+<pre><span class="cm">// Temporary: dump key config values</span>
+fprintf(stderr, <span class="str">"CONFIG: freq=%d gain=%d sdr_type=%d debug_net=%d\n"</span>,
+        Modes.freq, Modes.gain, Modes.sdr_type, Modes.debug_net);</pre>
+
+<p>This pattern — temporary <code>fprintf</code> to stderr immediately after initialization — is the standard approach used throughout the codebase for one-shot config verification.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2>
+  <label class="section-header">
+    <input type="checkbox" class="section-check" data-section="6">
+    <span>6. Quiz</span>
+    <span class="section-label">(practice)</span>
+  </label>
+</h2>
+
+<div class="quiz-block">
+
+  <div class="question" data-question="1">
+    <p>Q1. Why do the <code>Opt*</code> enum values start at 700 instead of 0?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="There's no 700-option limit. The enum can have as many values as you like.">The argp library supports at most 700 options</li>
+      <li data-correct="true"  data-why="Correct. argp uses integer keys for both long options (your Opt* enum) and short options (single character like 'g'). 'z' = 122, so anything above 127 is safe. Starting at 700 gives a clear visual distinction and avoids collisions with any printable ASCII character.">To avoid collisions with ASCII character codes used for short options (single-letter flags like '-g')</li>
+      <li data-correct="false" data-why="The enum values are not indices into the option array. argp looks up options by their key field, not position.">Because optionsReadsb[] has more than 700 entries</li>
+      <li data-correct="false" data-why="This is C, not a version-tagged protocol. The 700 is a pure namespace separation.">For binary protocol compatibility with Beast hardware</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="2">
+    <p>Q2. What does <code>--debug nPS</code> (three characters) actually do?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Only the last flag would take effect if they overwrote each other, but the handler iterates all characters and sets each independently.">Only the last character 'S' takes effect; earlier ones are overwritten</li>
+      <li data-correct="false" data-why="There's no 'nPS' combined flag. The parser iterates the string character by character.">It fails because 'nPS' is not a recognized multi-character flag name</li>
+      <li data-correct="true"  data-why="Correct. The OptDebug case loops over every character in the string with 'for (int j = 0; arg[j]; j++)'. Each character hits its own case: 'n' sets debug_net, 'P' sets debug_cpr, 'S' sets debug_speed_check.">Sets debug_net ('n'), debug_cpr ('P'), and debug_speed_check ('S') all at once</li>
+      <li data-correct="false" data-why="Parsing is done once at startup. There's no interactive mode watching for 'nPS'.">Triggers an interactive prompt that lets you pick three debug modes</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="3">
+    <p>Q3. In <code>parse_opt()</code>, the <code>OptGain</code> case stores the string with <code>strdup(arg)</code> instead of immediately calling <code>atof(arg)</code>. Why?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="atof is available and commonly used for float parsing in C. The delay is not for portability.">atof() is not portable on all platforms readsb targets</li>
+      <li data-correct="true"  data-why="Correct. --gain can be 'auto', 'auto-verbose', or a float like '32.8'. The deferred parsing in modesInitConfig() handles all these cases after the driver type is known. The driver matters because, e.g., MODES_RTL_AGC is an rtlsdr-specific pseudo-gain level.">The gain string can be 'auto', 'auto-verbose', or a number; deferred parsing handles all cases after the driver is selected</li>
+      <li data-correct="false" data-why="strdup allocates heap memory just like atof doesn't. The delay is about correctness, not memory.">strdup() is faster than atof() at parse time</li>
+      <li data-correct="false" data-why="The gain is fully parsed before the main loop starts; it's not set on each USB callback.">So gain can be updated on every USB callback without re-parsing the string</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="4">
+    <p>Q4. A user reports that <code>--gain 32.8</code> has no effect when they also pass <code>--device-type hackrf</code>. What's the most likely cause?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="gain parsing works for HackRF. The issue is about parsing order, not an unsupported feature.">HackRF doesn't support manual gain in readsb</li>
+      <li data-correct="true"  data-why="Correct. sdrHandleOption() dispatches gain to the currently-active driver. If --gain comes before --device-type hackrf on the command line, the gain is sent to the wrong driver (the default/none one). The fix is to always put --device-type first."><code>--device-type hackrf</code> appears after <code>--gain</code> on the command line, so gain is dispatched to the wrong driver</li>
+      <li data-correct="false" data-why="32.8 dB is a valid gain for RTL-SDR. The issue is ordering, not value validity.">32.8 is not a valid gain step; only certain discrete dB values are allowed</li>
+      <li data-correct="false" data-why="Modes.gain is not zeroed between options. It's initialized to MODES_MAX_GAIN and overwritten by --gain.">Modes.gain is zeroed between option parses</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question="5">
+    <p>Q5. Which file would you modify to add a new <code>--my-flag</code> option to readsb?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="argp.h is the argp library header — you don't modify library files. That's where argp_option and argp_state are defined.">argp.h — the argp library header</li>
+      <li data-correct="false" data-why="sdr.c handles SDR-specific option dispatch, not general program options. A new general flag would not go here.">sdr.c — the SDR dispatch layer</li>
+      <li data-correct="true"  data-why="Correct. You need changes in three files: (1) readsb.h — add OptMyFlag to the enum; (2) help.h — add a row to optionsReadsb[]; (3) readsb.c — add a case OptMyFlag: in parse_opt() that sets a Modes.my_flag field.">Three files: readsb.h (add enum), help.h (add option row), readsb.c (add case in parse_opt)</li>
+      <li data-correct="false" data-why="readsb.h declares the enum and Modes struct, but you also need help.h for the option table and readsb.c for the handler. Just readsb.h alone is not enough.">Only readsb.h — add the enum constant and the Modes field</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="score-area" id="score-area" hidden>Score: <span id="score-val">0</span> / 5</div>
+</div>
+
+<h2>Check Your Understanding</h2>
+
+<div class="callout">
+<strong>Scenario A:</strong> You add a new <code>Modes.my_feature</code> bool field and a corresponding <code>--my-feature</code> flag. Users report the flag is silently ignored. What's the debugging procedure?
+<br><br>
+<a href="#" id="toggleA" style="color:var(--cyan)">show answer</a>
+<div id="ansA" hidden style="margin-top:0.75rem; color:var(--green)">
+Step 1: Uncomment the <code>fprintf</code> at the top of <code>parse_opt()</code> — run readsb with <code>--my-feature</code> and check if the key number appears. If it doesn't, argp didn't recognise the option name — check the spelling in <code>optionsReadsb[]</code>.<br><br>
+Step 2: If the key appears but <code>my_feature</code> stays 0, the <code>case OptMyFeature:</code> in parse_opt's switch is not being reached — check the enum value and the case label match.<br><br>
+Step 3: After the argp call returns, add a temporary <code>fprintf(stderr, "my_feature=%d\n", Modes.my_feature)</code> to confirm the field was actually set before the main loop starts.
+</div>
+</div>
+
+<div class="callout" style="margin-top:1rem;">
+<strong>Scenario B:</strong> The help text (<code>--help</code>) shows your new option but running with it gives "unrecognized option". What's wrong?
+<br><br>
+<a href="#" id="toggleB" style="color:var(--cyan)">show answer</a>
+<div id="ansB" hidden style="margin-top:0.75rem; color:var(--green)">
+The most common cause: you added the row to <code>optionsReadsb[]</code> but forgot to add the key to the <code>enum</code> in <code>readsb.h</code>. If the key value is 0 (or whatever the compiler gives an undefined symbol), argp might display the entry (from the option table) but fail to dispatch it. Another possibility: the option was added to <code>optionsViewadsb[]</code> (the viewadsb option table) instead of <code>optionsReadsb[]</code>.
+</div>
+</div>
+
+<br><br>
+<p style="color:var(--muted);font-size:0.85rem;text-align:center;">readsb · readsb.h, help.h, readsb.c · lesson 0003</p><br>
+
+</div>
+
+<script>
+const checks = document.querySelectorAll('.section-check');
+const totalSections = checks.length;
+function updateProgress() {
+  const done = [...checks].filter(c => c.checked).length;
+  document.getElementById('progress-fill').style.width = (done/totalSections*100)+'%';
+  document.getElementById('progress-text').textContent = done+' / '+totalSections+' sections complete';
+}
+checks.forEach(c => c.addEventListener('change', updateProgress));
+updateProgress();
+
+function shuffle(arr) {
+  for (let i = arr.length-1; i>0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
+let correct=0, answered=0;
+const totalQ=5;
+
+document.querySelectorAll('[data-question]').forEach(block => {
+  const list = block.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = block.querySelector('.feedback');
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (block.dataset.done) return;
+      block.dataset.done='true'; answered++;
+      const isCorrect = li.dataset.correct==='true';
+      if (isCorrect) correct++;
+      list.querySelectorAll('li').forEach(o => {
+        o.classList.add('disabled');
+        o.classList.add(o.dataset.correct==='true'?'correct':'wrong');
+      });
+      feedback.hidden=false;
+      feedback.textContent=(isCorrect?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      feedback.className='feedback '+(isCorrect?'correct-fb':'wrong-fb');
+      if (answered===totalQ) {
+        const sa=document.getElementById('score-area'); sa.hidden=false;
+        document.getElementById('score-val').textContent=correct;
+        sa.style.color=correct>=4?'var(--green)':correct>=2?'var(--yellow)':'var(--red)';
+      }
+    });
+  });
+});
+
+document.getElementById('toggleA').addEventListener('click', e => { e.preventDefault(); document.getElementById('ansA').hidden=!document.getElementById('ansA').hidden; });
+document.getElementById('toggleB').addEventListener('click', e => { e.preventDefault(); document.getElementById('ansB').hidden=!document.getElementById('ansB').hidden; });
+</script>
+</body>
+</html>

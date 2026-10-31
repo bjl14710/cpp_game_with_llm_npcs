@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0016 — Composite Modeling from Primitives</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0016 · Rendering · from issue #64 (plaza fountain)</div>
+<h1>Composite Modeling from Primitives</h1>
+<p>Asset packs never cover everything. When the missing piece is simple
+enough, the cheapest fix is to <em>compose</em> it from the primitives your
+renderer already ships — no new downloads, no modeling tool, no license
+review.</p>
+
+<h2>The gap</h2>
+<p>The downtown map authors a <code>fountain</code> obstacle: an 8×8 collision
+AABB in the park. The KayKit City Builder pack has buildings, cars, and
+benches — but no fountain. The stand-in (the pack's flat <code>base</code>
+tile) satisfied the renderer but read as a pancake, not a landmark.</p>
+
+<h2>The technique</h2>
+<p>A fountain is geometrically boring: stacked cylinders. raylib's immediate-
+mode primitives (<code>DrawCylinder</code>, <code>DrawCylinderWires</code>)
+can build one in ~10 draw calls:</p>
+<pre><code>basin wall   DrawCylinder(r=R,      h=25% of height)  stone
+basin water  DrawCylinder(r=0.88R,  h=0.03)           translucent blue
+column       DrawCylinder(r=0.18R→0.26R, h=50%)       stone (tapered)
+upper bowl   DrawCylinder(r=0.45R,  h=15%)            stone
+bowl water   DrawCylinder(r=0.38R,  h=0.03)           translucent blue
+finial       DrawCylinder(r=0.07R→0.14R, h=25%)       dark stone</code></pre>
+<p>Two rules made it fit this codebase instead of fighting it:</p>
+<ul>
+<li><strong>Size from the contract, not constants.</strong> Total height comes
+from the fountain's <code>SizeSpec</code> table entry; radii derive from the
+authored collision AABB. Visuals and collider match by construction — the
+same single-sourcing rule every model follows.</li>
+<li><strong>Dispatch before the fallback.</strong>
+<code>Assets::modelForBuilding</code> maps <em>uncurated</em> ids to a hashed
+generic building so filler blocks always render. Deleting the curated
+<code>fountain → base</code> entry alone would have summoned a random
+skyscraper in the park. The composite is dispatched by id <em>before</em> the
+model lookup.</li>
+</ul>
+
+<h2>The two bugs screenshots caught</h2>
+<table>
+<tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+<tr><td>Fountain reads as a flat platform</td><td>SizeSpec height 1.2 was
+tuned for the old pancake tile; on an 8-unit footprint the proportions say
+"stage", not "fountain"</td><td>Raise the table value to 2.6 — sizing stays
+table-driven</td></tr>
+<tr><td>Basin water invisible</td><td><code>DrawCylinder</code> renders a
+<em>capped solid</em>; the basin's own stone top hid the recessed water disc
+inside it</td><td>Float each water disc as a thin (0.03) cylinder just
+<em>above</em> its stone cap</td></tr>
+</table>
+
+<div class="callout warn"><strong>Capped-solid gotcha.</strong> Immediate-mode
+"cylinder" in most APIs is a closed solid, not a tube. Anything you nest
+inside one is invisible from above. Either float the inner surface above the
+cap, or build walls from ring segments.</div>
+
+<div class="callout good"><strong>When to compose vs. when to import.</strong>
+Compose when the object is a landmark silhouette made of ≤ a dozen convex
+chunks (fountains, pillars, planters). Import when it needs texture detail,
+concavity, or animation — a composite car would look like soap bars.</div>
+
+<h2>Why this matters again later</h2>
+<p>The same pattern covers any future pack gap (statue, flagpole, fireplug
+variants), and the same <em>dispatch-before-fallback</em> shape appears
+anywhere a lookup has a default: check the special case before the map, or
+the default silently swallows it.</p>
+</div></body>
+</html>

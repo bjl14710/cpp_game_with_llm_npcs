@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM NPC City — Learning Index</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --text:#e0e2f0; --muted:#8589a8; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:840px; margin:0 auto; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.4rem; }
+  .sub { color:var(--muted); margin-bottom:2rem; }
+  h2 { font-size:1.2rem; color:var(--accent2); margin:2rem 0 .8rem; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { border:1px solid var(--border); padding:.55rem .8rem; text-align:left; font-size:.93rem; }
+  th { background:var(--surface); color:var(--accent2); }
+  a { color:var(--accent2); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .none { color:var(--muted); }
+</style>
+</head>
+<body><div class="wrap">
+<h1>Learning Index</h1>
+<p class="sub">Lessons, drills, and vocabulary generated alongside real changes to this
+codebase. Each lesson teaches the concept behind a merged feature; its drill tests
+recall; vocab pages collect the terms.</p>
+
+<h2>Getting started</h2>
+<table>
+<tr><th>#</th><th>Lesson</th><th>Drill</th></tr>
+<tr><td>0001</td><td><a href="lessons/0001-how-to-run-and-develop.html">How to Run and Develop the Game</a></td><td class="none">—</td></tr>
+</table>
+
+<h2>Multiplayer networking (July 2026 overnight build)</h2>
+<table>
+<tr><th>#</th><th>Lesson</th><th>Drill</th></tr>
+<tr><td>0008</td><td><a href="lessons/0008-length-prefixed-framing.html">Length-Prefixed Framing over TCP</a></td><td><a href="drills/0008-length-prefixed-framing.html">drill</a></td></tr>
+<tr><td>0009</td><td><a href="lessons/0009-server-authoritative-replication.html">Server-Authoritative Replication &amp; the Thread Contract</a></td><td><a href="drills/0009-server-authoritative-replication.html">drill</a></td></tr>
+<tr><td>0010</td><td><a href="lessons/0010-request-id-routing.html">Request-Id Routing: One LLM, Many Askers</a></td><td><a href="drills/0010-request-id-routing.html">drill</a></td></tr>
+<tr><td>0011</td><td><a href="lessons/0011-condition-variables-lost-wakeup.html">Condition Variables and the Lost Wakeup</a></td><td><a href="drills/0011-condition-variables-lost-wakeup.html">drill</a></td></tr>
+<tr><td>0012</td><td><a href="lessons/0012-testing-threaded-sockets.html">Deterministic Tests for Threaded Socket Code</a></td><td><a href="drills/0012-testing-threaded-sockets.html">drill</a></td></tr>
+<tr><td>0013</td><td><a href="lessons/0013-nat-and-port-forwarding.html">NAT, Port Forwarding, and "Send Me Your IP"</a></td><td><a href="drills/0013-nat-and-port-forwarding.html">drill</a></td></tr>
+</table>
+
+<h2>Vocabulary</h2>
+<table>
+<tr><th>#</th><th>Page</th><th>Covers</th></tr>
+<tr><td>0008</td><td><a href="vocab/0008-multiplayer-networking.html">Multiplayer Networking</a></td><td>lessons 0008-0013</td></tr>
+</table>
+
+<p class="sub" style="margin-top:2rem">Numbers 0002-0007 are reserved by local-only
+lessons from another project workspace and are intentionally not indexed here.</p>
+</div></body></html>

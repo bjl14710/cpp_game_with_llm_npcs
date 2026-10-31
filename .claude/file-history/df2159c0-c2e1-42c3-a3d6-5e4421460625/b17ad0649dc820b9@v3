@@ -1,0 +1,76 @@
+# Overnight Build Report
+Date: 2026-06-28
+Session duration: start to finish (all 8 issues processed)
+Issues attempted: 8
+
+## Summary
+All 8 ready-for-ai issues were completed successfully with draft PRs opened. The session delivered the full intraday candlestick strategy engine (#30–#33 sequential chain) plus four independent companion features (Robinhood loop mode, portfolio shorting, NASDAQ universe builder, morning runner pipeline). Two learning lessons and one drill were written covering the two most technically deep new concepts.
+
+## Completed ✅
+| Issue | Title | Branch | PR | Concept Taught |
+|-------|-------|--------|----|----------------|
+| #30 | Add `strategies/` package with `BaseStrategy` ABC | feature/issue-30-strategies-base-abc | #34 | Abstract base classes / strategy pattern |
+| #4  | Make Robinhood run continuously | feature/issue-4-continuous-robinhood-runner | #35 | Market-hours scheduling |
+| #9  | Create NASDAQ ticker universe builder | feature/issue-9-nasdaq-ticker-universe | #36 | Web scraping for financial universe |
+| #31 | Implement Bullish/Bearish Engulfing detector | feature/issue-31-engulfing-detector | #37 | Candlestick pattern detection without lookahead |
+| #26 | Create morning runner / pipeline | feature/issue-26-morning-runner-pipeline | #38 | Pipeline orchestration |
+| #6  | Create portfolio shorting option | feature/issue-6-portfolio-short-selling | #39 | Long-short mean-variance allocation |
+| #32 | Build intraday paper simulation engine | feature/issue-32-paper-engine | #40 | Bar-by-bar simulation without lookahead |
+| #33 | Add `intraday-sim` CLI entry point | feature/issue-33-intraday-sim-cli | #41 | CLI registry pattern |
+
+## Failed ❌
+None.
+
+## Skipped (needs human) ⏭
+None.
+
+## Learning Materials Created
+| Concept | Lesson | Drill |
+|---------|--------|-------|
+| Candlestick pattern detection without lookahead bias | ✅ 0032 | ✅ 0004 |
+| Bar-by-bar simulation without lookahead | ✅ 0033 | — |
+
+## Test Status
+All PRs pass `uv run pytest tests/ -m "not exercise" -q`. Final test count by PR:
+- #34: 26 passed
+- #35: 33 passed
+- #36: 35 passed (18 new tests in test_universe_builder.py)
+- #37: 35 passed (9 new tests in test_engulfing.py)
+- #38: 26 passed
+- #39: 35 passed (10 new tests in test_allocation.py)
+- #40: 44 passed (9 new tests in test_intraday_sim.py)
+- #41: 44 passed
+
+## PR Dependency Order
+The four strategies-chain PRs must be merged in order:
+1. **PR #34** (strategies/ package) ← merge first
+2. **PR #37** (engulfing detector) ← depends on #34
+3. **PR #40** (paper engine) ← depends on #37
+4. **PR #41** (intraday-sim CLI) ← depends on #40
+
+PRs #35, #36, #38, #39 are independent and can be merged in any order.
+
+## Important Notes
+
+### Shorting terminology (do not confuse)
+- **PR #39 / issue #6** — *portfolio-level* shorting: `meanvar_long_short()` allows the GBM portfolio allocator to hold negative-weight positions. `--allow_short` flag in `walkforward_sim` and `predict_next`.
+- **PR #40–#41 / intraday engine** — *intraday short-side trades*: `PaperEngine` can open a short position when a bearish engulfing signal fires. Disabled with `--no_short`. These are day-trades that close by EOD, not multi-day short positions.
+
+### First run of intraday-sim
+After merging the PR chain, test with:
+```bash
+uv run intraday-sim --tickers AAPL --interval 5m --start 2026-01-01 --end 2026-04-01 --out_csv equity.csv --trades_csv trades.csv
+```
+yfinance 5m data covers ~60 days. For a longer paper test, use `--interval 15m` or `--interval 30m` (yfinance provides up to 730 days for intervals ≥ 1h, and ~60 days for 5m/15m/30m).
+
+### Morning runner usage
+```bash
+# Safe daily dry run
+uv run morning-runner --tickers_file tickers/sp500.txt --dry_run
+
+# With weekly model retrain
+uv run morning-runner --tickers_file tickers/sp500.txt --retrain weekly --dry_run
+```
+
+## Suggested First Move
+Review and merge **PR #34** (BaseStrategy ABC) first — it's the smallest, cleanest PR and unblocks the rest of the strategy chain. Then review #37, #40, #41 in order. The independent PRs (#35, #36, #38, #39) can be reviewed in parallel.

@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lesson 0008 — LLM Use-Cases in HFT &amp; Quant Firms</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --panel-2: #1d222c;
+    --ink: #e7ecf3;
+    --ink-dim: #aab3c0;
+    --accent: #7cc4ff;
+    --accent-2: #ffd479;
+    --good: #4ade80;
+    --bad: #f87171;
+    --rule: #2b313d;
+    --code-bg: #0b0d12;
+    --code-kw: #ff8ec3;
+    --code-str: #c5e478;
+    --code-num: #ffd479;
+    --code-com: #6b7585;
+    --code-ty: #7cc4ff;
+    --code-fn: #ffe18a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.65 -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 40px 24px 120px;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; letter-spacing: -0.01em; }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { color: var(--ink); }
+  .lead { color: var(--ink-dim); font-size: 17px; margin: 0 0 28px; }
+  .pill {
+    display: inline-block; background: var(--panel-2); color: var(--accent);
+    padding: 2px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .04em;
+    text-transform: uppercase; margin-right: 6px;
+  }
+  code, pre, .mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; font-size: 14px; }
+  pre {
+    background: var(--code-bg); padding: 16px 18px; border-radius: 8px;
+    overflow-x: auto; font-size: 13.5px; line-height: 1.55;
+    border: 1px solid var(--rule);
+  }
+  pre .kw { color: var(--code-kw); }
+  pre .str { color: var(--code-str); }
+  pre .num { color: var(--code-num); }
+  pre .com { color: var(--code-com); font-style: italic; }
+  pre .ty { color: var(--code-ty); }
+  pre .fn { color: var(--code-fn); }
+  .filepath { display: block; color: var(--ink-dim); font-size: 12.5px; margin: 4px 0 6px; }
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bad { border-left-color: var(--bad); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 700px) {
+    .grid2, .grid3 { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .card h4 { margin: 0 0 6px; color: var(--accent-2); font-size: 14px; letter-spacing: .02em; }
+  .card .tag {
+    display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+    margin-left: 6px; vertical-align: middle;
+  }
+  .tag.fit  { background: rgba(74, 222, 128, .15); color: var(--good); }
+  .tag.warn { background: rgba(255, 212, 121, .15); color: var(--accent-2); }
+  .tag.bad  { background: rgba(248, 113, 113, .15); color: var(--bad); }
+  .question {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 14px 0;
+  }
+  .question p.q { margin: 0 0 10px; font-weight: 600; }
+  ul.options { list-style: none; padding: 0; margin: 8px 0 0; }
+  ul.options li {
+    cursor: pointer; padding: 10px 12px; border-radius: 8px;
+    background: var(--panel-2); margin: 6px 0; border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+  }
+  ul.options li:hover { border-color: var(--accent); }
+  ul.options li.picked-good { border-color: var(--good); background: rgba(74, 222, 128, .08); }
+  ul.options li.picked-bad  { border-color: var(--bad);  background: rgba(248, 113, 113, .08); }
+  .feedback { margin: 10px 2px 0; font-size: 14px; }
+  .scenario {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 14px 16px; margin: 12px 0;
+  }
+  .scenario summary { cursor: pointer; font-weight: 600; }
+  .scenario[open] summary { color: var(--accent); }
+  .scoreboard {
+    position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+    padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+    display: flex; gap: 18px; align-items: center; margin: 0 0 28px;
+    font-size: 14px; flex-wrap: wrap;
+  }
+  .scoreboard .lbl { color: var(--ink-dim); }
+  .check { display: inline-flex; gap: 8px; align-items: center; user-select: none; cursor: pointer; }
+  .check input { transform: translateY(1px); }
+  .footer-note { margin-top: 48px; color: var(--ink-dim); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--accent-2); font-weight: 600; }
+  .small { font-size: 13px; color: var(--ink-dim); }
+
+  .latency-wall {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: 16px; margin: 16px 0;
+  }
+  .lat-row {
+    display: grid; grid-template-columns: 220px 1fr 80px; gap: 12px;
+    padding: 8px 12px; border-radius: 6px; margin: 4px 0;
+    align-items: center; font-size: 14px;
+  }
+  .lat-row .lat-name { color: var(--accent); }
+  .lat-row .lat-num { text-align: right; font-family: "JetBrains Mono", monospace; color: var(--accent-2); }
+  .lat-row.fast { background: rgba(74, 222, 128, .06); }
+  .lat-row.medium { background: rgba(255, 212, 121, .06); }
+  .lat-row.slow { background: rgba(248, 113, 113, .06); }
+</style>
+</head>
+<body>
+<main>
+  <div class="scoreboard">
+    <span class="pill">Lesson 0008</span>
+    <label class="check"><input type="checkbox" id="c1" />§1 The honest map</label>
+    <label class="check"><input type="checkbox" id="c2" />§2 Seven use cases</label>
+    <label class="check"><input type="checkbox" id="c3" />§3 The latency wall</label>
+    <label class="check"><input type="checkbox" id="c4" />§4 In this project</label>
+    <label class="check"><input type="checkbox" id="c5" />§5 Patterns</label>
+    <span class="lbl">Quiz: <strong id="quizScore">0 / 5</strong></span>
+  </div>
+
+  <h1>LLM Use-Cases in HFT &amp; Quant Firms</h1>
+  <p class="lead">
+    Why this matters for <strong>HFT_practice</strong>: an LLM has already shipped
+    code into this repo — your latest merged PR is literally
+    <code>Claude_Fix_Ups_and_Documentations</code>. The interesting question isn't
+    "should we use LLMs?" but "where in a trading firm does an LLM <em>actually</em>
+    earn its keep, and where is using one a category error?"
+  </p>
+
+  <!-- ===================== §1 THE HONEST MAP ===================== -->
+  <h2>1. The honest map: LLMs are everywhere <em>except</em> the hot path</h2>
+
+  <p>
+    Lesson 0007 introduced transformers (BERT, FinBERT). Large Language Models —
+    GPT-class, Claude-class, Llama-class — are the same architecture scaled to
+    10⁹–10¹² parameters and pretrained on internet-scale text plus code. They
+    are the most general-purpose tool in your toolbox and the slowest. Two
+    consequences shape every honest use case:
+  </p>
+
+  <ul>
+    <li><strong>They cannot trade tick-to-trade.</strong> A single LLM call is 100ms–10s. The FPGA budget (Lessons 0001, 0002, 0004) is nanoseconds. Three orders of magnitude past the wall, even on the fastest hosted models.</li>
+    <li><strong>They are excellent at unstructured-to-structured.</strong> Free text → JSON, news article → sentiment + entities + event type, codebase → summary, log file → root-cause hypothesis. <em>That's</em> the alpha.</li>
+  </ul>
+
+  <p>So they cluster in three layers of a trading firm, all <em>off</em> the hot path:</p>
+
+  <div class="grid3">
+    <div class="card">
+      <h4>Research &amp; dev <span class="tag fit">strong fit</span></h4>
+      <p>Code generation, refactoring, research scripts, paper Q&amp;A, exploration of new data sources. Hours of dev time saved per engineer per week.</p>
+    </div>
+    <div class="card">
+      <h4>Signal generation (offline) <span class="tag fit">strong fit</span></h4>
+      <p>Earnings calls, 10-K filings, news, social media. Turn unstructured text into structured features that feed the next-day GBM. This is where revenue impact is biggest.</p>
+    </div>
+    <div class="card">
+      <h4>Ops, compliance, support <span class="tag fit">strong fit</span></h4>
+      <p>Compliance surveillance of trader chats, incident postmortems, document generation, customer/IR Q&amp;A. Boring but billed.</p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <strong>Where they don't fit:</strong> the FPGA hot path; per-tick decisions of
+    any kind; market-making quote logic; live exchange routing; anything that needs
+    a sub-millisecond response. Don't try to be clever here — physics wins.
+  </div>
+
+  <!-- ===================== §2 SEVEN USE CASES ===================== -->
+  <h2>2. Seven concrete use cases, grounded in this codebase</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>1. Research code-gen and refactoring <span class="tag fit">used in this repo</span></h4>
+      <p>
+        Engineers describe a task in natural language; the LLM produces a diff. Your
+        own <code>git log</code> shows it: merge <code>afeb129</code> is
+        <code>Claude_Fix_Ups_and_Documentations</code>. The repo is being maintained
+        partly by an LLM right now. Industry: nearly universal in 2025.
+      </p>
+    </div>
+    <div class="card">
+      <h4>2. News/filing &amp; earnings-call NLP <span class="tag fit">highest revenue impact</span></h4>
+      <p>
+        The natural extension of <code>news_features.py</code>. Today Alpha Vantage
+        gives you one scalar sentiment number per article. An LLM can extract: event
+        type ("guidance raise"), magnitude ("+3%"), entities ("CEO leaving"),
+        forward-looking statements — all as structured JSON that becomes new GBM
+        features. This is where buy-side desks see real alpha.
+      </p>
+    </div>
+    <div class="card">
+      <h4>3. Document &amp; report generation <span class="tag fit">used in this repo</span></h4>
+      <p>
+        <code>docs/generate_docs.py</code> builds <code>DEVELOPER_GUIDE.docx</code>
+        from Markdown. A small LLM pass can summarize, audit, or expand sections,
+        regenerating prose around your hard-coded structure. Production HFT firms use
+        LLMs to draft client reports, factor-model commentary, monthly attribution.
+      </p>
+    </div>
+    <div class="card">
+      <h4>4. Codebase &amp; data-room Q&amp;A <span class="tag fit">workhorse</span></h4>
+      <p>
+        Index the codebase + your <code>docs/</code> + recent commits + Jira tickets
+        into a vector store; ask "why does <code>walkforward_sim.py</code> have an HMM
+        overlay?" and get an answer with citations. Eliminates the "ask the one person
+        who knows" bottleneck. The lessons in <code>docs/learning/</code> you've been
+        building are a textbook input corpus for exactly this.
+      </p>
+    </div>
+    <div class="card">
+      <h4>5. Compliance &amp; trade surveillance <span class="tag fit">regulated</span></h4>
+      <p>
+        Read trader Slack/Bloomberg chats, flag potential market manipulation, frontrunning
+        language, MNPI leakage. Trad ML used keyword rules; LLMs grasp paraphrase
+        and context. Highly regulated; usually self-hosted models for privacy.
+      </p>
+    </div>
+    <div class="card">
+      <h4>6. Strategy-code review &amp; test gen <span class="tag warn">careful</span></h4>
+      <p>
+        Generate unit tests for <code>paper_trading_sim.py:build_features</code>,
+        spot look-ahead-bias bugs, audit risk constraints. Useful but unreliable —
+        LLMs miss subtle bugs (or invent them); always have a human review the
+        review.
+      </p>
+    </div>
+    <div class="card">
+      <h4>7. Alpha-GPT-style prompt-engineered signal mining <span class="tag warn">research</span></h4>
+      <p>
+        Recent (2024–2025) papers use LLMs to <em>propose</em> trading signals as
+        Python code, which are then backtested. Promising as an exploration loop;
+        productionizing the LLM's outputs requires the same walk-forward / leakage
+        discipline as any other signal source.
+      </p>
+    </div>
+    <div class="card">
+      <h4>The thing the press loves but you shouldn't try: LLM-as-trader <span class="tag bad">don't</span></h4>
+      <p>
+        Asking GPT/Claude to "trade my account" directly. Benchmarks (StockBench,
+        Oct 2025) show most LLM agents underperform buy-and-hold, and even the best
+        struggle on risk management. Use LLMs to <em>build</em> trading code, not
+        to <em>be</em> the trader.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §3 LATENCY WALL ===================== -->
+  <h2>3. The latency wall — why LLMs can't sit on the hot path</h2>
+
+  <p>
+    A reminder from Lessons 0002 and 0004: HFT latency budgets are unforgiving.
+    Map an LLM call onto them:
+  </p>
+
+  <div class="latency-wall">
+    <div class="lat-row fast"><span class="lat-name">FPGA tick-to-trade</span><span>your <code>market_maker.vhd</code> ballpark</span><span class="lat-num">~100 ns</span></div>
+    <div class="lat-row fast"><span class="lat-name">Kernel-bypass CPU</span><span>Solarflare OpenOnload C++</span><span class="lat-num">~750 ns</span></div>
+    <div class="lat-row medium"><span class="lat-name">Linux kernel network</span><span>your FastAPI HTTP roundtrip</span><span class="lat-num">~50 µs</span></div>
+    <div class="lat-row medium"><span class="lat-name">GBM inference (Python)</span><span><code>predict_next.py</code></span><span class="lat-num">~1 ms</span></div>
+    <div class="lat-row slow"><span class="lat-name">Small LLM first token</span><span>~7B model on a GPU, cached</span><span class="lat-num">~100 ms</span></div>
+    <div class="lat-row slow"><span class="lat-name">Frontier LLM full reply</span><span>GPT-5 / Claude Opus over HTTP</span><span class="lat-num">~1–10 s</span></div>
+  </div>
+
+  <p>
+    A single LLM call is roughly <strong>10⁷ to 10⁸ times slower</strong> than the
+    arithmetic in your FPGA. There is no architecture, no quantization, no
+    distillation trick that closes that gap by the right number of orders of
+    magnitude while preserving useful LLM behavior. So:
+  </p>
+
+  <ul>
+    <li><strong>Hot path:</strong> never. Make decisions in nanoseconds; LLMs need milliseconds.</li>
+    <li><strong>Warm path (intraday research, alerts):</strong> sometimes. Seconds are fine when you're rebalancing daily anyway.</li>
+    <li><strong>Cold path (overnight research, reports, code):</strong> obviously. Latency irrelevant; quality is the only metric.</li>
+  </ul>
+
+  <!-- ===================== §4 IN THIS PROJECT ===================== -->
+  <h2>4. In this project — where LLMs already touch the code, and where they'd fit next</h2>
+
+  <h3>Already touching the code: this conversation, and the recent commits</h3>
+  <span class="filepath">git log (most recent 5 commits, lightly trimmed)</span>
+<pre>afeb129  Merge pull request #29 from bjl14710/Claude_Fix_Ups_and_Documentations
+df3bae1  adding flashing button for hardware in the todo.md file.
+a42d755  updating the repo to include pricing, signing in and other things for the website.
+91582c2  Fix docker compose up: auth, starlette version, lockfile, compose version warning
+9c3dbc0  Fix Docker build: remove duplicate matplotlib, move python-docx to dev, add MPLBACKEND
+</pre>
+  <p>
+    The Docker-fix commits and the documentation merge were largely produced via
+    Claude Code. That's use case #1 (research code-gen) in production, on your own
+    repo. The artifact this lesson lives inside — a static HTML lesson generated
+    on demand — is use case #3 (document generation).
+  </p>
+
+  <h3>Concrete next fit: extending <code>news_features.py</code> with an LLM stage</h3>
+
+  <p>
+    Today's pipeline (Lesson 0007 reminder):
+  </p>
+  <p class="small">
+    Alpha Vantage transformer → <code>sentiment</code> scalar → your aggregations → GBM
+  </p>
+
+  <p>
+    An LLM-augmented version (<em>not</em> yet in the repo, but trivial to add):
+  </p>
+
+<pre><span class="com"># Hypothetical: news_features_llm.py</span>
+<span class="kw">def</span> <span class="fn">extract_event_structure</span>(article_text: <span class="ty">str</span>) -> <span class="ty">dict</span>:
+    <span class="str">"""Ask an LLM to produce a structured JSON view of a news article."""</span>
+    prompt = <span class="fn">PROMPT_TEMPLATE</span>.<span class="fn">format</span>(text=article_text)
+    response = llm.<span class="fn">complete</span>(prompt, response_format=<span class="str">"json"</span>)
+    <span class="kw">return</span> json.<span class="fn">loads</span>(response)
+    <span class="com"># {</span>
+    <span class="com">#   "event_type":   "guidance_change" | "m&a" | "leadership" | "lawsuit" | ...</span>
+    <span class="com">#   "direction":    "positive" | "negative" | "neutral",</span>
+    <span class="com">#   "magnitude":     0-100,        # subjective scale</span>
+    <span class="com">#   "tickers":      ["AAPL"],</span>
+    <span class="com">#   "is_forward_looking": true,</span>
+    <span class="com">#   "confidence":   0.0-1.0</span>
+    <span class="com"># }</span>
+</pre>
+
+  <p>
+    That structured dict becomes 6+ new daily features per ticker, replacing the
+    single <code>sentiment</code> scalar with richer, dimensional signal. The
+    downstream GBM still trains the same way — you've just made the input fatter
+    and more informative. This is the cleanest first LLM integration this repo
+    could ship.
+  </p>
+
+  <div class="callout warn">
+    <strong>Two practical constraints to plan around:</strong>
+    <strong>cost</strong> (frontier model calls add up — preprocess once, cache,
+    consider a small distilled model for volume) and
+    <strong>determinism</strong> (the same article re-run can yield slightly
+    different JSON; pin the model version and use <code>temperature=0</code> for
+    feature pipelines).
+  </div>
+
+  <h3>Cold-path use that'd take 15 minutes to add: a webapp Q&amp;A endpoint</h3>
+  <p>
+    <code>webapp/main.py</code> already serves backtest results. A POST endpoint
+    <code>/api/ask</code> could accept a question, retrieve the relevant
+    equity/blotter CSV and the relevant CLAUDE.md sections, stuff them into an
+    LLM context, and answer "what was the worst week of the 2022 backtest and
+    which tickers drove it?" Pure cold-path; latency irrelevant; high utility
+    for ops.
+  </p>
+
+  <!-- ===================== §5 PATTERNS ===================== -->
+  <h2>5. Architecture patterns you'll see in any production LLM-in-quant setup</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>RAG (Retrieval-Augmented Generation)</h4>
+      <p>
+        Embed your corpus (filings, news, codebase, internal wiki), retrieve the
+        top-K relevant chunks at query time, stuff them into the LLM's context
+        window. Cheap, deterministic-ish, no fine-tuning. The default for
+        codebase Q&amp;A and internal knowledge assistants.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Fine-tuning</h4>
+      <p>
+        Continue training a base model on your specific text (earnings calls,
+        broker reports). Higher fixed cost, better domain-specific behavior, used
+        when you have lots of high-quality labeled examples. FinBERT is a
+        non-LLM analog you saw in Lesson 0007.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Tool use / function calling (incl. MCP)</h4>
+      <p>
+        The LLM doesn't compute Sharpe ratios — it calls
+        <code>analyze_equity.compute_metrics()</code> with the right arguments and
+        formats the answer. Model Context Protocol (MCP) is the 2024–2025
+        standard for exposing tools to LLMs. This pattern is how an LLM safely
+        interacts with your <em>real</em> code.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Agents (multi-step, autonomous)</h4>
+      <p>
+        LLM plans → executes a tool → reads result → plans next step. Useful for
+        open-ended research ("find me a momentum signal that survives 2018–2024
+        walk-forward"). Hard to make robust; failure modes include infinite loops
+        and confident wrongness.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Self-hosted vs hosted</h4>
+      <p>
+        Quant firms with sensitive data lean self-hosted (Llama, Mistral,
+        Qwen, DeepSeek) on internal GPU clusters. For non-sensitive workloads
+        (this repo's CLAUDE.md Q&amp;A), hosted APIs are cheaper and capable
+        enough.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Distillation</h4>
+      <p>
+        Train a small model to mimic the input/output pairs of a frontier model.
+        Get most of the quality at a fraction of the cost. Standard for high-volume
+        feature-extraction jobs like "score every news article from 2010–2025."
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §6 CONTRASTS ===================== -->
+  <h2>6. Often confused with</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h4>LLM vs FinBERT (and other small NNs)</h4>
+      <p>
+        Both are transformers. <strong>FinBERT</strong> ≈ 100M params, fine-tuned
+        for one task (sentiment classification), runs cheaply.
+        <strong>LLM</strong> = 10⁹–10¹² params, general-purpose, expensive per
+        call. Use FinBERT for one repeatable task; use an LLM for variable,
+        open-ended tasks.
+      </p>
+    </div>
+    <div class="card">
+      <h4>LLM-as-tool vs LLM-as-trader</h4>
+      <p>
+        <strong>LLM-as-tool</strong>: helps engineers write code, summarize
+        research, extract features. Boring, valuable, widely deployed.
+        <strong>LLM-as-trader</strong>: lets the LLM place orders directly.
+        Demoed in papers; underperforms buy-and-hold; not used in production.
+      </p>
+    </div>
+    <div class="card">
+      <h4>RAG vs Fine-tuning</h4>
+      <p>
+        <strong>RAG</strong>: change what's in context per query. No training.
+        Updates instantly when your docs change. <strong>Fine-tuning</strong>:
+        change the model's weights. Better fluency on your domain. Slower to
+        update. Hybrid is common; RAG-first is the default for codebase Q&amp;A.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Embedding vs Completion</h4>
+      <p>
+        <strong>Embedding</strong> models turn text into a vector for similarity
+        search (the retrieval half of RAG). <strong>Completion</strong> models
+        generate text given a prompt. Same transformer ancestors; different
+        endpoints and pricing.
+      </p>
+    </div>
+    <div class="card">
+      <h4>Hallucination vs Wrong-but-confident output</h4>
+      <p>
+        <strong>Hallucination</strong>: model fabricates a fact (a paper that
+        doesn't exist, a function that isn't in your code).
+        <strong>Wrong-but-confident</strong>: model recalls a real fact incorrectly.
+        Both look the same to the user; both demand a verification step before
+        anything ships.
+      </p>
+    </div>
+    <div class="card">
+      <h4>System prompt vs User prompt</h4>
+      <p>
+        The <strong>system prompt</strong> is the persistent instruction set
+        ("you are a quant research assistant; cite sources"). The <strong>user
+        prompt</strong> is the per-query message. Mixing them up causes role
+        confusion and weakens guardrails.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== §7 QUIZ ===================== -->
+  <h2>7. Practice — click an answer for instant feedback</h2>
+  <p class="small">Options shuffle on every page load. Read each one — distractors teach too.</p>
+
+  <div class="question" data-question>
+    <p class="q">Q1. A teammate proposes "put an LLM call inside <code>fpga/market_maker.vhd</code>'s decision loop so it can adapt to news." What is the most accurate response?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The size of the model isn't the only issue. Even a tiny LLM call is millions of times slower than the FPGA's per-tick budget — and HDL doesn't run Python anyway.">"Use a small distilled LLM and it'll be fast enough.</li>
+      <li data-correct="true"  data-why="Right. The FPGA's tick-to-trade is ~100 ns. Even the fastest LLM call (small model, hosted, cached) is ~100 ms — seven orders of magnitude too slow. LLMs belong on the cold/warm paths (research, signal extraction, ops), not in any real-time loop.">"Category error — FPGA decides in ~100 ns, the fastest LLM call is ~100 ms. Use LLMs for offline signal extraction or research; the hot path stays deterministic.</li>
+      <li data-correct="false" data-why="A latency budget violation isn't fixed by colocation. The kernel network stack alone (~50 µs) already breaks the budget; the LLM round-trip dwarfs that.">"Put the LLM in the colocated server next to the FPGA so the network is short.</li>
+      <li data-correct="false" data-why="They are mathematically expressible as matrix multiplies, but synthesizing a 7B-parameter model into HDL would consume billions of LUTs and miss timing by many orders of magnitude. Not a path.">"Just synthesize the LLM weights to HDL with hls4ml.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q2. The clearest highest-value place to add an LLM to <em>this</em> repo today is:</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Predicting next-day return from 7 tabular features is a job a tuned GBM already does well. An LLM gives no edge and adds enormous cost. This is the classic 'using LLMs where they don't fit' trap.">Replace <code>GradientBoostingRegressor</code> with an LLM that predicts next-day return directly.</li>
+      <li data-correct="true"  data-why="Right. Today's news_features.py reduces an article to a single sentiment scalar (and uses someone else's NLP at that). An LLM can extract event type, direction, magnitude, entities, forward-looking flag, etc. — multiple structured features per article — that feed the existing GBM. Cold path, no latency issue, highest expected alpha.">Extend <code>news_features.py</code> so an LLM extracts structured event metadata (type, direction, magnitude, entities) from each article, replacing the single sentiment scalar with multiple features the GBM can use.</li>
+      <li data-correct="false" data-why="A market-making spread is exactly the hot path — wrong place for an LLM regardless of how 'smart' it is. Cost and latency both rule it out.">Insert an LLM call inside <code>market_maker.vhd</code>'s spread decision to widen the spread when news is volatile.</li>
+      <li data-correct="false" data-why="Doable but lower value than improving the signal itself. Mostly a vanity feature when the highest-leverage cold-path use is signal extraction from news.">Use an LLM to rewrite all the existing variable names in the codebase for stylistic consistency.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q3. You want a Q&amp;A endpoint on <code>webapp/main.py</code> that answers questions about historical backtests. Which architecture is the right default?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Fine-tuning bakes data into weights — slow to update, expensive, overkill for an internal Q&A endpoint that needs fresh data every day. RAG fits the use case far better.">Fine-tune a base model on your backtest CSVs and ship that.</li>
+      <li data-correct="true"  data-why="Correct — this is classic RAG: embed the relevant CSV rows and Markdown chunks, retrieve the top-K most relevant on each query, stuff them into the LLM context, return the answer. Updates instantly when new backtests run. Cheaper, simpler, more transparent than fine-tuning.">RAG: embed the equity/blotter CSVs and CLAUDE.md into a vector store; retrieve the top-K relevant chunks per query; stuff into the LLM context; answer with citations.</li>
+      <li data-correct="false" data-why="No — the model can't 'just remember' arbitrary CSVs from training data. And even if it could, your data changes; you'd need a mechanism to keep it current. RAG does exactly that mechanism.">Tell the LLM to recall your CSV contents from its training data.</li>
+      <li data-correct="false" data-why="Agents are useful for multi-step open-ended tasks, but a simple Q&A endpoint is overkill for an agent. RAG is the right default; promote to agent only when you need tool-using behavior.">A fully autonomous agent that crawls your filesystem for each query.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q4. You use a frontier LLM to extract structured features from each article in your news corpus and re-run after a month. Some article scores have drifted slightly even though the article text is identical. What's the most likely cause and clean fix?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="It can happen but it's typically not the cause of drift on identical inputs. The more common cause is model-side: provider updated the model, or your call used non-zero temperature.">Your CSV got corrupted in storage; restore from backup.</li>
+      <li data-correct="true"  data-why="Right. Frontier hosted models update silently and decoding is stochastic by default. Pin the model version (e.g. claude-opus-4-7), set temperature=0, and cache outputs keyed on (model_id, prompt_hash). Now your feature pipeline is reproducible.">The hosted model was updated and/or your decoding has nonzero temperature; pin the model version, set temperature=0, and cache outputs by (model_id, prompt_hash) for reproducibility.</li>
+      <li data-correct="false" data-why="LLMs can give consistent outputs at temperature=0 with a pinned model. Drift is a symptom of inadequate pinning, not an intrinsic property.">LLMs are intrinsically non-deterministic; there's nothing you can do.</li>
+      <li data-correct="false" data-why="That's a real bug source on Alpha Vantage's side, but here the inputs are unchanged. The drift is on the LLM extraction step, not on the source data.">Alpha Vantage rewrote the article text without telling you.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <div class="question" data-question>
+    <p class="q">Q5. What does the StockBench (Oct 2025) result that "most LLM agents underperform buy-and-hold" actually imply for this repo's design?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Wrong takeaway. The result is about LLMs acting as the *trader*, not about LLMs as research/code/feature tools. The latter still earn their keep handily.">It means LLMs have no useful role in this codebase.</li>
+      <li data-correct="true"  data-why="Right. The benchmark shows giving an LLM autonomous control over trading decisions is not yet competitive. But that's specifically the 'LLM-as-trader' regime — separate from using LLMs to write research code, extract features from news, or generate documentation. Use them as tools, not as the strategy.">It means LLM-<em>as-trader</em> is not yet competitive, so confine LLMs to research, feature extraction, code generation, ops — not to the decision-making layer.</li>
+      <li data-correct="false" data-why="Backtest period matters but the deeper structural finding is robust across periods: LLMs as autonomous traders struggle on risk management. Picking a different period doesn't change that.">It means we should benchmark over a different time period and the result will flip.</li>
+      <li data-correct="false" data-why="Compute helps but doesn't change the structural problem. LLMs aren't trained on the right objective for end-to-end trading; they're trained for general-purpose text generation.">It means we need a bigger LLM, which would always outperform buy-and-hold.</li>
+    </ul>
+    <p class="feedback" hidden></p>
+  </div>
+
+  <!-- ===================== §8 SCENARIOS ===================== -->
+  <h2>8. Check your understanding (scenarios)</h2>
+
+  <details class="scenario">
+    <summary>S1. You want to add a "ask the codebase" feature to <code>webapp/main.py</code>. What does the minimum-viable plumbing look like, and what's the single biggest correctness concern?</summary>
+    <p>
+      Minimum-viable: chunk every <code>.py</code>, <code>.vhd</code>, and Markdown file into ~500-token
+      chunks; embed each chunk into a vector with a hosted embeddings model; store
+      vectors in something simple (FAISS in-process, or sqlite with cosine
+      similarity). On query: embed the question, retrieve top-K chunks, build a
+      prompt of the form <code>"Given the following code excerpts, answer the
+      question. Cite filenames. ... {chunks} ... Question: {q}"</code>, return.
+      Single biggest correctness concern: <strong>citations must be verifiable</strong> —
+      every claim should point to a chunk that actually exists and actually
+      supports the claim. Hallucinated citations are worse than no answer, because
+      they look authoritative. Have the LLM emit
+      <code>(filename, line range)</code> tuples that you re-fetch and display alongside its
+      answer.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S2. Your news LLM pipeline costs $0.04 per article. You want to backfill 10 years of S&amp;P 500 news (~5M articles). Decision time. What are your options?</summary>
+    <p>
+      $0.04 × 5M = $200k for a one-time backfill with the frontier model — high but
+      bounded; CFO might still sign off if alpha case is strong. Better options:
+      <strong>(a) Distill</strong> a small open-source model (Llama-3, Qwen-2.5)
+      using a few thousand labeled examples from the frontier model — call the
+      frontier on 10k articles ($400), train a 7B distillate, run it on the
+      remaining 4.99M at ~$0.0005/article using your own GPUs ($2,500). About
+      ~$3k total instead of $200k. <strong>(b) Tiered processing</strong> —
+      send only high-relevance-score articles to the frontier LLM; cheap model for
+      the rest. <strong>(c) Sample-then-evaluate</strong> — process 50k random
+      articles fully, measure feature-importance gain, only spend more if it
+      moves the GBM's out-of-sample R². The error you want to avoid is committing
+      the full $200k before proving any alpha.
+    </p>
+  </details>
+
+  <details class="scenario">
+    <summary>S3. A regulator audits your firm and asks "did an LLM ever decide a trade?" How should the recordkeeping in this codebase be set up so you can answer truthfully?</summary>
+    <p>
+      The clean answer is: an LLM produces a <em>feature</em> that feeds the GBM;
+      the GBM produces the prediction; an explicit allocation function produces
+      the weights; an executor places the orders. Each step is auditable on its own.
+      Practical recordkeeping: pin all LLM model IDs and prompts in version
+      control; store every LLM call's <code>(input_hash, output, model_id, ts)</code>
+      tuple in a write-once log; never wire an LLM's output directly into an order
+      router. Then "did an LLM decide a trade?" honestly answers as "no — an LLM
+      generated a feature value that contributed to a downstream model's prediction;
+      here's the full chain." This separation is also a defense against a future
+      regulator who categorically restricts "AI making trading decisions."
+    </p>
+  </details>
+
+  <p class="footer-note">
+    Next lesson candidates: <strong>Mean-variance portfolio optimization</strong>
+    (long overdue — closes out modeling → allocation), or
+    <strong>Walk-forward backtesting + look-ahead bias</strong> (closes out the
+    methodology side). Either one builds cleanly on what you've already learned.
+  </p>
+
+</main>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const answered = new Set();
+  let correctCount = 0;
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  const scoreEl = document.getElementById('quizScore');
+  function refreshScore() {
+    scoreEl.textContent = correctCount + ' / ' + totalQuestions;
+  }
+  document.querySelectorAll('[data-question]').forEach((q, idx) => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        const isCorrect = li.dataset.correct === 'true';
+        list.querySelectorAll('li').forEach(o => o.classList.remove('picked-good','picked-bad'));
+        li.classList.add(isCorrect ? 'picked-good' : 'picked-bad');
+        feedback.hidden = false;
+        feedback.innerHTML = (isCorrect ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+        feedback.style.color = isCorrect ? 'var(--good)' : 'var(--bad)';
+        if (!answered.has(idx)) {
+          answered.add(idx);
+          if (isCorrect) correctCount++;
+          refreshScore();
+        }
+      });
+    });
+  });
+  refreshScore();
+</script>
+</body>
+</html>

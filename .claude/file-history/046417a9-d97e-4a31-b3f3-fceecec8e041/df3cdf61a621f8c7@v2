@@ -1,0 +1,26 @@
+#pragma once
+
+// camera.hpp — Camera mode enum and view-matrix helpers.
+//
+// CameraMode is stored in GameState. renderScene() branches on it to
+// compute the eye/target pair passed to setupLookAt().
+//
+// First-person: eye at player head height, looks along forwardFromAngles().
+//   Player body is NOT drawn in this mode.
+// Third-person: existing offset (15 units behind, 8 units above).
+//   Player body IS drawn.
+//
+// Toggle key: V (added to InputState.toggleCamera in main.cpp).
+
+enum class CameraMode {
+    FirstPerson,
+    ThirdPerson,
+};
+
+// Player eye height above pos.y in first-person mode.
+// Matches the approximate head centre used by drawPlayer() for the head box.
+constexpr float kFirstPersonEyeHeight = 5.2f;
+
+// Third-person offsets — keep in sync with the eye calculation in renderScene().
+constexpr float kThirdPersonBack = 15.0f;
+constexpr float kThirdPersonUp   =  8.0f;

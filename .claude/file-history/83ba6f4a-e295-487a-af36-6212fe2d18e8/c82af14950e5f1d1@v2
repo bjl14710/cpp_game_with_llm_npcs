@@ -1,0 +1,151 @@
+"""Tests for the MSP430 semantic sequencing reviewer.
+
+Known-bad snippets must trigger exactly their rule; known-good snippets must
+produce zero findings; and the reviewer must never alter extraction output.
+"""
+import pytest
+
+from silmulator.code_parser import CodeParser, SemanticReviewer
+
+GOOD_SNIPPET = '''
+inst.write("ADC:CHANNEL0:ENABLE ON")
+inst.write("ADC:TRIGGER")
+raw = inst.query("ADC:CHANNEL0:RAW?")
+inst.write("UART0:BAUD 115200")
+count = inst.query("UART0:RXCOUNT?")
+data = inst.query("UART0:RECEIVE?")
+'''
+
+READ_BEFORE_TRIGGER = '''
+inst.write("ADC:CHANNEL0:ENABLE ON")
+raw = inst.query("ADC:CHANNEL0:RAW?")
+'''
+
+CONVERT_WITHOUT_ENABLE = '''
+inst.write("ADC:CONVERT 3")
+'''
+
+BLOCKING_RECEIVE = '''
+inst.write("UART1:BAUD 9600")
+data = inst.query("UART1:RECEIVE?")
+'''
+
+SHARED_BUS = '''
+inst.write("SPI0:TRANSFER \\"AA\\"")
+inst.write("I2C0:WRITE \\"BB\\"")
+'''
+
+MULTI_FUNCTION = '''
+def read_adc(inst):
+    return inst.query("ADC:CHANNEL0:RAW?")
+
+def setup(inst):
+    inst.write("ADC:CHANNEL0:ENABLE ON")
+    inst.write("ADC:TRIGGER")
+'''
+
+OTHER_DEVICE_ONLY = '''
+inst.write("CH1:SCALE 0.5")
+inst.write("SOURCE1:FUNC SIN")
+resp = inst.query("MEAS:VOLT:DC?")
+'''
+
+
+@pytest.fixture
+def parser():
+    return CodeParser()
+
+
+@pytest.fixture
+def reviewer():
+    return SemanticReviewer()
+
+
+def review(parser, reviewer, snippet):
+    commands = parser.parse(snippet, "python")
+    return commands, reviewer.review(commands, source=snippet)
+
+
+class TestKnownGood:
+    def test_correct_sequence_zero_findings(self, parser, reviewer):
+        _, findings = review(parser, reviewer, GOOD_SNIPPET)
+        assert findings == []
+
+    def test_other_device_commands_ignored(self, parser, reviewer):
+        # Oscilloscope/function-generator traffic is not MSP430-targeted.
+        commands, findings = review(parser, reviewer, OTHER_DEVICE_ONLY)
+        assert commands  # extraction did find SCPI calls
+        assert findings == []
+
+
+class TestKnownBad:
+    def test_read_before_trigger_flagged_with_line(self, parser, reviewer):
+        _, findings = review(parser, reviewer, READ_BEFORE_TRIGGER)
+        rules = [f.rule for f in findings]
+        assert "trigger-before-read" in rules
+        f = next(f for f in findings if f.rule == "trigger-before-read")
+        # The read sits on line 3 of the snippet (leading newline is line 1).
+        assert f.line_number == 3
+        assert "ADC" in f.message and "trigger" in f.message.lower()
+
+    def test_convert_without_enable_flagged(self, parser, reviewer):
+        _, findings = review(parser, reviewer, CONVERT_WITHOUT_ENABLE)
+        assert [f.rule for f in findings] == ["enable-before-conversion"]
+        assert findings[0].line_number == 2
+
+    def test_blocking_receive_flagged(self, parser, reviewer):
+        _, findings = review(parser, reviewer, BLOCKING_RECEIVE)
+        assert [f.rule for f in findings] == ["busy-check-before-blocking-op"]
+        assert "UART1" in findings[0].message
+
+    def test_shared_bus_overlap_flagged(self, parser, reviewer):
+        _, findings = review(parser, reviewer, SHARED_BUS)
+        assert [f.rule for f in findings] == ["shared-bus-overlap"]
+        assert "eUSCI_B0" in findings[0].message
+
+    def test_different_bus_indexes_not_flagged(self, parser, reviewer):
+        snippet = '''
+inst.write("SPI0:TRANSFER \\"AA\\"")
+inst.write("I2C1:WRITE \\"BB\\"")
+'''
+        _, findings = review(parser, reviewer, snippet)
+        assert all(f.rule != "shared-bus-overlap" for f in findings)
+
+
+class TestConfidence:
+    def test_multi_function_code_is_low_confidence(self, parser, reviewer):
+        # Call order across functions is unknowable statically: the read may
+        # well run after setup(). Flag softly, never hard.
+        _, findings = review(parser, reviewer, MULTI_FUNCTION)
+        absence_findings = [f for f in findings if f.rule != "shared-bus-overlap"]
+        assert absence_findings
+        assert all(f.confidence == "LOW_CONFIDENCE" for f in absence_findings)
+
+    def test_single_buffer_is_high_confidence(self, parser, reviewer):
+        _, findings = review(parser, reviewer, READ_BEFORE_TRIGGER)
+        assert all(f.confidence == "HIGH" for f in findings)
+
+
+class TestPurelyAdditive:
+    def test_extraction_output_untouched(self, parser, reviewer):
+        # Acceptance criterion: findings never block or alter extraction.
+        before = parser.parse(READ_BEFORE_TRIGGER, "python")
+        reviewer.review(before, source=READ_BEFORE_TRIGGER)
+        after = parser.parse(READ_BEFORE_TRIGGER, "python")
+        assert [(c.scpi_command, c.line_number) for c in before] == \
+               [(c.scpi_command, c.line_number) for c in after]
+
+    def test_review_accepts_empty_list(self, reviewer):
+        assert reviewer.review([], source="") == []
+
+
+class TestProjectMode:
+    def test_files_reviewed_independently(self, tmp_path, parser, reviewer):
+        # The bad file is flagged and carries its path; the good file is clean.
+        (tmp_path / "bad.py").write_text(READ_BEFORE_TRIGGER)
+        (tmp_path / "good.py").write_text(GOOD_SNIPPET)
+        from silmulator.code_parser import CodeProject
+        project = CodeProject.from_path(tmp_path)
+        findings = reviewer.review_project(project)
+        assert findings
+        assert all(f.file and f.file.endswith("bad.py") for f in findings)

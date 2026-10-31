@@ -1,0 +1,91 @@
+"""Draft PR for the traits milestone; close #115-#119."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Milestone #14 — NPC personality as curated DATA plus a human-in-the-loop
+rating loop. Prompt-conditioning by design, deliberately not fine-tuning
+(the escalation path is documented, not built). One atomic commit per
+issue.
+
+**#115 trait library** (`a98de1d`) — TraitDef {rules, paired example
+exchanges} loaded from `traits/*.trait` (persona-loader contract:
+malformed files named and skipped). Ships eight starter traits (grumpy,
+cheerful, poetic, gossipy, taciturn, salesman, nervous, deadpan).
+
+**#116 ordered composition** (`3172a7a`) — personas carry `trait =` ids
+(≤3, parse error above; round-tripped). The assembly order is a TESTED
+index contract: identity < trait rules+examples < memory summary <
+trait REINFORCEMENT < action protocol — the post-memory reinforcement
+is the anti-drift requirement from the brief. Trait-less rendering is
+byte-identical to before; unknown ids demote with a spawn log. The
+registry installs on every world repopulation, so sandbox-placed NPCs
+get traits too.
+
+**#117 creator picker** (`41ab768`) — a Trait cycler row on the creator
+page (NPC mode only); the choice persists through the stored persona
+text. Logged v1 cut: one trait via UI, three via file.
+
+**#118 rating capture** (`6080199`) — F1 keeps a completed reply as a
+candidate example, F2 flags it; JSONL review files under saves/ratings/
+with persona + active trait ids + the exchange. One rating per reply.
+The design guarantee is pinned by test: **rating changes nothing in any
+live prompt** — promotion is a human editing a .trait file. (F-keys by
+logged decision: +/- would collide with the dialogue text input.)
+
+**#119 escalation doc** (`b31fd24`) — docs/design/TRAIT_FINE_TUNE_PATH.md:
+what accumulates, how it would become LoRA training pairs, and the three
+measured criteria (adherence-failure rate despite reinforcement, ≥200
+curated rows, player-visible breaks) that would justify training. Zero
+training code.
+
+## Verification
+- `make -C tests test` green at every commit; final **193 cases /
+  32,004 assertions** (loader contract, index-pinned assembly order,
+  cap + round-trip, JSONL shape, prompt-unchanged-by-rating).
+- Boot verified: `loaded 8 traits`.
+
+## Needs human verification
+- Feel: converse with a trait-carrying NPC (create one with the picker)
+  and judge whether the personality holds across a long conversation —
+  the reinforcement's whole purpose.
+- The F1/F2 hint timing and creator row layout at your resolution.
+
+## Notes
+- Stacked on `feature/sandbox-map-editor` (PR #131). Merge order:
+  #130 → #131 → this. Do not merge; review only.
+- Trait ids are part of the LLM world-generation output contract
+  (milestone #16).
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="feat: NPC trait system + human-curated rating loop (#115-#119)",
+           body=BODY, base="feature/sandbox-map-editor", head="feature/npc-traits", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in range(115, 120):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/npc-traits`. Draft PR #{pr.number} open for review (base: feature/sandbox-map-editor). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: closed -> PR #{pr.number}")
+print("done")

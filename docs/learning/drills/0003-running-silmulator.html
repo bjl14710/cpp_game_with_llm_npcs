@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drill 0003 — Running Silmulator on Windows, Mac &amp; Linux</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#30363d;
+  --accent:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#e3b341;
+  --orange:#fb923c;--text:#c9d1d9;--dim:#8b949e;--border:#30363d;
+  --code:#090d12;
+  --win:#60a5fa;--mac:#d1d5db;--lnx:#fb923c;--docker:#38bdf8;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.68;min-height:100vh}
+.screen{display:none;max-width:800px;margin:0 auto;padding:2rem 1.5rem 4rem}
+.screen.active{display:block}
+
+/* ── start ── */
+.hd{text-align:center;margin-bottom:2rem}
+.lbl{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.15em;
+     text-transform:uppercase;margin-bottom:.4rem}
+.ttl{font-size:2rem;color:#fff;margin-bottom:.4rem}
+.sub{color:var(--accent);font-size:.95rem}
+
+/* platform dots */
+.dots{display:flex;justify-content:center;gap:.8rem;margin:1.2rem 0 1.6rem}
+.dot{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;
+     justify-content:center;font-size:1.15rem;border:2px solid var(--border)}
+.dot.win{border-color:var(--win);background:rgba(96,165,250,.1)}
+.dot.mac{border-color:var(--mac);background:rgba(209,213,219,.07)}
+.dot.lnx{border-color:var(--lnx);background:rgba(251,146,60,.1)}
+.dot.docker{border-color:var(--docker);background:rgba(56,189,248,.1)}
+
+.chips{display:flex;flex-wrap:wrap;gap:.55rem;justify-content:center;margin:1.3rem 0}
+.chip{font-family:var(--mono);font-size:.8rem;padding:.35rem .85rem;
+      border:1px solid var(--border);border-radius:20px;cursor:pointer;
+      background:var(--surf);color:var(--dim);user-select:none;transition:all .15s}
+.chip.on{border-color:var(--accent);color:var(--accent);background:rgba(88,166,255,.09)}
+.chip.all{border-color:var(--yellow);color:var(--yellow)}
+.chip.all.on{border-color:var(--yellow);color:var(--yellow);background:rgba(227,179,65,.07)}
+.smeta{text-align:center;color:var(--dim);font-size:.85rem;margin-bottom:.8rem}
+.shuf{display:flex;align-items:center;justify-content:center;gap:.65rem;
+      margin-bottom:1.4rem;font-size:.86rem;color:var(--dim)}
+.tog{position:relative;display:inline-block;width:36px;height:20px}
+.tog input{opacity:0;width:0;height:0}
+.sl{position:absolute;inset:0;background:var(--surf2);border-radius:20px;cursor:pointer;transition:background .2s}
+.sl:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;
+           background:#fff;border-radius:50%;transition:transform .2s}
+input:checked+.sl{background:var(--accent)}
+input:checked+.sl:before{transform:translateX(16px)}
+
+/* ── question ── */
+.qhdr{display:flex;align-items:center;gap:.8rem;margin-bottom:1.4rem;flex-wrap:wrap}
+.qnum{font-family:var(--mono);font-size:.78rem;color:var(--dim)}
+.pbar{flex:1;height:5px;background:var(--surf2);border-radius:3px;min-width:80px}
+.pfill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+.ctag{font-family:var(--mono);font-size:.7rem;padding:.18rem .55rem;
+      border:1px solid var(--border);border-radius:12px;color:var(--dim)}
+.ttag{font-family:var(--mono);font-size:.7rem;padding:.18rem .55rem;border-radius:12px}
+.ttag.mc{background:rgba(88,166,255,.12);color:var(--accent)}
+.ttag.wr{background:rgba(251,146,60,.12);color:var(--orange)}
+
+.qtxt{font-size:1.05rem;font-weight:600;color:#fff;margin-bottom:1rem;line-height:1.5}
+pre.snip{background:var(--code);border:1px solid var(--border);border-radius:6px;
+         padding:.85rem 1.1rem;overflow-x:auto;font-family:var(--mono);
+         font-size:.82rem;line-height:1.6;margin-bottom:1rem;display:none}
+.cm{color:#3d5264;font-style:italic}.kw{color:#ff7b72}.str{color:#a5d6a7}
+.fn{color:#d2a8ff}.cmd{color:#79c0ff}.env{color:#e6edf3}
+
+/* mc */
+.opts{list-style:none}
+.opts li{background:var(--surf);border:1px solid var(--border);border-radius:5px;
+         padding:.52rem .9rem;margin-bottom:.42rem;cursor:pointer;user-select:none;
+         transition:border-color .13s,background .13s;font-size:.9rem}
+.opts li:hover:not(.lk){border-color:var(--accent);background:rgba(88,166,255,.07)}
+.opts li:focus{outline:2px solid var(--accent);outline-offset:2px}
+.opts li.ok{border-color:var(--green);background:rgba(63,185,80,.09);color:var(--green)}
+.opts li.no{border-color:var(--red);background:rgba(248,81,73,.08);color:var(--red)}
+.opts li.lk{cursor:default}
+.mfb{margin-top:.6rem;font-size:.87rem;padding:.42rem .8rem;border-radius:4px;display:none}
+.mfb.ok{background:rgba(63,185,80,.09);color:var(--green);border:1px solid rgba(63,185,80,.28)}
+.mfb.no{background:rgba(248,81,73,.08);color:var(--red);border:1px solid rgba(248,81,73,.28)}
+
+/* written */
+textarea{width:100%;min-height:108px;background:var(--surf);border:1px solid var(--border);
+         border-radius:6px;padding:.7rem .9rem;color:var(--text);font-family:inherit;
+         font-size:.92rem;resize:vertical;line-height:1.55}
+textarea:focus{outline:2px solid var(--accent)}
+.wacts{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+.kwres{margin-top:.8rem;display:none}
+.tally{font-weight:700;margin-bottom:.4rem;font-size:.9rem}
+.kwchips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.5rem}
+.kc{font-family:var(--mono);font-size:.75rem;padding:.18rem .5rem;border-radius:12px}
+.kc.h{background:rgba(63,185,80,.12);color:var(--green);border:1px solid rgba(63,185,80,.28)}
+.kc.m{background:rgba(248,81,73,.1);color:var(--red);border:1px solid rgba(248,81,73,.28)}
+.knote{color:var(--dim);font-size:.78rem}
+.modans{display:none;margin-top:.8rem;background:var(--surf);border:1px solid var(--border);
+        border-radius:6px;padding:.8rem 1rem;font-size:.9rem;line-height:1.65}
+.modlbl{font-family:var(--mono);font-size:.7rem;color:var(--dim);text-transform:uppercase;
+        letter-spacing:.08em;margin-bottom:.35rem}
+.sr{display:none;align-items:center;gap:.5rem;flex-wrap:wrap;
+    font-size:.85rem;color:var(--dim);margin-top:.65rem}
+
+/* nav / buttons */
+.nav{display:flex;gap:.55rem;margin-top:1.4rem;flex-wrap:wrap;align-items:center}
+.spc{flex:1}
+.btn{font-family:var(--mono);font-size:.83rem;padding:.45rem 1rem;
+     border:1px solid transparent;border-radius:5px;cursor:pointer;
+     transition:opacity .15s;user-select:none}
+.btn:focus{outline:2px solid var(--accent);outline-offset:2px}
+.pri{background:var(--accent);color:#000}.pri:hover{opacity:.82}
+.sec{background:var(--surf2);color:var(--text);border-color:var(--border)}.sec:hover{border-color:var(--accent)}
+.grn{background:var(--green);color:#000}
+.gld{background:var(--yellow);color:#000}
+.red{background:var(--red);color:#fff}
+.sm{padding:.32rem .7rem;font-size:.77rem}
+
+/* results */
+.rhdr{text-align:center;margin-bottom:1.8rem}
+.sbig{font-size:3.4rem;font-family:var(--mono);color:var(--accent)}
+.slbl{color:var(--dim);font-size:.88rem;margin-top:.25rem}
+.rcols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.4rem 0}
+@media(max-width:520px){.rcols{grid-template-columns:1fr}}
+.rcard{background:var(--surf);border:1px solid var(--border);border-radius:7px;padding:.9rem 1.1rem}
+.rcard h3{font-family:var(--mono);font-size:.78rem;color:var(--dim);
+          text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem}
+.miss{background:var(--surf2);border-radius:4px;padding:.38rem .65rem;
+      margin-bottom:.38rem;font-size:.86rem}
+.mcorr{color:var(--green);font-family:var(--mono);font-size:.8rem;display:block;margin-top:.2rem}
+</style>
+</head>
+<body>
+
+<!-- ═══ START ═══ -->
+<div id="S" class="screen active">
+<div class="hd">
+  <div class="lbl">Drill 0003 · Active Recall</div>
+  <div class="ttl">Running Silmulator</div>
+  <div class="sub">20 questions — dev mode · Docker · installers · real code · traps</div>
+</div>
+<div class="dots">
+  <div class="dot win" title="Windows">🪟</div>
+  <div class="dot mac" title="macOS">🍎</div>
+  <div class="dot lnx" title="Linux">🐧</div>
+  <div class="dot docker" title="Docker">🐳</div>
+</div>
+<div class="chips" id="chips">
+  <div class="chip all on" data-ch="all">⚡ All</div>
+  <div class="chip on" data-ch="dev">Dev mode</div>
+  <div class="chip on" data-ch="docker">Docker / browser</div>
+  <div class="chip on" data-ch="installer">Installers</div>
+  <div class="chip on" data-ch="code">Real project code</div>
+  <div class="chip on" data-ch="traps">Gotchas &amp; traps</div>
+</div>
+<p class="smeta" id="smeta">20 questions selected</p>
+<div class="shuf">Shuffle
+  <label class="tog"><input type="checkbox" id="sh" checked><span class="sl"></span></label>
+</div>
+<div style="text-align:center">
+  <button class="btn pri" onclick="go()" style="font-size:1rem;padding:.65rem 2rem">Begin →</button>
+</div>
+</div>
+
+<!-- ═══ QUESTION ═══ -->
+<div id="Q" class="screen">
+<div class="qhdr">
+  <span class="qnum" id="qn">Q 1 / 20</span>
+  <div class="pbar"><div class="pfill" id="pf" style="width:0%"></div></div>
+  <span class="ctag" id="ct"></span>
+  <span class="ttag mc" id="tt">MC</span>
+</div>
+<div class="qtxt" id="qt"></div>
+<pre class="snip" id="qs"></pre>
+
+<div id="MA" style="display:none">
+  <ul class="opts" id="mo"></ul>
+  <div class="mfb" id="mf"></div>
+</div>
+
+<div id="WA" style="display:none">
+  <textarea id="wa" placeholder="Type your answer here…"></textarea>
+  <div class="wacts">
+    <button class="btn sec sm" onclick="chkW()">Check keywords</button>
+    <button class="btn sec sm" onclick="showM()">Show model answer</button>
+  </div>
+  <div class="kwres" id="kr">
+    <div class="tally" id="kt"></div>
+    <div class="kwchips" id="kc"></div>
+    <div class="knote">⚠ Keyword check is fuzzy — judge honestly against the model answer.</div>
+  </div>
+  <div class="modans" id="md"><div class="modlbl">Model answer</div><div id="mt"></div></div>
+  <div class="sr" id="sr">
+    Rate yourself:
+    <button class="btn grn sm" onclick="rate('k')">✓ Knew it</button>
+    <button class="btn red sm"  onclick="rate('r')">↺ Needs review</button>
+  </div>
+</div>
+
+<div class="nav">
+  <button class="btn sec sm" id="bp" onclick="prev()">← Prev</button>
+  <div class="spc"></div>
+  <button class="btn pri sm" id="bn" onclick="next()">Next →</button>
+  <button class="btn gld sm" id="bf" style="display:none" onclick="results()">Results</button>
+</div>
+</div>
+
+<!-- ═══ RESULTS ═══ -->
+<div id="R" class="screen">
+<div class="rhdr">
+  <div class="sbig" id="rb">—</div>
+  <div class="slbl" id="rl"></div>
+</div>
+<div class="rcols">
+  <div class="rcard"><h3>MC misses</h3><div id="rm"><em style="color:var(--dim);font-size:.86rem">None!</em></div></div>
+  <div class="rcard"><h3>Written — needs review</h3><div id="rw"><em style="color:var(--dim);font-size:.86rem">None flagged.</em></div></div>
+</div>
+<div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:.8rem">
+  <button class="btn sec" onclick="rev()">Review missed only</button>
+  <button class="btn pri" onclick="location.reload()">Restart</button>
+</div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// QUESTION BANK  (20 questions)
+// ════════════════════════════════════════════════════════════════
+const BANK = [
+
+// ─── DEV MODE ────────────────────────────────────────────────
+{id:'d1',ch:'dev',type:'w',
+ q:'List the three ways to launch Silmulator in dev mode. For each, give the exact command and the one prerequisite it needs.',
+ c:[{l:'python main.py — Python + deps installed',t:['python main.py','python 3','python3','deps','requirements']},
+    {l:'uv run python main.py — uv installed',t:['uv run','uv']},
+    {l:'silmulator — pip install -e . first',t:['silmulator','pip install','install -e','-e .']}],
+ m:`1. python main.py — requires Python 3.9+ on PATH and all deps installed (pip install -r requirements.txt or pip install -e .).
+2. uv run python main.py — requires only uv installed; uv handles the .venv automatically from uv.lock/pyproject.toml.
+3. silmulator — requires pip install -e . (or pip install dist/silmulator-*.whl) to have been run first; this registers the entry-point command via pyproject.toml [project.scripts].`
+},
+
+{id:'d2',ch:'dev',type:'mc',
+ q:'What does uv sync do that pip install -r requirements.txt does NOT?',
+ snip:`<span class="cm"># pyproject.toml</span>
+[tool.uv]
+dev-dependencies = [
+    <span class="str">"pytest>=7.2.0"</span>,
+    <span class="str">"pyinstaller>=6.0.0"</span>,
+]`,
+ opts:[
+  {t:'Creates and populates .venv from uv.lock, also locking dev-dependencies, without touching system Python.',c:true,
+   w:'Correct. uv sync resolves and installs both runtime and dev deps from uv.lock into an isolated .venv. pip install -r requirements.txt installs into whatever Python is active and uses requirements.txt only (no dev-deps).'},
+  {t:'Downloads the latest versions of all packages, overwriting the lockfile with newer releases.',c:false,
+   w:'uv sync installs what uv.lock specifies — it does not update the lockfile. uv lock --upgrade does that.'},
+  {t:'Builds the C++ scpi_core extension inside the container before installing Python deps.',c:false,
+   w:'uv sync only manages Python packages. Building the C++ extension requires cmake + make steps inside the build/ directory.'},
+  {t:'Installs packages into system site-packages so the silmulator command is globally available.',c:false,
+   w:'uv sync always targets the project .venv, never system site-packages. The silmulator command is only available after activating the venv or using uv run.'},
+ ]
+},
+
+{id:'d3',ch:'dev',type:'w',
+ q:'After running pip install -e . from inside the Silmulator/ directory, how does the silmulator terminal command get created? Which file defines its name and target?',
+ snip:`<span class="cm"># pyproject.toml</span>
+[project.scripts]
+silmulator = <span class="str">"silmulator.app:main"</span>
+
+[project.gui-scripts]
+silmulator-gui = <span class="str">"silmulator.app:main"</span>`,
+ c:[{l:'pyproject.toml [project.scripts]',t:['pyproject.toml','project.scripts','scripts']},
+    {l:'silmulator = "silmulator.app:main"',t:['silmulator.app','silmulator.app:main','app:main']},
+    {l:'pip creates a shim on PATH',t:['shim','path','entry point','entrypoint','wrapper']}],
+ m:`pip reads pyproject.toml's [project.scripts] section. The entry "silmulator = silmulator.app:main" tells pip to create a small executable shim (a wrapper script) named "silmulator" in the active Python environment's bin/ (or Scripts/ on Windows) directory. When you run "silmulator" in a terminal, that shim imports silmulator.app and calls the main() function. The file that defines this is pyproject.toml; the target is the main() function in silmulator/app.py.`
+},
+
+{id:'d4',ch:'dev',type:'mc',
+ q:'main.py is a two-liner. What does it call and why does it pass the return value to sys.exit()?',
+ snip:`<span class="cm"># main.py</span>
+<span class="kw">import</span> sys
+<span class="kw">from</span> silmulator.app <span class="kw">import</span> main
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    sys.exit(main())`,
+ opts:[
+  {t:'It calls silmulator.app:main() and propagates the Qt event-loop exit code to the OS so shell scripts can detect crashes.',c:true,
+   w:'Correct. QApplication.exec() returns 0 on clean exit or non-zero on error. sys.exit() forwards that integer to the OS, enabling CI or shell scripts to detect failures.'},
+  {t:'It calls silmulator.app:main() and sys.exit() prevents the process from hanging after the Qt window closes.',c:false,
+   w:'Qt\'s event loop returns on its own when the last window closes. sys.exit() here is about forwarding the return code, not preventing hangs.'},
+  {t:'It calls silmulator.app:main() and sys.exit() suppresses any Python tracebacks that would otherwise print to the terminal.',c:false,
+   w:'sys.exit() does not suppress tracebacks — exceptions still print before the process exits. It only sets the OS exit code.'},
+  {t:'It calls silmulator.app:main() and sys.exit() is required because main() spawns threads that must be force-killed.',c:false,
+   w:'main() does not spawn detached threads. sys.exit() is solely for propagating the Qt exit code integer.'},
+ ]
+},
+
+{id:'d5',ch:'dev',type:'w',
+ q:'On which platform does activating the virtual environment use .venv\\Scripts\\activate instead of source .venv/bin/activate? What shell is that intended for?',
+ c:[{l:'Windows',t:['windows','win']},
+    {l:'Scripts/ instead of bin/',t:['scripts','scripts/','scripts\\']},
+    {l:'Command Prompt or PowerShell',t:['cmd','command prompt','powershell','batch','.bat']}],
+ m:`Windows uses .venv\Scripts\activate (backslash, Scripts with capital S). This is for Command Prompt or PowerShell. On macOS and Linux the path is .venv/bin/activate (forward slash, lowercase bin) and the shell is bash or zsh. The difference is because Windows uses a different directory layout for virtual environments and path separators.`
+},
+
+// ─── DOCKER ──────────────────────────────────────────────────
+{id:'k1',ch:'docker',type:'w',
+ q:'What is the exact URL to open Silmulator in a browser after docker compose up -d? What is the default password?',
+ c:[{l:'http://localhost:6080/vnc.html',t:['6080','vnc.html','localhost:6080']},
+    {l:'password: silmulator',t:['silmulator','password']}],
+ m:`URL: http://localhost:6080/vnc.html
+Password: silmulator
+Port 6080 is the NoVNC web-socket port exposed in docker-compose.yml. Port 5900 is the raw VNC port (for VNC client apps). The NoVNC web page makes Silmulator usable in any browser without installing a VNC client.`
+},
+
+{id:'k2',ch:'docker',type:'mc',
+ q:'The production Dockerfile is a multi-stage build. What is the purpose of Stage 1, and what file does Stage 2 copy from it?',
+ opts:[
+  {t:'Stage 1 installs Python deps and builds the wheel; Stage 2 copies the .whl file and installs it into a slim runtime image.',c:false,
+   w:'Stage 1 builds the C++ extension, not a Python wheel. The artifact is a .so file (scpi_core.so), not a .whl.'},
+  {t:'Stage 1 compiles the C++ SCPI parser to scpi_core.so; Stage 2 copies that .so into the slim runtime image.',c:true,
+   w:'Correct. The builder stage has cmake, g++, and pybind11. It compiles cpp_core/ into a Python extension (.so). Stage 2 (python:3.11-slim + Qt6 + NoVNC) copies only that .so — keeping the final image small.'},
+  {t:'Stage 1 runs PyInstaller to bundle the app; Stage 2 copies the resulting AppImage into the container for execution.',c:false,
+   w:'PyInstaller is used by build_installer.sh for standalone distribution, not inside the Docker build. The Docker image runs the Python source directly.'},
+  {t:'Stage 1 downloads and caches all pip packages; Stage 2 copies the cache layer to speed up repeated builds.',c:false,
+   w:'Both stages are separate images — there is no shared pip cache layer. The only artifact passed between stages is scpi_core.so via COPY --from=builder.'},
+ ]
+},
+
+{id:'k3',ch:'docker',type:'w',
+ q:'Name two docker compose up -d variants that change the port or the password. Give the exact command for each.',
+ c:[{l:'APP_PORT=8080 docker compose up -d',t:['app_port','8080','port']},
+    {l:'VNC_PASSWORD=mysecret docker compose up -d',t:['vnc_password','password','vnc_pass']}],
+ m:`Change port:    APP_PORT=8080 docker compose up -d   (access at http://localhost:8080/vnc.html)
+Change password: VNC_PASSWORD=mysecret docker compose up -d
+Both can also be set in a .env file in the same directory as docker-compose.yml. Default: port 6080, password "silmulator".`
+},
+
+{id:'k4',ch:'docker',type:'mc',
+ q:'After docker compose up -d the browser shows "Connection failed". What is the correct first debugging step?',
+ opts:[
+  {t:'Rebuild the image — the connection failure means PyInstaller packaging failed.',c:false,
+   w:'The Docker image uses python main.py, not PyInstaller. "Connection failed" from the browser means the VNC/NoVNC server hasn\'t started yet, not a build failure.'},
+  {t:'Wait 10–15 seconds, run docker compose logs and look for "x11vnc is ready".',c:true,
+   w:'Correct. Xvfb and x11vnc start up inside the container after docker compose up. This takes 10–15 seconds. The log line "x11vnc is ready" confirms the VNC server is accepting connections.'},
+  {t:'Re-run docker compose up without the -d flag so error output prints directly to the terminal.',c:false,
+   w:'Removing -d shows logs in the foreground, but the most direct check is docker compose logs -f while the container is already running. The root cause is usually just startup lag.'},
+  {t:'Run docker compose down -v and restart — the named volume is corrupt and must be wiped.',c:false,
+   w:'A corrupt volume causes settings loss, not a "Connection failed" error. That error means the server isn\'t ready yet — wait and check logs before destroying data.'},
+ ]
+},
+
+{id:'k5',ch:'docker',type:'w',
+ q:'What does the silmulator-config named volume store, and what command removes it?',
+ c:[{l:'saved layouts and settings (.sil files)',t:['layout','.sil','config','settings','saved']},
+    {l:'docker compose down -v',t:['down -v','compose down -v','-v']}],
+ m:`silmulator-config is a named Docker volume mounted at /root/.config/silmulator inside the container. It stores saved layout files (.sil) and application settings so they persist across container restarts.
+To remove it (deleting all saved data): docker compose down -v
+The -v flag removes named volumes along with the containers. Without -v, docker compose down stops and removes containers but leaves the volume intact.`
+},
+
+// ─── INSTALLERS ───────────────────────────────────────────────
+{id:'i1',ch:'installer',type:'w',
+ q:'What does build_installer.sh produce on macOS vs Linux? Give the exact filename pattern for each.',
+ c:[{l:'macOS → Silmulator-1.0.0-macos-arm64.dmg',t:['.dmg','dmg','macos']},
+    {l:'Linux → Silmulator-1.0.0-linux-x86_64.AppImage',t:['.appimage','appimage','linux']}],
+ m:`macOS: dist/Silmulator-1.0.0-macos-arm64.dmg  (the exact arch suffix matches uname -m)
+Linux: dist/Silmulator-1.0.0-linux-x86_64.AppImage
+Both are produced by the same build_installer.sh script — it detects the OS with uname -s and runs a different packaging step (create-dmg or appimagetool) after the shared PyInstaller step.`
+},
+
+{id:'i2',ch:'installer',type:'mc',
+ q:'build_installer.bat produces a .zip instead of a .exe. What is the root cause?',
+ opts:[
+  {t:'NSIS (makensis) is not installed or not on PATH — the bat falls back to zipping the PyInstaller output folder.',c:true,
+   w:'Correct. The script checks "where makensis" — if it fails, the .exe packaging step is skipped and it zips dist\\Silmulator\\ instead. Installing NSIS 3.x and ensuring makensis is on PATH gives the .exe installer.'},
+  {t:'The Python version is below 3.10 — NSIS requires Python 3.10+ to generate Unicode installers.',c:false,
+   w:'NSIS is a standalone tool with no Python version requirement. The .zip fallback is purely about whether makensis is on PATH.'},
+  {t:'PyInstaller failed to bundle PyQt6 because Qt6 is not supported on Windows by build_installer.bat.',c:false,
+   w:'PyInstaller runs before the NSIS step. If PyInstaller fails, the script errors out entirely — it does not produce a .zip fallback.'},
+  {t:'The app must be code-signed before NSIS can wrap it; unsigned apps always fall back to .zip on Windows.',c:false,
+   w:'NSIS does not require code-signing. The .zip fallback is only about makensis availability.'},
+ ]
+},
+
+{id:'i3',ch:'installer',type:'w',
+ q:'A user on Linux downloads the AppImage and double-clicks it but nothing happens. What two steps are they missing?',
+ c:[{l:'chmod +x to mark it executable',t:['chmod','chmod +x','executable','+x','execute']},
+    {l:'run it from terminal or a file manager that supports AppImage',t:['./','terminal','run','execute','double','appimag']}],
+ m:`1. chmod +x Silmulator-1.0.0-linux-x86_64.AppImage — AppImages downloaded from the internet are not executable by default; the file permission bit must be set.
+2. Run it: ./Silmulator-1.0.0-linux-x86_64.AppImage — double-clicking may or may not work depending on the file manager and AppImage integration. Running from the terminal is the reliable path.
+Some Linux desktop environments also need libfuse2 (or the AppImage --appimage-extract-and-run flag) if FUSE is not available.`
+},
+
+{id:'i4',ch:'installer',type:'mc',
+ q:'A macOS user drags Silmulator.app from the DMG to Applications and double-clicks it. They get: "Silmulator can\'t be opened because Apple cannot check it for malicious software." What is the correct fix?',
+ opts:[
+  {t:'Right-click (Control-click) → Open → click Open in the dialog. This bypasses Gatekeeper for unsigned apps.',c:true,
+   w:'Correct. Gatekeeper quarantines unsigned apps on first launch. Right-click → Open shows a dialog that lets the user explicitly allow it. After that, subsequent double-clicks open normally.'},
+  {t:'Run sudo spctl --master-disable in Terminal to turn off Gatekeeper globally.',c:false,
+   w:'This works but disables all Gatekeeper checks system-wide — a heavy-handed approach that removes security from every app. Only appropriate for developer machines; never recommend this to end users.'},
+  {t:'Run chmod +x Silmulator.app/Contents/MacOS/Silmulator in Terminal.',c:false,
+   w:'The execute bit is already set by build_installer.sh. Gatekeeper\'s block is about code-signing and notarization, not file permissions.'},
+  {t:'Re-run build_installer.sh with the --sign flag to produce a signed build.',c:false,
+   w:'build_installer.sh has no --sign flag. Code-signing requires an Apple Developer certificate and separate codesign + notarytool commands — it is not built into the script.'},
+ ]
+},
+
+{id:'i5',ch:'installer',type:'w',
+ q:'What tool do all three installer builds (macOS, Linux, Windows) share, and what does it do?',
+ c:[{l:'PyInstaller',t:['pyinstaller','pyinstall']},
+    {l:'bundles Python interpreter + all deps into a self-contained app',t:['bundle','self-contain','no python','without python','interpreter','deps']}],
+ m:`All three use PyInstaller (configured via silmulator.spec). PyInstaller walks the import tree, collects all Python modules and native extension files (.so / .pyd), and bundles them together with a Python interpreter into a single directory or executable. The result can run on a machine with no Python installed. Each OS then wraps the PyInstaller output differently: create-dmg (macOS), appimagetool (Linux), or NSIS (Windows).`
+},
+
+// ─── REAL CODE ────────────────────────────────────────────────
+{id:'r1',ch:'code',type:'w',
+ q:'pyproject.toml lists three runtime dependencies. Name all three and briefly state what each is used for in Silmulator.',
+ snip:`<span class="cm"># pyproject.toml [project]</span>
+dependencies = [
+    <span class="str">"PyQt6>=6.4.0"</span>,
+    <span class="str">"numpy>=1.24.0"</span>,
+    <span class="str">"scipy>=1.10.0"</span>,
+]`,
+ c:[{l:'PyQt6 — GUI (Qt widgets, scene, events)',t:['pyqt6','qt','gui','widget']},
+    {l:'numpy — waveform arrays',t:['numpy','waveform','array','numeric']},
+    {l:'scipy — signal processing / waveform generation',t:['scipy','signal','waveform gen']},
+ ],
+ m:`PyQt6 (>=6.4.0) — the entire GUI: QApplication, QGraphicsScene, all blocks, wires, the main window. Without it the app cannot open.
+numpy (>=1.24.0) — waveform array generation in silmulator/utils/waveform.py. Used when the oscilloscope generates or returns CURVE? data.
+scipy (>=1.10.0) — signal processing for waveform generation (e.g. square/ramp/pulse shaping). Used alongside numpy in waveform.py.`
+},
+
+{id:'r2',ch:'code',type:'mc',
+ q:'pyproject.toml defines both [project.scripts] and [project.gui-scripts]. What is the difference between them on Windows?',
+ snip:`[project.scripts]
+silmulator = <span class="str">"silmulator.app:main"</span>
+
+[project.gui-scripts]
+silmulator-gui = <span class="str">"silmulator.app:main"</span>`,
+ opts:[
+  {t:'On Windows, gui-scripts wraps the entry point in a .exe with the Windows subsystem flag, hiding the console window; scripts shows a console.',c:true,
+   w:'Correct. pip generates silmulator.exe as a console app (Windows subsystem) and silmulator-gui.exe with the GUI subsystem flag. The GUI variant suppresses the black cmd window that would otherwise appear alongside the Qt window.'},
+  {t:'gui-scripts installs to a different directory (C:\\Users\\...\\GUI\\) while scripts installs to PATH.',c:false,
+   w:'Both install to the same Scripts\\ directory. The difference is the Windows subsystem flag in the generated .exe, not the install location.'},
+  {t:'gui-scripts is only read by PyInstaller; pip ignores it during pip install.',c:false,
+   w:'pip reads and honours both sections. It creates silmulator.exe (console) and silmulator-gui.exe (GUI subsystem) in the active Python environment\'s Scripts\\.'},
+  {t:'gui-scripts enables hardware-accelerated rendering via DirectX; scripts uses software rendering.',c:false,
+   w:'The GUI subsystem flag controls the console window, not rendering backend. Qt chooses its rendering pipeline independently.'},
+ ]
+},
+
+{id:'r3',ch:'code',type:'w',
+ q:'requirements.txt lists seven packages. Which two are dev-only (not needed to run the app) and why?',
+ snip:`PyQt6>=6.4.0
+PyQt6-Qt6>=6.4.0
+numpy>=1.24.0
+scipy>=1.10.0
+pybind11>=2.10.0
+pytest>=7.2.0
+pytest-qt>=4.2.0`,
+ c:[{l:'pytest and pytest-qt — only for running tests',t:['pytest','test','pytest-qt']},
+    {l:'pybind11 — only for building the C++ extension',t:['pybind11','pybind','c++','cpp','extension','build']}],
+ m:`pytest (>=7.2.0) and pytest-qt (>=4.2.0) are only needed to run the test suite. An end user running the installed app never needs them.
+pybind11 (>=2.10.0) is only needed to compile the C++ SCPI parser extension (scpi_core.so) from source. At runtime the app falls back to the pure-Python silmulator/scpi/parser.py if the .so is absent.
+The clean runtime deps are the four non-dev packages: PyQt6, PyQt6-Qt6, numpy, scipy. pyproject.toml correctly separates them under [project.optional-dependencies.dev].`
+},
+
+// ─── TRAPS ────────────────────────────────────────────────────
+{id:'t1',ch:'traps',type:'mc',
+ q:'You run python main.py on a remote Linux server and get: "qt.qpa.xcb: could not connect to display". What is the issue and which launch method avoids it?',
+ opts:[
+  {t:'The server has no X11 display; Qt cannot open a window. Use Docker NoVNC mode instead.',c:true,
+   w:'Correct. A headless server has no DISPLAY. Qt\'s xcb platform plugin requires a real or virtual X11 server. Docker NoVNC spins up Xvfb inside the container and serves the display to your browser — no DISPLAY on the host required.'},
+  {t:'PyQt6 is not installed; Qt falls back to xcb which is not bundled. Run pip install PyQt6-Qt6.',c:false,
+   w:'PyQt6-Qt6 is the Qt runtime library — it is listed in requirements.txt. If it were missing, the import would fail before Qt tries to open a display.'},
+  {t:'The QT_QPA_PLATFORM variable is not set; add export QT_QPA_PLATFORM=xcb before running.',c:false,
+   w:'xcb IS the platform trying to connect — that\'s what failed. Setting QT_QPA_PLATFORM=xcb explicitly doesn\'t create a display where none exists. You\'d need QT_QPA_PLATFORM=offscreen for headless testing, but that only works for tests, not the real GUI.'},
+  {t:'The app must be installed with pip install -e . before main.py can find the Qt libraries.',c:false,
+   w:'pip install -e . is not needed to run main.py — you can run it directly after pip install -r requirements.txt. The xcb error is purely about missing display server, not installation.'},
+ ]
+},
+
+{id:'t2',ch:'traps',type:'w',
+ q:'A developer on macOS uses Docker dev mode (docker-compose.dev.yml) to get a native Qt window. The window never appears and docker compose logs shows "cannot connect to display :0". What two things must the developer do on their Mac before starting the container?',
+ c:[{l:'install XQuartz',t:['xquartz','x11','x server','xquartz']},
+    {l:'run xhost +localhost (or allow network clients in XQuartz prefs)',t:['xhost','xhost +localhost','allow','network client','preferences']}],
+ m:`1. Install XQuartz (https://www.xquartz.org/) — XQuartz is the X11 server for macOS. Docker dev mode needs somewhere to send Qt draw calls; XQuartz provides it.
+2. In XQuartz Preferences → Security, enable "Allow connections from network clients". Then restart XQuartz. OR run "xhost +localhost" in a terminal each session.
+Without both steps, the DISPLAY environment variable set in the container points to a socket the container can't reach, and Qt fails to open a window.`
+},
+
+{id:'t3',ch:'traps',type:'w',
+ q:'After docker compose down, you restart with docker compose up -d and find all your saved .sil layouts are gone. What went wrong, and what command should you have used to stop the container without deleting data?',
+ c:[{l:'docker compose down -v deleted the named volume',t:['down -v','-v','volume','down -v']},
+    {l:'docker compose down (without -v) preserves the volume',t:['without -v','no -v','docker compose down','preserve','keep']}],
+ m:`docker compose down -v removes all named volumes, including silmulator-config which holds saved layouts at /root/.config/silmulator. If you ran down -v, the data is gone.
+To stop the container WITHOUT deleting saved data: docker compose down (no -v flag). This stops and removes the containers but leaves the named volume intact. Alternatively, docker compose stop pauses containers without removing anything at all.`
+},
+
+{id:'t4',ch:'traps',type:'mc',
+ q:'Docker NoVNC mode and Docker dev mode (X11 forwarding) both run Silmulator inside a container. What is the key difference a user experiences?',
+ opts:[
+  {t:'NoVNC renders in a browser tab with a small lag; X11 forwarding draws the window natively on the host desktop with near-native feel.',c:true,
+   w:'Correct. NoVNC encodes the virtual X11 framebuffer as images/video and streams them to the browser over WebSockets — small latency, any OS. X11 forwarding sends Qt draw commands to the host X server (XQuartz/VcXsrv/Linux X11) and renders natively — faster response, but requires an X server on the host.'},
+  {t:'NoVNC supports saving .sil files; X11 mode is read-only and cannot persist layouts.',c:false,
+   w:'Both modes support saving layouts. The volume mount or lack of one is what determines persistence, not the display method.'},
+  {t:'NoVNC requires Docker Desktop; X11 forwarding works with Docker Engine on Linux only.',c:false,
+   w:'NoVNC mode works with Docker Engine on Linux too — it only needs port 6080 exposed. X11 forwarding on Linux also works with Docker Engine (no Desktop needed).'},
+  {t:'X11 forwarding runs a second Xvfb inside the container; NoVNC connects to the host display directly.',c:false,
+   w:'It\'s the reverse. NoVNC runs Xvfb (and x11vnc) inside the container. X11 forwarding connects to the host\'s existing X server via DISPLAY — no Xvfb needed inside the container.'},
+ ]
+},
+
+{id:'t5',ch:'traps',type:'w',
+ q:'You pip install -r requirements.txt on a fresh machine and then run python main.py but get: ModuleNotFoundError: No module named "PyQt6". The package IS in requirements.txt. What is the most likely cause?',
+ c:[{l:'pip installed into wrong Python (multiple Pythons on PATH)',t:['wrong python','multiple python','which python','python3','pip3','different']},
+    {l:'or installed into a different venv than the one being used to run main.py',t:['venv','virtual env','activate','different env']}],
+ m:`The most common cause is that pip and python belong to different Python installations. For example, pip (pip3) installed packages into Python 3.11 but python resolves to Python 3.9 (which has no packages). Verify with: which python && which pip — they should share the same prefix.
+The other common cause is running pip inside a virtual environment but then running python main.py with the system Python (without activating the venv). Fix: source .venv/bin/activate before running python main.py, OR use uv run python main.py which always uses the project venv.`
+},
+
+]; // end BANK
+
+// ════════════════════════════════════════════════════════════════
+const CHS=['dev','docker','installer','code','traps'];
+let active=new Set(CHS),qs=[],idx=0,saved={},mcR={},wR={};
+
+document.querySelectorAll('.chip:not(.all)').forEach(c=>{
+  c.addEventListener('click',()=>{
+    const ch=c.dataset.ch;
+    active.has(ch)?active.delete(ch):active.add(ch);
+    c.classList.toggle('on',active.has(ch));
+    document.querySelector('.chip.all').classList.toggle('on',active.size===CHS.length);
+    upMeta();
+  });
+});
+document.querySelector('.chip.all').addEventListener('click',()=>{
+  const allOn=active.size===CHS.length;
+  allOn?active.clear():CHS.forEach(c=>active.add(c));
+  document.querySelectorAll('.chip:not(.all)').forEach(c=>c.classList.toggle('on',!allOn));
+  document.querySelector('.chip.all').classList.toggle('on',!allOn);
+  upMeta();
+});
+function upMeta(){const n=BANK.filter(q=>active.has(q.ch)).length;document.getElementById('smeta').textContent=`${n} question${n===1?'':'s'} selected`;}
+
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+function go(){
+  qs=BANK.filter(q=>active.has(q.ch));
+  if(document.getElementById('sh').checked)shuf(qs);
+  if(!qs.length)return;
+  idx=0;saved={};mcR={};wR={};
+  show('Q');render();
+}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+
+function render(){
+  const q=qs[idx],n=qs.length;
+  document.getElementById('qn').textContent=`Q ${idx+1} / ${n}`;
+  document.getElementById('pf').style.width=((idx+1)/n*100)+'%';
+  document.getElementById('ct').textContent=q.ch;
+  const tt=document.getElementById('tt');
+  tt.textContent=q.type==='mc'?'MC':'Written';
+  tt.className='ttag '+(q.type==='mc'?'mc':'wr');
+  document.getElementById('qt').innerHTML=q.q;
+  const sn=document.getElementById('qs');
+  if(q.snip){sn.style.display='block';sn.innerHTML=q.snip;}else sn.style.display='none';
+  document.getElementById('MA').style.display=q.type==='mc'?'block':'none';
+  document.getElementById('WA').style.display=q.type!=='mc'?'block':'none';
+  q.type==='mc'?renderMC(q):renderW(q);
+  document.getElementById('bp').disabled=idx===0;
+  const last=idx===n-1;
+  document.getElementById('bn').style.display=last?'none':'inline-block';
+  document.getElementById('bf').style.display=last?'inline-block':'none';
+}
+
+function renderMC(q){
+  const list=document.getElementById('mo');list.innerHTML='';
+  const fb=document.getElementById('mf');fb.style.display='none';
+  const prev=mcR[q.id];
+  shuf([...q.opts]).forEach(o=>{
+    const li=document.createElement('li');li.tabIndex=0;
+    li.dataset.correct=o.c?'true':'false';li.dataset.why=o.w;li.textContent=o.t;
+    if(prev)li.classList.add('lk');
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('ok');
+      mcR[q.id]=ok?'ok':'no';
+      fb.style.display='block';fb.className='mfb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+    });
+    li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')li.click();});
+    list.appendChild(li);
+  });
+  if(prev){fb.style.display='block';fb.className='mfb '+(prev==='ok'?'ok':'no');
+    fb.textContent=prev==='ok'?'✓ Marked correct.':'✗ Marked incorrect.';}
+}
+
+function renderW(q){
+  const sv=saved[q.id]||{};
+  document.getElementById('wa').value=sv.t||'';
+  const kr=document.getElementById('kr');kr.style.display=sv.kr?'block':'none';
+  if(sv.kr){document.getElementById('kt').innerHTML=sv.kr.tally;document.getElementById('kc').innerHTML=sv.kr.chips;}
+  document.getElementById('md').style.display=sv.ms?'block':'none';
+  if(sv.ms)document.getElementById('mt').textContent=q.m;
+  document.getElementById('sr').style.display=sv.ms?'flex':'none';
+}
+
+function saveW(){
+  const q=qs[idx];if(!q||q.type!=='w')return;
+  if(!saved[q.id])saved[q.id]={};
+  saved[q.id].t=document.getElementById('wa').value;
+}
+
+function chkW(){
+  const q=qs[idx];
+  const txt=(document.getElementById('wa').value||'').toLowerCase();
+  const hits=q.c.map(c=>({l:c.l,h:c.t.some(t=>txt.includes(t.toLowerCase()))}));
+  const got=hits.filter(h=>h.h).length;
+  const tally=`<strong>${got} / ${hits.length} key concepts detected</strong>`;
+  const chips=hits.map(h=>`<span class="kc ${h.h?'h':'m'}">${h.h?'✓':'✗'} ${h.l}</span>`).join('');
+  document.getElementById('kt').innerHTML=tally;
+  document.getElementById('kc').innerHTML=chips;
+  document.getElementById('kr').style.display='block';
+  if(!saved[q.id])saved[q.id]={};
+  saved[q.id].kr={tally,chips};
+  saved[q.id].t=document.getElementById('wa').value;
+}
+
+function showM(){
+  const q=qs[idx];
+  document.getElementById('mt').textContent=q.m;
+  document.getElementById('md').style.display='block';
+  document.getElementById('sr').style.display='flex';
+  if(!saved[q.id])saved[q.id]={};
+  saved[q.id].ms=true;saved[q.id].t=document.getElementById('wa').value;
+}
+
+function rate(v){
+  wR[qs[idx].id]=v;
+  if(!saved[qs[idx].id])saved[qs[idx].id]={};
+  saved[qs[idx].id].rate=v;
+  document.getElementById('sr').querySelectorAll('button').forEach(b=>b.style.opacity='.35');
+  const tgt=v==='k'?document.getElementById('sr').children[1]:document.getElementById('sr').children[2];
+  if(tgt)tgt.style.opacity='1';
+}
+
+function prev(){saveW();if(idx>0){idx--;render();}}
+function next(){saveW();if(idx<qs.length-1){idx++;render();}}
+
+function results(){
+  saveW();
+  const mcTotal=qs.filter(q=>q.type==='mc').length;
+  const mcOk=Object.values(mcR).filter(v=>v==='ok').length;
+  const pct=mcTotal?Math.round(mcOk/mcTotal*100):0;
+  document.getElementById('rb').textContent=`${mcOk}/${mcTotal}`;
+  document.getElementById('rl').textContent=(pct===100?'Perfect MC score!':pct>=60?`${pct}% — review misses below`:`${pct}% — re-read lesson 0003`)+` · Written: check self-ratings`;
+
+  const misses=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const rm=document.getElementById('rm');
+  rm.innerHTML=misses.length?misses.map(q=>`<div class="miss">${q.q.slice(0,72)}…<span class="mcorr">✓ ${q.opts.find(o=>o.c).t.slice(0,55)}</span></div>`).join(''):'<em style="color:var(--dim);font-size:.86rem">None!</em>';
+
+  const revW=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const rw=document.getElementById('rw');
+  rw.innerHTML=revW.length?revW.map(q=>`<div class="miss">${q.q.slice(0,72)}…</div>`).join(''):'<em style="color:var(--dim);font-size:.86rem">None flagged.</em>';
+
+  show('R');
+}
+
+function rev(){
+  const mc=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const wr=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const all=[...mc,...wr];if(!all.length)return;
+  mc.forEach(q=>delete mcR[q.id]);
+  wr.forEach(q=>{delete wR[q.id];delete saved[q.id];});
+  qs=all;idx=0;show('Q');render();
+}
+</script>
+</body>
+</html>

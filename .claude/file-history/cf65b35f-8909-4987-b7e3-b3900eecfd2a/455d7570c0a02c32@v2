@@ -1,0 +1,27 @@
+-- flat_book_tb.vhd — file-driven testbench (SCAFFOLD).
+-- Plan: .claude/plans/vhdl-flat-book.md.
+--
+-- Reads the golden CSV produced by cpp/itch/golden_vectors_main.cpp
+-- (schema version asserted from the header comment before any op runs),
+-- applies one op per clock cycle, asserts level totals / best outputs /
+-- clamp pulses match the C++ oracle exactly, and reports total cycles.
+-- GHDL exits nonzero on any assertion failure — that exit code IS the
+-- parity test consumed by tests/test_vhdl_flat_book.py.
+--
+-- TODO(vhdl-2): clock/reset gen, CSV reader (std.textio), op driver,
+-- level-total assertions. TODO(vhdl-3): best bid/ask + clamp assertions,
+-- cycle counter report for the DEPTH sweep.
+
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity flat_book_tb is
+end entity flat_book_tb;
+
+architecture sim of flat_book_tb is
+begin
+  -- TODO(vhdl-2): instantiate flat_book, drive ops from the CSV, assert.
+  assert false
+    report "flat_book_tb is scaffolded but not implemented (plan: vhdl-flat-book)"
+    severity failure;
+end architecture sim;

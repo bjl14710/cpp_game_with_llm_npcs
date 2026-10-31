@@ -1,5 +1,7 @@
 #include "HostChatRouter.hpp"
 
+#include "AsciiText.hpp"
+
 #include "NpcAction.hpp"
 
 namespace llm_npc {
@@ -58,14 +60,20 @@ bool HostChatRouter::routeReply(const ChatReply& reply) {
     const auto text = npc.onReplyArrived(reply);
 
     if (reply.ok) {
+        // The fallback is RAW model text: onReplyArrived returns nullopt when
+        // the reply id does not match the NPC's pending one, which is
+        // reachable today because an Npc has a single pendingId_ shared across
+        // askers. Folding here too, or the "don?t" this release fixes comes
+        // straight back for every bystander in exactly the concurrent-dialogue
+        // case the report was about. Found by behaviour QA, not by a test.
+        const std::string spoken =
+            text ? *text : toRenderableAscii(reply.content);
         server_.sendToPlayer(playerId, MessageType::ChatReply,
-                             {{"npc", npcIndex},
-                              {"ok", true},
-                              {"text", text ? *text : reply.content}});
+                             {{"npc", npcIndex}, {"ok", true}, {"text", spoken}});
         // Bystanders see the NPC speak and feel it — the requester included,
         // which keeps every client's rendering state identical.
         server_.broadcast(MessageType::NpcSpeechBubble,
-                          {{"npc", npcIndex}, {"text", text ? *text : reply.content}});
+                          {{"npc", npcIndex}, {"text", spoken}});
         announceNpcMood(npcIndex);
     } else {
         // Failures concern only the player who asked (plan edge case).

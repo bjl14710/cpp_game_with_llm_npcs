@@ -1,0 +1,52 @@
+// Tests for the gun-aim fix (plan: .claude/plans/aim-styles-preview.md, Part A).
+//
+// SCAFFOLD: every case is decorated with `* doctest::skip()` so the suite stays
+// green until the feature is implemented. Remove the skip decorator as each
+// piece lands. The bodies are stubs — replace the TODO(aim) blocks with real
+// assertions. `lookDirection` already exists (a scaffold placeholder in
+// Math.hpp) so these reference the real API and compile today.
+#include "Math.hpp"
+#include "Weapon.hpp"
+#include "World.hpp"
+#include "doctest.h"
+
+using namespace llm_npc;
+
+// Criterion: lookDirection(yaw, 0) reproduces the horizontal forward
+// (sin yaw, 0, cos yaw) — i.e. it stays byte-compatible with the movement
+// helper flatForward() at zero pitch, so aim and movement never disagree
+// horizontally.
+TEST_CASE("lookDirection matches the horizontal forward at zero pitch" *
+          doctest::skip()) {
+    // TODO(aim): for several yaws, assert lookDirection(yaw,0) ==
+    // normalize({sin(yaw),0,cos(yaw)}) within a small epsilon.
+    CHECK(true);
+}
+
+// Criterion: the yaw/pitch convention matches the camera basis in
+// RaylibRenderer::beginFrame: yaw 0 -> +Z, yaw 90 -> +X, pitch up -> +Y.
+TEST_CASE("lookDirection yaw/pitch convention" * doctest::skip()) {
+    // TODO(aim): CHECK lookDirection(0,0) ~ (0,0,1); lookDirection(90,0) ~
+    // (1,0,0); lookDirection(0,+45).y > 0; lookDirection(0,-45).y < 0.
+    CHECK(true);
+}
+
+// Criterion: pitch reaches the projectile. A pitched-down shot spawns a
+// projectile whose direction.y < 0, originating at eye height (previously the
+// origin was the feet at y==0 and the direction was flattened to y==0).
+TEST_CASE("playerAttack fires along the full 3D aim from eye height" *
+          doctest::skip()) {
+    // TODO(aim): build a World with the pistol equipped, call
+    // playerAttack(lookDirection(yaw, -30)), then inspect the spawned
+    // projectile: direction.y < 0 and position.y == kEyeHeight.
+    CHECK(true);
+}
+
+// Criterion (regression): aim is derived from the live look every shot, not a
+// stored constant — firing while pitched up vs level yields different
+// direction.y. This is the guard against the moonwalk-class bug returning.
+TEST_CASE("player aim is derived per-shot, not stored" * doctest::skip()) {
+    // TODO(aim): fire at pitch +40 and at pitch 0; assert the two projectiles'
+    // direction.y differ.
+    CHECK(true);
+}

@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0004 — FPGAs, calling them from C++, and running LLMs on them</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 30px; margin: 8px 0 6px; line-height: 1.25; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .chip-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.4;
+  }
+
+  .arch-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0 18px;
+  }
+  .arch-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px; font-size: 13.5px;
+  }
+  .arch-card h4 { margin: 0 0 8px; font-size: 14px; color: var(--accent-2); }
+  .arch-card ul { margin: 0; padding-left: 18px; }
+  .arch-card.cpu { border-top: 3px solid #a0d8ff; }
+  .arch-card.gpu { border-top: 3px solid #c4e08a; }
+  .arch-card.fpga { border-top: 3px solid #ffb780; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .arch-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0004 &middot; cpp_games / docs / learning</div>
+  <h1>FPGAs, calling them from C++, and running LLMs on them</h1>
+  <p class="why">Why this matters: your <code class="inline">cpp_game_with_llm_npcs</code> already uses a sidecar for inference. Researchers are now putting that same inference workload on FPGAs, and getting 1.1&ndash;3.3&times; the speed of a GPU at 3&ndash;6&times; less energy. This lesson is the conceptual bridge from "Ollama on a GPU" to "what if Wren's brain were a programmable chip instead?"</p>
+</header>
+
+<h2>1. What an FPGA actually is</h2>
+
+<p>An <b>FPGA</b> (Field-Programmable Gate Array) is a chip whose <em>wiring</em> is programmable. A CPU has a fixed circuit that fetches instructions and runs them. An FPGA ships with a sea of generic logic blocks and wires, and at boot you load a configuration that <em>becomes</em> a specific custom circuit. You're not running software on hardware &mdash; you're describing hardware that the chip then is.</p>
+
+<div class="chip-diagram">
+   inside an FPGA, every cell is one of these:
+
+   +----+----+----+----+        LUT  = a tiny 4- or 6-input lookup table
+   |LUT |LUT |LUT |LUT |              that you fill in to implement
+   |----+ FF +----+ FF |              any boolean function
+   |LUT |    |LUT |    |        FF   = a flip-flop (one bit of state)
+   +----+----+----+----+        DSP  = a dedicated multiplier-accumulator
+   |LUT |LUT |DSP |LUT |        BRAM = a small on-chip RAM block
+   |----+ FF |    | FF |
+   |LUT |    |    |    |        Routing fabric (the lines between)
+   +----+----+----+----+        is itself programmable.
+   |BRAM|BRAM|LUT |LUT |
+   |    |    |----+ FF |        You "program" an FPGA by deciding which
+   |    |    |LUT |    |        cells light up and how they're wired
+   +----+----+----+----+        together. The result is a circuit.</div>
+
+<p>You describe what you want using a <b>hardware description language</b> &mdash; Verilog or VHDL &mdash; or with <b>High-Level Synthesis (HLS)</b>, where you write C/C++ and a compiler produces the HDL for you. A synthesizer reduces your description to LUTs/FFs/DSPs, a placer assigns them to physical cells, a router connects them, and the final output is a <b>bitstream</b>: a file that, when loaded into the chip, rewires it to be the circuit you described.</p>
+
+<div class="callout">
+  <h3>The one-sentence mental model</h3>
+  <p>An FPGA is a chip where you specify the schematic at boot time, then run signals through it &mdash; not instructions through a fixed CPU.</p>
+</div>
+
+<h2>2. FPGA vs. CPU vs. GPU</h2>
+
+<p>All three are silicon. They diverge on <em>what they're optimized to do</em>.</p>
+
+<div class="arch-row">
+  <div class="arch-card cpu">
+    <h4>CPU (your game loop)</h4>
+    <ul>
+      <li>Few (4&ndash;16) very smart cores</li>
+      <li>Branch prediction, deep caches, out-of-order execution</li>
+      <li>Optimized for <b>latency</b> on serial code with unpredictable control flow</li>
+      <li>Programmed in C++/Rust/etc.</li>
+    </ul>
+  </div>
+  <div class="arch-card gpu">
+    <h4>GPU (Ollama, today)</h4>
+    <ul>
+      <li>Thousands of small cores, ganged into "warps"</li>
+      <li>Massive memory bandwidth, simple cache</li>
+      <li>Optimized for <b>throughput</b> on regular parallel math (matrices, pixels)</li>
+      <li>Programmed in CUDA/Vulkan/OpenCL</li>
+    </ul>
+  </div>
+  <div class="arch-card fpga">
+    <h4>FPGA</h4>
+    <ul>
+      <li>Sea of LUTs/FFs/DSPs wired to your spec</li>
+      <li>You build a deep custom pipeline; throughput = 1 result per clock</li>
+      <li>Optimized for <b>determinism + efficiency</b> on a single fixed workload</li>
+      <li>Programmed in Verilog/VHDL/HLS</li>
+    </ul>
+  </div>
+</div>
+
+<table class="compare">
+  <thead><tr><th>Question</th><th>CPU</th><th>GPU</th><th>FPGA</th></tr></thead>
+  <tbody>
+    <tr><td>"What's it good at?"</td><td>Irregular code, branches, single-threaded latency</td><td>Lots of identical math in parallel</td><td>One specific dataflow done with minimal energy</td></tr>
+    <tr><td>"How do I program it?"</td><td>Write code, compile, run</td><td>Write a kernel, dispatch from host</td><td>Describe a circuit, synthesize, load bitstream</td></tr>
+    <tr><td>"Time from idea to running"</td><td>Seconds (compile)</td><td>Seconds (compile)</td><td>Hours (synth + place &amp; route)</td></tr>
+    <tr><td>"Change behaviour at runtime?"</td><td>Trivially &mdash; new code</td><td>Trivially &mdash; new kernel</td><td>Possible (reload bitstream) but heavy</td></tr>
+    <tr><td>"Energy efficiency"</td><td>Worst &mdash; lots of silicon never used</td><td>Better on its workload</td><td>Best &mdash; only the circuit you needed exists</td></tr>
+    <tr><td>"Cost to get started"</td><td>You have one</td><td>You have one</td><td>$500 dev board &rarr; $40k data-center card</td></tr>
+  </tbody>
+</table>
+
+<p>The takeaway: an FPGA shines when you have <b>one workload</b> you'll run <b>millions of times</b> and you care about <b>energy and tail latency</b>. That's not a game loop &mdash; game logic branches too much. But it <em>is</em> an LLM doing matrix-multiply after matrix-multiply.</p>
+
+<h2>3. How a C++ program "calls" an FPGA</h2>
+
+<p>This is the part that maps cleanly onto what you've already built. From a C++ program's point of view, an FPGA is an <b>accelerator at the other end of a bus</b> &mdash; usually PCIe. You don't "call a function" on it the way you call <code class="inline">printf</code>. You move data into its memory, kick off a kernel, and wait for the result.</p>
+
+<div class="chip-diagram">
+   your C++ host           the bus            the FPGA card
+   +---------------+      +--------+      +--------------------+
+   | game / driver | ===> |  PCIe  | ===> |  bitstream is your |
+   | OpenCL/XRT API|      | (or    |      |  custom circuit:   |
+   |               | <=== |  HBM   | <=== |  matrix multiply,  |
+   +---------------+      |  link) |      |  attention kernel, |
+                          +--------+      |  whatever you need |
+                                          +--------------------+
+   data flow:
+   1. host allocates a buffer (host RAM, mapped to FPGA card via OpenCL)
+   2. host writes input data into it
+   3. host enqueues the kernel  (a one-line API call)
+   4. FPGA does the work (everything runs in parallel inside)
+   5. host waits, then reads the output buffer</div>
+
+<p>Here is the same pattern in C++ using AMD's XRT (the Xilinx Runtime, which lives behind the Vitis HLS toolchain). It looks deceptively like our <code class="inline">LlmClient</code>:</p>
+
+<pre class="code"><span class="pp">#include</span> <span class="str">&lt;xrt/xrt_device.h&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;xrt/xrt_kernel.h&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;xrt/xrt_bo.h&gt;</span>
+
+<span class="typ">int</span> main() {
+    <span class="com">// 1. Open the FPGA card and load the bitstream — analogous to</span>
+    <span class="com">//    "ollama serve starting up with a model loaded".</span>
+    <span class="kw">auto</span> device = xrt::device(<span class="num">0</span>);
+    <span class="kw">auto</span> uuid   = device.load_xclbin(<span class="str">"matmul_kernel.xclbin"</span>);
+    <span class="kw">auto</span> kernel = xrt::kernel(device, uuid, <span class="str">"matmul"</span>);
+
+    <span class="com">// 2. Allocate device buffers and fill them — like building a JSON body.</span>
+    <span class="kw">auto</span> A = xrt::bo(device, N*N*<span class="kw">sizeof</span>(<span class="typ">float</span>), kernel.group_id(<span class="num">0</span>));
+    <span class="kw">auto</span> B = xrt::bo(device, N*N*<span class="kw">sizeof</span>(<span class="typ">float</span>), kernel.group_id(<span class="num">1</span>));
+    <span class="kw">auto</span> C = xrt::bo(device, N*N*<span class="kw">sizeof</span>(<span class="typ">float</span>), kernel.group_id(<span class="num">2</span>));
+    A.write(matrixA); A.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    B.write(matrixB); B.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+    <span class="com">// 3. Launch the kernel — like cli.Post("/api/chat", ...) in LlmClient.cpp.</span>
+    <span class="kw">auto</span> run = kernel(A, B, C, N);
+
+    <span class="com">// 4. Wait for it (blocking) — or .start()/.wait() async like our worker thread does.</span>
+    run.wait();
+
+    <span class="com">// 5. Read result back to host RAM — like parsing res-&gt;body into reply.content.</span>
+    C.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    C.read(resultMatrix);
+}</pre>
+
+<p>Notice the five-step shape: <b>set up &rarr; ship inputs &rarr; launch &rarr; wait &rarr; read outputs</b>. That's structurally identical to a network call to Ollama. The only difference is what's on the other side: instead of a process talking HTTP, it's a circuit talking memory.</p>
+
+<h2>4. LLMs on FPGAs &mdash; the exciting part</h2>
+
+<p>Until recently the idea of running a language model on an FPGA was a research curiosity. As of 2026 it's real, and the results are interesting enough that AMD and a couple of startups are pouring money into it.</p>
+
+<div class="callout real">
+  <h3>Real 2026 numbers</h3>
+  <p>The <b>LUT-LLM</b> paper (Nov 2025) implemented Qwen 3 1.7B &mdash; not a toy &mdash; on an AMD Alveo V80 FPGA. On the generation step it reported <b>1.10&ndash;3.29&times; faster than a GPU</b>, and <b>3.05&ndash;6.60&times; better energy efficiency</b>. A Versal/Alveo system running Mamba2-2.7B hit ~93 tokens/s on the prefill, ~200 tokens/s in decode on an Alveo U280, and ~333 tokens/s in decode on a VHK158.</p>
+</div>
+
+<p>Why does an FPGA win on LLM inference at all? Three reasons:</p>
+
+<ol>
+  <li><b>The arithmetic is regular and quantized.</b> Modern LLM inference is mostly multiplying weight matrices by activation vectors at 4- or 8-bit precision. That's the workload where an FPGA's dedicated DSPs and customizable bit widths beat a GPU's fixed FP16/BF16 lanes.</li>
+  <li><b>You can build the exact dataflow.</b> A GPU has fixed-size warps and a fixed cache hierarchy. An FPGA lets you wire one layer's output straight into the next layer's input <em>on chip</em>, without round-tripping through HBM. That's where the energy savings come from.</li>
+  <li><b>Lookup-table tricks like LUT-LLM.</b> A 2025 insight: at very low bit-width, you can replace some multiplies with pre-baked table lookups in the FPGA's BRAM. CPUs and GPUs can't do that cheaply; FPGAs absolutely can &mdash; LUTs are their native unit.</li>
+</ol>
+
+<table class="compare">
+  <thead><tr><th>Card</th><th>Model</th><th>Throughput</th><th>Context</th></tr></thead>
+  <tbody>
+    <tr><td>AMD Alveo V80</td><td>Qwen 3 1.7B (LUT-LLM)</td><td>1.1&ndash;3.3&times; a GPU baseline</td><td>Generation, mid-2026 prototype</td></tr>
+    <tr><td>Alveo U280</td><td>Mamba2-2.7B</td><td>93 tok/s prefill &middot; ~200 tok/s decode</td><td>Spatial accelerator</td></tr>
+    <tr><td>Versal VCK190</td><td>Mamba2-2.7B</td><td>7.21 tok/s</td><td>Embedded class card</td></tr>
+    <tr><td>VHK158</td><td>Mamba2-2.7B</td><td>~333 tok/s decode</td><td>HBM-equipped data-center card</td></tr>
+  </tbody>
+</table>
+
+<p>The catches, in plain English:</p>
+<ul>
+  <li>An Alveo V80 is several thousand dollars; a VHK158 is tens of thousands. For a hobby game, you'd use a GPU.</li>
+  <li>"Programming" the FPGA means an HLS or HDL flow, a multi-hour synthesis run, and probably $1k+ of Vitis tooling (or its open-source approximations).</li>
+  <li>You target <b>one model at a time</b>. Switching from Qwen 3 to Llama 3 means reloading a different bitstream &mdash; potentially recompiling it.</li>
+</ul>
+
+<h2>5. In your project (hypothetically)</h2>
+
+<p>Your game doesn't have an FPGA in it. But here's the punchline: <b>your <code class="inline">LlmClient</code> wouldn't care if you added one</b>. The whole reason we made <code class="inline">processOne()</code> the only place that knows about Ollama is precisely so we could replace it later. Here's what would change &mdash; and what wouldn't.</p>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:67 — today</small>
+<pre class="code"><span class="com">// Sidecar implementation, HTTP to Ollama.</span>
+ChatReply LlmClient::processOne(<span class="kw">const</span> ChatRequest&amp; req) {
+    httplib::Client cli(config_.host, config_.port);
+    <span class="kw">auto</span> res = cli.Post(<span class="str">"/api/chat"</span>, buildJson(req), <span class="str">"application/json"</span>);
+    <span class="com">// ... parse and return ...</span>
+}</pre>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:67 — hypothetical FPGA backend</small>
+<pre class="code"><span class="com">// Same signature, different transport — XRT call to a Qwen kernel on Alveo.</span>
+ChatReply LlmClient::processOne(<span class="kw">const</span> ChatRequest&amp; req) {
+    <span class="kw">auto</span> tokens = tokenize(req);                            <span class="com">// CPU</span>
+    inputBuf_.write(tokens.data());
+    inputBuf_.sync(XCL_BO_SYNC_BO_TO_DEVICE);                <span class="com">// PCIe -&gt; FPGA</span>
+    <span class="kw">auto</span> run = qwenKernel_(inputBuf_, outputBuf_, tokens.size());
+    run.wait();                                              <span class="com">// FPGA does the work</span>
+    outputBuf_.sync(XCL_BO_SYNC_BO_FROM_DEVICE);             <span class="com">// FPGA -&gt; PCIe</span>
+    ChatReply reply;
+    reply.id = req.id;
+    reply.ok = <span class="kw">true</span>;
+    reply.content = detokenize(outputBuf_);                  <span class="com">// CPU</span>
+    <span class="kw">return</span> reply;
+}</pre>
+
+<p>The function body changes completely. But nothing else in the codebase moves:</p>
+
+<ul>
+  <li><code class="inline">LlmClient::submit()</code>, <code class="inline">drainReplies()</code>, <code class="inline">workerLoop()</code> &mdash; unchanged.</li>
+  <li><code class="inline">Npc</code>, <code class="inline">Persona</code>, history-trimming &mdash; unchanged.</li>
+  <li><code class="inline">DialogUI</code>, <code class="inline">main.cpp</code> &mdash; unchanged.</li>
+  <li>Your async drain pattern, your thread-safe queues &mdash; unchanged.</li>
+</ul>
+
+<p>That's the whole reward for the encapsulation we did in lesson 0001. From the game's point of view, "Wren's brain is on an FPGA" and "Wren's brain is in a Python process down the hall" are indistinguishable as long as <code class="inline">processOne()</code> turns a request into a reply.</p>
+
+<h2>6. Often confused with...</h2>
+
+<h3>FPGA vs. ASIC</h3>
+<p>An <b>ASIC</b> (Application-Specific Integrated Circuit) is a chip designed and fabricated for one job &mdash; an NVIDIA H100 is an ASIC, your phone's neural engine is an ASIC. It's faster and more power-efficient than the same design on an FPGA, but the design is frozen in silicon. FPGA is the reprogrammable cousin: you give up some efficiency in exchange for being able to ship a new bitstream tomorrow. Most chips that ship to consumers in volume are ASICs; FPGAs dominate prototyping, niche workloads, and any case where the workload mutates faster than chip fab cycles (years).</p>
+
+<h3>FPGA vs. GPU</h3>
+<p>Both are massively parallel and live on PCIe. The difference is rigidity. A GPU's parallelism is fixed: 32-wide warps, fixed-size caches, a fixed instruction set. You write a kernel that maps your problem onto that grid. An FPGA's parallelism is whatever you wire up: 17-wide pipelines, 12-bit arithmetic, on-chip RAM blocks placed where you need them. GPUs are easier to program and have better tooling; FPGAs are more efficient when your workload is regular and you're willing to spend weeks tuning.</p>
+
+<h3>FPGA vs. microcontroller</h3>
+<p>A microcontroller (Arduino, STM32) is a tiny CPU. An FPGA can <em>contain</em> a microcontroller as one circuit among many &mdash; that's called a "soft core" &mdash; but the FPGA itself is fundamentally different: customizable wiring, not fixed CPU logic. People sometimes use FPGAs because they need <em>both</em> a tiny CPU and a hardware pipeline next to it.</p>
+
+<h3>FPGA on a board vs. eFPGA inside an SoC</h3>
+<p>Modern AMD Versal chips put a small FPGA fabric <em>inside</em> the same package as ARM CPU cores and a GPU. This is an <b>embedded FPGA (eFPGA)</b>. From a programmer's view it's still "configurable hardware you call from C++"; from a hardware view it lives on the same die as everything else, so the PCIe step disappears. The LLM-on-FPGA work increasingly targets Versal AI Edge SoCs for exactly this reason.</p>
+
+<h2>7. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">You "program" an FPGA. What does that actually mean at the chip level?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="That describes a CPU. An FPGA has no instruction set in the conventional sense — there's no fetch/decode/execute cycle running your code.">
+      You write machine instructions to a small instruction memory and the chip executes them in order.
+    </li>
+    <li data-correct="true" data-why="Right. The bitstream programs which LUTs/FFs/DSPs are active and how they're wired. After loading, the chip *is* the circuit you described — until you load a different bitstream.">
+      You load a bitstream that configures which logic blocks are active and how they're wired into a circuit.
+    </li>
+    <li data-correct="false" data-why="GPUs run kernels — many copies of one program across thousands of threads. An FPGA doesn't have threads at all.">
+      You upload a kernel that runs across thousands of parallel threads on a fixed instruction set.
+    </li>
+    <li data-correct="false" data-why="That happens once in the silicon fab, years before you buy the chip. FPGAs are programmable *after* fabrication — that's the point.">
+      You permanently etch a custom design into the silicon during the fabrication process.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Why is an FPGA <em>not</em> a good fit for your game's main loop (the SFML/OpenGL update-and-render code in <code class="inline">cpp_shooter_game</code> or <code class="inline">cpp_racing_game</code>)?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="FPGAs absolutely can handle floating point — Versal DSPs do FP32 and FP16. That's not the disqualifier.">
+      FPGAs can only do integer math, and game physics needs floats.
+    </li>
+    <li data-correct="true" data-why="Right. Game-loop code is full of branches that depend on player input — different code paths each frame. FPGAs shine on regular dataflow where the same operation repeats; they're terrible at branchy serial logic. A CPU is the right tool there.">
+      Game-loop code is branchy and irregular — the FPGA strength is regular dataflow, not unpredictable control flow.
+    </li>
+    <li data-correct="false" data-why="SFML is a software library — it doesn't care what chip it runs on. The disqualifier is conceptual, not platform-specific.">
+      SFML doesn't have FPGA bindings.
+    </li>
+    <li data-correct="false" data-why="Capacity is plenty for game logic. The reason it's wrong is *type* of workload, not size.">
+      An FPGA doesn't have enough memory to hold the game state.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">In the hypothetical FPGA backend for <code class="inline">LlmClient::processOne()</code>, the host C++ code calls <code class="inline">inputBuf_.sync(XCL_BO_SYNC_BO_TO_DEVICE)</code>. What is this doing, and why is it necessary?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="There's no such thing in this pattern. xclbin is the bitstream file, loaded once at startup, not per-request.">
+      Loading a fresh bitstream into the FPGA so it knows what model to run.
+    </li>
+    <li data-correct="true" data-why="Right. The buffer's contents live in host RAM until you sync them; sync copies them over PCIe to the FPGA's local memory so the kernel can read them. Without it the FPGA would read stale or empty data.">
+      Copying the buffer contents over PCIe from host RAM to the FPGA's on-card memory so the kernel can read them.
+    </li>
+    <li data-correct="false" data-why="That'd be a programming error in xrt::bo construction, not a sync operation. The buffer is allocated by xrt::bo earlier.">
+      Allocating a new buffer on the FPGA each time.
+    </li>
+    <li data-correct="false" data-why="Mutexes live on the host. The PCIe transfer is the synchronisation; there's no shared-memory lock involved.">
+      Acquiring a mutex so the worker thread doesn't read while the FPGA writes.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Why do FPGAs win on energy efficiency for LLM inference (~3&ndash;6&times; a GPU in the LUT-LLM result)?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Same chemistry, very different transistor counts and densities. The win comes from *what gets used*, not from running cooler at the same job.">
+      FPGAs run at a much lower temperature, so their transistors switch with less leakage.
+    </li>
+    <li data-correct="false" data-why="Higher clocks usually cost more power per operation, not less. FPGAs typically clock *lower* than GPUs.">
+      FPGAs clock higher than GPUs, so each operation takes fewer joules.
+    </li>
+    <li data-correct="true" data-why="Right. A GPU runs at fixed FP16/BF16 lanes, fixed cache, fixed warp width — silicon you didn't need still draws power. An FPGA's bitstream only lights up exactly the circuit your workload uses, at exactly the bit-widths it uses, and pipes layer-to-layer data on-chip instead of round-tripping through HBM.">
+      The bitstream only lights up the circuit the workload actually uses, at the bit-widths it actually uses, and routes data on-chip instead of through HBM.
+    </li>
+    <li data-correct="false" data-why="Memory hierarchies are still part of the design — HBM is on many FPGA cards (e.g. VHK158, VCU128) precisely because LLM weights are big. The win isn't 'no memory', it's 'less unnecessary round-tripping'.">
+      FPGAs don't use any memory hierarchy — the weights are baked into the gates.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You decide one day to swap Ollama for an FPGA-hosted Qwen kernel. Which of the following files will you have to change?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Persona and Npc have nothing to do with how inference happens. The whole point of the LlmClient abstraction is to keep those layers ignorant.">
+      <code class="inline">Persona.hpp</code>, <code class="inline">Npc.cpp</code>, and <code class="inline">DialogUI.cpp</code>.
+    </li>
+    <li data-correct="false" data-why="main.cpp constructs an LlmClient; it doesn't know about HTTP or PCIe. Swapping the backend doesn't change construction.">
+      Mostly <code class="inline">main.cpp</code>, plus a new CMake target.
+    </li>
+    <li data-correct="true" data-why="Right. processOne() is the only place that knows about the transport. Everything else — submit, drainReplies, the worker loop, the queues, the persona layer, the UI — keeps working unchanged. CMake needs to link XRT instead of vendored httplib.">
+      <code class="inline">LlmClient::processOne()</code> in <code class="inline">LlmClient.cpp</code>, and the <code class="inline">CMakeLists.txt</code> to link XRT instead of httplib.
+    </li>
+    <li data-correct="false" data-why="You'd absolutely not need to rewrite from scratch — the whole layered design was built to make this change cheap. Skipping the abstraction was the cost-saving move at the start, not the rewrite later.">
+      All of them &mdash; you'd rewrite the codebase against XRT from scratch.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>8. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> An FPGA's bitstream synthesis takes 4 hours. A C++ compile takes 4 seconds. What does that 4-hour gap force you to do <em>differently</em> when iterating on a Verilog design vs. iterating on game code? Name two concrete habit changes.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> You buy an Alveo U280 and load LUT-LLM's Qwen 3 1.7B bitstream onto it. You connect it to <code class="inline">cpp_game_with_llm_npcs</code>. Wren now replies twice as fast as on your GPU. The next day you want to test Llama 3.2 instead. Walk through what you'd have to do, step by step, and contrast it with switching models under Ollama today.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> Lesson 0003 ended with the rule "don't pointer-chase &mdash; the CPU hates waiting on memory." How does an FPGA's solution to that same problem differ from a CPU's (caches, prefetcher) and a GPU's (huge memory bandwidth)? One sentence each.</p>
+</div>
+
+<h2>9. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can explain "what is an FPGA" in one sentence</label></li>
+  <li><label><input type="checkbox"> Read section 2 &mdash; I can name one thing each of CPU/GPU/FPGA is best at</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; the five-step host-to-device pattern makes sense to me</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I can name one reason FPGAs win on LLM inference</label></li>
+  <li><label><input type="checkbox"> Read section 5 &mdash; I see why LlmClient's design makes a future swap cheap</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://arxiv.org/abs/2511.06174">LUT-LLM: LLM inference on FPGAs (Nov 2025)</a> &middot;
+    <a href="https://arxiv.org/html/2312.15159v1">Spatial acceleration for LLMs (early survey)</a> &middot;
+    <a href="https://arxiv.org/pdf/2407.21325">EdgeLLM: CPU-FPGA heterogeneous edge</a> &middot;
+    <a href="https://numato.com/kb/learning-fpga-verilog-beginners-guide-part-1-introduction/">Verilog beginner's guide (Numato)</a> &middot;
+    <a href="https://www.ni.com/en/shop/electronic-test-instrumentation/add-ons-for-electronic-test-and-instrumentation/what-is-labview-fpga-module/fpga-fundamentals.html">FPGA fundamentals (NI)</a>
+  </p>
+  <p>Lesson 0004 &middot; <code class="inline">docs/learning/lessons/0004-fpgas-and-llm-inference.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

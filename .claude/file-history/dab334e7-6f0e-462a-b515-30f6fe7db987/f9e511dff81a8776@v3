@@ -1,0 +1,85 @@
+"""DailyStrategy adapter over a saved GBM model bundle.
+
+Wraps the existing joblib bundle format ``{"model": GradientBoostingRegressor,
+"features": [...]}`` (see CLAUDE.md "Model Bundles") behind the arena's daily
+contract. The model itself is never modified — this is inference only, using
+the same feature pipeline as walkforward_sim / predict_next.
+"""
+from __future__ import annotations
+
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class GBMStrategy(DailyStrategy):
+    """Predicted next-day return sign -> position; magnitude -> confidence."""
+
+    name = "gbm"
+
+    def __init__(self, bundle_path: str, min_abs_pred: float = 0.0) -> None:
+        """Store the bundle path; loading is deferred to first use.
+
+        Args:
+            bundle_path: Path to a model_bundle .joblib from paper_trading_sim.
+            min_abs_pred: Predictions with |value| below this are HOLD —
+                filters signal noise around zero. Default 0 = trade any sign.
+        """
+        self.bundle_path = bundle_path
+        self.min_abs_pred = min_abs_pred
+        self._model = None
+        self._feat_cols: list[str] | None = None
+
+    @property
+    def warmup_bars(self) -> int:
+        """Longest rolling window in build_features (10d vol/MA) + NaN buffer."""
+        return 30
+
+    def _ensure_loaded(self) -> None:
+        """Lazily load the joblib bundle on first signal.
+
+        Security note: joblib.load executes pickled code, so bundles must
+        only ever come from models/ trained locally by paper_trading_sim —
+        never from a downloaded or user-supplied path. This matches the
+        existing trust model in walkforward_sim.py and predict_next.py.
+        """
+        if self._model is not None:
+            return
+        import joblib  # function-local: constructing the strategy stays cheap
+
+        bundle = joblib.load(self.bundle_path)
+        self._model = bundle["model"]
+        self._feat_cols = list(bundle["features"])
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Predict next-day return for the final bar of df."""
+        if len(df) < self.warmup_bars:
+            return HOLD
+        self._ensure_loaded()
+        # Function-local so `import strategies.registry` never pulls yfinance.
+        from paper_trading_sim import build_features
+
+        # build_features drops every row whose fwd_ret_1d target is NaN,
+        # which is always the newest bar — the one we need to predict on.
+        # Pad with a copy of the last bar: the real last bar then gets a
+        # finite dummy target (never used as an input) and survives, while
+        # the pad row becomes the dropped NaN-target row. Features only look
+        # backward, so the pad cannot contaminate the real bar's inputs.
+        padded = pd.concat([df, df.iloc[[-1]]])
+        feats = build_features(padded)
+        if feats.empty or feats.index[-1] != df.index[-1]:
+            return HOLD
+        row = feats.iloc[-1]
+        if any(c not in feats.columns or pd.isna(row[c]) for c in self._feat_cols):
+            return HOLD
+
+        X = row[self._feat_cols].astype(float).values.reshape(1, -1)
+        yhat = float(self._model.predict(X)[0])
+        if abs(yhat) <= self.min_abs_pred:
+            return DailySignal(position=0, confidence=0.0,
+                               reason=f"pred_ret={yhat:+.4%} below threshold")
+        return DailySignal(position=1 if yhat > 0 else -1, confidence=abs(yhat),
+                           reason=f"pred_ret={yhat:+.4%}")
+
+
+__all__ = ["GBMStrategy"]

@@ -1,0 +1,81 @@
+# Plan: Volatility-Targeted Position Sizing (first risk control)
+Date: 2026-07-14
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+Scale exposure so risk, not notional, is what's constant. Half of this
+already shipped: `sizing="conf_vol"` (PR #63) weights positions by
+confidence ÷ trailing σ — that IS inverse-vol relative weighting, giving
+each name a roughly equal volatility contribution. The missing half is the
+portfolio level: total gross exposure should scale to a target portfolio
+volatility (e.g. 15% annualized), shrinking the whole book when realized
+vol runs hot and running fully invested when calm — the mechanism the
+research credits with cutting crash risk.
+
+## Goal
+A strategy's ledger targets a chosen annualized volatility; turbulent
+periods automatically de-lever toward cash without any signal changes.
+
+## Design Decisions
+- **Realized vol source: the strategy's own equity curve** — trailing
+  N-day (default 20) std of the ledger's daily returns, annualized. This is
+  deterministic from data already computed in the loop, needs no covariance
+  matrix, and measures exactly the thing being targeted. During backtest
+  the loop uses its own accumulating daily `realized` series; live inherits
+  identically (same code path — the arena invariant).
+- **Scalar, never leverage**: `exposure_mult = min(1.0, target_vol /
+  realized_vol)`, applied to the day's weights after conf_vol/equal
+  weighting and the max_pos cap. Long-only, no borrowing — the multiplier
+  only ever de-levers.
+- **New sizing mode `vol_target`** stacking ON conf_vol (relative weights
+  from conf/σ, gross from the target) — persisted per strategy like
+  existing modes; `equal` and `conf_vol` untouched and regression-pinned.
+- Warmup: fewer than N days of realized returns → multiplier 1.0
+  (fully invested until evidence exists).
+- Flags: `--target_vol 0.15`, `--vol_target_window 20` on backtest
+  (screened configuration, like sizing itself).
+
+## Out of Scope
+- Leverage above 1.0; covariance-based portfolio vol; per-ticker vol
+  targets beyond what conf_vol already does; applying to intraday engine.
+
+## Affected Areas
+- `walkforward_sim.py` — `run_strategy_walkforward`: sizing mode
+  `vol_target`; rolling realized-vol tracker on the loop's own daily
+  returns; multiplier applied to weights (cost model then sees the scaled
+  |Δweight| turnover automatically — no cost changes needed).
+- `strategy_arena.py` — mode choice + params persisted (sizing column
+  already exists; add `target_vol` column, guarded ALTER); CLI flags.
+- `tests/test_strategy_walkforward.py` — calm vs turbulent synthetic
+  series: turbulent period's gross exposure strictly lower; calm ≈ fully
+  invested; warmup fully invested; equal/conf_vol regression pins hold.
+
+## Implementation Order
+1. Rolling realized-vol tracker + multiplier in the loop, mode plumbed,
+   tests (pure loop behavior).
+2. Arena persistence (column, flags) + live reuse + migration test.
+3. Report: `target_vol` visible for vol_target strategies.
+
+## Acceptance Criteria
+- [ ] Synthetic high-vol regime cuts gross exposure by ≈ target/realized
+      (verified numerically); calm regime runs at 1.0
+- [ ] Multiplier never exceeds 1.0 and never goes negative
+- [ ] `sizing="equal"`/`"conf_vol"` outputs byte-identical to today
+- [ ] Mode + target persisted at screen, reused by live; legacy DBs migrate
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Realized vol ≈ 0 (flat ledger) | Multiplier capped at 1.0 — the min() handles it |
+| < window days of history | Multiplier 1.0 (documented warmup) |
+| Strategy holds nothing for a stretch | Realized vol decays toward 0; re-entry starts fully invested — acceptable, noted |
+| Interaction with Kelly plan (fractional-kelly.md) | Multipliers compose multiplicatively; combined gross still capped at 1.0 — stated in both plans |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(sizing): portfolio vol-targeting multiplier in run_strategy_walkforward` — mode, tracker, tests
+2. `feat(arena): persist target_vol as screened config + report column` — migration + flags

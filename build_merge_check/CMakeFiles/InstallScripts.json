@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/brandonlee/development/repos/products/cpp_games/cpp_game_with_llm_npcs/build_merge_check/cmake_install.cmake",
+		"/Users/brandonlee/development/repos/products/cpp_games/cpp_game_with_llm_npcs/build_merge_check/_deps/raylib-build/cmake_install.cmake",
+		"/Users/brandonlee/development/repos/products/cpp_games/cpp_game_with_llm_npcs/build_merge_check/_deps/raylib-build/raylib/cmake_install.cmake",
+		"/Users/brandonlee/development/repos/products/cpp_games/cpp_game_with_llm_npcs/build_merge_check/_deps/raylib-build/raylib/external/glfw/cmake_install.cmake",
+		"/Users/brandonlee/development/repos/products/cpp_games/cpp_game_with_llm_npcs/build_merge_check/_deps/raylib-build/raylib/external/glfw/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

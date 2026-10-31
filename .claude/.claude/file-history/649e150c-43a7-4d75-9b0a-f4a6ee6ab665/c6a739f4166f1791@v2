@@ -1,0 +1,46 @@
+# Exercise 02 — Inventory-Aware Market Maker
+
+**Lesson:** [0017 — Market making](../../docs/learning/lessons/0017-market-making.html)
+**Builds on:** exercise 01 (BBO / mid-price concepts).
+
+## Why this exercise exists
+
+The repo's [`fpga/market_maker.vhd`](../../fpga/market_maker.vhd) quotes
+`mid ± spread/2` with **no inventory input** — the exact gap lesson 0017
+flags: a quoter that ignores its position gets run over by adverse selection
+and unbounded inventory. Here you build the fix in Python (Avellaneda-Stoikov-lite);
+the VHDL version can follow later.
+
+## Spec
+
+Implement `InventoryAwareQuoter` in `market_maker.py` with parameters
+`gamma` (risk aversion), `sigma` (mid-price volatility), `horizon` (T),
+`max_inventory`, `k` (liquidity, default 1.5):
+
+- `reservation_price(mid, inventory)` → `mid − q·γ·σ²·T`. Long inventory
+  skews it below mid, short above.
+- `optimal_spread()` → `γ·σ²·T + (2/γ)·ln(1 + γ/k)`.
+- `quote(mid, inventory)` → `(bid, ask)` = reservation ± spread/2. At
+  `inventory ≥ +max_inventory` return `(None, ask)` (stop buying); at
+  `≤ −max_inventory` return `(bid, None)`. Quotes never cross.
+- Constructor raises `ValueError` for non-positive `gamma/sigma/horizon/k`
+  or `max_inventory`.
+
+## Acceptance criteria
+
+```bash
+uv run pytest tests/exercises/test_02_market_maker.py -v
+```
+
+## Hints
+
+- The whole point is that *both* quotes shift together with inventory —
+  the spread stays the same, the center moves.
+- Sanity numbers (test params γ=0.1, σ=2, T=1): `reservation_price(100, 5)`
+  = 98.0; spread ≈ 0.4 + 20·ln(1.0667) ≈ 1.69.
+- A note on monotonicity: the spread is always increasing in σ, but only
+  increasing in γ when σ²T > 1/k² (true for the test parameters).
+
+## Check yourself
+
+Solution: [`solutions/02_market_maker/market_maker.py`](../../solutions/02_market_maker/market_maker.py)

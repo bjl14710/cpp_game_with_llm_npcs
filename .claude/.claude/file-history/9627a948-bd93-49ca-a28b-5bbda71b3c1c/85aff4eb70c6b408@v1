@@ -1,0 +1,108 @@
+"""Tests for the drag-to-connect wiring flow on the canvas.
+
+Regression coverage for the bug where the in-progress "rubber" wire was
+returned by ``itemAt`` in ``mouseReleaseEvent`` and silently swallowed the
+click on the destination port, so blocks never connected.
+
+PyQt6 forbids direct instantiation of ``QGraphicsSceneMouseEvent``, so we
+exercise the same call path that ``mousePressEvent`` / ``mouseReleaseEvent``
+use internally: ``_start_wire`` → ``_port_at`` → ``connect_ports``.
+"""
+from __future__ import annotations
+import pytest
+from PyQt6.QtCore import QPointF, QLineF
+
+from silmulator.gui.canvas import CanvasScene, WireItem
+
+
+def _simulate_drag(scene: CanvasScene, src_port, target_pos: QPointF):
+    """Mirror what mousePress/Move/Release do, end-to-end."""
+    scene._start_wire(src_port, src_port.scenePos())
+    scene._temp_wire.setLine(QLineF(src_port.scenePos(), target_pos))
+    target = scene._port_at(target_pos)
+    wire = None
+    if target is not None and target is not scene._connecting:
+        wire = scene.connect_ports(scene._connecting, target)
+    scene._cancel_wire()
+    return wire
+
+
+@pytest.fixture
+def scene(qapp):
+    return CanvasScene()
+
+
+def test_port_at_skips_in_progress_temp_wire(scene):
+    """The original bug: temp wire (zValue=100) shadowed the destination
+    port, so itemAt returned the wire and the connection silently failed."""
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    src, dst = osc.ports[0], psu.ports[0]
+
+    scene._start_wire(src, src.scenePos())
+    scene._temp_wire.setLine(QLineF(src.scenePos(), dst.scenePos()))
+
+    found = scene._port_at(dst.scenePos())
+    assert found is dst, "temp wire should not shadow the destination port"
+
+    scene._cancel_wire()
+
+
+def test_drag_between_ports_creates_wire(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    src, dst = osc.ports[0], psu.ports[0]
+    assert src.connected_to is None
+    assert dst.connected_to is None
+
+    wire = _simulate_drag(scene, src, dst.scenePos())
+
+    assert isinstance(wire, WireItem)
+    assert src.connected_to is dst
+    assert dst.connected_to is src
+
+
+def test_drag_to_same_block_does_not_connect(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    src, dst = osc.ports[0], osc.ports[1]
+
+    wire = _simulate_drag(scene, src, dst.scenePos())
+
+    assert wire is None
+    assert src.connected_to is None
+    assert dst.connected_to is None
+
+
+def test_drag_release_on_empty_canvas_is_noop(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    src = osc.ports[0]
+
+    wire = _simulate_drag(scene, src, QPointF(2000, 2000))
+
+    assert wire is None
+    assert src.connected_to is None
+    assert [i for i in scene.items() if isinstance(i, WireItem)] == []
+
+
+def test_already_connected_port_is_not_overwritten(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    fgen = scene.add_block("Function Generator", QPointF(1000, 0))
+    a, b, c = osc.ports[0], psu.ports[0], fgen.ports[0]
+
+    _simulate_drag(scene, a, b.scenePos())
+    assert a.connected_to is b
+
+    second = _simulate_drag(scene, a, c.scenePos())
+    assert second is None
+    assert a.connected_to is b
+    assert c.connected_to is None
+
+
+def test_temp_wire_is_cleaned_up_after_drag(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    _simulate_drag(scene, osc.ports[0], psu.ports[0].scenePos())
+
+    assert scene._connecting is None
+    assert scene._temp_wire is None

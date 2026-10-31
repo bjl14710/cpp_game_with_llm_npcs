@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0008 — Length-Prefixed Framing over TCP</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { color:var(--text); margin-bottom:.8rem; }
+  ul { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); }
+  .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0008 · Multiplayer networking · from feat(net): message protocol and length-prefixed framing</div>
+<h1>Length-Prefixed Framing over TCP</h1>
+<p>Why <code>FrameAssembler</code> exists, and why "just send the JSON" doesn't work.</p>
+
+<h2>The problem: TCP is a byte stream, not a message service</h2>
+<p>TCP guarantees bytes arrive <em>in order</em> and <em>uncorrupted</em> — but it says
+nothing about <em>where one write ends and the next begins</em>. If the host sends
+<code>{"type":"Welcome"}</code> and then <code>{"type":"WorldSnapshot",...}</code>, the client's
+<code>recv()</code> might return both glued together, or the first half of one, or three
+bytes of a length header. Anything.</p>
+<div class="callout warn">Every "works on my machine, breaks over Wi-Fi" protocol bug starts
+with code that assumes one <code>send()</code> equals one <code>recv()</code>. It never reliably does.</div>
+
+<h2>Two classic fixes</h2>
+<table>
+<tr><th>Strategy</th><th>How</th><th>Where this repo uses it</th></tr>
+<tr><td>Delimiter framing</td><td>End every message with a byte that can't appear inside it (e.g. <code>\n</code>)</td><td><code>StreamAssembler</code> — Ollama's NDJSON stream, one JSON object per line</td></tr>
+<tr><td>Length-prefixed framing</td><td>Send the payload size first, then exactly that many bytes</td><td><code>FrameAssembler</code> (<code>src/core/NetFraming.hpp</code>) — all multiplayer traffic</td></tr>
+</table>
+<p>Delimiters are great when the sender guarantees the delimiter never appears in a
+message (NDJSON promises exactly that). For our own protocol we chose a
+<strong>4-byte big-endian length prefix</strong>: no escaping rules, O(1) "do I have a
+full message yet?" checks, and binary-safe if we ever move off JSON.</p>
+
+<h2>The wire format</h2>
+<pre><code>[ 4 bytes: payload length, big-endian ][ length bytes: JSON payload ]
+[ 00 00 00 11 ][ {"type":"ChatOpen"} ]</code></pre>
+<p><strong>Big-endian</strong> (network byte order) is the convention every internet protocol
+uses for multi-byte integers — both peers must agree, and x86/ARM CPUs are
+little-endian, so the code converts explicitly with shifts rather than casting
+an <code>int</code>'s raw bytes:</p>
+<pre><code>frame.push_back(static_cast&lt;char&gt;((len &gt;&gt; 24) &amp; 0xFF));  // most significant first
+frame.push_back(static_cast&lt;char&gt;((len &gt;&gt; 16) &amp; 0xFF));
+frame.push_back(static_cast&lt;char&gt;((len &gt;&gt; 8) &amp; 0xFF));
+frame.push_back(static_cast&lt;char&gt;(len &amp; 0xFF));</code></pre>
+
+<h2>Reassembly: the accumulate-and-peel loop</h2>
+<pre><code>bool FrameAssembler::feed(bytes, onFrame) {
+    buffer_.append(bytes);                    // whatever recv() gave us
+    while (buffer_.size() &gt;= 4) {             // enough for a prefix?
+        uint32_t declared = readPrefix(buffer_);
+        if (declared &gt; kMaxFrameBytes) return false;   // see below
+        if (buffer_.size() &lt; 4 + declared) return true; // wait for more
+        onFrame(buffer_.substr(4, declared)); // complete frame!
+        buffer_.erase(0, 4 + declared);       // peel and repeat
+    }
+    return true;
+}</code></pre>
+<p>Bytes can arrive split <em>anywhere</em> — mid-prefix, mid-payload — and multiple
+frames can arrive in one read. The loop handles both: it buffers until a whole
+frame exists, emits it, and keeps going. <code>tests/test_net_framing.cpp</code> feeds a
+frame one byte at a time to prove it.</p>
+
+<h2>The poisoned-prefix problem</h2>
+<div class="callout warn"><p>If a prefix is corrupt (or hostile) and declares a 3 GB payload,
+a naive reader allocates 3 GB and waits forever. Worse: once you mistrust one
+prefix, you can never find the next frame boundary again — the stream is
+unrecoverable.</p></div>
+<p>That's why <code>feed()</code> returns <code>false</code> when the declared length exceeds
+<code>kMaxFrameBytes</code> (1 MiB — generous, since a 4-player snapshot is a few KB), and
+why the caller's only correct response is to <strong>drop the connection</strong>. There is no
+"skip this frame": without trusting the length, you don't know where it ends.</p>
+
+<h2>Contrast: StreamAssembler vs FrameAssembler</h2>
+<p>The two classes are siblings — same feed/callback shape, different boundary rule:</p>
+<ul>
+<li><code>StreamAssembler::feed()</code> scans for <code>\n</code>; unbounded line length (trusts Ollama).</li>
+<li><code>FrameAssembler::feed()</code> reads a declared size; bounded, endian-explicit, drop-on-violation (trusts nobody).</li>
+</ul>
+<div class="callout good">Design takeaway: when you control both ends of a socket, a length
+prefix is almost always the simplest robust choice. Reach for delimiters only when a
+protocol you don't control already promises them.</div>
+</div></body></html>

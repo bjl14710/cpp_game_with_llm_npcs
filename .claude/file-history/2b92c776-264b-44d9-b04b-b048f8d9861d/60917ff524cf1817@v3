@@ -1,0 +1,53 @@
+# Checkpoint
+Session started: 2026-07-05 00:05
+Goal: Work through the 7 planned multiplayer issues (plan: .claude/plans/multiplayer-and-aws-deploy.md)
+Status: COMPLETE — see OVERNIGHT_REPORT.md (repo root, uncommitted)
+GitHub: issues #21-#27, milestone #2, draft PR stack #28-#34 (merge in order)
+
+## Environment notes (read this first on resume)
+- GH_TOKEN / gh CLI NOT available — GitHub API ops (issues, labels, PRs) are
+  DEFERRED to a morning-sync script. Issue numbers below are the plan's local
+  numbering, not GitHub numbers.
+- git push over HTTPS may work via keychain — verified only as dry-run so far.
+- PyGithub installed (user approved). Issue-creation script:
+  scratchpad/create_multiplayer_issues.py (extend into morning sync).
+- Branch structure is STACKED (each issue branch off the previous) because the
+  issues are sequential by nature: scaffold -> 1 -> 2 -> 3 -> 4 -> 5 -> 7.
+  Issue 6 (loopback fixture) is folded into 3 and 4.
+- Uncommitted files NOT part of this work (leave alone, do not commit):
+  docs/learning/* Silmulator content, CLAUDE.md, .claude/, docs/*.md guides,
+  GLOSSARY.md/PROGRESS.md preexisting modifications, docs/walkthroughs/.
+
+## Issues to process
+1. net protocol + framing        -> feature/issue-1-net-protocol-framing
+2. NetServer snapshots           -> feature/issue-2-netserver-snapshots
+3. NetClient connect/poll        -> feature/issue-3-netclient-connect-poll
+4. server NPC chat routing       -> feature/issue-4-server-npc-chat
+5. Menu host/join + main modes   -> feature/issue-5-menu-host-join
+6. loopback fixture              -> folded into 3 and 4
+7. docs                          -> feature/issue-7-docs-multiplayer
+
+Issues completed: [scaffold, 1]
+Issues failed: []
+Issues skipped: []
+
+## Progress log
+- scaffold: COMPLETED — feature/multiplayer-scaffold pushed (22c6b03).
+  git push WORKS via keychain; only GitHub API ops need the morning sync.
+- Issue 1: COMPLETED — feature/issue-1-net-protocol-framing pushed (2b3ee35).
+  FrameAssembler + NetMessage codec, 11 tests live. Concept:
+  length-prefixed framing.
+- Issue 2+3 (in progress, branch feature/issue-2-netserver-snapshots):
+  NetSocket.hpp (portability shims; macOS needs SO_NOSIGPIPE not
+  MSG_NOSIGNAL), NetServer rewritten publish/drain design (server threads
+  touch ONLY sockets+queues; host loop feeds setHostPose/publishNpcPoses,
+  drains drainChatEvents — World/LlmClient stay single-threaded), NetClient
+  with timeout connect. 5 loopback tests live, 4 chat stubs remain skipped.
+  NOTE: dropped scaffold's World&/LlmClient& ctor params — glue lives in
+  main.cpp (issue 5) / test fixture instead.
+- FOUND+FIXED pre-existing bug: LlmClient::~LlmClient lost-wakeup (stop_
+  set + notify without requestMutex_ -> worker misses wakeup, join() hangs
+  forever; suite hung on run 3 of a 5x flake check). Fix: set stop_ under
+  the mutex. Regression test: 200x construct/destroy loop in
+  test_llm_client.cpp. Commit this fix SEPARATELY (fix(llm): ...) on the
+  issue-2 branch before the feat commit.

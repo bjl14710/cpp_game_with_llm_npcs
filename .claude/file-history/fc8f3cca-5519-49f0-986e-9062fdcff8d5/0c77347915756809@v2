@@ -1,0 +1,1 @@
+"""Data layer: fetchers, free-tier budget tracking, and a local parquet cache."""

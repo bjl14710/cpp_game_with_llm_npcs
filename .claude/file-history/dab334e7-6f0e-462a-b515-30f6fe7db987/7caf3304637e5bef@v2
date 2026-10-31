@@ -1,0 +1,101 @@
+# Plan: SHAP Explainability for predict_next.py
+Date: 2026-07-07
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: S
+
+## The Idea (one paragraph)
+`predict_next.py` currently emits a bare number per ticker with no way to
+tell why the model predicted it. This adds an opt-in `--explain` flag that
+computes exact SHAP values (via `shap.TreeExplainer`, which supports
+sklearn's `GradientBoostingRegressor` natively) for each ticker's prediction
+row and reports the top contributing features with their signed direction —
+"rsi_14 pushed the prediction up by 0.0012, ma_gap pushed it down by 0.0008."
+
+## Goal
+Every prediction can be interrogated for which features drove it and in
+which direction, without touching the model or the feature pipeline.
+
+## Design Decisions
+- **New dependency: `shap`.** sklearn's GBM has no native per-prediction
+  attribution; hand-rolling Saabas-style tree attribution would only
+  approximate SHAP for an ensemble and adds real math to own. `shap` is
+  actively maintained, pure-Python installable, and `TreeExplainer` needs no
+  background dataset for tree models (deterministic, exact, cheap for this
+  model size). Per project convention this requires asking first — flagged
+  and approved for this plan.
+- **Explainer built once per model, not per ticker.** `TreeExplainer(model)`
+  construction is the expensive part; predictions loop over tickers as today,
+  reusing one explainer instance.
+- **Output stays additive to the existing CSV/print path**: `pred_df` gains
+  a `shap_top` column — a compact string like
+  `"rsi_14:+0.0012,ma_gap:-0.0008,vol_10:+0.0003"` (top `k`, default 3, by
+  |shap value|) — plus an optional `--explain_csv` for a full long-format
+  dump (date, ticker, feature, shap_value) for deeper debugging sessions.
+  No change to default output when `--explain` is omitted.
+- **Known limitation inherited, not fixed here**: `predict_next.py`'s
+  `feats = build_features(df).dropna()` already drops the newest bar (its
+  `fwd_ret_1d` target is NaN — see `docs/learning/lessons/0035`), so
+  `latest = feats.iloc[-1]` is yesterday's bar. SHAP will faithfully explain
+  whatever row the model actually scored — i.e. it inherits the existing
+  one-day inference lag rather than fixing it. That fix is tracked
+  separately; this plan does not touch `feats.iloc[-1]`.
+
+## Out of Scope (this version)
+- Visual force-plots / summary plots (text/CSV output only)
+- Explaining `walkforward_sim`'s rolling-retrain predictions (predict_next.py
+  only, per the idea's exact scope)
+- Support for non-tree models (only `GradientBoostingRegressor` bundles exist
+  today; `TreeExplainer` is tree-specific by design)
+- Fixing the pre-existing one-day inference lag
+
+## Affected Areas
+- `predict_next.py` — `--explain` (bool flag, default off), `--explain_top_k`
+  (default 3), `--explain_csv` (optional path). Lazy `import shap` inside the
+  explain branch so the default (unflagged) path has zero new import cost and
+  never fails if `shap` isn't installed and `--explain` isn't used.
+- `pyproject.toml` — add `shap` to `[project.dependencies]` (or a dedicated
+  `explain` extra if the user prefers keeping it optional at install time —
+  default to a plain dependency since `predict-next` is a core entry point
+  and the import is lazy regardless).
+- New tests: `tests/test_predict_next_explain.py` — trains a tiny synthetic
+  GBM (same in-test pattern as `tests/test_daily_strategies.py`'s GBM tests),
+  asserts `shap_top` is populated, top feature ordering matches manually
+  computed `|shap value|` ranks, and that `--explain` omitted leaves output
+  byte-identical to current behavior.
+
+## Implementation Order
+1. Add `shap` dependency; lazy-import wiring + `--explain` flag plumbing with
+   no behavior change when unset (regression-pinned).
+2. Per-ticker SHAP computation + `shap_top` column + top-k formatting;
+   unit test against a hand-checked synthetic case.
+3. `--explain_csv` long-format dump + docs note in `predict_next.py`'s module
+   docstring.
+
+## Acceptance Criteria
+- [ ] `predict-next --model ... ` (no `--explain`) produces output identical
+      to current behavior — no new columns, no shap import triggered
+- [ ] `predict-next --model ... --explain` adds a `shap_top` column whose
+      top feature matches the largest `|shap_value|` computed independently
+      in the test
+- [ ] `--explain_csv` writes one row per (date, ticker, feature, shap_value)
+      covering every feature, not just the top-k
+- [ ] SHAP values for a given row sum (plus the explainer's base value) to
+      the model's own prediction for that row, within floating-point
+      tolerance — the standard SHAP consistency check
+- [ ] Tests pass: `uv run pytest tests/ -m "not exercise"`
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| `--explain` passed but `shap` not installed | Clear `SystemExit` naming the missing package and the install command, not a bare `ImportError` traceback |
+| A ticker's feature row has any NaN (shouldn't happen post-dropna, but defensive) | That ticker skipped for explanation with a printed note, same as today's existing missing-feature skip logic |
+| `--explain_top_k` larger than the number of features | Silently capped at the actual feature count |
+| Bundle has zero estimators / degenerate model | `TreeExplainer` still returns zeros; no crash, `shap_top` shows all-zero contributions |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `feat(predict-next): add shap dependency + --explain flag with lazy import` — plumbing, zero-impact when unset
+2. `feat(predict-next): per-ticker SHAP top-k contributions + consistency test` — shap_top column
+3. `feat(predict-next): --explain_csv long-format SHAP dump` — deep-debug output

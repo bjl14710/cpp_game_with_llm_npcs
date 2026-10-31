@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lesson 0005 — Block Connections: Backend</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#30363d;
+  --wire:#fbbf24;--port-idle:#60a5fa;--port-conn:#34d399;--port-hover:#fbbf24;
+  --accent:#34d399;--blue:#60a5fa;--red:#f87171;--orange:#fb923c;--purple:#a78bfa;
+  --text:#c9d1d9;--dim:#6e7681;--border:#30363d;--code:#010409;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.7;min-height:100vh}
+
+/* ── nav ── */
+nav{background:var(--surf);border-bottom:1px solid var(--border);padding:.6rem 1.5rem;
+    display:flex;align-items:center;gap:1rem;font-family:var(--mono);font-size:.78rem;
+    position:sticky;top:0;z-index:50}
+.nav-title{color:var(--accent)}
+.nav-lbl{color:var(--dim)}
+.progress-dots{display:flex;gap:.35rem;margin-left:auto}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--surf2);border:1px solid var(--border);
+     cursor:pointer;transition:background .2s}
+.dot.done{background:var(--accent)}
+.dot.active{background:var(--wire);border-color:var(--wire)}
+
+/* ── layout ── */
+article{max-width:780px;margin:0 auto;padding:2.5rem 1.5rem 6rem}
+h1{font-size:1.9rem;color:#fff;margin-bottom:.3rem;line-height:1.3}
+.why{font-size:.97rem;color:var(--accent);margin-bottom:2rem;font-style:italic}
+
+/* ── sections ── */
+section{margin-bottom:3rem}
+h2{font-size:1.25rem;color:#fff;margin-bottom:1rem;padding-bottom:.4rem;
+   border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.7rem}
+h2 .sec-num{font-family:var(--mono);font-size:.75rem;color:var(--dim);
+             background:var(--surf2);padding:.1rem .45rem;border-radius:4px}
+.done-btn{font-family:var(--mono);font-size:.72rem;padding:.18rem .55rem;
+          border:1px solid var(--border);border-radius:12px;cursor:pointer;
+          background:transparent;color:var(--dim);transition:all .18s;margin-left:auto}
+.done-btn:hover{border-color:var(--accent);color:var(--accent)}
+.done-btn.ticked{background:rgba(52,211,153,.12);border-color:var(--accent);color:var(--accent)}
+
+h3{font-size:1rem;color:#e6edf3;margin:1.4rem 0 .55rem}
+p{margin-bottom:.85rem}
+ul,ol{margin-left:1.5rem;margin-bottom:.85rem}
+li{margin-bottom:.3rem}
+strong{color:#e6edf3}
+em{color:var(--orange);font-style:normal}
+code{font-family:var(--mono);font-size:.85em;background:var(--surf2);
+     padding:.1em .35em;border-radius:3px;color:#a5d6ff}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ── callouts ── */
+.note,.warn,.key{border-radius:6px;padding:.75rem 1rem;margin-bottom:1rem;
+                 font-size:.9rem;line-height:1.6;border-left:3px solid}
+.note{background:rgba(96,165,250,.07);border-color:var(--blue);color:#b0c8e8}
+.warn{background:rgba(248,113,113,.07);border-color:var(--red);color:#e8b0b0}
+.key{background:rgba(52,211,153,.07);border-color:var(--accent);color:#b0e8cc}
+
+/* ── code blocks ── */
+pre{background:var(--code);border:1px solid var(--border);border-radius:7px;
+    padding:1rem 1.2rem;overflow-x:auto;font-family:var(--mono);
+    font-size:.83rem;line-height:1.75;margin:1rem 0 1.2rem;position:relative}
+pre .fl{color:var(--dim);user-select:none;margin-right:.9rem}
+.cm{color:#3d5a70;font-style:italic}.kw{color:#ff7b72}.fn{color:var(--accent)}
+.str{color:#a5d6ff}.cls{color:var(--wire)}.at{color:var(--blue)}.num{color:#ffa657}
+.op{color:var(--dim)}.pm{color:#d2a8ff}.me{color:#79c0ff}
+
+/* ── file pill ── */
+.fpill{font-family:var(--mono);font-size:.73rem;background:var(--surf2);
+       border:1px solid var(--border);border-radius:4px;padding:.15rem .5rem;
+       color:var(--dim);margin-bottom:.6rem;display:inline-block}
+
+/* ── diagram ── */
+.diagram{background:var(--surf);border:1px solid var(--border);border-radius:8px;
+         padding:1.2rem 1.5rem;margin:1rem 0 1.4rem;font-family:var(--mono);font-size:.82rem}
+.d-row{display:flex;align-items:center;gap:.7rem;margin-bottom:.45rem;flex-wrap:wrap}
+.d-block{background:var(--surf2);border:1.5px solid var(--blue);border-radius:5px;
+         padding:.3rem .8rem;color:#c9d1d9;min-width:120px;text-align:center}
+.d-port{width:12px;height:12px;border-radius:50%;background:var(--port-idle);
+        border:1.5px solid #1a2233;display:inline-block}
+.d-port.cn{background:var(--port-conn)}
+.d-wire{flex:1;height:2px;background:var(--wire);min-width:40px;position:relative}
+.d-wire::before,.d-wire::after{content:'';position:absolute;top:-4px;width:8px;height:8px;
+  border-radius:50%;background:var(--port-conn)}
+.d-wire::before{left:-4px}.d-wire::after{right:-4px}
+.d-label{color:var(--dim);font-size:.73rem}
+
+/* ── state machine ── */
+.sm{display:grid;grid-template-columns:auto 1fr;gap:.1rem 1.2rem;align-items:start;
+    background:var(--surf);border:1px solid var(--border);border-radius:7px;
+    padding:1rem 1.2rem;font-family:var(--mono);font-size:.82rem;margin:1rem 0 1.2rem}
+.sm-ev{color:var(--wire);text-align:right;white-space:nowrap;padding:.3rem 0}
+.sm-desc{color:var(--text);padding:.3rem 0;border-bottom:1px solid var(--border)}
+.sm-ev:last-of-type+.sm-desc{border:none}
+
+/* ── quiz ── */
+.quiz{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:1.4rem 1.5rem;margin-top:1.5rem}
+.quiz h3{margin-top:0;color:var(--wire)}
+.qblock{margin-bottom:1.4rem}
+.qblock:last-child{margin-bottom:0}
+.qt{font-weight:600;color:#e6edf3;margin-bottom:.65rem;font-size:.94rem}
+pre.qsnip{margin:.4rem 0 .65rem;font-size:.79rem;padding:.7rem 1rem}
+.opts{list-style:none;margin:0}
+.opts li{background:var(--surf2);border:1px solid var(--border);border-radius:4px;
+         padding:.45rem .85rem;margin-bottom:.38rem;cursor:pointer;
+         font-size:.88rem;transition:border-color .13s,background .13s}
+.opts li:hover:not(.lk){border-color:var(--accent);background:rgba(52,211,153,.06)}
+.opts li.ok{border-color:var(--accent);background:rgba(52,211,153,.08);color:var(--accent)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.06);color:var(--red)}
+.opts li.lk{cursor:default}
+.fb{font-size:.82rem;margin-top:.4rem;padding:.35rem .7rem;border-radius:4px;display:none}
+.fb.ok{background:rgba(52,211,153,.08);color:var(--accent);border:1px solid rgba(52,211,153,.25)}
+.fb.no{background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.25)}
+.score{font-family:var(--mono);font-size:.82rem;color:var(--dim);margin-top:1rem;padding-top:.8rem;border-top:1px solid var(--border)}
+
+/* ── scenario ── */
+.scenario{background:var(--surf2);border:1px solid var(--border);border-radius:7px;
+          padding:1.1rem 1.3rem;margin-bottom:1.1rem}
+.sc-q{font-weight:600;margin-bottom:.6rem;color:#e6edf3}
+.sc-reveal{font-family:var(--mono);font-size:.78rem;padding:.28rem .7rem;
+           border:1px solid var(--border);border-radius:4px;background:transparent;
+           color:var(--dim);cursor:pointer;transition:all .15s}
+.sc-reveal:hover{border-color:var(--accent);color:var(--accent)}
+.sc-ans{margin-top:.7rem;font-size:.88rem;background:var(--surf);border-radius:4px;
+        padding:.7rem .9rem;display:none;border-left:2px solid var(--accent)}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-lbl">Silmulator / Lesson</span>
+  <span class="nav-title">0005 — Block Connections: Backend</span>
+  <div class="progress-dots" id="pdots">
+    <div class="dot active" title="Concepts" onclick="scrollTo(0)"></div>
+    <div class="dot" title="ConnectionPort" onclick="scrollTo(1)"></div>
+    <div class="dot" title="WireItem" onclick="scrollTo(2)"></div>
+    <div class="dot" title="Mouse state machine" onclick="scrollTo(3)"></div>
+    <div class="dot" title="connect_ports & remove" onclick="scrollTo(4)"></div>
+    <div class="dot" title="Serialisation" onclick="scrollTo(5)"></div>
+    <div class="dot" title="Quiz" onclick="scrollTo(6)"></div>
+  </div>
+</nav>
+
+<article>
+<h1>Block Connections: Backend</h1>
+<p class="why">Why this matters: every bug involving invisible wires, ghost connections, or broken save/load traces back to these five classes and the symmetry contracts between them.</p>
+
+<!-- ═══════════════════════════════════════════════════
+     §0  CONCEPTS
+     ═══════════════════════════════════════════════════ -->
+<section id="s0">
+<h2><span class="sec-num">§0</span> The three-layer model <button class="done-btn" onclick="tick(0,this)">Mark done</button></h2>
+<p>Connections in Silmulator involve three distinct layers. Confusing them is the root of most bugs:</p>
+<ul>
+  <li><strong>Data layer</strong> — <code>connected_to</code> pointers on <code>ConnectionPort</code>. These are Python object references. They say "these two ports know about each other".</li>
+  <li><strong>Visual layer</strong> — <code>WireItem</code>, a <code>QGraphicsLineItem</code> that paints the yellow line. It reads <code>scenePos()</code> from the two ports to draw itself.</li>
+  <li><strong>Signal layer</strong> — <code>pyqtSignal</code> emissions on <code>CanvasScene</code> (<code>wire_added</code>, <code>wire_removed</code>, etc.) that let the rest of the app react without polling.</li>
+</ul>
+<div class="diagram">
+  <div class="d-row">
+    <div class="d-block">BlockA<br><span class="d-port cn"></span> OUT1</div>
+    <div class="d-wire"></div>
+    <div class="d-block">IN1 <span class="d-port cn"></span><br>BlockB</div>
+  </div>
+  <div class="d-row" style="margin-top:.5rem">
+    <span class="d-label">data: port.connected_to → peer</span>
+    <span class="d-label" style="margin-left:auto">visual: WireItem.setLine(srcPos, dstPos)</span>
+  </div>
+</div>
+<p>All three must stay in sync. <code>connect_ports()</code> and <code>_remove_wire()</code> are the only two code paths that should touch all three layers — don't update ports directly from outside those methods.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════
+     §1  ConnectionPort
+     ═══════════════════════════════════════════════════ -->
+<section id="s1">
+<h2><span class="sec-num">§1</span> ConnectionPort — the data node <button class="done-btn" onclick="tick(1,this)">Mark done</button></h2>
+<div class="fpill">silmulator/gui/blocks/base_block.py:21–66</div>
+
+<p><code>ConnectionPort</code> inherits from <code>QGraphicsEllipseItem</code>. It is a child item of the block, which means its coordinates are relative to the block's local origin.</p>
+
+<pre>
+<span class="fl">29</span><span class="kw">def</span> <span class="fn">__init__</span>(self, parent: <span class="str">"BaseBlock"</span>, port_id: <span class="cls">str</span>, label: <span class="cls">str</span> = <span class="str">""</span>) -&gt; <span class="cls">None</span>:
+<span class="fl">30</span>    r = self.PORT_RADIUS          <span class="cm"># 6.0 px</span>
+<span class="fl">31</span>    <span class="kw">super</span>().<span class="fn">__init__</span>(-r, -r, 2*r, 2*r, parent)   <span class="cm"># centered on local (0, 0)</span>
+<span class="fl">32</span>    self.parent_block = parent    <span class="cm"># back-reference to the owning block</span>
+<span class="fl">33</span>    self.port_id = port_id        <span class="cm"># unique string within this block e.g. "OUT1"</span>
+<span class="fl">34</span>    self.label = label
+<span class="fl">35</span>    self.connected_to: Optional[<span class="str">"ConnectionPort"</span>] = <span class="kw">None</span>  <span class="cm"># THE key field</span>
+</pre>
+
+<h3>The symmetry invariant</h3>
+<p>The cardinal rule: <em>if A.connected_to is B, then B.connected_to must be A</em>. Both sides must always point at each other, or at <code>None</code> together. Break this and you get ghost wires.</p>
+
+<pre>
+<span class="fl">54</span><span class="kw">def</span> <span class="fn">connect_to</span>(self, other: <span class="str">"ConnectionPort"</span>) -&gt; <span class="cls">None</span>:
+<span class="fl">55</span>    self.connected_to = other     <span class="cm"># set both sides at once</span>
+<span class="fl">56</span>    other.connected_to = self
+<span class="fl">57</span>    self.<span class="fn">_update_color</span>()          <span class="cm"># turn green</span>
+<span class="fl">58</span>    other.<span class="fn">_update_color</span>()
+
+<span class="fl">60</span><span class="kw">def</span> <span class="fn">disconnect</span>(self) -&gt; <span class="cls">None</span>:
+<span class="fl">61</span>    <span class="kw">if</span> self.connected_to:
+<span class="fl">62</span>        self.connected_to.connected_to = <span class="kw">None</span>  <span class="cm"># null the peer FIRST</span>
+<span class="fl">63</span>        self.connected_to.<span class="fn">_update_color</span>()       <span class="cm"># turn blue again</span>
+<span class="fl">64</span>    self.connected_to = <span class="kw">None</span>                    <span class="cm"># then null self</span>
+<span class="fl">65</span>    self.<span class="fn">_update_color</span>()
+</pre>
+
+<div class="warn">If you call <code>port.connected_to = None</code> directly (skipping <code>disconnect()</code>), the peer still thinks it's connected. The wire disappears from the canvas but the port stays green and <code>_get_connected_blocks()</code> still returns the orphaned peer — a ghost connection.</div>
+
+<h3>Port positioning — fractional coordinates</h3>
+<p>Ports are positioned using fractions of the block's width and height:</p>
+<pre>
+<span class="cm"># base_block.py:191</span>
+<span class="kw">def</span> <span class="fn">add_port</span>(self, port_id, label, x_frac, y_frac):
+    port = <span class="cls">ConnectionPort</span>(self, port_id, label)
+    port.<span class="fn">setPos</span>(self.BLOCK_WIDTH * x_frac, self.BLOCK_HEIGHT * y_frac)
+    <span class="cm"># e.g. x_frac=1.0 → right edge, y_frac=0.5 → vertical center</span>
+</pre>
+<p>Because <code>ConnectionPort</code> is a child of the block, when the block moves, all its ports move with it for free — Qt propagates the transform down to children automatically. The <code>setPos()</code> here is in the block's <em>local</em> coordinate space.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════
+     §2  WireItem
+     ═══════════════════════════════════════════════════ -->
+<section id="s2">
+<h2><span class="sec-num">§2</span> WireItem — the visual layer <button class="done-btn" onclick="tick(2,this)">Mark done</button></h2>
+<div class="fpill">silmulator/gui/canvas.py:46–68</div>
+
+<pre>
+<span class="fl">46</span><span class="kw">class</span> <span class="cls">WireItem</span>(<span class="cls">QGraphicsLineItem</span>):
+<span class="fl">49</span>    <span class="kw">def</span> <span class="fn">__init__</span>(self, src: <span class="cls">ConnectionPort</span>, dst: <span class="cls">ConnectionPort</span>) -&gt; <span class="cls">None</span>:
+<span class="fl">50</span>        <span class="kw">super</span>().<span class="fn">__init__</span>()
+<span class="fl">51</span>        self.src_port = src
+<span class="fl">52</span>        self.dst_port = dst
+<span class="fl">53</span>        self.wire_id = str(uuid.<span class="fn">uuid4</span>())[:<span class="num">8</span>]
+<span class="fl">54</span>        pen = <span class="cls">QPen</span>(<span class="cls">QColor</span>(<span class="num">255</span>, <span class="num">200</span>, <span class="num">50</span>), <span class="num">2</span>, ...)
+<span class="fl">57</span>        self.<span class="fn">setZValue</span>(-<span class="num">1</span>)      <span class="cm"># drawn BELOW every block</span>
+<span class="fl">58</span>        self.<span class="fn">update_position</span>()  <span class="cm"># draw line immediately</span>
+<span class="fl">60</span>    <span class="kw">def</span> <span class="fn">update_position</span>(self) -&gt; <span class="cls">None</span>:
+<span class="fl">61</span>        src_pos = self.src_port.<span class="fn">scenePos</span>()  <span class="cm"># scene coords, not local</span>
+<span class="fl">62</span>        dst_pos = self.dst_port.<span class="fn">scenePos</span>()
+<span class="fl">63</span>        self.<span class="fn">setLine</span>(<span class="cls">QLineF</span>(src_pos, dst_pos))
+</pre>
+
+<h3>Why ZValue = −1?</h3>
+<p>Qt paints items in order of their ZValue (lower = painted first = visually behind). Blocks have ZValue 0 (the default). Setting wires to −1 ensures that when two blocks overlap, the wire between them doesn't appear drawn over the block's body and title bar.</p>
+
+<h3>Why <code>scenePos()</code> and not <code>pos()</code>?</h3>
+<p><code>pos()</code> returns coordinates in the item's parent's local space. For a <code>ConnectionPort</code> that is a child of a block, <code>pos()</code> gives you something like <code>(220, 80)</code> — relative to the block. <code>scenePos()</code> walks up the parent chain and gives you the absolute scene position, which is what you need to draw a straight line across the canvas between two ports on two different blocks.</p>
+
+<h3>update_position() is called during mouse drag</h3>
+<p>While the user is dragging a block, Qt moves the block and all its child ports — but it doesn't automatically re-draw any <code>WireItem</code>s. That's why <code>mouseMoveEvent</code> calls <code>wire.update_position()</code> for every wire on every mouse move during a wire-drag gesture:</p>
+<pre>
+<span class="cm"># canvas.py:238–245</span>
+<span class="kw">if</span> self._connecting <span class="kw">and</span> self._temp_wire:
+    self._temp_wire.<span class="fn">setLine</span>(...)
+    <span class="kw">for</span> wire <span class="kw">in</span> self._wires.values():
+        wire.<span class="fn">update_position</span>()  <span class="cm"># re-query scenePos() to keep wires taut</span>
+    event.<span class="fn">accept</span>()
+    <span class="kw">return</span>
+</pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════
+     §3  Mouse state machine
+     ═══════════════════════════════════════════════════ -->
+<section id="s3">
+<h2><span class="sec-num">§3</span> The mouse state machine <button class="done-btn" onclick="tick(3,this)">Mark done</button></h2>
+<div class="fpill">silmulator/gui/canvas.py:225–287</div>
+
+<p>Drawing a wire is a three-event gesture. The scene holds two pieces of mutable state that drive it:</p>
+<ul>
+  <li><code>self._connecting: Optional[ConnectionPort]</code> — the source port being dragged from, or <code>None</code>.</li>
+  <li><code>self._temp_wire: Optional[QGraphicsLineItem]</code> — the dashed rubber-band line that follows the cursor, or <code>None</code>.</li>
+</ul>
+
+<div class="sm">
+  <span class="sm-ev">mousePressEvent</span>
+  <span class="sm-desc">Call <code>_port_at(scenePos)</code>. If a free port is found: save it as <code>_connecting</code>, create a dashed <code>_temp_wire</code> at ZValue 100, call <code>event.accept()</code> to block rubber-band selection.</span>
+  <span class="sm-ev">mouseMoveEvent</span>
+  <span class="sm-desc">If <code>_connecting</code>: update <code>_temp_wire</code> endpoint to follow cursor, re-run <code>update_position()</code> on all committed wires, <code>event.accept()</code>.</span>
+  <span class="sm-ev">mouseReleaseEvent</span>
+  <span class="sm-desc">Call <code>_port_at(scenePos)</code> for the target. If a valid different port is found: call <code>connect_ports(src, target)</code> to create the real wire. Always call <code>_cancel_wire()</code> to remove the temp wire and reset state.</span>
+</div>
+
+<h3>_port_at() — finding the port under the cursor</h3>
+<pre>
+<span class="fl">261</span><span class="kw">def</span> <span class="fn">_port_at</span>(self, pos) -&gt; Optional[<span class="cls">ConnectionPort</span>]:
+<span class="fl">262</span>    <span class="kw">for</span> item <span class="kw">in</span> self.<span class="fn">items</span>(pos):    <span class="cm"># returns items at pos, front to back</span>
+<span class="fl">263</span>        <span class="kw">if</span> item <span class="kw">is</span> self._temp_wire: <span class="cm"># skip the rubber-band line itself</span>
+<span class="fl">264</span>            <span class="kw">continue</span>
+<span class="fl">265</span>        <span class="kw">if</span> isinstance(item, <span class="cls">ConnectionPort</span>):
+<span class="fl">266</span>            <span class="kw">return</span> item
+<span class="fl">267</span>    <span class="kw">return</span> <span class="kw">None</span>
+</pre>
+<p><code>self.items(pos)</code> returns every item whose bounding rect contains <code>pos</code>, ordered from topmost Z to bottommost. The temp wire sits at ZValue 100 — above everything — so without the <code>is self._temp_wire</code> skip, it would always be the first item returned and the target port would never be found on release.</p>
+
+<h3>Why event.accept() is critical</h3>
+<pre>
+<span class="cm"># canvas.py:228–234</span>
+port = self.<span class="fn">_port_at</span>(event.<span class="fn">scenePos</span>())
+<span class="kw">if</span> port <span class="kw">is not</span> <span class="kw">None</span> <span class="kw">and</span> port.connected_to <span class="kw">is</span> <span class="kw">None</span>:
+    self.<span class="fn">_start_wire</span>(port, event.<span class="fn">scenePos</span>())
+    event.<span class="fn">accept</span>()   <span class="cm"># &lt;— THIS LINE IS LOAD-BEARING</span>
+    <span class="kw">return</span>
+</pre>
+<div class="warn">If <code>event.accept()</code> is removed, the event propagates up to <code>CanvasView</code>, which is in <code>RubberBandDrag</code> mode. The view starts a rubber-band selection rectangle that fights the dashed wire on every mouse move, churns the scene selection, and prevents the wire from being drawn. This was the original root-cause bug fixed in commit <code>34122c2</code>.</div>
+
+<h3>The temp wire is non-interactive</h3>
+<pre>
+<span class="fl">278</span>self._temp_wire.<span class="fn">setAcceptedMouseButtons</span>(<span class="cls">Qt</span>.MouseButton.NoButton)
+<span class="fl">279</span>self._temp_wire.<span class="fn">setFlag</span>(
+<span class="fl">280</span>    <span class="cls">QGraphicsItem</span>.GraphicsItemFlag.ItemIsSelectable, <span class="kw">False</span>
+<span class="fl">281</span>)
+</pre>
+<p>These two lines ensure the temp wire is invisible to mouse hit-testing. Without them, the temp wire (ZValue 100) would eat every subsequent <code>mouseMoveEvent</code> hit and <code>_port_at()</code> could never find the destination port underneath.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════
+     §4  connect_ports & _remove_wire
+     ═══════════════════════════════════════════════════ -->
+<section id="s4">
+<h2><span class="sec-num">§4</span> connect_ports() and _remove_wire() <button class="done-btn" onclick="tick(4,this)">Mark done</button></h2>
+<div class="fpill">silmulator/gui/canvas.py:195–219</div>
+
+<h3>connect_ports — creating a permanent wire</h3>
+<pre>
+<span class="fl">195</span><span class="kw">def</span> <span class="fn">connect_ports</span>(self, src, dst) -&gt; Optional[<span class="cls">WireItem</span>]:
+<span class="fl">196</span>    <span class="kw">if</span> src.parent_block <span class="kw">is</span> dst.parent_block:
+<span class="fl">197</span>        <span class="kw">return</span> <span class="kw">None</span>   <span class="cm"># self-loop guard</span>
+<span class="fl">198</span>    <span class="kw">if</span> src.connected_to <span class="kw">or</span> dst.connected_to:
+<span class="fl">199</span>        <span class="kw">return</span> <span class="kw">None</span>   <span class="cm"># already-connected guard</span>
+<span class="fl">201</span>    wire = <span class="cls">WireItem</span>(src, dst)    <span class="cm"># creates the visual</span>
+<span class="fl">202</span>    self.<span class="fn">addItem</span>(wire)           <span class="cm"># registers with the scene</span>
+<span class="fl">203</span>    self._wires[wire.wire_id] = wire   <span class="cm"># registers in our dict</span>
+<span class="fl">204</span>    src.<span class="fn">connect_to</span>(dst)         <span class="cm"># updates the data layer (both ports)</span>
+<span class="fl">205</span>    self.wire_added.<span class="fn">emit</span>(...)   <span class="cm"># signal layer</span>
+<span class="fl">208</span>    <span class="kw">return</span> wire
+</pre>
+
+<p>Notice the order: the <code>WireItem</code> is created <em>before</em> calling <code>connect_to()</code>. This is safe because <code>WireItem.__init__</code> only reads port positions — it doesn't check <code>connected_to</code>. The data layer is updated <em>after</em> the visual exists and is added to the scene.</p>
+
+<h3>_remove_wire — teardown order matters</h3>
+<pre>
+<span class="fl">214</span><span class="kw">def</span> <span class="fn">_remove_wire</span>(self, wire: <span class="cls">WireItem</span>) -&gt; <span class="cls">None</span>:
+<span class="fl">215</span>    wire.src_port.<span class="fn">disconnect</span>()      <span class="cm"># nulls both src and dst (data layer)</span>
+<span class="fl">216</span>    wire.dst_port.<span class="fn">disconnect</span>()      <span class="cm"># safe to call twice — already None</span>
+<span class="fl">217</span>    self._wires.<span class="fn">pop</span>(wire.wire_id, <span class="kw">None</span>)
+<span class="fl">218</span>    self.<span class="fn">removeItem</span>(wire)           <span class="cm"># removes from scene (visual layer)</span>
+<span class="fl">219</span>    self.wire_removed.<span class="fn">emit</span>(wire.wire_id)
+</pre>
+
+<p>Why call <code>disconnect()</code> on <em>both</em> ports? Because <code>disconnect()</code> nulls the <em>peer</em> first, then self. After <code>src.disconnect()</code> runs: src.connected_to=None AND dst.connected_to=None. The second call <code>dst.disconnect()</code> is idempotent — it sees <code>connected_to is None</code> and does nothing. This double-call pattern is defensive: it costs nothing and prevents the ghost-connection bug even if the caller gets the order slightly wrong.</p>
+
+<div class="key">Pattern to remember: in any teardown that involves bidirectional references, null the cross-references first, then remove from registries, then remove from the parent container. Data → dict → scene.</div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════
+     §5  Serialisation
+     ═══════════════════════════════════════════════════ -->
+<section id="s5">
+<h2><span class="sec-num">§5</span> Save &amp; load — the port_map bridge <button class="done-btn" onclick="tick(5,this)">Mark done</button></h2>
+<div class="fpill">silmulator/gui/canvas.py:323–357</div>
+
+<p>A wire references two <code>ConnectionPort</code> objects — live Python objects that don't survive to disk. Serialisation solves this with two steps: encoding the reference as a (block_id, port_id) pair, then rebuilding the live objects via a lookup table.</p>
+
+<h3>to_dict — encode wires as ID pairs</h3>
+<pre>
+<span class="cm"># Each wire is stored as four strings, not Python references:</span>
+{
+    <span class="str">"src_block"</span>: wire.src_port.parent_block.block_id,
+    <span class="str">"src_port"</span>:  wire.src_port.port_id,
+    <span class="str">"dst_block"</span>: wire.dst_port.parent_block.block_id,
+    <span class="str">"dst_port"</span>:  wire.dst_port.port_id,
+}
+</pre>
+
+<h3>from_dict — rebuild via port_map</h3>
+<pre>
+<span class="fl">344</span><span class="kw">def</span> <span class="fn">from_dict</span>(self, data) -&gt; <span class="cls">None</span>:
+<span class="fl">345</span>    self.<span class="fn">clear</span>()
+<span class="fl">346</span>    port_map: Dict[Tuple[<span class="cls">str</span>, <span class="cls">str</span>], <span class="cls">ConnectionPort</span>] = {}
+<span class="fl">347</span>    <span class="kw">for</span> bdata <span class="kw">in</span> data[<span class="str">"blocks"</span>]:
+<span class="fl">348</span>        block = self.<span class="fn">add_block</span>(bdata[<span class="str">"type"</span>], ...)
+<span class="fl">350</span>        <span class="kw">for</span> port <span class="kw">in</span> block.ports:
+<span class="fl">351</span>            port_map[(bdata[<span class="str">"id"</span>], port.port_id)] = port  <span class="cm"># build the bridge</span>
+<span class="fl">352</span>    <span class="kw">for</span> wdata <span class="kw">in</span> data[<span class="str">"wires"</span>]:
+<span class="fl">353</span>        src = port_map.<span class="fn">get</span>((wdata[<span class="str">"src_block"</span>], wdata[<span class="str">"src_port"</span>]))
+<span class="fl">354</span>        dst = port_map.<span class="fn">get</span>((wdata[<span class="str">"dst_block"</span>], wdata[<span class="str">"dst_port"</span>]))
+<span class="fl">355</span>        <span class="kw">if</span> src <span class="kw">and</span> dst:
+<span class="fl">356</span>            self.<span class="fn">connect_ports</span>(src, dst)  <span class="cm"># reconnects via the normal path</span>
+</pre>
+
+<p><code>port_map</code> is keyed by a tuple: <code>(block_id_string, port_id_string)</code>. The block IDs come from <code>to_dict</code>'s <code>bdata["id"]</code> field, not the freshly-created block's ID — that matters because <code>add_block</code> generates a new <code>uuid</code>. So <code>from_dict</code> must use the <em>saved</em> block ID as the key, not the live one.</p>
+
+<div class="note">The <code>if src and dst</code> guard is why wires silently disappear on reload when a block type is missing from <code>BLOCK_REGISTRY</code>: <code>add_block()</code> returns <code>None</code>, the block is never added to <code>port_map</code>, and the wire lookup fails quietly. The original "Function Gen" vs "Function Generator" mismatch bug manifested exactly this way.</div>
+
+<h3>clear() — why it must reset Python dicts</h3>
+<pre>
+<span class="fl">178</span><span class="kw">def</span> <span class="fn">clear</span>(self) -&gt; <span class="cls">None</span>:
+<span class="fl">185</span>    <span class="kw">super</span>().<span class="fn">clear</span>()    <span class="cm"># deletes C++ items — Python dicts still hold references</span>
+<span class="fl">186</span>    self._blocks = {}  <span class="cm"># must reset or next save hits deleted C++ objects</span>
+<span class="fl">187</span>    self._wires = {}
+<span class="fl">188</span>    self._connecting = <span class="kw">None</span>
+<span class="fl">189</span>    self._temp_wire = <span class="kw">None</span>
+</pre>
+<p><code>QGraphicsScene.clear()</code> destroys the underlying C++ objects for every item. Python objects wrapping them become invalid — any attribute access raises <code>RuntimeError: wrapped C/C++ object has been deleted</code>. Resetting the dicts drops the Python references so the wrappers are garbage-collected cleanly.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════
+     §6  QUIZ
+     ═══════════════════════════════════════════════════ -->
+<section id="s6">
+<h2><span class="sec-num">§6</span> Practice <button class="done-btn" onclick="tick(6,this)">Mark done</button></h2>
+
+<div class="quiz">
+<h3>Quick-fire quiz</h3>
+
+<!-- Q1 -->
+<div class="qblock" data-q="1">
+<div class="qt">Q1. A port's <code>connected_to</code> is set but its peer's <code>connected_to</code> is <code>None</code>. What do we call this state?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="An orphaned block is one that has no ports connected at all. This is about a broken bidirectional pointer — both sides exist, but the symmetry is violated.">Orphaned block</li>
+  <li data-correct="true" data-why="Correct. When A.connected_to=B but B.connected_to=None, B thinks it's free while A thinks it's connected. Routing code that walks connected_to will behave differently depending on which port it starts from — this is a ghost connection.">Ghost connection — the symmetry invariant is broken</li>
+  <li data-correct="false" data-why="A dangling pointer is the right idea (a pointer to a non-live object), but here both Python objects are alive. The problem is the asymmetry: one side knows about the connection, the other doesn't.">Dangling pointer — the port object was deleted</li>
+  <li data-correct="false" data-why="A stale wire is a WireItem that still exists in the scene after its ports were disconnected. This is a different (visual) invariant violation. The question is about the data layer.">Stale wire — the WireItem outlived its ports</li>
+</ul>
+<div class="fb" id="fb1"></div>
+</div>
+
+<!-- Q2 -->
+<div class="qblock" data-q="2">
+<div class="qt">Q2. You call <code>_port_at(scenePos)</code> during <code>mouseReleaseEvent</code> and it always returns <code>None</code>, even when the cursor is clearly over a destination port. What is the most likely cause?</div>
+<ul class="opts">
+  <li data-correct="true" data-why="Correct. _temp_wire sits at ZValue 100, above everything. items(pos) returns it first. Without the 'if item is self._temp_wire: continue' skip, _port_at() would stop at the temp wire and never reach the ConnectionPort underneath — returning None.">The temp wire (ZValue 100) is above the port and eating the hit test — the <code>_temp_wire</code> skip is missing or broken.</li>
+  <li data-correct="false" data-why="ConnectionPort inherits from QGraphicsEllipseItem, which accepts hover events by default. Missing setAcceptHoverEvents wouldn't stop items() from returning the port — hover events and hit-testing are different mechanisms.">The destination port's <code>setAcceptHoverEvents(True)</code> was not called, so it's excluded from hit-testing.</li>
+  <li data-correct="false" data-why="Port position is relative to the block. scenePos() translates it correctly. A fractional x/y bug would misplace the port visually, but the visual mismatch would be obvious; it wouldn't cause items() to miss the port at the cursor location.">The port's <code>x_frac</code> / <code>y_frac</code> placement is wrong, so <code>scenePos()</code> returns a position far from the cursor.</li>
+  <li data-correct="false" data-why="QGraphicsScene.items(pos) returns all items whose bounding rect contains pos — it doesn't require ItemIsSelectable. The selectable flag only affects rubber-band selection and scene.selectedItems().">The destination port has <code>ItemIsSelectable</code> set to <code>False</code>, so <code>items(pos)</code> skips it.</li>
+</ul>
+<div class="fb" id="fb2"></div>
+</div>
+
+<!-- Q3 -->
+<div class="qblock" data-q="3">
+<div class="qt">Q3. You add a new block type but after save → reload, all wires connected to it vanish silently. The JSON file contains the wires. What went wrong?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="update_position() is only called during mouse moves and when a block is dragged. It has nothing to do with the save/reload path, and a missing call wouldn't cause wires to disappear.">The new block's <code>update_position()</code> was not called during reload, so wires have zero length and are invisible.</li>
+  <li data-correct="false" data-why="clear() resets _blocks and _wires correctly regardless of block type. The bug is not in the reset step — it's in add_block() during from_dict().">The scene's <code>clear()</code> override doesn't reset <code>_blocks</code>, so port_map gets stale entries from the previous session.</li>
+  <li data-correct="true" data-why="Correct. from_dict() calls add_block(bdata['type']). add_block() does BLOCK_REGISTRY.get(device_type). If the string doesn't match a key (e.g. 'Function Gen' vs 'Function Generator'), it returns None and the block is never created. port_map has no entry for it, so the wire lookup (port_map.get(...)) returns None, and the if src and dst: guard skips the connect_ports() call — wires silently dropped.">The <code>device_type</code> string doesn't match any key in <code>BLOCK_REGISTRY</code>, so <code>add_block()</code> returns <code>None</code> and the block is never added to <code>port_map</code>.</li>
+  <li data-correct="false" data-why="WireItem is a QGraphicsLineItem, not a QGraphicsItem subclass with a custom shape(). Even if shape() were wrong, the wire would be created and drawn — just with the wrong hit area.">The new block's <code>shape()</code> method returns an incorrect <code>QPainterPath</code>, preventing wires from attaching to it.</li>
+</ul>
+<div class="fb" id="fb3"></div>
+</div>
+
+<!-- Q4 -->
+<div class="qblock" data-q="4">
+<div class="qt">Q4. <code>WireItem.update_position()</code> calls <code>scenePos()</code> on both ports. Why not <code>pos()</code>?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="Both pos() and scenePos() work on live items. The issue is coordinate space, not object lifetime.">Because <code>pos()</code> raises an exception on child items whose parent has been moved since the item was added.</li>
+  <li data-correct="false" data-why="scenePos() does not involve pixel rounding — it returns QPointF in floating-point scene units. The anti-aliasing decision is made in the QPainter, not in coordinate retrieval.">Because <code>pos()</code> returns integer pixels, while <code>scenePos()</code> returns floating-point values that support anti-aliased rendering.</li>
+  <li data-correct="true" data-why="Correct. pos() returns the item's position in its parent's local coordinate space. For a ConnectionPort (child of a BaseBlock), pos() gives you something like (220, 80) — relative to the block's top-left corner. To draw a line from one block's port to another block's port, you need absolute scene coordinates, which scenePos() provides by walking up the parent transform chain.">Because <code>pos()</code> returns local coordinates relative to the item's parent (the block), but the wire needs absolute scene coordinates to draw a line between two different blocks.</li>
+  <li data-correct="false" data-why="scenePos() is available on any QGraphicsItem, including QGraphicsEllipseItem (which ConnectionPort inherits from). It's not a privilege of specific subclasses.">Because <code>scenePos()</code> is only available on <code>QGraphicsObject</code> subclasses, and <code>ConnectionPort</code> inherits from <code>QGraphicsEllipseItem</code> which is a <code>QGraphicsObject</code>.</li>
+</ul>
+<div class="fb" id="fb4"></div>
+</div>
+
+<!-- Q5 -->
+<div class="qblock" data-q="5">
+<div class="qt">Q5. In <code>_remove_wire()</code>, why is <code>wire.dst_port.disconnect()</code> called after <code>wire.src_port.disconnect()</code>, given that <code>src.disconnect()</code> already nulls the peer?</div>
+<ul class="opts">
+  <li data-correct="false" data-why="disconnect() always calls _update_color() — it works correctly whether connected_to is set or None. The color isn't the reason for the second call.">To ensure <code>dst_port._update_color()</code> runs, since <code>src_port.disconnect()</code> only updates the source port's color.</li>
+  <li data-correct="true" data-why="Correct. src.disconnect() nulls both src.connected_to AND dst.connected_to. Calling dst.disconnect() afterwards is idempotent — it sees connected_to=None and does nothing. The double-call is defensive: if the code ever changes so that src.disconnect() doesn't null the peer, the second call prevents a ghost connection. Zero runtime cost, strong correctness guarantee.">It's a defensive invariant: the second call is idempotent (does nothing when <code>connected_to</code> is already <code>None</code>) but guards against future changes to <code>disconnect()</code> that might not null both sides.</li>
+  <li data-correct="false" data-why="Both ports are still live Python objects at this point. removeItem() hasn't been called yet. Neither port is in any state that would require 'cleanup before deletion'.">Because <code>removeItem()</code> deletes the C++ item, and the second <code>disconnect()</code> must run before that to prevent a RuntimeError on the C++ object.</li>
+  <li data-correct="false" data-why="There is no ordered return convention in Python for cleanup calls here. Both ports are fully accessible throughout _remove_wire(). The src/dst order in the function signature doesn't impose any requirement on teardown order.">Because the function signature guarantees src was set before dst, so teardown must happen in the same order to respect Python's reference-counting semantics.</li>
+</ul>
+<div class="fb" id="fb5"></div>
+</div>
+
+<div class="score" id="score">0 / 5 answered</div>
+</div>
+
+<!-- ── scenarios ── -->
+<h3 style="margin-top:2rem;color:#e6edf3">Scenario questions</h3>
+
+<div class="scenario">
+  <div class="sc-q">A user reports that wires "snap back" and disappear the moment they release the mouse on a destination port. The dashed line was visible during the drag. What do you check first?</div>
+  <button class="sc-reveal" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">Check <code>connect_ports()</code>'s guards (canvas.py:196–199). The most likely cause is that the destination port is already connected (<code>dst.connected_to is not None</code>), triggering the early <code>return None</code>. The wire drag completes successfully and <code>_cancel_wire()</code> removes the temp wire — but <code>connect_ports()</code> silently returns without creating a WireItem. To confirm: right-click the destination port's block and check its command log. If the port is wired, its commands will appear. Also check whether a previous session's wire is still recorded (stale <code>_wires</code> dict after File→New was the original bug).</div>
+</div>
+
+<div class="scenario">
+  <div class="sc-q">After adding a new custom block class, you notice that moving the block leaves its wire endpoints frozen in the original position — the wire doesn't follow the block. The wire connects this block's port to a Power Supply port. What is missing?</div>
+  <button class="sc-reveal" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans"><code>update_position()</code> is only called inside the <code>if self._connecting and self._temp_wire</code> branch of <code>mouseMoveEvent</code>. This means wires only update during active wire-drawing gestures, not during block drags. To fix this properly, you need to call <code>wire.update_position()</code> whenever a block moves — the right place is to override <code>itemChange()</code> on <code>BaseBlock</code> with <code>GraphicsItemChange.ItemPositionHasChanged</code>: look up all wires touching this block's ports and call <code>update_position()</code>. Alternatively, connect to a signal on the block.</div>
+</div>
+
+<div class="scenario">
+  <div class="sc-q">You want to write a unit test that checks: after <code>scene.clear()</code>, calling <code>scene.to_dict()</code> returns <code>{"blocks": [], "wires": []}</code>. The test passes in isolation but crashes with <code>RuntimeError: wrapped C/C++ object has been deleted</code> in the full suite. Why?</div>
+  <button class="sc-reveal" onclick="rev(this)">Show answer</button>
+  <div class="sc-ans">The crash happens when another test calls <code>scene.to_dict()</code> or accesses <code>scene.blocks</code> after <code>QGraphicsScene.clear()</code> has been called on the same scene instance — but before the Python dicts (<code>_blocks</code>, <code>_wires</code>) were reset. The overridden <code>clear()</code> fixes this by resetting the dicts immediately after <code>super().clear()</code>. If the test suite reuses the same scene object between tests (a common pattern for speed), it must call the overridden <code>clear()</code>, not <code>QGraphicsScene.clear()</code> directly. The fix: ensure each test that needs a clean scene calls <code>scene.clear()</code> (our override) and verify that <code>len(scene.blocks) == 0</code> before proceeding.</div>
+</div>
+</section>
+
+</article>
+
+<script>
+// ── section completion ──
+const N=7;
+const dots=document.querySelectorAll('.dot');
+function tick(i,btn){
+  btn.classList.toggle('ticked');
+  dots[i].classList.toggle('done');
+}
+
+// ── quiz ──
+let answered=0;
+const total=5;
+function upScore(){document.getElementById('score').textContent=`${answered} / ${total} answered`;}
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+document.querySelectorAll('.qblock').forEach(qb=>{
+  const list=qb.querySelector('.opts');
+  shuf([...list.children]).forEach(li=>list.appendChild(li));
+  const qn=qb.dataset.q;
+  const fb=document.getElementById('fb'+qn);
+  list.querySelectorAll('li').forEach(li=>{
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('ok');
+      fb.style.display='block';fb.className='fb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+      answered++;upScore();
+    });
+  });
+});
+
+// ── scenarios ──
+function rev(btn){
+  const ans=btn.nextElementSibling;
+  ans.style.display=ans.style.display==='block'?'none':'block';
+  btn.textContent=ans.style.display==='block'?'Hide answer':'Show answer';
+}
+</script>
+</body>
+</html>

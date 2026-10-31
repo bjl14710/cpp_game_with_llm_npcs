@@ -1,0 +1,124 @@
+"""Cleaning that respects the paper's known traps (Part 2.1 + Caveats).
+
+Three hazards are handled explicitly:
+
+1. **Negative prices break log returns.** On 2020-04-20 the NYMEX WTI May
+   contract settled at -$37.63/bbl, so ``ln(P_t / P_{t-1})`` is undefined across
+   that window. :func:`to_returns` refuses to take logs of non-positive prices
+   and points the caller at the offending dates.
+2. **CL=F is a rolled continuous series.** Front-month roll dates inject jumps
+   that are not real returns; :func:`flag_roll_days` detects them and they can be
+   dropped.
+3. **Alignment.** Returns are computed per column then inner-joined on common
+   dates so the lead-lag estimators see a synchronous frame with no NaN/inf.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from oil_alpha.config import NEGATIVE_PRICE_WINDOW
+
+
+class NegativePriceError(ValueError):
+    """Raised when log returns are requested over a series that crosses <= 0."""
+
+
+def to_returns(prices: pd.Series, kind: str = "log") -> pd.Series:
+    """Daily returns for one price series.
+
+    ``kind="log"`` requires strictly positive prices and raises
+    :class:`NegativePriceError` otherwise (the Apr-2020 trap). ``kind="simple"``
+    is defined wherever the *previous* price is non-zero and is the recommended
+    fallback across the negative-price window.
+    """
+    prices = prices.dropna()
+    if kind == "log":
+        nonpos = prices[prices <= 0]
+        if not nonpos.empty:
+            first = nonpos.index[0].date()
+            raise NegativePriceError(
+                f"log returns undefined: '{prices.name}' has non-positive prices "
+                f"(first at {first}). Use kind='simple' or a positive proxy "
+                f"(USO / FRED DCOILWTICO) across {NEGATIVE_PRICE_WINDOW}."
+            )
+        out = np.log(prices / prices.shift(1))
+    elif kind == "simple":
+        out = prices / prices.shift(1) - 1.0
+        out = out.replace([np.inf, -np.inf], np.nan)
+    else:
+        raise ValueError(f"unknown return kind: {kind!r} (use 'log' or 'simple')")
+    return out.dropna().rename(prices.name)
+
+
+def has_negative_prices(prices: pd.Series) -> bool:
+    return bool((prices.dropna() <= 0).any())
+
+
+def flag_roll_days(
+    prices: pd.Series, threshold: float = 0.10, window: tuple[str, str] | None = None
+) -> pd.Series:
+    """Boolean mask of suspected front-month roll-day discontinuities in CL=F.
+
+    A roll shows up as an outsized one-day jump that is a contract switch, not a
+    real return. We flag |simple return| > ``threshold`` (default 10%). The
+    Apr-2020 window is itself an expiry artifact, so days inside ``window`` (if
+    given) are always flagged.
+    """
+    simple = prices.dropna()
+    simple = (simple / simple.shift(1) - 1.0).replace([np.inf, -np.inf], np.nan)
+    mask = simple.abs() > threshold
+    mask = mask.fillna(False)
+    if window is not None:
+        lo, hi = pd.Timestamp(window[0]), pd.Timestamp(window[1])
+        in_window = (prices.index >= lo) & (prices.index <= hi)
+        mask = mask | pd.Series(in_window, index=prices.index)
+    return mask.rename(f"{prices.name}_roll_flag")
+
+
+def build_returns_frame(
+    prices: pd.DataFrame,
+    *,
+    kind: str = "log",
+    drop_roll_days: bool = True,
+    roll_col: str | None = "wti_fut",
+    roll_threshold: float = 0.10,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Turn a multi-column price frame into an aligned return frame + flags.
+
+    Returns ``(returns, flags)`` where ``returns`` is inner-joined on common
+    dates with no NaN/inf, and ``flags`` records per-date booleans (e.g. roll
+    days, negative-window) for transparency on the dashboard.
+
+    If ``kind="log"`` but a column crosses <= 0 (CL=F over Apr-2020), that single
+    column automatically falls back to simple returns and is flagged, rather than
+    failing the whole run -- the paper's recommended handling (b).
+    """
+    ret_cols: dict[str, pd.Series] = {}
+    fallback_cols: list[str] = []
+    for col in prices.columns:
+        series = prices[col]
+        if kind == "log" and has_negative_prices(series):
+            ret_cols[col] = to_returns(series, kind="simple")
+            fallback_cols.append(col)
+        else:
+            ret_cols[col] = to_returns(series, kind=kind)
+
+    returns = pd.concat(ret_cols.values(), axis=1, join="inner").dropna()
+
+    flags = pd.DataFrame(index=returns.index)
+    lo, hi = pd.Timestamp(NEGATIVE_PRICE_WINDOW[0]), pd.Timestamp(NEGATIVE_PRICE_WINDOW[1])
+    flags["negative_window"] = (returns.index >= lo) & (returns.index <= hi)
+
+    if roll_col is not None and roll_col in prices.columns:
+        roll_mask = flag_roll_days(
+            prices[roll_col], threshold=roll_threshold, window=NEGATIVE_PRICE_WINDOW
+        ).reindex(returns.index, fill_value=False)
+        flags["roll_day"] = roll_mask.to_numpy()
+        if drop_roll_days:
+            returns = returns[~flags["roll_day"].to_numpy()]
+            flags = flags.loc[returns.index]
+
+    flags["log_fallback_to_simple"] = bool(fallback_cols)
+    return returns, flags

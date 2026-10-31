@@ -1,0 +1,135 @@
+#pragma once
+/**
+ * @file feed_handler.hpp  (exercises/07_feed_handler)
+ * @brief Exercise 07 — ITCH-inspired binary feed handler.
+ *
+ * HFT exchanges publish order-book events as dense binary streams — no
+ * JSON, no allocations, no branching on the hot path.  This exercise
+ * builds the parsing layer that converts raw bytes into structured events.
+ *
+ * Message format (ITCH-inspired, packed, little-endian):
+ *
+ *   type  fields                                            bytes
+ *   'A'   type(1) oid(8) side(1) price_ticks(8) qty(4)       22
+ *   'X'   type(1) oid(8)                                       9
+ *   'E'   type(1) oid(8) qty(4)                               13
+ *   'P'   type(1) price_ticks(8) qty(4)   [trade print, skip] 13
+ *
+ * parse_one must return true ONLY for book events (A, X, E).
+ * 'P' messages should advance pos but return false.
+ *
+ * IMPORTANT — never use reinterpret_cast to access a packed struct through a
+ * potentially unaligned pointer (undefined behaviour in C++).  Always
+ * std::memcpy the bytes into a local struct before reading its fields.
+ *
+ * Grading: uv run pytest tests/exercises/test_07_feed_handler.py -v
+ * Peek:    see solutions/07_feed_handler/feed_handler.hpp after attempting.
+ *
+ * -----------------------------------------------------------------------
+ * Complexity / theoretical speed:
+ *   parse_one  ~ O(1): switch on 1 byte + memcpy of 9–22 bytes
+ *   parse_all  ~ O(N messages): no allocations
+ *   Throughput ~ 10–30 ns per message (wire-rate at 40 Gbps Ethernet)
+ * -----------------------------------------------------------------------
+ */
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+
+// ---------------------------------------------------------------------------
+// Packed message structs — do not modify sizes or field order.
+// ---------------------------------------------------------------------------
+#pragma pack(push, 1)
+struct MsgAdd {
+    char     type;         // 'A'
+    uint64_t oid;
+    char     side;         // 'B' or 'A'
+    int64_t  price_ticks;
+    int32_t  qty;
+};  // 22 bytes
+
+struct MsgCancel {
+    char     type;         // 'X'
+    uint64_t oid;
+};  // 9 bytes
+
+struct MsgExec {
+    char     type;         // 'E'
+    uint64_t oid;
+    int32_t  qty;
+};  // 13 bytes
+
+struct MsgTrade {
+    char    type;          // 'P'
+    int64_t price_ticks;
+    int32_t qty;
+};  // 13 bytes
+#pragma pack(pop)
+
+// ---------------------------------------------------------------------------
+// BookEvent — unified output for all book-relevant messages.
+// ---------------------------------------------------------------------------
+struct BookEvent {
+    char     type;         // 'A', 'X', or 'E'
+    uint64_t oid;
+    char     side;         // 'B' or 'A' for type 'A'; '\0' otherwise
+    int64_t  price;        // price_ticks for type 'A'; 0 otherwise
+    int32_t  qty;          // qty for 'A' and 'E'; 0 for 'X'
+};
+
+// ---------------------------------------------------------------------------
+// FeedHandler — implement parse_one and parse_all below.
+// ---------------------------------------------------------------------------
+class FeedHandler {
+public:
+    // -----------------------------------------------------------------------
+    // TODO 1 — parse_one
+    //
+    // Attempt to parse one message from buf[*pos .. buf_len).
+    //
+    // Algorithm:
+    //   1. Return false immediately if *pos >= buf_len (nothing to read).
+    //   2. Read the type byte: buf[*pos].
+    //   3. Switch on type:
+    //        'A': check we have sizeof(MsgAdd) bytes remaining; memcpy into a
+    //             local MsgAdd; advance *pos; populate *out; return true.
+    //        'X': check sizeof(MsgCancel); memcpy; advance; populate; return true.
+    //        'E': check sizeof(MsgExec);   memcpy; advance; populate; return true.
+    //        'P': check sizeof(MsgTrade);  advance *pos; return FALSE
+    //             (trade print — informational, not a book event).
+    //        default: return false (unknown type, do NOT advance pos).
+    //   4. If any size check fails (truncated message), leave *pos unchanged
+    //      and return false.
+    //
+    // Never use reinterpret_cast on buf + *pos directly — always memcpy.
+    // -----------------------------------------------------------------------
+    bool parse_one(const uint8_t* buf, size_t buf_len,
+                   size_t* pos, BookEvent* out) {
+        (void)buf; (void)buf_len; (void)pos; (void)out;
+        throw std::logic_error("not implemented");
+    }
+
+    // -----------------------------------------------------------------------
+    // TODO 2 — parse_all
+    //
+    // Parse every message in buf[0 .. buf_len); call callback(event) for
+    // each book-relevant event.
+    //
+    // Loop:
+    //   - Record prev_pos = *pos before each call to parse_one.
+    //   - If parse_one returns true, call callback(ev) and increment count.
+    //   - If pos did NOT advance (prev_pos == pos), break (no progress =
+    //     truncated/unknown — do not loop forever).
+    //
+    // Return the number of book events emitted.
+    //
+    // Hint: declare a local size_t pos = 0 and pass &pos to parse_one.
+    // -----------------------------------------------------------------------
+    template<typename Fn>
+    size_t parse_all(const uint8_t* buf, size_t buf_len, Fn callback) {
+        (void)buf; (void)buf_len; (void)callback;
+        throw std::logic_error("not implemented");
+    }
+};
+

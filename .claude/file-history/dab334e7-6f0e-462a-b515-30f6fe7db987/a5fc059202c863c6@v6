@@ -1,0 +1,17 @@
+# Checkpoint
+Session: 2026-07-14 overnight #2 (research batch)
+Status: COMPLETE
+Branch: feature/research-batch (PR #72, stacked on gui branch → #63 → #53 → #52)
+Issues: #64–#71 all completed, one commit each, ai-completed labels + PR links
+Tests: 235 passed, 0 skipped (all scaffold stubs now live)
+Deviations (documented in commits/report): portfolio_dd flag independence,
+  in-window Kelly estimation, no --i_have_margin override
+Action items left for Brandon: GBM retrain+ONNX after #70's new features;
+  seed PEAD cache via refresh-earnings (~5 daily runs, AV free tier);
+  review/merge the 5-deep PR stack bottom-up
+Learning: lessons/0039 + drills/0008 (sizing pipeline), index rebuilt
+
+## Prior sessions
+- 2026-07-14 (day): 8 research plans + scaffolds + issues #64-#71 (milestone #4)
+- 2026-07-07: july6 batch #54-#62 (PR #63)
+- 2026-07-05: arena layer + orchestrator (PRs #52, #53)

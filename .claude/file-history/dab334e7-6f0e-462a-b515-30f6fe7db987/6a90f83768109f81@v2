@@ -1,0 +1,45 @@
+"""Confirmation-gate wrapper — scaffold.
+
+Spec: .claude/plans/indicators-to-features.md. Composes two DailyStrategy
+instances: the base's signal passes through only when the confirmer agrees
+— the "demoted" candlestick/technical strategies' second life as entry
+filters instead of standalone alpha.
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class ConfirmedStrategy(DailyStrategy):
+    """base's signal, gated by confirmer's opinion.
+
+    Modes:
+      - "direction": pass base's signal only when confirmer emits the SAME
+        direction (confirmer HOLD blocks).
+      - "veto": pass unless confirmer emits the OPPOSITE direction
+        (confirmer HOLD passes).
+    """
+
+    name = "confirmed"
+
+    def __init__(self, base: DailyStrategy, confirmer: DailyStrategy,
+                 mode: str = "direction") -> None:
+        if mode not in ("direction", "veto"):
+            raise ValueError(f"unknown mode '{mode}'")
+        self.base = base
+        self.confirmer = confirmer
+        self.mode = mode
+
+    @property
+    def warmup_bars(self) -> int:
+        return max(self.base.warmup_bars, self.confirmer.warmup_bars)
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """TODO(implement): evaluate both; apply the mode table above;
+        passed-through signal keeps base's confidence, reason annotated
+        with the confirmer's verdict.
+        """
+        raise NotImplementedError("scaffold: see .claude/plans/indicators-to-features.md")
+
+
+__all__ = ["ConfirmedStrategy"]

@@ -1,0 +1,16 @@
+{
+  "pid": 53798,
+  "version": "2.1.214",
+  "jsonPath": "/Users/brandonlee/.claude/daemon.json",
+  "logPath": "/Users/brandonlee/.claude/daemon.log",
+  "startedAt": 1784356024843,
+  "origin": "transient",
+  "spawnedBy": {
+    "label": "claude",
+    "cwd": "/Users/brandonlee/development/repos/products/HFT_Trading_Practice_Repo",
+    "pid": 89756
+  },
+  "procStart": "Sat Jul 18 06:27:03 2026",
+  "launchTarget": "/Users/brandonlee/.local/share/claude/versions/2.1.214",
+  "processWrapper": ""
+}

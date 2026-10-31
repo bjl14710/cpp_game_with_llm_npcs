@@ -1,0 +1,116 @@
+# Plan: Bench Latency History — Performance as a Time Series
+Date: 2026-07-06
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: S
+
+## The Idea (one paragraph)
+`docs/perf/` currently holds point-in-time snapshots (perf/01's 83→42 ns is
+frozen in December's hardware and code). This milestone adds a small tracked
+dataset and a runner script: each invocation runs `bench_main` and
+`bench_main_flat` several times, parses their existing latency line, and
+appends one row per bench — commit hash, date, host fingerprint, message
+count, p50/p99/p99.9/mean/max — to a committed CSV. A comparison step flags
+regressions against the recent history *for the same host and bench*, so
+"did I just make the book slower?" becomes a one-command answer before
+performance-sensitive work like the VHDL comparison or the market-making
+simulator begins.
+
+## Goal
+A user can run one script before committing performance-relevant changes and
+get an appended history row plus a pass/regress verdict against recent runs
+on the same machine.
+
+## Resolved Decisions
+1. **Host fingerprinting is mandatory for comparability.** Latency numbers
+   are meaningless across machines (Apple Silicon laptop vs Linux CI vs
+   container). Each row records `host_id = <hostname>-<arch>-<os>`, and
+   regression checks ONLY compare rows sharing (host_id, bench, workload).
+2. **Quantized percentiles are expected, mean is the headline.** On macOS
+   the timer granularity makes p50 read 0 and p99 land on 1000-ns steps
+   (observed this session: p50=0, mean=30.9). All fields are recorded, but
+   the regression check runs on **mean**, the only stable statistic here;
+   the CSV keeps percentiles for platforms where they're meaningful.
+3. **Noise control:** the runner executes each bench K times (default 5)
+   and records the row from the run with the LOWEST mean (best-of-K is the
+   standard low-noise estimator for "what the code can do"), with K and all
+   means noted in a `runs_json` column for forensics.
+4. **Regression rule:** mean > (1 + threshold) × median(last N matching
+   rows), defaults threshold=20%, N=5. Regression ⇒ nonzero exit + loud
+   message; the row is still appended (history records bad days too), with
+   a `flagged` column set.
+5. **No CI integration this version** — the repo has no workflows; the
+   script is local/pre-commit. It must however be non-interactive and
+   exit-code driven so dropping it into a future GitHub Action is trivial.
+6. **Storage:** `docs/perf/history.csv`, committed. Plain CSV (pandas- and
+   spreadsheet-friendly, diff-reviewable); one header row, versioned by a
+   `schema` comment line.
+7. **Bench binaries are not modified.** The existing
+   `Latency (ns): p50=... p99=... p99.9=... mean=... max=...` line is
+   parsed as-is (single stable regex); if the format ever changes the
+   parser fails loudly rather than recording garbage.
+
+## Out of Scope (this version)
+- GitHub Actions / CI wiring (no CI exists yet).
+- Tracking the microstructure engine or signals_cpp costs (bench_main and
+  bench_main_flat only; the schema's `bench` column leaves room).
+- Plotting/dashboarding the history (a one-liner in pandas when wanted).
+- Statistical change-point detection — a median-vs-threshold rule is enough
+  for a toy repo.
+- Enforcing a git hook (an optional installer is provided, never forced).
+
+## Affected Areas
+- New: `scripts/bench_history.py` (stdlib-only Python; no new deps) —
+  - builds the benches if missing (reuses the cmake invocation pattern from
+    build_cpp.sh), runs each K times, parses the latency line,
+  - appends rows to `docs/perf/history.csv`,
+  - compares against recent same-host history, prints verdict, exits 1 on
+    regression, 0 otherwise (2 on parse/build failure),
+  - `--check-only` (no append), `--threshold`, `--runs`, `--history` flags.
+- New: `docs/perf/history.csv` — seeded with the schema header and the
+  first real rows from the implementing machine.
+- New: `scripts/install_bench_hook.sh` — optional, idempotent: writes a
+  `.git/hooks/pre-push` that runs `bench_history.py --check-only` (pre-push
+  not pre-commit: benches take ~10s×K and shouldn't tax every commit).
+- New: `tests/test_bench_history.py` — unit tests for the parser and the
+  regression rule using canned bench output and a synthetic history CSV
+  (no real bench runs in tests; marked so they never require the binaries).
+- `docs/perf/` README note or header comment in history.csv pointing at the
+  runner script.
+
+## Implementation Order
+1. Parser + regression logic as importable functions in
+   `scripts/bench_history.py` + unit tests (pure logic, committable alone).
+2. Runner (build-if-missing, K runs, append, verdict) + seeded history.csv.
+3. Optional hook installer + short usage note.
+
+## Acceptance Criteria
+- [ ] Given canned bench output, the parser extracts p50/p99/p99.9/mean/max
+      exactly and raises on any format drift (unit test).
+- [ ] Given a synthetic history where the new mean is 25% above the median
+      of the last 5 same-host rows, the check flags a regression and exits
+      1; at 15% it passes (unit tests, threshold=20%).
+- [ ] Rows from a different host_id or bench never enter the comparison
+      window (unit test).
+- [ ] Running `scripts/bench_history.py` on this machine appends two rows
+      (bench_main, bench_main_flat) with the current commit hash and a
+      valid host fingerprint, and exits 0.
+- [ ] `pytest` passes in full; nothing else in the repo changes behaviour.
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|--------------------|
+| Fewer than N prior matching rows | Verdict "insufficient history — recorded, not judged", exit 0 |
+| Bench binaries missing and build fails | Exit 2 with the build error; nothing appended |
+| Latency line not found / format drift | Exit 2, loud parse error, nothing appended (Decision 7) |
+| Dirty working tree at run time | Commit hash recorded with a `-dirty` suffix so rows are honest |
+| p50 = 0 from timer quantization | Recorded as-is; regression logic ignores percentiles (Decision 2) |
+| History CSV missing or header mismatch | Missing: created with header. Mismatch: exit 2 (schema comment prevents silent format mixing) |
+| Two benches, one regresses | Exit 1, verdict names which bench and by how much |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. `bench_history: parser + regression rule + unit tests` — step 1.
+2. `bench_history: runner, seeded history.csv, optional pre-push hook` —
+   steps 2–3.

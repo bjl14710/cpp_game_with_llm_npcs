@@ -1,0 +1,276 @@
+"""Create the microstructure-signals milestone + ready-for-ai issues via GitHub REST API.
+
+Stdlib only (urllib) — PyGithub is not installed and CLAUDE.md forbids
+unasked dependency installs. Auth: GH_TOKEN env var.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+
+TOKEN = os.environ["GH_TOKEN"]
+OWNER = "bjl14710"          # from git remote (GITHUB_USERNAME not set in env)
+REPO = "HFT_Trading_Practice_Repo"
+API = f"https://api.github.com/repos/{OWNER}/{REPO}"
+
+
+def gh(method: str, path: str, payload: dict | None = None):
+    req = urllib.request.Request(
+        API + path,
+        data=json.dumps(payload).encode() if payload is not None else None,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.load(r), r.status
+    except urllib.error.HTTPError as e:
+        return json.load(e), e.code
+
+
+# ── Step 1: existing open issues (dupe guard) ────────────────────────────────
+existing, _ = gh("GET", "/issues?state=open&per_page=100")
+existing_titles = {i["title"].lower() for i in existing if "pull_request" not in i}
+print(f"Existing open issues: {len(existing_titles)}")
+
+# ── Step 3: milestone ────────────────────────────────────────────────────────
+MILESTONE_TITLE = "Microstructure Signals — OFI, Microprice, Kyle's λ"
+milestones, _ = gh("GET", "/milestones?state=open&per_page=100")
+ms = next((m for m in milestones if m["title"] == MILESTONE_TITLE), None)
+if ms is None:
+    ms, code = gh("POST", "/milestones", {
+        "title": MILESTONE_TITLE,
+        "description": (
+            "Real-data intraday microstructure signals from the pinned AAPL "
+            "golden day (12302019.NASDAQ_ITCH50, filtered). Plan: "
+            ".claude/plans/microstructure-signals.md. Steps 1-2 (fetch/filter "
+            "+ C++ OFI/microprice engine) are already on branches "
+            "feature/micro-1-fetch-itch-sample and "
+            "feature/micro-2-ofi-microprice awaiting PR merge; these issues "
+            "cover the remaining steps on the scaffolded skeletons "
+            "(branch feature/microstructure-scaffold)."
+        ),
+    })
+    assert code == 201, ms
+    print(f"Created milestone #{ms['number']}: {ms['title']}")
+else:
+    print(f"Milestone exists: #{ms['number']}")
+
+# ── Labels ───────────────────────────────────────────────────────────────────
+label, code = gh("POST", "/labels", {
+    "name": "ready-for-ai",
+    "color": "0e8a16",
+    "description": "Queued for the overnight autonomous session",
+})
+print("Label ready-for-ai:", "created" if code == 201 else "exists")
+
+# ── Step 4: issues ───────────────────────────────────────────────────────────
+ISSUE_TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy_note}
+
+## Branch name
+`feature/issue-NUM-{slug}`
+
+## Concept for learning materials
+{concept}
+"""
+
+SPECS = [
+    {
+        "title": "Implement signals_cpp.events_from_file (columnar ITCH event bridge)",
+        "slug": "signals-bridge",
+        "what": (
+            "Fill in the scaffolded `events_from_file()` in cpp/signals_py/bindings.cpp: "
+            "read a symbol-filtered framed ITCH file, run itch::parse_buffer with "
+            "MicrostructureEngine::visitor(), and return the event stream as the "
+            "documented columnar dict (one list per MicroEvent field plus "
+            "skipped_one_sided / book_error_count ints). Then implement "
+            "load_micro_events() in src/oil_alpha/microstructure/events.py per its "
+            "docstring TODO (DataFrame with EVENT_COLUMNS, diagnostics in .attrs, "
+            "empty-stream returns an empty frame with a warning, never a crash)."
+        ),
+        "where": (
+            "cpp/signals_py/bindings.cpp (TODO(micro-3) markers), "
+            "src/oil_alpha/microstructure/events.py. Contract and column names are "
+            "already fixed in the scaffold — see the file-top comments. "
+            "Depends on branches feature/micro-2-ofi-microprice + "
+            "feature/microstructure-scaffold being merged."
+        ),
+        "verify": (
+            "Un-skip and pass tests/test_micro_events.py (golden fixture "
+            "tests/fixtures/aapl-12302019-first8mb.itch: non-empty frame, "
+            "microprice within $280-$300, non-decreasing timestamps). "
+            "Full pytest and ctest suites stay green. "
+            "`pip install -e .` then `python -c \"import signals_cpp\"` works."
+        ),
+        "constraints": (
+            "Read the (already-filtered, ~45 MB max) file in one gulp; do NOT stream "
+            "or chunk. Never hand it the unfiltered multi-GB day. Prices convert to "
+            "dollars at the boundary exactly as MicroEvent already does."
+        ),
+        "economy_note": (
+            "No new files: the two scaffolded files only, plus un-skipping the "
+            "existing test stubs. The columnar-dict contract in the scaffold is "
+            "frozen — no per-event Python objects, no numpy dependency in C++, "
+            "plain std::vector -> py::list via pybind11/stl.h."
+        ),
+        "concept": (
+            "Columnar (struct-of-arrays) data transfer across a C++/Python "
+            "boundary — why 1.5M tiny objects is the wrong shape and how "
+            "DataFrame-ready columns fix it"
+        ),
+    },
+    {
+        "title": "Implement rolling-window Kyle's lambda estimator",
+        "slug": "kyles-lambda",
+        "what": (
+            "Implement estimate_kyles_lambda() in "
+            "src/oil_alpha/microstructure/kyles_lambda.py per its docstring TODO: "
+            "bucket events into contiguous window_ns windows, aggregate 1s sub-bars "
+            "of (sum OFI, microprice change), OLS per window into LambdaWindow "
+            "(ok = n_obs >= min_obs), plus one whole-session OLS aggregate."
+        ),
+        "where": (
+            "src/oil_alpha/microstructure/kyles_lambda.py (dataclasses and "
+            "signature already scaffolded). Depends on the scaffold branch; does "
+            "NOT depend on the signals_cpp bridge — the tests use synthetic frames."
+        ),
+        "verify": (
+            "Un-skip and pass all four stubs in tests/test_kyles_lambda.py, "
+            "including recovery of the injected TRUE_LAMBDA within 5% and the "
+            "low-observation ok=False flag. Full pytest suite stays green."
+        ),
+        "constraints": (
+            "Low-observation windows must report ok=False, never a silent fit. "
+            "Empty input raises ValueError with a clear message. Keep the "
+            "regression numerically plain (no HAC/robust errors this milestone)."
+        ),
+        "economy_note": (
+            "numpy (lstsq or polyfit) is sufficient — statsmodels is already a "
+            "dependency but not required here; add no new dependencies. One file's "
+            "implementation + its existing test stubs; if the synthetic generator "
+            "needs tuning, adjust the noise scale in the test, not the API."
+        ),
+        "concept": (
+            "Kyle's lambda: estimating price impact by regressing price changes "
+            "on signed order flow, and why per-window observation counts gate "
+            "confidence"
+        ),
+    },
+    {
+        "title": "Microstructure dashboard panel + docs/perf/02 writeup",
+        "slug": "micro-dashboard-writeup",
+        "what": (
+            "Implement the two figure stubs in src/oil_alpha/microstructure/plots.py "
+            "(cumulative-OFI-vs-microprice with twin axes; per-window lambda "
+            "stability with not-ok windows greyed and a session-aggregate line), "
+            "replace the 'coming soon' expander in app/dashboard.py with the real "
+            "panel (load golden-day events if data_cache/itch/AAPL-12302019.itch "
+            "exists, else keep the staging hint), and fill in every TODO in "
+            "docs/perf/02-microstructure-signals.md with measured numbers "
+            "(bare book vs book+engine per-event cost on the AAPL day)."
+        ),
+        "where": (
+            "src/oil_alpha/microstructure/plots.py, app/dashboard.py (marked "
+            "TODO(micro-5)), docs/perf/02-microstructure-signals.md. Depends on "
+            "both issues above being merged."
+        ),
+        "verify": (
+            "streamlit run app/dashboard.py renders the panel without errors both "
+            "with and without the local golden-day file present; pytest green; "
+            "docs/perf/02 contains no remaining 'TODO' strings and includes a "
+            "before/after table in the style of 01-flat-book.md."
+        ),
+        "constraints": (
+            "Downsample to <=5k points before plotting (the day has ~1.5M events). "
+            "The dashboard must degrade gracefully when the 45 MB local file is "
+            "absent — the committed 8 MB fixture is the fallback demo source."
+        ),
+        "economy_note": (
+            "Follow the existing _ccf_figure/_line plotly conventions in "
+            "dashboard.py exactly — no new plotting helpers module, no caching "
+            "layer beyond st.session_state, no config knobs beyond a window-size "
+            "selectbox."
+        ),
+        "concept": (
+            "Downsampling and rendering million-event intraday streams: why "
+            "naive plotting fails and what decimation preserves (plus measuring "
+            "the observability overhead of in-path signal computation)"
+        ),
+    },
+]
+
+created = []
+for spec in SPECS:
+    if spec["title"].lower() in existing_titles:
+        print(f"Skipping (exists): {spec['title']}")
+        continue
+    body = ISSUE_TEMPLATE.format(**{k: spec[k] for k in
+        ("what", "where", "verify", "constraints", "economy_note", "slug", "concept")})
+    issue, code = gh("POST", "/issues", {
+        "title": spec["title"],
+        "body": body,
+        "labels": ["ready-for-ai"],
+        "assignees": [OWNER],
+        "milestone": ms["number"],
+    })
+    assert code == 201, issue
+    fixed = body.replace("feature/issue-NUM-", f"feature/issue-{issue['number']}-")
+    gh("PATCH", f"/issues/{issue['number']}", {"body": fixed})
+    print(f"  Created #{issue['number']}: {spec['title']}")
+    created.append({"number": issue["number"], "title": spec["title"],
+                    "concept": spec["concept"], "url": issue["html_url"]})
+
+# ── Step 6: verify queue ─────────────────────────────────────────────────────
+queue, _ = gh("GET", "/issues?state=open&labels=ready-for-ai&per_page=100")
+queue = [i for i in queue if "pull_request" not in i]
+print("\n=== Tonight's ready-for-ai queue ===")
+for i in queue:
+    print(f"  #{i['number']:3} {i['title']}")
+print(f"\nTotal: {len(queue)} issues queued")
+
+# ── Step 7: local summary ────────────────────────────────────────────────────
+summary = (
+    f"# Issue Planning Summary\n"
+    f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    f"Repo: {OWNER}/{REPO}\n"
+    f'Focus: "hft additions of lambda and other feature additions"\n\n'
+    f"Milestone: {MILESTONE_TITLE} (#{ms['number']})\n\n"
+    "## Issues Created\n"
+)
+for i in created:
+    summary += f"- #{i['number']}: {i['title']}\n  Concept: {i['concept']}\n  URL: {i['url']}\n\n"
+summary += (
+    "\n## What Was NOT Planned\n"
+    "- Plan steps 1-2 (ITCH fetch/filter + C++ OFI/microprice engine): already\n"
+    "  implemented on feature/micro-1-fetch-itch-sample and\n"
+    "  feature/micro-2-ofi-microprice, awaiting PR merge - no issues needed.\n"
+    "- Hayashi-Yoshida / Avellaneda-Stoikov: explicitly out of scope in the plan.\n"
+    "- Incremental best-bid/ask tracking optimization (avoiding the O(range)\n"
+    "  top_of_book scan per event): deferred until docs/perf/02 numbers show\n"
+    "  whether it matters - noted inside the writeup template instead.\n"
+)
+Path(".claude/memory").mkdir(parents=True, exist_ok=True)
+Path(".claude/memory/planning-session.md").write_text(summary)
+print("\nPlan saved to .claude/memory/planning-session.md")

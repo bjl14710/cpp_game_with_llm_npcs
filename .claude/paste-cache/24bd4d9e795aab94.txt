@@ -1,0 +1,37 @@
+/idea
+
+Goal: A trait system for NPC personalities — traits are data (behavior
+rules + example lines) composed into the persona prompt — plus a lightweight
+rating loop so I can mark good/bad responses and have that shape future
+behavior. No model training in this ticket.
+
+Context: This is prompt-conditioning, deliberately not fine-tuning. Traits
+work through the existing persona-in-prompt pipeline. The rating loop's job
+is to grow each trait's few-shot example set from responses I actually
+liked, and record rules from ones I didn't.
+
+Scope:
+1. Trait data model — {name, behavior_rules[], example_exchanges[]},
+   attachable to any character (premade or created). Multiple traits
+   compose into one persona prompt in a defined order (backstory, traits,
+   examples, memory summary).
+2. Character creator integration — pick traits when creating a character;
+   also editable on existing characters.
+3. Rating capture — an unobtrusive in-conversation way to mark a response
+   good/bad. Good → stored as a candidate example line for the active
+   trait(s); bad → logged with the response for my later review. Candidates
+   go to a review file, NOT auto-promoted into prompts — I curate.
+4. Prompt-order check — ensure trait rules are asserted after the memory
+   summary in assembly order, so long-conversation drift doesn't dilute
+   traits.
+5. Document (do not implement) the escalation path: what data this system
+   accumulates that a future LoRA fine-tune could use if conditioning
+   demonstrably fails.
+
+Autonomy instructions — unattended run:
+- No clarifying questions or /grill-me-style interrogation; pick the most
+  defensible option, log reasoning, keep going.
+- Keep ratings/candidates human-curated by design — do not build
+  auto-promotion of rated lines into live prompts.
+- Follow existing CLAUDE.md agent routing. Draft PR only, no merge, no
+  main. Standard gitignore rules apply.

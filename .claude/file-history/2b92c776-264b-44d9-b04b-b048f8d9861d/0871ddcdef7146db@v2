@@ -1,0 +1,108 @@
+# Plan: Instruct NPCs to take in-world actions
+
+## Context
+
+The player can already *type* anything to an NPC, so an NPC will verbally
+react to "follow me." What's missing is turning that intent into **world
+behavior** — the NPC actually following, facing, gesturing, or chasing. Today
+NPCs are completely static: `Npc` stores `position_`/`facingDeg_` set once via
+`setPlacement()` and never updated, and the main loop has no per-frame NPC
+behavior tick. This feature lets instructions like *"follow me"*, *"raise your
+right hand"*, *"wave"*, *"stop"*, and *"arrest me if you can"* drive real
+behavior, while keeping compliance **in character** (the LLM decides whether to
+obey) and rendering gestures with **real arm poses**.
+
+## Approach
+
+Have the LLM emit a machine-readable action tag at the end of its reply *only
+when its character would actually comply*. The game parses the tag out of the
+reply text (so it's never shown), sets the NPC's behavior, and ticks behavior
+each frame. This reuses the existing LLM round-trip — no new networking.
+
+### Action vocabulary
+`follow`, `stop`, `face`, `raise_hand`, `wave`, `arrest`. Tag format, one per
+reply on its own line: `[[ACTION: follow]]`.
+
+Two independent state axes on an NPC:
+- **Movement behavior** (persistent until changed): `None | Follow | Arrest`,
+  plus `Stop`/`Face` which set facing but no movement.
+- **Gesture pose** (transient, timed overlay): `None | RaiseHand | Wave`.
+
+## Changes
+
+### 1. `src/core/NpcAction.hpp` (new, header-only — no CMake/Make change)
+- `enum class NpcAction { None, Follow, Stop, Face, RaiseHand, Wave, Arrest };`
+- `inline NpcAction parseActionTag(std::string& reply)`: case-insensitive scan
+  for `[[ACTION: <kw>]]`, map keyword→enum, **erase the tag from `reply`** (and
+  trailing whitespace) so it never displays, return `None` when absent/unknown.
+- Header-only keeps it out of `CMakeLists.txt`; `tests/` includes it directly.
+
+### 2. `src/core/Persona.hpp` — `renderSystemPrompt()`
+Append a shared "Action protocol" block: list the tags, instruct the model to
+end its reply with exactly one tag **only if the character would truly do it**
+(otherwise none), and never speak the tag aloud. This is what makes compliance
+in-character (a cop may `arrest`; a tourist refuses → no tag).
+
+### 3. `src/core/Npc.hpp` / `Npc.cpp`
+- New fields: `NpcAction behavior_ = None`, `NpcAction pose_ = None`,
+  `float poseTimer_ = 0.f`.
+- In `onReplyArrived()`: call `parseActionTag()` on the reply content before
+  returning it; route movement verbs → `behavior_`, gesture verbs → `pose_` +
+  `poseTimer_` (e.g. 4s hold / wave duration). Return the cleaned text so the
+  tag is stripped from the transcript.
+- New `void update(float dt, const Vec3& playerPos, const City& city)`:
+  - `Follow`: if `distanceXZ(pos, player) > kFollowStop (~2.5)`, step toward
+    player via `city.resolveMovement(position_, target, kNpcRadius)` at
+    `kNpcWalk (~3.8)`; always face player.
+  - `Arrest`: same but faster (`kNpcRun ~6.0`); within `kCatch (~1.6)` switch to
+    `Stop` (caught) and face player.
+  - `Stop`/`Face`: face player, no movement.
+  - Gesture timer counts down; `pose_`→`None` at zero (independent of movement).
+  - Facing toward player: `facingDeg_ = atan2(dx, dz) * 180/π` (matches the
+    `(sin,0,cos)` yaw convention in `flatForward`/`forwardFromAngles`).
+- Accessors: `NpcAction pose() const`, `float poseTimer() const`.
+- Reuses `distanceXZ`, `normalize`, `City::resolveMovement` (no new math).
+
+### 4. `src/app/Renderer3D.hpp` / `Renderer3D.cpp` — `NpcVisual` + `drawNpc`
+- Extend `NpcVisual` with `pose` (None/RaiseHand/Wave) and `gesturePhase`
+  (float seconds, for wave oscillation).
+- `drawNpc`: add two arms (thin `drawTexturedBox`/cylinder at shoulder height,
+  ~1.35 y). Default: arms at sides. `RaiseHand`: right arm rotated up. `Wave`:
+  right arm up, oscillate with `sin(gesturePhase * speed)`. Left arm static.
+
+### 5. `src/app/main.cpp` — wiring
+- After resolving player movement (after line ~319), loop NPCs and call
+  `npc.update(dt, camera.position, world.city())`.
+- In the existing `drawNpc` call (~359), pass `npc.pose()` and a running phase
+  (reuse `frameClock`/accumulated time) into `NpcVisual`.
+- Optional flourish: brief HUD line when caught by an `arrest` NPC.
+
+### 6. Tests (CLAUDE.md requires tests for new business logic)
+- `tests/test_npc_action.cpp` (new, auto-globbed): `parseActionTag` extracts
+  each keyword, strips the tag, is case-insensitive, returns `None` for
+  missing/unknown, and leaves surrounding prose intact.
+- Extend NPC tests (pattern from `tests/test_npc_history.cpp` + `FakeOllama.hpp`):
+  feed a reply containing `[[ACTION: follow]]`, assert behavior set and tag
+  stripped; then `update()` over several ticks moves the NPC closer and halts
+  within stop radius; `face` sets facing; `arrest` moves faster. Pure logic,
+  SFML-free.
+
+## Out of scope / notes
+- No pathfinding around buildings beyond `resolveMovement`'s slide (NPCs can
+  bump a corner); fine for the open plaza. Can revisit if needed.
+- `stop` leaves the NPC wherever it is (no "return home").
+
+## Verification
+- `make -C tests test` — full offline suite incl. new action/behavior tests.
+- `cmake --build build -j` then run the game (Ollama already up). Walk to
+  Officer Brooks, say "follow me" → she trails you; "stop" → she halts; "raise
+  your right hand" → arm raises; "arrest me if you can" → she chases and stops
+  on catch. Ask the baker to arrest you → expect a verbal refusal, no movement
+  (in-character). Confirm action tags never appear in the transcript.
+
+## Branch & commits
+This is the `be_able_to_instruct_npcs` work. Recommend first committing the
+already-approved mouse/strafe fixes on the current branch (two `fix(app):`
+commits), then branching `be_able_to_instruct_npcs` for this feature. Per
+CLAUDE.md I'll run `/code-review` before committing the feature and won't push
+unless asked.

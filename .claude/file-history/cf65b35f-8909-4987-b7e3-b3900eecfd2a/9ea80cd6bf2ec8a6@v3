@@ -1,0 +1,70 @@
+"""Tests for the Kyle's lambda estimator.
+
+Acceptance criteria covered (plan: .claude/plans/microstructure-signals.md):
+- synthetic dataset with a known injected impact coefficient is recovered
+  within tolerance (mirrors the CCF synthetic-lead test in test_leadlag.py)
+- low-observation windows are flagged low-confidence, never silently fitted
+
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from oil_alpha.microstructure.kyles_lambda import (
+    DEFAULT_WINDOW_NS,
+    estimate_kyles_lambda,
+)
+
+#: Injected ground-truth impact for the synthetic stream ($ per share of OFI).
+TRUE_LAMBDA = 2.5e-6
+
+
+def _synthetic_events(lam: float = TRUE_LAMBDA, n: int = 5_000, seed: int = 7) -> pd.DataFrame:
+    """Event stream where microprice moves EXACTLY lam * cumulative OFI + noise.
+
+    Noise scale 1e-5 on price levels vs a per-bar signal of ~3.5e-4
+    (lam * per-bar OFI std) gives ~25:1 signal-to-noise, so the 5% relative
+    tolerance in the recovery test is comfortable but not vacuous — a sign
+    flip or a bar-misalignment bug still fails it decisively.
+    """
+    rng = np.random.default_rng(seed)
+    ts = 34_200_000_000_000 + np.sort(rng.integers(0, 3_600_000_000_000, n))  # 9:30-10:30
+    ofi = rng.normal(0.0, 120.0, n)
+    micro = 290.0 + lam * np.cumsum(ofi) + rng.normal(0.0, 1e-5, n)
+    return pd.DataFrame({
+        "timestamp_ns": ts, "ofi": ofi, "microprice": micro,
+        "best_bid": micro - 0.005, "best_ask": micro + 0.005,
+        "bid_size": rng.integers(50, 500, n), "ask_size": rng.integers(50, 500, n),
+    })
+
+
+def test_recovers_injected_impact_coefficient() -> None:
+    """Session-level lambda on the synthetic stream matches TRUE_LAMBDA within 5%."""
+    result = estimate_kyles_lambda(_synthetic_events())
+    assert result.session_lambda == pytest.approx(TRUE_LAMBDA, rel=0.05)
+
+
+def test_rolling_windows_cover_session() -> None:
+    """Windows tile [first, last] event timestamps with the requested width."""
+    result = estimate_kyles_lambda(_synthetic_events(), window_ns=DEFAULT_WINDOW_NS)
+    assert result.windows, "expected at least one window"
+    for w in result.windows:
+        assert w.end_ns - w.start_ns == DEFAULT_WINDOW_NS
+
+
+def test_low_observation_window_flagged_not_ok() -> None:
+    """A near-empty window reports ok=False instead of a silently fitted lambda."""
+    events = _synthetic_events(n=10)  # far below MIN_OBS_PER_WINDOW
+    result = estimate_kyles_lambda(events)
+    assert result.n_windows_ok == 0
+    assert all(not w.ok for w in result.windows)
+
+
+def test_empty_events_raise_value_error() -> None:
+    """An empty event frame raises a clear ValueError (plan edge case)."""
+    empty = _synthetic_events().iloc[0:0]
+    with pytest.raises(ValueError):
+        estimate_kyles_lambda(empty)

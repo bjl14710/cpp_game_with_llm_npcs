@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0002 — Game Engines &amp; the Game Loop</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --ink:#e6edf3; --dim:#8b949e;
+    --line:#30363d; --accent:#58a6ff; --accent2:#7ee787; --warn:#f0883e;
+    --good:#3fb950; --bad:#f85149; --hit:#3fb950; --miss:#f85149;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;
+    background-image:radial-gradient(circle at 12% -10%,#16203033,transparent 42%),
+                     radial-gradient(circle at 88% 0%,#1d2a1a33,transparent 46%);}
+  .wrap{max-width:840px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-family:var(--mono);font-size:1.35rem;letter-spacing:.5px;margin:.2em 0}
+  h1 .spin{display:inline-block;color:var(--accent2);animation:spin 3.2s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){h1 .spin{animation:none}}
+  .sub{color:var(--dim);font-family:var(--mono);font-size:.82rem;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;
+    box-shadow:0 1px 0 #0006}
+  .bubble{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin:0 0 16px}
+  .tagrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .tag{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.6px;
+    padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  .tag.cat{color:var(--accent);border-color:#1f6feb55;background:#1f6feb14}
+  .tag.type{color:var(--accent2);border-color:#2ea04355;background:#2ea04314}
+  .qtext{font-size:1.05rem;margin:6px 0 4px}
+  pre{font-family:var(--mono);font-size:.8rem;background:#0a0e14;border:1px solid var(--line);
+    border-radius:8px;padding:12px 14px;overflow:auto;color:#c9d1d9;margin:12px 0}
+  .cite{font-family:var(--mono);font-size:.72rem;color:var(--dim);margin-top:-4px}
+  ul.options{list-style:none;padding:0;margin:14px 0 0}
+  ul.options li{border:1px solid var(--line);background:#0d1117;border-radius:8px;padding:11px 14px;
+    margin-bottom:9px;cursor:pointer;transition:border-color .12s,background .12s}
+  ul.options li:hover{border-color:var(--accent)}
+  ul.options li.picked-correct{border-color:var(--good);background:#2ea04318}
+  ul.options li.picked-wrong{border-color:var(--bad);background:#f8514918}
+  ul.options li.show-correct{border-color:var(--good)}
+  ul.options li .why{display:block;margin-top:7px;font-size:.82rem;color:var(--dim);font-family:var(--sans)}
+  textarea{width:100%;min-height:120px;background:#0a0e14;color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:12px;font-family:var(--mono);font-size:.86rem;resize:vertical}
+  .btn{font-family:var(--mono);font-size:.82rem;border:1px solid var(--line);background:var(--panel2);
+    color:var(--ink);padding:8px 14px;border-radius:8px;cursor:pointer;transition:.12s}
+  .btn:hover{border-color:var(--accent);color:#fff}
+  .btn.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  .btn.primary:hover{background:#388bfd}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .spacer{flex:1}
+  .feedback{margin-top:12px;font-family:var(--mono);font-size:.82rem}
+  .check{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+  .concept{font-family:var(--mono);font-size:.82rem;padding:3px 0}
+  .concept .hit{color:var(--hit)} .concept .miss{color:var(--miss)}
+  .tally{font-family:var(--mono);font-weight:bold;margin:6px 0}
+  .model{background:#0a0e14;border-left:3px solid var(--accent2);border-radius:0 8px 8px 0;
+    padding:12px 14px;margin-top:12px;font-size:.92rem}
+  .rate{display:flex;gap:10px;margin-top:12px}
+  .progress{height:7px;background:#0a0e14;border:1px solid var(--line);border-radius:999px;overflow:hidden;margin:6px 0 18px}
+  .progress > div{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width .25s}
+  .chip{font-family:var(--mono);font-size:.8rem;border:1px solid var(--line);background:#0d1117;color:var(--dim);
+    padding:7px 12px;border-radius:999px;cursor:pointer;user-select:none}
+  .chip.on{background:#1f6feb22;border-color:var(--accent);color:var(--ink)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+  .toggle{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.82rem;color:var(--dim);margin-top:14px;cursor:pointer}
+  .note{font-size:.8rem;color:var(--dim);font-style:italic;margin-top:16px}
+  .big{font-size:2.2rem;font-family:var(--mono);color:var(--accent2)}
+  .stat{font-family:var(--mono);margin:6px 0}
+  a{color:var(--accent)}
+  .hidden{display:none}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Game-engine drill <span class="spin">↺</span></h1>
+  <div class="sub">cpp_game_with_llm_npcs · drill 0002 · tests lesson 0002 · grounded in src/app/main.cpp</div>
+
+  <!-- START -->
+  <section id="start" class="card">
+    <p>Active-recall self-test on game engines and the loop: the five phases, delta time and the
+    <code>std::min(0.03f, dt)</code> clamp, update-vs-render, what makes this project an engine, and the
+    <code>core/</code>&nbsp;vs&nbsp;<code>app/</code> boundary. Most questions are <b>written recall</b> —
+    type your answer, then check it against the model answer.</p>
+    <p style="font-family:var(--mono);font-size:.82rem;color:var(--dim)">Pick channels to drill:</p>
+    <div class="chips" id="chips"></div>
+    <label class="toggle"><input type="checkbox" id="shuffle" checked> shuffle question order</label>
+    <div class="btnrow">
+      <button class="btn primary" id="begin">begin drill →</button>
+    </div>
+  </section>
+
+  <!-- QUESTION -->
+  <section id="quiz" class="card hidden">
+    <div class="progress"><div id="bar"></div></div>
+    <div class="tagrow">
+      <span class="tag" id="qcount"></span>
+      <span class="tag cat" id="qcat"></span>
+      <span class="tag type" id="qtype"></span>
+    </div>
+    <div id="qbody"></div>
+    <div class="btnrow">
+      <button class="btn ghost" id="prev">← prev</button>
+      <div class="spacer"></div>
+      <button class="btn" id="next">next →</button>
+    </div>
+    <p class="note">Heads-up: the keyword check is a rough substring match — it can miss a right answer
+    worded differently. Always judge yourself against the model answer and rate honestly.</p>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="results" class="card hidden">
+    <h1 style="font-size:1.1rem">Results</h1>
+    <div class="big" id="mcScore"></div>
+    <div class="stat" id="mcLine"></div>
+    <div class="stat" id="wrLine"></div>
+    <div id="reviewList"></div>
+    <div class="btnrow">
+      <button class="btn" id="reviewMissed">review only what I missed</button>
+      <button class="btn ghost" id="restart">restart</button>
+    </div>
+  </section>
+</div>
+
+<script>
+const CATS = {
+  loop:     "The game loop",
+  time:     "Delta time & timestep",
+  split:    "Update vs render",
+  engine:   "Engine architecture",
+  boundary: "Engine / platform boundary",
+};
+
+const Q = [
+  /* ---------- THE GAME LOOP ---------- */
+  {type:"wr",cat:"loop",
+   prompt:"Name the five phases of this game's main loop, in order, and the main.cpp construct that drives each.",
+   cite:"src/app/main.cpp:327-617",
+   model:"Per frame, in order: (1) INPUT — drain the OS event queue with the inner while(window.pollEvent(event)); (2) TIME — measure dt via frameClock.restart().asSeconds(); (3) UPDATE — advance the world by dt (move the player, npc.update(dt,…), traffic.update(dt,…)); (4) RENDER — beginFrame then drawCity/drawNpc/drawCar; (5) PRESENT — window.display() shows the finished frame. Then the outer while(window.isOpen()) repeats.",
+   concepts:[
+     {label:"INPUT — poll/drain events",terms:["input","poll","pollevent","event"]},
+     {label:"TIME — measure dt",terms:["time","dt","delta","elapsed","clock","restart"]},
+     {label:"UPDATE — advance the world by dt",terms:["update","advance","simulat","npc.update","traffic"]},
+     {label:"RENDER — draw the world",terms:["render","draw","drawcity","drawnpc","beginframe","paint"]},
+     {label:"PRESENT — display the frame",terms:["present","display","window.display","show","swap"]},
+   ]},
+
+  {type:"wr",cat:"loop",
+   prompt:"Line 330 is a loop INSIDE the frame: while (window.pollEvent(event)) { ... }. Why is input a loop within the loop rather than a single read?",
+   code:"while (window.pollEvent(event)) {\n    // handle close, focus, keypress, mouse, menu...\n}",
+   cite:"src/app/main.cpp:330",
+   model:"The OS fills an event queue; several events (key presses, mouse moves, resize, focus, close) can pile up between two frames. The inner while pops them ONE at a time until the queue is empty, so every event that arrived this frame is handled this frame. Reading only one per frame would let the queue back up and input would visibly lag behind reality.",
+   concepts:[
+     {label:"Drains the whole event queue this frame",terms:["drain","all event","every event","queue","empty","until empty"]},
+     {label:"Several events can arrive per frame",terms:["several","multiple","many","more than one","pile","batch"]},
+     {label:"Otherwise input lags / backs up",terms:["lag","backs up","back up","build up","delay","behind","accumulate"]},
+   ]},
+
+  {type:"mc",cat:"loop",
+   prompt:"Which construct is the OUTER loop — one iteration per frame?",
+   options:[
+     {t:"while (window.isOpen()) — runs each frame until the window closes",correct:true,
+      why:"The frame loop iterates as long as the window is open; everything else nests inside it."},
+     {t:"while (window.pollEvent(event)) — pops events off the queue",correct:false,
+      why:"That's the inner INPUT loop within a single frame, not the per-frame outer loop."},
+     {t:"for (Npc& npc : world.npcs()) — steps every NPC in the roster",correct:false,
+      why:"That's an inner per-entity loop inside the update/render phases, not the frame loop."},
+     {t:"a 60Hz timer callback the OS fires once per frame",correct:false,
+      why:"There's no timer callback here; it's a plain while loop, paced by vsync."},
+   ]},
+
+  /* ---------- DELTA TIME & TIMESTEP ---------- */
+  {type:"wr",cat:"time",
+   prompt:"Dissect this line: what does each part do, and why the std::min?",
+   code:"const float dt = std::min(0.03f, frameClock.restart().asSeconds());",
+   cite:"src/app/main.cpp:406",
+   model:"frameClock.restart() returns the time elapsed since the last call AND resets the clock to zero; .asSeconds() gives that as float seconds — the real duration of the previous frame. std::min(0.03f, …) caps dt at ~33 ms: after a stall (pause menu, alt-tab, OS hitch) the raw value could be seconds, which would advance everything in one giant step — cars leap a block, the player tunnels through a wall because collision only samples the step's ends. The clamp bounds the largest step the world can take, so it briefly runs slow-motion instead of exploding.",
+   concepts:[
+     {label:"restart() returns elapsed AND resets the clock",terms:["restart","reset","elapsed","since last","zero"]},
+     {label:"asSeconds() → real frame duration as float",terms:["asseconds","seconds","real","frame duration","frame time"]},
+     {label:"min clamps the maximum step",terms:["min","clamp","cap","limit","0.03","ceiling","upper bound","bound"]},
+     {label:"prevents teleport/tunnel after a stall",terms:["teleport","tunnel","stall","spike","huge","jump","giant","leap"]},
+   ]},
+
+  {type:"mc",cat:"time",
+   prompt:"You delete the * dt from pos += speed * dt. What happens?",
+   options:[
+     {t:"The game runs faster on faster machines — speed becomes tied to frame rate, not real time",correct:true,
+      why:"Without dt each frame moves a fixed amount, so more frames per second means more movement per second."},
+     {t:"Nothing changes, because dt is effectively 1.0 every frame anyway",correct:false,
+      why:"dt is a fraction of a second (~0.016 at 60fps), never 1.0; dropping it changes the units entirely."},
+     {t:"The game runs slower, because each frame now costs more to compute",correct:false,
+      why:"Removing a multiply doesn't change frame cost; it changes how far things move per frame."},
+     {t:"Movement gets smoother but keeps the same overall real-world speed",correct:false,
+      why:"Speed stops being anchored to real time, so it swings with frame rate — not the same speed."},
+   ]},
+
+  {type:"mc",cat:"time",
+   prompt:"Which timestep model does this game use?",
+   options:[
+     {t:"Variable timestep: one real-elapsed-time step per frame, clamped and vsync-capped",correct:true,
+      why:"dt is the clamped frameClock elapsed, and setVerticalSyncEnabled(true) paces the frame rate."},
+     {t:"Fixed timestep: an accumulator runs update in constant 1/60 s slices each frame",correct:false,
+      why:"There's no accumulator or constant-slice catch-up loop; it takes one elapsed-time step per frame."},
+     {t:"Unbounded variable timestep with no limit on how big a step can be",correct:false,
+      why:"It IS bounded — std::min(0.03f, …) caps the step size."},
+     {t:"No timing model: update just runs once per frame with no scaling",correct:false,
+      why:"It explicitly measures dt and scales movement by it."},
+   ]},
+
+  {type:"wr",cat:"time",
+   prompt:"What is the 'spiral of death', and why is THIS loop structurally immune to it?",
+   cite:"contrast: fixed-timestep loops",
+   model:"The spiral of death afflicts fixed-timestep loops: they accumulate real time and run as many constant-size sim steps as needed to catch up. If one step takes longer to simulate than the slice of time it represents, you fall further behind every frame, queue ever more steps, and the game freezes. This project takes a SINGLE clamped variable step per frame with no accumulator, so there's nothing to queue — at worst it runs in slow motion, never spirals.",
+   concepts:[
+     {label:"It's a fixed-timestep accumulator failure",terms:["fixed","accumulator","slice","catch up","catch-up","steps to"]},
+     {label:"Sim slower than real time → queue grows → freeze",terms:["slower","behind","grow","queue","more steps","freeze","lock"]},
+     {label:"This loop: one bounded step/frame, no accumulator",terms:["one step","single","bounded","clamp","per frame","no accumulator","slow motion"]},
+   ]},
+
+  {type:"wr",cat:"time",
+   prompt:"Two machines run the build: one at 30 fps, one at 120 fps. After 1 real second a car has travelled the same distance on both. Explain why, in terms of dt.",
+   cite:"src/core/Traffic.cpp (pos += dir * speed * dt)",
+   model:"dt is inversely proportional to frame rate: ~0.033 s/frame at 30fps, ~0.008 s at 120fps. Each frame the car moves speed*dt; summed over one real second the per-frame distances add up to speed*1.0 on both machines (30 big steps vs 120 small steps, same total). Scaling movement by dt makes it frame-rate independent — same real-world speed regardless of how many frames render.",
+   concepts:[
+     {label:"dt is inversely proportional to frame rate",terms:["inversely","proportional","bigger","larger","smaller","30","120"]},
+     {label:"distance = speed * dt integrates to the same total",terms:["speed","dt","distance","sum","integrat","total","same distance","product"]},
+     {label:"→ frame-rate independence",terms:["independent","frame-rate","framerate","real time","consistent","regardless"]},
+   ]},
+
+  /* ---------- UPDATE VS RENDER ---------- */
+  {type:"mc",cat:"split",
+   prompt:"Which of these calls belongs to the RENDER phase (not update)?",
+   options:[
+     {t:"renderer.drawCar(pos, headingDeg, colorId)",correct:true,
+      why:"drawCar only reads a car's pose and paints it; it changes no game state — that's render."},
+     {t:"traffic.update(dt, camera.position)",correct:false,
+      why:"This advances the cars by dt — the update/simulation phase."},
+     {t:"city.resolveMovement(from, to, radius)",correct:false,
+      why:"Collision resolution is part of advancing the world — update, not render."},
+     {t:"npc.update(dt, camera.position, city)",correct:false,
+      why:"update() mutates NPC state by dt — update phase."},
+   ]},
+
+  {type:"wr",cat:"split",
+   prompt:"State precisely what the UPDATE step may do and what the RENDER step may NOT do — and one concrete payoff of keeping them separate.",
+   cite:"npc.update(...) vs renderer.drawNpc(...)",
+   model:"UPDATE (npc.update, traffic.update, resolveMovement) may change world state and must scale time-based change by dt. RENDER (drawNpc, drawCar, drawCity) may only READ world state and paint it — it must mutate nothing. The payoff: because all the mutating logic is render-free, the whole core/ library is unit-testable with no window or GPU, and the renderer can be rewritten or swapped without touching gameplay.",
+   concepts:[
+     {label:"Update mutates world state (by dt)",terms:["update","mutat","change","advance","writes","modif","by dt"]},
+     {label:"Render only reads / mutates nothing",terms:["read","only read","no mutat","doesn't change","pure","draw only","view"]},
+     {label:"Payoff: headless tests / swappable renderer",terms:["test","headless","no gpu","no window","swap","replace","decoupl"]},
+   ]},
+
+  {type:"wr",cat:"split",
+   prompt:"Suppose you moved an NPC's movement INTO drawNpc. Name a concrete bug that follows, using a fact about this game's render loop.",
+   cite:"render loop culls NPCs beyond ~150 units",
+   model:"The render loop skips (culls) NPCs beyond ~150 units (kNpcCullRange) and could skip more off-screen. If movement lived in drawNpc, those culled NPCs would stop simulating — they'd freeze while far away and jump when you got close. An NPC drawn twice would move twice. The world's progress must not depend on whether or when something is rendered.",
+   concepts:[
+     {label:"World advances only when drawn/visible",terms:["visible","drawn","when drawn","on screen","only when","rendered"]},
+     {label:"Culled/distant NPCs freeze (then snap)",terms:["cull","culled","skip","distant","far","freeze","frozen","snap","stop"]},
+     {label:"Or double-draw → double-update",terms:["twice","double","two","inconsistent","depends"]},
+   ]},
+
+  /* ---------- ENGINE ARCHITECTURE ---------- */
+  {type:"mc",cat:"engine",
+   prompt:"What is the engine-vs-game distinction in this project?",
+   options:[
+     {t:"Engine = reusable machinery (loop, renderer, world, collision); game = content & rules (personas, arrest law, map)",correct:true,
+      why:"The engine is the substrate; the same machinery could run a different city game's content."},
+     {t:"Engine = the compiled binary; game = the source code that produced it",correct:false,
+      why:"Both are the same program; the split is machinery vs content, not binary vs source."},
+     {t:"Engine = the graphics code; game = everything that isn't graphics",correct:false,
+      why:"The engine also includes non-graphics machinery: the loop, world model, collision, input."},
+     {t:"Engine = the third-party libraries; game = the code you wrote yourself",correct:false,
+      why:"You hand-rolled the engine here — it's your own code, not just the libraries."},
+   ]},
+
+  {type:"wr",cat:"engine",
+   prompt:"Define 'game engine' in one sentence, then list four subsystems this project hand-rolled with the class or file for each.",
+   cite:"whole repo",
+   model:"A game engine is the reusable runtime machinery beneath a specific game. Hand-rolled here: the game loop (main.cpp), the renderer (Renderer3D), the world/entity model (World/Npc/Traffic), collision (City::resolveMovement), input (InputMap/KeyBindings), and timing (sf::Clock). Any of several different city games could run on the same machinery.",
+   concepts:[
+     {label:"Reusable runtime machinery beneath the game",terms:["reusable","machinery","runtime","beneath","substrate","underneath","framework"]},
+     {label:"Loop — main.cpp",terms:["loop","main"]},
+     {label:"Renderer — Renderer3D",terms:["render","renderer3d","draw"]},
+     {label:"World/entities — World/Npc/Traffic",terms:["world","npc","traffic","entit"]},
+     {label:"Collision — City::resolveMovement",terms:["collision","resolvemovement","city"]},
+   ]},
+
+  {type:"wr",cat:"engine",
+   prompt:"This project ships no Unity/Unreal/Godot and has no visual editor. Argue why it's still a game engine.",
+   cite:"hand-rolled on SFML + OpenGL",
+   model:"An engine is defined by its runtime machinery — a game loop, a renderer, a world/entity model, collision, and input — not by shipping a visual editor or asset pipeline, which are conveniences commercial engines add. This project hand-rolls all that machinery on SFML (window/input) and OpenGL (drawing), so it's a small but real engine, editor or not.",
+   concepts:[
+     {label:"Engine = runtime machinery, not an editor",terms:["runtime","machinery","not editor","without editor","no editor","defined by"]},
+     {label:"It has a loop + renderer + simulation",terms:["loop","renderer","simulation","subsystem","collision","present"]},
+     {label:"Editor/asset pipeline are conveniences",terms:["convenience","optional","tooling","editor is","bundle","add-on","extra"]},
+   ]},
+
+  /* ---------- ENGINE / PLATFORM BOUNDARY ---------- */
+  {type:"wr",cat:"boundary",
+   prompt:"Where is the engine/platform boundary in this repo, and what concrete benefit does it buy?",
+   cite:"src/core/ vs src/app/, CMakeLists.txt",
+   model:"The boundary is the SFML-free src/core/ library (World, City, Npc, Traffic, LlmClient, Offense, PersonaFactory) versus the src/app/ layer (main, Renderer3D) that needs SFML/OpenGL. CMake builds core on its own, so the doctest suite compiles and runs headless with no SFML and no GPU. That's exactly why all the simulation/logic is unit-tested while only the rendering is eyeballed.",
+   concepts:[
+     {label:"core/ is SFML-free; app/ needs SFML/OpenGL",terms:["core","app","sfml-free","sfml","opengl","without sfml","free of"]},
+     {label:"core = logic/simulation (World/Npc/Traffic/...)",terms:["world","city","npc","traffic","llmclient","offense","logic","simulation"]},
+     {label:"Benefit: headless unit tests / builds without SFML",terms:["test","headless","unit","build without","no sfml","no gpu","container","portable"]},
+   ]},
+
+  {type:"mc",cat:"boundary",
+   prompt:"Why can the test suite build and run with no SFML installed?",
+   options:[
+     {t:"The tests link only the SFML-free core library, which has no window or GL dependency",correct:true,
+      why:"core/ is deliberately SFML-free, so it compiles and links headless on its own."},
+     {t:"SFML is header-only, so it needs no installation just to run tests",correct:false,
+      why:"SFML isn't header-only, and the tests don't link it at all."},
+     {t:"The test harness mocks out every SFML call with a fake stand-in",correct:false,
+      why:"There's no SFML mock; the core simply never references SFML."},
+     {t:"OpenGL is stubbed by the harness so the GL calls quietly do nothing",correct:false,
+      why:"Core has no GL calls to stub — rendering lives only in app/."},
+   ]},
+
+  {type:"wr",cat:"boundary",
+   prompt:"You want to add a flocking 'Birds' system. Which loop PHASES do you touch, and which LAYER (core/ or app/) does each new piece live in?",
+   cite:"applies the loop + boundary together",
+   model:"Put the Birds simulation in src/core/ (SFML-free, unit-testable) and call birds.update(dt, …) in the UPDATE phase. Add a drawBird(…) in Renderer3D (src/app/) and call it in the RENDER phase. INPUT, TIME, and PRESENT are untouched — a clean loop means a new system plugs into exactly two well-known slots, with its logic on the testable side of the boundary.",
+   concepts:[
+     {label:"Sim in core/, birds.update(dt) in UPDATE",terms:["core","update","birds.update","dt","simulation"]},
+     {label:"drawBird in app/Renderer3D in RENDER",terms:["render","drawbird","renderer","app","draw"]},
+     {label:"INPUT/TIME/PRESENT untouched (two slots)",terms:["input","time","present","untouched","unchanged","two slot","plug"]},
+   ]},
+];
+
+/* ---------- engine ---------- */
+const state = { order:[], idx:0, answers:{}, reviewMode:false };
+const el = id => document.getElementById(id);
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+const selected = new Set(Object.keys(CATS));
+function renderChips(){
+  const c = el("chips"); c.innerHTML="";
+  const all = document.createElement("span");
+  all.className="chip"+(selected.size===Object.keys(CATS).length?" on":"");
+  all.textContent="all";
+  all.onclick=()=>{ if(selected.size===Object.keys(CATS).length){selected.clear();} else {Object.keys(CATS).forEach(k=>selected.add(k));} renderChips(); };
+  c.appendChild(all);
+  for(const [k,name] of Object.entries(CATS)){
+    const s=document.createElement("span");
+    s.className="chip"+(selected.has(k)?" on":"");
+    s.textContent=name;
+    s.onclick=()=>{ selected.has(k)?selected.delete(k):selected.add(k); renderChips(); };
+    c.appendChild(s);
+  }
+}
+renderChips();
+
+function ans(i){ return state.answers[i] || (state.answers[i]={typed:"",mcCorrect:null,checked:false,revealed:false,selfRate:null}); }
+
+function begin(missedOnly){
+  let pool = Q.map((q,i)=>i).filter(i=>selected.has(Q[i].cat));
+  if(missedOnly){
+    pool = pool.filter(i=>{
+      const a=state.answers[i]; if(!a) return false;
+      if(Q[i].type==="mc") return a.mcCorrect===false;
+      return a.selfRate==="review";
+    });
+    if(pool.length===0){ alert("Nothing marked as missed/needs-review yet."); return; }
+  }
+  if(pool.length===0){ alert("Pick at least one channel."); return; }
+  if(el("shuffle").checked) shuffle(pool);
+  state.order=pool; state.idx=0; state.reviewMode=missedOnly;
+  el("start").classList.add("hidden");
+  el("results").classList.add("hidden");
+  el("quiz").classList.remove("hidden");
+  render();
+}
+
+function render(){
+  const i = state.order[state.idx];
+  const q = Q[i]; const a = ans(i);
+  el("qcount").textContent = `Q ${state.idx+1} / ${state.order.length}`;
+  el("qcat").textContent = CATS[q.cat];
+  el("qtype").textContent = q.type==="mc" ? "multiple choice" : "written recall";
+  el("bar").style.width = ((state.idx)/(state.order.length))*100 + "%";
+
+  const body = el("qbody"); body.innerHTML="";
+  const bubble=document.createElement("div"); bubble.className="bubble";
+  const p=document.createElement("p"); p.className="qtext"; p.textContent=q.prompt; bubble.appendChild(p);
+  body.appendChild(bubble);
+  if(q.code){ const pre=document.createElement("pre"); pre.textContent=q.code; body.appendChild(pre); }
+  if(q.cite){ const c=document.createElement("div"); c.className="cite"; c.textContent="↳ "+q.cite; body.appendChild(c); }
+
+  if(q.type==="mc") renderMC(q,a,body);
+  else renderWR(q,a,body);
+
+  el("prev").disabled = state.idx===0;
+  el("next").textContent = state.idx===state.order.length-1 ? "see results →" : "next →";
+}
+
+function renderMC(q,a,body){
+  const ul=document.createElement("ul"); ul.className="options";
+  shuffle(q.options.map(o=>o)).forEach(o=>{
+    const li=document.createElement("li");
+    li.dataset.correct = o.correct ? "true":"false";
+    li.textContent=o.t;
+    const why=document.createElement("span"); why.className="why"; why.textContent=o.why; why.style.display="none";
+    li.appendChild(why);
+    li.onclick=()=>{
+      if(a.mcCorrect!==null) return;
+      const correct = li.dataset.correct==="true";
+      a.mcCorrect = correct;
+      li.classList.add(correct?"picked-correct":"picked-wrong");
+      ul.querySelectorAll("li").forEach(x=>{
+        x.querySelector(".why").style.display="block";
+        if(x.dataset.correct==="true") x.classList.add("show-correct");
+      });
+    };
+    ul.appendChild(li);
+  });
+  body.appendChild(ul);
+  if(a.mcCorrect!==null){
+    ul.querySelectorAll("li").forEach(x=>{
+      x.querySelector(".why").style.display="block";
+      if(x.dataset.correct==="true") x.classList.add(a.mcCorrect?"picked-correct":"show-correct");
+    });
+    const fb=document.createElement("p"); fb.className="feedback";
+    fb.style.color = a.mcCorrect ? "var(--good)":"var(--bad)";
+    fb.textContent = a.mcCorrect ? "✓ Answered correctly." : "✗ Marked wrong — review the highlighted answer.";
+    body.appendChild(fb);
+  }
+}
+
+function renderWR(q,a,body){
+  const ta=document.createElement("textarea");
+  ta.placeholder="Type your answer from memory…";
+  ta.value=a.typed;
+  ta.oninput=()=>{ a.typed=ta.value; };
+  body.appendChild(ta);
+
+  const row=document.createElement("div"); row.className="btnrow";
+  const checkBtn=document.createElement("button"); checkBtn.className="btn"; checkBtn.textContent="check my answer";
+  const showBtn=document.createElement("button"); showBtn.className="btn ghost"; showBtn.textContent="show me the answer";
+  row.appendChild(checkBtn); row.appendChild(showBtn);
+  body.appendChild(row);
+
+  const out=document.createElement("div"); body.appendChild(out);
+
+  checkBtn.onclick=()=>{
+    a.checked=true;
+    const text=(a.typed||"").toLowerCase();
+    const hits=q.concepts.map(c=>({c, hit:c.terms.some(t=>text.includes(t.toLowerCase()))}));
+    const got=hits.filter(h=>h.hit).length;
+    let html=`<div class="check"><div class="tally">${got} / ${q.concepts.length} key concepts detected</div>`;
+    hits.forEach(h=>{ html+=`<div class="concept"><span class="${h.hit?'hit':'miss'}">${h.hit?'✓':'○'}</span> ${h.c.label}</div>`; });
+    html+=`</div>`;
+    out.innerHTML=html;
+  };
+
+  showBtn.onclick=()=>{
+    a.revealed=true;
+    let html=`<div class="model"><b>Model answer</b><br>${q.model}</div>`;
+    html+=`<div class="rate"><span style="font-family:var(--mono);font-size:.82rem;color:var(--dim);align-self:center">rate yourself:</span>
+      <button class="btn" data-r="knew">knew it</button>
+      <button class="btn" data-r="review">needs review</button></div>`;
+    const prior = out.querySelector(".check");
+    out.innerHTML = (prior?prior.outerHTML:"") + html;
+    out.querySelectorAll("[data-r]").forEach(b=>{
+      b.onclick=()=>{
+        a.selfRate=b.dataset.r;
+        out.querySelectorAll("[data-r]").forEach(x=>x.classList.remove("primary"));
+        b.classList.add("primary");
+      };
+    });
+    if(a.selfRate){ const sel=out.querySelector(`[data-r="${a.selfRate}"]`); if(sel) sel.classList.add("primary"); }
+  };
+
+  if(a.checked) checkBtn.onclick();
+  if(a.revealed) showBtn.onclick();
+}
+
+el("prev").onclick=()=>{ if(state.idx>0){state.idx--; render();} };
+el("next").onclick=()=>{ if(state.idx<state.order.length-1){state.idx++; render();} else showResults(); };
+el("begin").onclick=()=>begin(false);
+el("restart").onclick=()=>{ el("results").classList.add("hidden"); el("start").classList.remove("hidden"); };
+el("reviewMissed").onclick=()=>begin(true);
+
+function showResults(){
+  el("quiz").classList.add("hidden");
+  el("results").classList.remove("hidden");
+  el("bar").style.width="100%";
+
+  const mc = state.order.filter(i=>Q[i].type==="mc");
+  const mcRight = mc.filter(i=>state.answers[i] && state.answers[i].mcCorrect===true).length;
+  const wr = state.order.filter(i=>Q[i].type==="wr");
+  const knew = wr.filter(i=>state.answers[i] && state.answers[i].selfRate==="knew").length;
+  const review = wr.filter(i=>state.answers[i] && state.answers[i].selfRate==="review").length;
+  const unrated = wr.length - knew - review;
+
+  el("mcScore").textContent = mc.length ? `${mcRight} / ${mc.length}` : "—";
+  el("mcLine").textContent = mc.length ? `multiple choice correct` : `no MC questions in this set`;
+  el("wrLine").textContent = `written recall — ${knew} knew it · ${review} need review · ${unrated} unrated`;
+
+  const missed = state.order.filter(i=>{
+    const a=state.answers[i]; if(!a) return false;
+    return Q[i].type==="mc" ? a.mcCorrect===false : a.selfRate==="review";
+  });
+  const rl=el("reviewList");
+  if(missed.length){
+    rl.innerHTML = `<div class="stat" style="margin-top:14px;color:var(--warn)">To revisit (${missed.length}):</div>` +
+      missed.map(i=>`<div class="concept" style="color:var(--dim)">· [${CATS[Q[i].cat]}] ${Q[i].prompt}</div>`).join("");
+  } else {
+    rl.innerHTML = `<div class="stat" style="margin-top:14px;color:var(--good)">Nothing flagged for review. Solid run.</div>`;
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0010 — Smart pointers: unique_ptr, shared_ptr, weak_ptr</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 30px; margin: 8px 0 6px; line-height: 1.25; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .own-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .ptr-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 14px 0 18px;
+  }
+  .ptr-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px; font-size: 13.5px;
+  }
+  .ptr-card h4 { margin: 0 0 6px; font-size: 14px; color: var(--accent-2); }
+  .ptr-card.uniq { border-top: 3px solid #a0d8ff; }
+  .ptr-card.shar { border-top: 3px solid #c4e08a; }
+  .ptr-card.weak { border-top: 3px solid #ffb780; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .ptr-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0010 &middot; cpp_games / docs / learning</div>
+  <h1>Smart pointers: <code>unique_ptr</code>, <code>shared_ptr</code>, <code>weak_ptr</code></h1>
+  <p class="why">Why this matters: lesson 0007 quietly used <code class="inline">std::unique_ptr&lt;LlmBackend&gt;</code> without ever explaining what it does. Lesson 0006 promised "modern C++ has no manual <code class="inline">delete</code>." This is the lesson where you finally learn the type that delivered on that promise &mdash; and the two siblings that handle the cases <code class="inline">unique_ptr</code> doesn't.</p>
+</header>
+
+<h2>1. The concept &mdash; the ownership question</h2>
+
+<p>For every heap object in a program, there's a question someone has to answer: <b>who owns this, and who is responsible for freeing it?</b> Pre-modern C++ answered that with a convention &mdash; "whoever called <code class="inline">new</code> should later call <code class="inline">delete</code>" &mdash; and the convention failed constantly. Forget to delete: memory leak. Delete twice: undefined behaviour. Delete on the wrong thread: crash. Pass a raw pointer across an API and you don't know whether you're supposed to free it.</p>
+
+<p>Smart pointers replace the convention with a <em>type</em>. Each smart pointer encodes one specific answer to the ownership question, and the compiler enforces it. There are three:</p>
+
+<div class="ptr-row">
+  <div class="ptr-card uniq">
+    <h4><code>std::unique_ptr&lt;T&gt;</code></h4>
+    <p><b>"Exactly one owner."</b> Can be moved, never copied. Destroys the object when it goes out of scope. Zero runtime overhead. Your default.</p>
+  </div>
+  <div class="ptr-card shar">
+    <h4><code>std::shared_ptr&lt;T&gt;</code></h4>
+    <p><b>"Shared by N owners."</b> Reference-counted. Object destroyed when the count reaches zero. The count uses atomics, so it's thread-safe and ~2&times; slower to copy than a raw pointer.</p>
+  </div>
+  <div class="ptr-card weak">
+    <h4><code>std::weak_ptr&lt;T&gt;</code></h4>
+    <p><b>"I observe but don't own."</b> Doesn't keep the object alive. <code class="inline">lock()</code> upgrades to a <code class="inline">shared_ptr</code> if the object still exists, else returns null. Required to break <code class="inline">shared_ptr</code> cycles.</p>
+  </div>
+</div>
+
+<p>The decision tree is short:</p>
+
+<div class="own-diagram">  who needs to keep this alive?
+
+   one obvious owner            ──>  std::unique_ptr&lt;T&gt;
+   multiple owners,
+   none demonstrably "last"     ──>  std::shared_ptr&lt;T&gt;
+   I just want to watch it,
+   I'm fine if it's gone        ──>  std::weak_ptr&lt;T&gt;
+   nobody needs to free it
+   (it's a stack local,
+    or a container element)     ──>  no smart pointer; use a reference</div>
+
+<div class="callout">
+  <h3>The one-sentence mental model</h3>
+  <p>Smart pointers are RAII wrappers around a heap pointer. The destructor of the wrapper does the <code class="inline">delete</code> &mdash; so as long as the wrapper has the right scope, the heap object is freed exactly once, at exactly the right moment.</p>
+</div>
+
+<h2>2. Minimal example &mdash; one heap object, four ways</h2>
+
+<pre class="code"><span class="kw">struct</span> Wren { std::string greeting = <span class="str">"Hi there."</span>; };
+
+<span class="com">// (1) RAW NEW/DELETE — the way that used to be normal. Every error path</span>
+<span class="com">// has to remember the delete. Forget it (or throw on the line above) → leak.</span>
+<span class="bad">Wren* w = <span class="kw">new</span> Wren;
+useWren(*w);                       <span class="com">// what if this throws? leak.</span>
+<span class="kw">delete</span> w;                          <span class="com">// have to remember; no compiler help</span></span>
+
+<span class="com">// (2) UNIQUE_PTR — RAII. delete runs automatically at scope end, even on</span>
+<span class="com">// exceptions. Zero overhead vs raw new — just one pointer in size.</span>
+<span class="ok"><span class="kw">auto</span> w = std::make_unique&lt;Wren&gt;();   <span class="com">// allocates and owns</span>
+useWren(*w);
+<span class="com">// destructor of w runs here → delete is called for us.</span></span>
+
+<span class="com">// (3) SHARED_PTR — two pointers can both own. Refcount goes up on copy,</span>
+<span class="com">// down on destruction. Object freed when count hits zero.</span>
+std::shared_ptr&lt;Wren&gt; a = std::make_shared&lt;Wren&gt;();   <span class="com">// refcount = 1</span>
+{
+    std::shared_ptr&lt;Wren&gt; b = a;                     <span class="com">// refcount = 2</span>
+    use(b);
+}                                                    <span class="com">// b destroyed → refcount = 1</span>
+<span class="com">// a destroyed → refcount = 0 → delete runs</span>
+
+<span class="com">// (4) WEAK_PTR — observes the shared_ptr above without keeping it alive.</span>
+std::weak_ptr&lt;Wren&gt; observer = a;                    <span class="com">// refcount UNCHANGED</span>
+<span class="kw">if</span> (<span class="kw">auto</span> locked = observer.lock()) {                <span class="com">// upgrades to shared_ptr if still alive</span>
+    useWren(*locked);
+} <span class="kw">else</span> {
+    <span class="com">// the Wren is gone; lock() returned a null shared_ptr.</span>
+}</pre>
+
+<p>Three things to take away:</p>
+<ul>
+  <li><b><code class="inline">make_unique</code> and <code class="inline">make_shared</code> are the right way to construct.</b> They're exception-safe; bare <code class="inline">new</code> in an argument list can leak if a sibling argument throws.</li>
+  <li><b><code class="inline">unique_ptr</code> isn't slower than <code class="inline">new</code>/<code class="inline">delete</code>.</b> It's the same heap allocation; the wrapper is sizeof(pointer). The compiler optimises the destructor call away when there's nothing else to do.</li>
+  <li><b><code class="inline">shared_ptr</code> isn't free.</b> Each copy/destruction touches an atomic counter. ~2&times; the cost of a raw pointer copy. Fine for occasional copies; surprising in a hot loop.</li>
+</ul>
+
+<h2>3. In your project &mdash; where smart pointers fit</h2>
+
+<h3>You're already <em>using</em> them &mdash; just inside containers</h3>
+
+<p>Every <code class="inline">std::vector</code>, <code class="inline">std::string</code>, and <code class="inline">std::thread</code> you've written is conceptually a smart pointer with extras. A <code class="inline">std::vector&lt;Projectile&gt;</code> owns its heap buffer; its destructor frees it. A <code class="inline">std::string</code> owns its (possibly heap-allocated) character buffer. A <code class="inline">std::thread</code> owns the OS-level thread handle. None of them require you to write <code class="inline">delete</code>. They're all RAII wrappers, just specialised to one kind of resource.</p>
+
+<p>This is why your code has zero <code class="inline">new</code> and zero <code class="inline">delete</code> today. You've been writing modern C++ without thinking about it. Smart pointers are the same idea applied to single heap objects that don't fit any of the specialised containers.</p>
+
+<h3>The case you've already seen: <code class="inline">unique_ptr</code> for HAL backends</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.hpp (proposed in lesson 0007)</small>
+<pre class="code"><span class="kw">class</span> LlmClient {
+ <span class="kw">public</span>:
+    <span class="kw">explicit</span> LlmClient(std::unique_ptr&lt;LlmBackend&gt; backend);
+    <span class="com">// ...</span>
+ <span class="kw">private</span>:
+    std::unique_ptr&lt;LlmBackend&gt; backend_;
+};</pre>
+
+<p>Why <code class="inline">unique_ptr&lt;LlmBackend&gt;</code> and not a value member or a raw pointer?</p>
+<ul>
+  <li><b>Can't be a value member.</b> <code class="inline">LlmBackend</code> is abstract &mdash; you can't instantiate it directly. The member has to be polymorphic: <code class="inline">unique_ptr&lt;Base&gt;</code> can hold an <code class="inline">OllamaBackend</code> or <code class="inline">XrtFpgaBackend</code> derived; a <code class="inline">LlmBackend</code> by value cannot.</li>
+  <li><b>Could be a raw pointer, but why?</b> A raw pointer leaves the question open: who deletes it? With <code class="inline">unique_ptr</code>, the answer is unambiguously "<code class="inline">LlmClient</code>'s destructor does." If you also remember the virtual destructor on <code class="inline">LlmBackend</code> (lesson 0007's gotcha), the right derived destructor runs automatically.</li>
+  <li><b>Can be moved, not copied.</b> Passing <code class="inline">std::unique_ptr&lt;LlmBackend&gt;</code> into the constructor with <code class="inline">std::move</code> transfers ownership. The caller no longer has the backend; <code class="inline">LlmClient</code> does. The type system forbids accidentally keeping a second copy.</li>
+</ul>
+
+<p>This is the textbook role for <code class="inline">unique_ptr</code>: heap-allocated polymorphic object with one clear owner.</p>
+
+<h3>Where <code class="inline">shared_ptr</code> would be tempting &mdash; and wrong</h3>
+
+<p>Imagine a future where multiple <code class="inline">Npc</code>s could each hold their own <code class="inline">LlmBackend</code> reference: "Jim uses Ollama, Jane uses the FPGA, Bob uses Ollama too." If two NPCs share a backend, you might reach for <code class="inline">shared_ptr&lt;LlmBackend&gt;</code> &mdash; "we both own it."</p>
+
+<p>Don't. The right model is: <code class="inline">LlmClient</code> owns the backend; NPCs <em>borrow</em> it through a reference (or a non-owning raw pointer). One owner, many users is not the same as many owners. Reaching for <code class="inline">shared_ptr</code> the moment you see "more than one thing touches it" is the most common abuse of the type. Use it when ownership is genuinely shared and you cannot name the last owner. Most of the time, you can.</p>
+
+<h3>Where <code class="inline">shared_ptr</code> + <code class="inline">weak_ptr</code> would actually fit</h3>
+
+<p>A real case is harder to find in this project, but here's a hypothetical: an NPC <code class="inline">Quest</code> system where multiple NPCs reference the same quest object ("Jim gave you this quest; Jane comments on it; the journal UI shows it") and the quest dies only when nobody references it anymore.</p>
+
+<pre class="code"><span class="kw">struct</span> Quest { std::string title; <span class="typ">bool</span> complete = <span class="kw">false</span>; };
+
+<span class="com">// Each NPC holds a shared_ptr to quests it knows about.</span>
+<span class="com">// The quest is alive as long as anyone references it.</span>
+<span class="kw">struct</span> Npc {
+    std::vector&lt;std::shared_ptr&lt;Quest&gt;&gt; knownQuests;
+};
+
+<span class="com">// The UI just wants to observe — if the quest gets removed by the world,</span>
+<span class="com">// the UI should NOT keep it alive on its own.</span>
+<span class="kw">struct</span> QuestLogUI {
+    std::vector&lt;std::weak_ptr&lt;Quest&gt;&gt; tracked;
+
+    <span class="kw">void</span> render() {
+        <span class="kw">for</span> (<span class="kw">auto</span>&amp; w : tracked) {
+            <span class="kw">if</span> (<span class="kw">auto</span> q = w.lock()) {   <span class="com">// upgrade if still alive</span>
+                drawTitle(q-&gt;title);
+            }
+            <span class="com">// else: the quest is gone; we silently skip it.</span>
+        }
+    }
+};</pre>
+
+<p>The <code class="inline">weak_ptr</code> here would also prevent a cycle. If the UI held <code class="inline">shared_ptr</code>s and the quest itself held a <code class="inline">shared_ptr</code> back to the UI (say, to push notifications), you'd have a cycle: each end is keeping the other alive, neither will ever destruct, memory is leaked even after the player closes the journal. <code class="inline">weak_ptr</code> on one edge breaks the loop.</p>
+
+<div class="callout warn">
+  <h3>You don't have a use case for these in your code today</h3>
+  <p>The honest answer: in the current state of your three games, <code class="inline">shared_ptr</code> and <code class="inline">weak_ptr</code> don't fit anywhere. <code class="inline">unique_ptr</code> fits in the lesson-0007 refactor. Smart pointers are the answer to a problem (heap object + ownership question); if you don't have heap objects with ambiguous ownership, you don't need them. The point of learning them is so you recognise the problem when it appears.</p>
+</div>
+
+<h2>4. Often confused with...</h2>
+
+<h3><code class="inline">unique_ptr</code> vs. <code class="inline">shared_ptr</code></h3>
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th><code class="inline">unique_ptr</code></th><th><code class="inline">shared_ptr</code></th></tr></thead>
+  <tbody>
+    <tr><td>Size</td><td>1 pointer</td><td>2 pointers (data + control block ptr)</td></tr>
+    <tr><td>Copy</td><td>Forbidden &mdash; compile error</td><td>Allowed; increments atomic refcount</td></tr>
+    <tr><td>Move</td><td>Cheap, transfers ownership</td><td>Cheap, same atomic refcount</td></tr>
+    <tr><td>Destruction</td><td>Always; once, at scope end</td><td>Only when refcount hits 0</td></tr>
+    <tr><td>Thread safety of the ptr itself</td><td>None needed (one owner)</td><td>Refcount is atomic; the pointed-at object is your problem to synchronise</td></tr>
+    <tr><td>Best when</td><td>One clear owner &mdash; the default</td><td>Ownership is genuinely shared and you can't name "last"</td></tr>
+  </tbody>
+</table>
+
+<h3><code class="inline">shared_ptr</code> vs. raw pointer (or reference)</h3>
+<p>A <code class="inline">shared_ptr</code> owns; a raw pointer or reference observes. If you write <code class="inline">void render(Quest& q)</code>, you've said "I'm using <code class="inline">q</code> for this call; I don't claim ownership." If you write <code class="inline">void render(std::shared_ptr&lt;Quest&gt; q)</code>, you've said "I'm taking part-ownership; if you destroy your shared_ptr, mine still keeps the quest alive." For most function parameters, the non-owning form is correct. <b>Pass smart pointers only when ownership actually transfers or is shared.</b></p>
+
+<h3><code class="inline">weak_ptr</code> vs. raw pointer</h3>
+<p>Both observe without owning. The difference is detection. A raw pointer kept around after its target dies becomes a dangling pointer &mdash; using it is undefined behaviour with no warning. A <code class="inline">weak_ptr</code> kept around after its target dies returns a null <code class="inline">shared_ptr</code> when you <code class="inline">.lock()</code> &mdash; safe, detectable. Use <code class="inline">weak_ptr</code> when the observed object might die under you and you need to handle that gracefully. Use a raw pointer or reference when the lifetime is guaranteed by the surrounding code.</p>
+
+<h3>Smart pointers vs. garbage collection</h3>
+<p>Java and Go free memory periodically, scanning to find what's unreachable. The cost: stop-the-world pauses (or background CPU), nondeterministic destruction time. C++'s smart pointers free <em>immediately</em> when ownership ends. The cost: you have to think about ownership; cycles aren't auto-detected. Trade-off in plain English &mdash; GC gives you "I never think about it"; smart pointers give you "I know exactly when destructors run." For game code that wants predictable frame budget (lesson 0003), the smart-pointer model is the right one.</p>
+
+<h3><code class="inline">std::move(unique_ptr)</code> vs. copy</h3>
+<p>You can't copy a <code class="inline">unique_ptr</code>: the line <code class="inline">auto b = a;</code> for two <code class="inline">unique_ptr</code>s is a compile error. You can <em>move</em>: <code class="inline">auto b = std::move(a);</code>. After the move, <code class="inline">a</code> is empty &mdash; <code class="inline">a.get() == nullptr</code> &mdash; and <code class="inline">b</code> owns the heap object. The language enforces "exactly one owner at a time" by literally disallowing the operation that would violate it. This is the type system at its best.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">In the lesson 0007 refactor, why is <code class="inline">LlmClient</code>'s backend field declared as <code class="inline">std::unique_ptr&lt;LlmBackend&gt;</code> rather than <code class="inline">LlmBackend</code> by value?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Performance isn't the issue here — the call cost is dominated by the model. The value-member option is forbidden for a different reason.">
+      Performance &mdash; storing it by value would copy the whole backend on every <code class="inline">LlmClient</code> copy.
+    </li>
+    <li data-correct="true" data-why="Right. LlmBackend has at least one pure virtual method, which makes it abstract. You literally cannot instantiate it. The polymorphic member has to be held via pointer or reference; unique_ptr is the cleanest way to also own it.">
+      <code class="inline">LlmBackend</code> is abstract (pure virtuals) — it can't be instantiated as a value member. Polymorphic ownership requires pointer-to-base.
+    </li>
+    <li data-correct="false" data-why="Backwards. shared_ptr is for shared ownership; LlmClient is the sole owner of the backend, so unique_ptr is the right tool.">
+      To allow multiple <code class="inline">LlmClient</code>s to share one backend.
+    </li>
+    <li data-correct="false" data-why="A by-value member is allowed for non-abstract types. The compiler doesn't ban inheritance hierarchies in general — just instantiation of abstract ones.">
+      C++ doesn't allow inheritance hierarchies as value members in general.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You add <code class="inline">std::shared_ptr&lt;Texture&gt;</code> to <code class="inline">Projectile</code> in the shooter game so every projectile can show a custom sprite. The shooter's per-frame loop now iterates the projectile vector, copying each <code class="inline">Projectile</code> into a temporary for some helper. What's the hidden cost?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The Texture isn't deep-copied — shared_ptr's whole point is to NOT copy the pointed-at object. The cost is in the control block, not the pixels.">
+      Every projectile copy deep-copies the underlying texture pixels.
+    </li>
+    <li data-correct="true" data-why="Right. Every shared_ptr copy increments an atomic refcount; the destructor of the temporary decrements it. Atomic operations are fast but not free — ~2× a normal pointer copy. In a hot loop multiplied by 500 projectiles that adds up. The fix is usually to pass by reference, not to switch container types.">
+      Every projectile copy increments an atomic reference count; the temporary's destruction decrements it. In a hot loop, those atomic ops add up.
+    </li>
+    <li data-correct="false" data-why="A null check is just a load and compare, dwarfed by the atomic refcount cost. The atomic increment/decrement is the real story.">
+      Each access does a null-pointer check, which adds a branch in the hot loop.
+    </li>
+    <li data-correct="false" data-why="shared_ptr doesn't move data through the kernel. The refcount lives in user space; it's atomic but not a syscall.">
+      Each shared_ptr access requires a syscall to update the reference count in the kernel.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">Two classes hold <code class="inline">std::shared_ptr</code> to each other (a "cycle"). The program exits. What happens to the two objects?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Smart pointers do free memory — but they only free when the refcount hits zero. In a cycle the refcount never reaches zero, so nothing is freed.">
+      Both are correctly freed because <code class="inline">std::shared_ptr</code> always cleans up.
+    </li>
+    <li data-correct="true" data-why="Right. Each holds a refcount on the other, so neither's count ever reaches zero. Neither destructor runs. Memory leaked at program exit (technically the OS reclaims it then, but during a long-running game the leak grows unboundedly). The fix is to make one side a weak_ptr — observation without refcount — so the cycle is broken.">
+      Both leak — each keeps the other's refcount above zero, so neither destructor runs. Fix: make one side a <code class="inline">weak_ptr</code>.
+    </li>
+    <li data-correct="false" data-why="Modern compilers don't detect shared_ptr cycles at compile time. The bug is invisible to the language; you have to design around it.">
+      The compiler detects the cycle at build time and refuses to compile.
+    </li>
+    <li data-correct="false" data-why="C++'s standard library has no GC. shared_ptr is purely refcount-based; cycles defeat it.">
+      The standard library's garbage collector detects the cycle and frees both.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You're writing <code class="inline">void renderQuest(Quest&amp; q)</code>. Which is the right parameter type, given the function only reads <code class="inline">q</code> and the quest's lifetime is guaranteed by the caller?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Passing shared_ptr by value means an atomic increment on every call. Pure waste here — you're not taking ownership, just reading.">
+      <code class="inline">std::shared_ptr&lt;Quest&gt; q</code> &mdash; safest by default.
+    </li>
+    <li data-correct="true" data-why="Right. The function doesn't own; it borrows for the call. const reference passes nothing but a pointer's worth of address, with no refcount manipulation, and the type itself says 'I don't claim ownership.' Smart pointers are for transferring ownership, not for plain access.">
+      <code class="inline">const Quest&amp; q</code> &mdash; non-owning observation, no refcount cost.
+    </li>
+    <li data-correct="false" data-why="Raw owning pointers are exactly what smart pointers were invented to replace. Even as a parameter, raw pointer + ownership semantics is the foot-gun.">
+      <code class="inline">Quest* q</code> &mdash; matches old C-style APIs.
+    </li>
+    <li data-correct="false" data-why="You can't move from a function parameter that the caller might still want to use. And moving here would unnecessarily mutate the caller's state.">
+      <code class="inline">Quest&amp;&amp; q</code> &mdash; allows moving the quest out efficiently.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A teammate writes <code class="inline">std::unique_ptr&lt;LlmBackend&gt; b1 = backend; std::unique_ptr&lt;LlmBackend&gt; b2 = backend;</code> hoping to keep <code class="inline">backend</code> while also giving it to someone else. What happens?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="That'd be the shared_ptr behaviour. unique_ptr literally cannot be copied; the second line wouldn't even compile.">
+      <code class="inline">backend</code> ends up with refcount 3 and all three pointers stay valid.
+    </li>
+    <li data-correct="false" data-why="There's no runtime check for 'two unique_ptrs.' The check happens at compile time — both copy attempts fail to compile.">
+      <code class="inline">b2</code> is initialised but <code class="inline">backend</code> is silently nulled at runtime.
+    </li>
+    <li data-correct="true" data-why="Right. unique_ptr's copy constructor is = delete. Both copy attempts are compile errors. The whole point of the type is to make 'two owners' literally inexpressible in the language. If they wanted to transfer, they'd write std::move(backend) — which leaves backend null and only works once.">
+      Compile error on both lines. <code class="inline">unique_ptr</code>'s copy constructor is deleted; the only way to transfer ownership is <code class="inline">std::move</code>.
+    </li>
+    <li data-correct="false" data-why="There's no 'pointer pool' in the standard library — that's not how the type works. Each unique_ptr destructor deletes its raw pointer, full stop.">
+      Both <code class="inline">b1</code> and <code class="inline">b2</code> point at the same backend; the destructor pool handles it.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> Look at <code class="inline">DialogUI::transcript_</code> &mdash; a <code class="inline">std::deque&lt;TranscriptLine&gt;</code>. The deque is "really" a smart pointer over its data. State the parallel as precisely as you can: what does the deque own (heap-wise), and what destructor frees it?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> A teammate proposes <code class="inline">std::vector&lt;std::shared_ptr&lt;Enemy&gt;&gt; enemies;</code> in the shooter "so we can pass enemies around safely." Argue against it (one paragraph) using lesson 0003's hot-loop cost and this lesson's "one owner" principle. What container would you keep instead?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> Imagine you add quest-tracking like §3 sketched. The journal UI uses <code class="inline">std::weak_ptr&lt;Quest&gt;</code> to observe. The player completes a quest; the world destroys its <code class="inline">shared_ptr&lt;Quest&gt;</code>. The journal renders on the next frame. Walk through what happens inside <code class="inline">render()</code>'s loop &mdash; specifically what <code class="inline">w.lock()</code> returns and why that's better than a raw pointer.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can name the three smart pointers and what each is for</label></li>
+  <li><label><input type="checkbox"> Walked through the four-way example &mdash; I see why raw <code class="inline">new</code>/<code class="inline">delete</code> is the foot-gun</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I can defend why <code class="inline">unique_ptr&lt;LlmBackend&gt;</code> is right and <code class="inline">shared_ptr</code> would be wrong</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I can contrast unique vs shared, shared vs raw, weak vs raw, GC vs smart pointers</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/cpp/memory/unique_ptr">cppreference: <code>std::unique_ptr</code></a> &middot;
+    <a href="https://en.cppreference.com/cpp/memory/shared_ptr">cppreference: <code>std::shared_ptr</code></a> &middot;
+    <a href="https://en.cppreference.com/cpp/memory/weak_ptr">cppreference: <code>std::weak_ptr</code></a> &middot;
+    <a href="https://www.modernescpp.com/index.php/c-core-guidelines-rules-to-smart-pointers/">C++ Core Guidelines: smart pointer rules</a> &middot;
+    <a href="https://learn.microsoft.com/en-us/cpp/cpp/smart-pointers-modern-cpp?view=msvc-170">Microsoft: smart pointers in modern C++</a>
+  </p>
+  <p>Lesson 0010 &middot; <code class="inline">docs/learning/lessons/0010-smart-pointers.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

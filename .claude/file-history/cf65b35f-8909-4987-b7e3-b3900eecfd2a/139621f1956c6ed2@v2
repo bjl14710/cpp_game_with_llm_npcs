@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Build the C++ extension (oil_volume_cpp) and place the .so in src/oil_alpha/.
+# This script works around environments where the system Python lacks dev headers.
+# Usage: ./scripts/build_cpp.sh [python_executable]
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="$REPO_ROOT/_build"
+
+# Pick a Python that has dev headers.
+PYTHON="${1:-}"
+if [ -z "$PYTHON" ]; then
+    # Prefer a uv-managed Python (has bundled headers).
+    if command -v uv &>/dev/null; then
+        PYTHON=$(uv python find 3.11 2>/dev/null || uv python find 3.12 2>/dev/null || true)
+    fi
+fi
+PYTHON="${PYTHON:-python3}"
+
+echo "Using Python: $PYTHON ($($PYTHON --version 2>&1))"
+
+# Check Python headers are present.
+INCLUDE_DIR=$($PYTHON -c "import sysconfig; print(sysconfig.get_path('include'))")
+if [ ! -f "$INCLUDE_DIR/Python.h" ]; then
+    echo "ERROR: Python.h not found at $INCLUDE_DIR"
+    echo "Install python3-dev (apt) or use a uv-managed Python: uv python install 3.11"
+    exit 1
+fi
+
+# Locate pybind11 cmake config from pip-installed package.
+PYBIND11_CMAKE=$($PYTHON -c "import pybind11; print(pybind11.get_cmake_dir())" 2>/dev/null || true)
+
+CMAKE_EXTRA_ARGS=()
+if [ -n "$PYBIND11_CMAKE" ]; then
+    CMAKE_EXTRA_ARGS+=("-Dpybind11_DIR=$PYBIND11_CMAKE")
+fi
+
+mkdir -p "$BUILD_DIR"
+cmake -S "$REPO_ROOT" -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPython3_EXECUTABLE="$PYTHON" \
+    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$REPO_ROOT/src/oil_alpha" \
+    ${CMAKE_EXTRA_ARGS[@]+"${CMAKE_EXTRA_ARGS[@]}"}
+
+# nproc is Linux-only; fall back to sysctl on macOS.
+cmake --build "$BUILD_DIR" --parallel "$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+
+echo ""
+echo "Extension built. Verify with:"
+echo "  PYTHONPATH=src $PYTHON -c 'import oil_volume_cpp; print(oil_volume_cpp.rolling_mean([1,2,3,4,5], 3))'"

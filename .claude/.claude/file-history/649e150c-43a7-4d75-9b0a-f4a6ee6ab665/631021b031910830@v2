@@ -1,0 +1,98 @@
+-- =============================================================================
+-- Exercise 05b: write a testbench for fpga/moving_average_trader.vhd
+--
+-- The scaffolding (entity, DUT with WINDOW=4 / SPREAD=100, clock, reset) is
+-- done. YOUR JOB: the stimulus process. Prices are integer x100
+-- ($100.00 -> 10000); SPREAD=100 means $1.00.
+--
+-- Behaviors to verify (read the DUT's two pipeline stages first!):
+--   1. valid_out stays LOW through warm-up — and for one extra sample,
+--      because the warmed-up flag is registered a stage behind.
+--   2. The average a sample is compared against is over the PREVIOUS
+--      window, NOT including that sample (stage 1 registers the old
+--      running sum).
+--   3. 2-cycle latency from a sample's input edge to its signal.
+--   4. One BUY (price < avg - $1), one SELL (price > avg + $1), one HOLD
+--      (valid_out high, both signals low), then valid_out drops when the
+--      pipeline drains.
+--
+-- Suggested ramp: 4 x $100.00 warm-up, then $98.00 (BUY), $102.00 (SELL),
+-- $100.00 (HOLD) — work the expected averages out by hand before asserting.
+--
+-- Grade yourself:
+--   uv run pytest tests/exercises/test_05_vhdl.py -v        (needs ghdl)
+--   bash scripts/run_vhdl_tests.sh tb_moving_average_trader
+-- =============================================================================
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity tb_moving_average_trader is
+end entity tb_moving_average_trader;
+
+architecture sim of tb_moving_average_trader is
+
+    constant CLK_PERIOD : time := 10 ns;
+
+    signal clk         : std_logic := '0';
+    signal rst_n       : std_logic := '0';
+    signal price_in    : signed(31 downto 0) := (others => '0');
+    signal valid_in    : std_logic := '0';
+    signal buy_signal  : std_logic;
+    signal sell_signal : std_logic;
+    signal valid_out   : std_logic;
+
+    signal done : boolean := false;
+
+begin
+
+    dut : entity work.moving_average_trader
+        generic map (
+            WINDOW     => 4,
+            PRICE_BITS => 32,
+            SPREAD     => 100   -- $1.00 in x100 units
+        )
+        port map (
+            clk         => clk,
+            rst_n       => rst_n,
+            price_in    => price_in,
+            valid_in    => valid_in,
+            buy_signal  => buy_signal,
+            sell_signal => sell_signal,
+            valid_out   => valid_out
+        );
+
+    clk_gen : process
+    begin
+        while not done loop
+            clk <= '0';
+            wait for CLK_PERIOD / 2;
+            clk <= '1';
+            wait for CLK_PERIOD / 2;
+        end loop;
+        wait;
+    end process clk_gen;
+
+    stimulus : process
+    begin
+        rst_n <= '0';
+        wait until rising_edge(clk);
+        wait until rising_edge(clk);
+        rst_n <= '1';
+        wait until rising_edge(clk);
+
+        -- TODO: hold valid_in high and feed the price ramp one sample per
+        --       rising edge; after each relevant edge,
+        --       `wait for 1 ns;` then assert valid_out / buy_signal /
+        --       sell_signal (severity error).
+
+        -- Delete this line once your stimulus is written:
+        report "EXERCISE-NOT-IMPLEMENTED: write the stimulus and assertions"
+            severity failure;
+
+        done <= true;
+        report "TB PASSED" severity note;
+        wait;
+    end process stimulus;
+
+end architecture sim;

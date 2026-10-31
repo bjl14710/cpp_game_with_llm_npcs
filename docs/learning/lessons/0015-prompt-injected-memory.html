@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0015 — Prompt-Injected Memory: Summaries as Compressed State</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0015 · LLM engineering · from src/core/ConversationStore + Persona::renderSystemPrompt(memory)</div>
+<h1>Prompt-Injected Memory: Summaries as Compressed State</h1>
+<p>An LLM has no memory between requests — every "conversation" is a replay.
+Long-term memory is therefore an engineering choice about <em>what to replay</em>.</p>
+
+<h2>Three tiers of remembering</h2>
+<ol>
+<li><strong>The context window</strong> (built in): replay recent turns
+verbatim. This game keeps 10 turns per NPC — beyond that, cost and small-model
+attention degrade.</li>
+<li><strong>The summary</strong> (this lesson): compress everything older into
+a few sentences and inject them into the system prompt. Cheap, bounded,
+survives restarts once persisted.</li>
+<li><strong>Retrieval (RAG)</strong>: store everything, embed, fetch relevant
+pieces per query. Powerful, but a whole retrieval stack for a hot-dog vendor
+is not v1 engineering.</li>
+</ol>
+
+<h2>Who writes the memory? The NPC does</h2>
+<p>When a conversation closes, the game asks the NPC's own model to update its
+note — first person, three sentences, "who is this player, what happened,
+what should I remember." First person matters: the summary re-enters the
+prompt as the character's own recollection, so voice and perspective survive
+the round-trip. Marge remembers "Sam loves my rye" — not "the user expressed
+a preference for rye bread."</p>
+<pre><code>// On conversation close (main.cpp):
+//   transcript -> "update your note" request -> NPC's model
+// On reply:
+//   npc.setMemory(note); store.save(name, note, history)
+// On next launch:
+//   npc.setMemory(store.load(name).summary)</code></pre>
+
+<h2>Placement in the prompt is load-bearing</h2>
+<p><code>renderSystemPrompt(memory)</code> inserts the memory <em>before</em>
+the action/mood protocol, not at the end. Small local models weight trailing
+instructions most heavily — the directive contract must stay last or tag
+compliance drops. Prompt sections are ordered by how badly you need them
+obeyed, back to front.</p>
+
+<h2>Persistence: boring on purpose</h2>
+<p>One SQLite table: <code>conversations(npc_id, summary, transcript_json,
+updated_at)</code>. The summary is the working state; the transcript is for
+debugging ("why does Marge think my name is Kevin?"). Failure semantics are
+the important design: a missing database, unwritable path, or corrupt row
+degrades to a memoryless session with a logged warning — memory is an
+enhancement, and an enhancement is never allowed to crash the game.</p>
+<div class="callout warn">Summarization drift is the known failure mode: each
+compression loses detail, and errors compound ("Sam mentioned bread" becomes
+"Sam is a baker" three summaries later). Mitigations: feed the previous note
+into the update request (the model corrects rather than re-invents), keep
+notes short (less room to confabulate), and keep transcripts for auditing.</div>
+
+<h2>Multiplayer wrinkle</h2>
+<p>Memories belong to the host's world — guests talk to the host's NPCs, so
+their exploits land in the host's saves. Replicating memories to guests would
+mean replicating identity; that's a design question for later, not an
+accident to stumble into.</p>
+<div class="callout good">Takeaway: "long-term memory" for an LLM character is
+state compression with a persistence layer — the model is both the consumer
+and the compressor, and the prompt is the only bus that carries it back in.</div>
+</div></body></html>

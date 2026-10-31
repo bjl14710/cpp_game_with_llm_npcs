@@ -1,0 +1,1020 @@
+#!/usr/bin/env python3
+import inspect
+import os
+import subprocess
+import sys
+import threading
+import datetime as dt
+from datetime import date
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+
+import pandas as pd
+import yfinance as yf
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+import joblib
+
+try:
+    # Local imports from this repo
+    from walkforward_sim import simulate_walkforward
+    from analyze_equity import compute_metrics
+    from paper_trading_sim import simulate as bt_simulate, BacktestConfig
+    from scripts.universe_builder import (
+        fetch_index,
+        load_as_of,
+        save_snapshot,
+        top_n_by_market_cap,
+    )
+except Exception:
+    # If running from an installed package, they should still resolve; otherwise add CWD
+    sys.path.append(os.getcwd())
+    from walkforward_sim import simulate_walkforward
+    from analyze_equity import compute_metrics
+    from paper_trading_sim import simulate as bt_simulate, BacktestConfig
+    from scripts.universe_builder import (
+        fetch_index,
+        load_as_of,
+        save_snapshot,
+        top_n_by_market_cap,
+    )
+
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("HFT Practice – GUI")
+        self.geometry("1000x700")
+
+        nb = ttk.Notebook(self)
+        nb.pack(fill=tk.BOTH, expand=True)
+
+        self.walk_tab = ttk.Frame(nb)
+        self.train_tab = ttk.Frame(nb)
+        self.universe_tab = ttk.Frame(nb)
+        self.news_tab = ttk.Frame(nb)
+        self.exec_tab = ttk.Frame(nb)
+        self.eval_tab = ttk.Frame(nb)
+        nb.add(self.walk_tab, text="Walkforward")
+        nb.add(self.train_tab, text="Train/Backtest")
+        nb.add(self.universe_tab, text="Universe Builder")
+        nb.add(self.news_tab, text="News")
+        nb.add(self.exec_tab, text="Execution")
+        nb.add(self.eval_tab, text="Analyze Equity")
+
+        self._updating_universe_out = False
+        self._universe_out_user_set = False
+
+        self._build_walk_tab()
+        self._build_train_tab()
+        self._build_universe_tab()
+        self._build_news_tab()
+        self._build_exec_tab()
+        self._build_eval_tab()
+
+    def _build_walk_tab(self):
+        f = self.walk_tab
+        pad = {"padx": 6, "pady": 4}
+
+        row = 0
+        # Model bundle
+        ttk.Label(f, text="Model bundle (.joblib)").grid(row=row, column=0, sticky="w", **pad)
+        self.model_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.model_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_model).grid(row=row, column=2, **pad)
+
+        row += 1
+        # Tickers file
+        ttk.Label(f, text="Tickers file (one per line)").grid(row=row, column=0, sticky="w", **pad)
+        self.tickers_file_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.tickers_file_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_tickers).grid(row=row, column=2, **pad)
+
+        row += 1
+        # Dates
+        ttk.Label(f, text="Start (YYYY-MM-DD)").grid(row=row, column=0, sticky="w", **pad)
+        self.start_var = tk.StringVar(value="2020-01-01")
+        ttk.Entry(f, textvariable=self.start_var, width=20).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="End (YYYY-MM-DD)").grid(row=row, column=2, sticky="w", **pad)
+        self.end_var = tk.StringVar(value=str(date.today()))
+        ttk.Entry(f, textvariable=self.end_var, width=20).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        # Strategy params
+        self.topn_var = tk.IntVar(value=20)
+        self.opt_var = tk.StringVar(value="meanvar")
+        self.covlb_var = tk.IntVar(value=90)
+        self.shrink_var = tk.DoubleVar(value=0.2)
+        self.maxw_var = tk.DoubleVar(value=0.05)
+        self.capital_var = tk.DoubleVar(value=100000.0)
+        self.cost_var = tk.DoubleVar(value=1.0)
+
+        ttk.Label(f, text="Top N").grid(row=row, column=0, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.topn_var, width=10).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Optimize").grid(row=row, column=2, sticky="w", **pad)
+        ttk.Combobox(f, textvariable=self.opt_var, values=["none", "meanvar"], width=10, state="readonly").grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Cov lookback").grid(row=row, column=0, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.covlb_var, width=10).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Shrink (0-1)").grid(row=row, column=2, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.shrink_var, width=10).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Max weight").grid(row=row, column=0, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.maxw_var, width=10).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Capital ($)").grid(row=row, column=2, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.capital_var, width=12).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Trade cost (bps)").grid(row=row, column=0, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.cost_var, width=10).grid(row=row, column=1, sticky="w", **pad)
+
+        # Rolling retrain controls
+        row += 1
+        self.rr_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Rolling retrain", variable=self.rr_var).grid(row=row, column=0, sticky="w", **pad)
+        ttk.Label(f, text="Cadence").grid(row=row, column=1, sticky="w", **pad)
+        self.rr_freq_var = tk.StringVar(value="monthly")
+        ttk.Combobox(f, textvariable=self.rr_freq_var, values=["daily", "weekly", "monthly", "quarterly"], width=12, state="readonly").grid(row=row, column=2, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Train window (days)").grid(row=row, column=0, sticky="w", **pad)
+        self.rr_window_var = tk.IntVar(value=756)
+        ttk.Entry(f, textvariable=self.rr_window_var, width=12).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Min train days").grid(row=row, column=2, sticky="w", **pad)
+        self.rr_min_days_var = tk.IntVar(value=252)
+        ttk.Entry(f, textvariable=self.rr_min_days_var, width=12).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        # News features
+        self.use_news_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Use news features", variable=self.use_news_var).grid(row=row, column=0, sticky="w", **pad)
+        self.news_file_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.news_file_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_news).grid(row=row, column=2, **pad)
+
+        # Risk overlay controls
+        row += 1
+        self.risk_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="Risk overlay", variable=self.risk_var).grid(row=row, column=0, sticky="w", **pad)
+        ttk.Label(f, text="Vol win").grid(row=row, column=1, sticky="w", **pad)
+        self.risk_vol_win_var = tk.IntVar(value=20)
+        ttk.Entry(f, textvariable=self.risk_vol_win_var, width=8).grid(row=row, column=2, sticky="w", **pad)
+        ttk.Label(f, text="Vol thr").grid(row=row, column=3, sticky="w", **pad)
+        self.risk_vol_thr_var = tk.DoubleVar(value=0.025)
+        ttk.Entry(f, textvariable=self.risk_vol_thr_var, width=10).grid(row=row, column=4, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="DD win").grid(row=row, column=1, sticky="w", **pad)
+        self.risk_dd_win_var = tk.IntVar(value=120)
+        ttk.Entry(f, textvariable=self.risk_dd_win_var, width=8).grid(row=row, column=2, sticky="w", **pad)
+        ttk.Label(f, text="DD thr").grid(row=row, column=3, sticky="w", **pad)
+        self.risk_dd_thr_var = tk.DoubleVar(value=-0.10)
+        ttk.Entry(f, textvariable=self.risk_dd_thr_var, width=10).grid(row=row, column=4, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Risk scale").grid(row=row, column=1, sticky="w", **pad)
+        self.risk_scale_var = tk.DoubleVar(value=0.5)
+        ttk.Entry(f, textvariable=self.risk_scale_var, width=10).grid(row=row, column=2, sticky="w", **pad)
+        ttk.Label(f, text="Event CSV").grid(row=row, column=3, sticky="w", **pad)
+        self.event_csv_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.event_csv_var, width=40).grid(row=row, column=4, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=lambda: self._pick_path(self.event_csv_var)).grid(row=row, column=5, **pad)
+
+        row += 1
+        # Outputs
+        ttk.Label(f, text="Out equity CSV").grid(row=row, column=0, sticky="w", **pad)
+        self.out_eq_var = tk.StringVar(value="walkforward_equity.csv")
+        ttk.Entry(f, textvariable=self.out_eq_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Save As", command=self._pick_out_eq).grid(row=row, column=2, **pad)
+
+        row += 1
+        ttk.Label(f, text="Out blotter CSV").grid(row=row, column=0, sticky="w", **pad)
+        self.out_bl_var = tk.StringVar(value="walkforward_blotter.csv")
+        ttk.Entry(f, textvariable=self.out_bl_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Save As", command=self._pick_out_bl).grid(row=row, column=2, **pad)
+
+        row += 1
+        # Optional: local data download helpers
+        ttk.Label(f, text="Data dir (optional)").grid(row=row, column=0, sticky="w", **pad)
+        self.data_dir_var = tk.StringVar(value=os.path.join(os.getcwd(), "data"))
+        ttk.Entry(f, textvariable=self.data_dir_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_data_dir).grid(row=row, column=2, **pad)
+
+        row += 1
+        btns = ttk.Frame(f)
+        btns.grid(row=row, column=0, columnspan=4, sticky="w", **pad)
+        self.run_btn = ttk.Button(btns, text="Run Walkforward", command=self._run_walkforward)
+        self.run_btn.pack(side=tk.LEFT, padx=4)
+        self.dl_btn = ttk.Button(btns, text="Download OHLCV (optional)", command=self._download_history)
+        self.dl_btn.pack(side=tk.LEFT, padx=4)
+        self.status_var = tk.StringVar(value="Ready")
+        ttk.Label(btns, textvariable=self.status_var).pack(side=tk.LEFT, padx=10)
+
+        # Plot area
+        row += 1
+        self.fig = Figure(figsize=(8, 4), dpi=100)
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_title("Equity Curve")
+        self.ax.set_xlabel("Date")
+        self.ax.set_ylabel("Equity ($)")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=f)
+        self.canvas.get_tk_widget().grid(row=row, column=0, columnspan=4, sticky="nsew", padx=6, pady=6)
+        f.rowconfigure(row, weight=1)
+        f.columnconfigure(1, weight=1)
+
+    def _build_train_tab(self):
+        f = self.train_tab
+        pad = {"padx": 6, "pady": 4}
+
+        row = 0
+        # Tickers
+        ttk.Label(f, text="Tickers file (one per line)").grid(row=row, column=0, sticky="w", **pad)
+        self.tr_tickers_file_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.tr_tickers_file_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_tr_tickers).grid(row=row, column=2, **pad)
+
+        row += 1
+        # Dates
+        ttk.Label(f, text="Start (YYYY-MM-DD)").grid(row=row, column=0, sticky="w", **pad)
+        self.tr_start_var = tk.StringVar(value="2019-01-01")
+        ttk.Entry(f, textvariable=self.tr_start_var, width=20).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="End (YYYY-MM-DD)").grid(row=row, column=2, sticky="w", **pad)
+        self.tr_end_var = tk.StringVar(value=str(date.today()))
+        ttk.Entry(f, textvariable=self.tr_end_var, width=20).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        # Backtest params
+        self.tr_initial_cash_var = tk.DoubleVar(value=100000.0)
+        self.tr_topn_var = tk.IntVar(value=5)
+        self.tr_cost_var = tk.DoubleVar(value=1.0)
+        self.tr_split_var = tk.DoubleVar(value=0.7)
+
+        ttk.Label(f, text="Initial cash ($)").grid(row=row, column=0, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.tr_initial_cash_var, width=12).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Top N").grid(row=row, column=2, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.tr_topn_var, width=10).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Trade cost (bps)").grid(row=row, column=0, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.tr_cost_var, width=10).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Train ratio (0-1)").grid(row=row, column=2, sticky="w", **pad)
+        ttk.Entry(f, textvariable=self.tr_split_var, width=10).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        # Outputs
+        ttk.Label(f, text="Out equity CSV").grid(row=row, column=0, sticky="w", **pad)
+        self.tr_out_eq_var = tk.StringVar(value="paper_backtest_equity.csv")
+        ttk.Entry(f, textvariable=self.tr_out_eq_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Save As", command=self._pick_tr_out_eq).grid(row=row, column=2, **pad)
+
+        row += 1
+        ttk.Label(f, text="Save model bundle (.joblib)").grid(row=row, column=0, sticky="w", **pad)
+        self.tr_out_model_var = tk.StringVar(value="model_bundle.joblib")
+        ttk.Entry(f, textvariable=self.tr_out_model_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Save As", command=self._pick_tr_out_model).grid(row=row, column=2, **pad)
+
+        row += 1
+        # Run button
+        self.tr_run_btn = ttk.Button(f, text="Run Backtest + Save Model", command=self._run_train)
+        self.tr_run_btn.grid(row=row, column=0, sticky="w", **pad)
+
+        # Plot area
+        row += 1
+        self.tr_fig = Figure(figsize=(8, 4), dpi=100)
+        self.tr_ax = self.tr_fig.add_subplot(111)
+        self.tr_ax.set_title("Backtest Equity Curve")
+        self.tr_ax.set_xlabel("Date")
+        self.tr_ax.set_ylabel("Equity ($)")
+        self.tr_canvas = FigureCanvasTkAgg(self.tr_fig, master=f)
+        self.tr_canvas.get_tk_widget().grid(row=row, column=0, columnspan=4, sticky="nsew", padx=6, pady=6)
+        f.rowconfigure(row, weight=1)
+        f.columnconfigure(1, weight=1)
+
+    def _build_universe_tab(self):
+        f = self.universe_tab
+        pad = {"padx": 6, "pady": 4}
+        row = 0
+
+        idx_options = ["nasdaq_all", "nasdaq100", "sp500", "sp100", "sp1000"]
+        ttk.Label(f, text="Index").grid(row=row, column=0, sticky="w", **pad)
+        self.uni_index_var = tk.StringVar(value="nasdaq_all")
+        ttk.Combobox(
+            f, textvariable=self.uni_index_var, values=idx_options, state="readonly", width=20
+        ).grid(row=row, column=1, sticky="w", **pad)
+        self.uni_index_var.trace_add("write", lambda *args: self._auto_update_universe_out())
+
+        row += 1
+        ttk.Label(f, text="Start year").grid(row=row, column=0, sticky="w", **pad)
+        self.uni_start_year_var = tk.StringVar(value=str(date.today().year))
+        ttk.Entry(f, textvariable=self.uni_start_year_var, width=12).grid(row=row, column=1, sticky="w", **pad)
+        self.uni_start_year_var.trace_add("write", lambda *args: self._auto_update_universe_out())
+        ttk.Label(f, text="Top N (optional)").grid(row=row, column=2, sticky="w", **pad)
+        self.uni_topn_var = tk.StringVar(value="")
+        ttk.Entry(f, textvariable=self.uni_topn_var, width=12).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Mode").grid(row=row, column=0, sticky="w", **pad)
+        mode_choices = [
+            ("Fetch + save snapshot", "refresh"),
+            ("Fetch current (no snapshot)", "fetch"),
+            ("Load stored snapshot (as-of date)", "as_of"),
+        ]
+        self._universe_mode_map = {label: value for label, value in mode_choices}
+        self.uni_mode_var = tk.StringVar(value=mode_choices[0][0])
+        ttk.Combobox(
+            f, textvariable=self.uni_mode_var, values=[label for label, _ in mode_choices], state="readonly", width=28
+        ).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="As-of date (YYYY-MM-DD)").grid(row=row, column=0, sticky="w", **pad)
+        self.uni_as_of_var = tk.StringVar(value="")
+        ttk.Entry(f, textvariable=self.uni_as_of_var, width=20).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Snapshot directory").grid(row=row, column=0, sticky="w", **pad)
+        self.uni_snapshot_dir_var = tk.StringVar(value=os.path.join(os.getcwd(), "universes"))
+        ttk.Entry(f, textvariable=self.uni_snapshot_dir_var, width=50).grid(row=row, column=1, columnspan=2, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_snapshot_dir).grid(row=row, column=3, sticky="w", **pad)
+        self.uni_snapshot_dir_var.trace_add("write", lambda *args: self._auto_update_universe_out())
+
+        row += 1
+        ttk.Label(f, text="Output tickers file").grid(row=row, column=0, sticky="w", **pad)
+        self.uni_out_file_var = tk.StringVar()
+        self.uni_out_file_var.trace_add("write", self._handle_universe_out_change)
+        ttk.Entry(f, textvariable=self.uni_out_file_var, width=50).grid(row=row, column=1, columnspan=2, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_universe_out).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Button(f, text="Use default path", command=self._set_universe_default_out).grid(row=row, column=1, sticky="w", **pad)
+
+        row += 1
+        btns = ttk.Frame(f)
+        btns.grid(row=row, column=0, columnspan=4, sticky="w", **pad)
+        ttk.Button(btns, text="Generate Tickers File", command=self._run_universe_builder).pack(side=tk.LEFT, padx=4)
+        self.uni_status_var = tk.StringVar(value="Ready")
+        ttk.Label(btns, textvariable=self.uni_status_var).pack(side=tk.LEFT, padx=10)
+
+        f.columnconfigure(1, weight=1)
+        f.columnconfigure(2, weight=1)
+        self._set_universe_default_out()
+
+    def _build_news_tab(self):
+        f = self.news_tab
+        pad = {"padx": 6, "pady": 4}
+
+        row = 0
+        ttk.Label(f, text="Alpha Vantage API Key").grid(row=row, column=0, sticky="w", **pad)
+        self.news_key_var = tk.StringVar(value=os.getenv("ALPHAVANTAGE_API_KEY", ""))
+        ttk.Entry(f, textvariable=self.news_key_var, width=50, show="*").grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Use Key", command=self._apply_news_key).grid(row=row, column=2, **pad)
+
+        row += 1
+        ttk.Label(f, text="Tickers file").grid(row=row, column=0, sticky="w", **pad)
+        self.news_tickers_var = tk.StringVar()
+        ttk.Entry(f, textvariable=self.news_tickers_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_news_tickers).grid(row=row, column=2, **pad)
+
+        row += 1
+        ttk.Label(f, text="Time from (UTC, YYYYMMDDTHHMM)").grid(row=row, column=0, sticky="w", **pad)
+        self.news_from_var = tk.StringVar(value="20200101T0000")
+        ttk.Entry(f, textvariable=self.news_from_var, width=20).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Time to (UTC, YYYYMMDDTHHMM)").grid(row=row, column=2, sticky="w", **pad)
+        self.news_to_var = tk.StringVar(value="20241231T2359")
+        ttk.Entry(f, textvariable=self.news_to_var, width=20).grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Limit").grid(row=row, column=0, sticky="w", **pad)
+        self.news_limit_var = tk.IntVar(value=1000)
+        ttk.Entry(f, textvariable=self.news_limit_var, width=10).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Sort").grid(row=row, column=2, sticky="w", **pad)
+        self.news_sort_var = tk.StringVar(value="LATEST")
+        ttk.Combobox(f, textvariable=self.news_sort_var, values=["LATEST", "EARLIEST"], width=10, state="readonly").grid(row=row, column=3, sticky="w", **pad)
+
+        row += 1
+        ttk.Label(f, text="Out raw CSV").grid(row=row, column=0, sticky="w", **pad)
+        self.news_raw_var = tk.StringVar(value="news_raw.csv")
+        ttk.Entry(f, textvariable=self.news_raw_var, width=60).grid(row=row, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Save As", command=self._pick_news_raw).grid(row=row, column=2, **pad)
+
+        row += 1
+        ttk.Label(f, text="Windows (days, e.g., 3,5)").grid(row=row, column=0, sticky="w", **pad)
+        self.news_windows_var = tk.StringVar(value="3,5")
+        ttk.Entry(f, textvariable=self.news_windows_var, width=12).grid(row=row, column=1, sticky="w", **pad)
+        ttk.Label(f, text="Out features CSV").grid(row=row, column=2, sticky="w", **pad)
+        self.news_feats_var = tk.StringVar(value="news_features.csv")
+        ttk.Entry(f, textvariable=self.news_feats_var, width=40).grid(row=row, column=3, sticky="we", **pad)
+
+        row += 1
+        btns = ttk.Frame(f)
+        btns.grid(row=row, column=0, columnspan=4, sticky="w", **pad)
+        ttk.Button(btns, text="Fetch News", command=self._run_news_fetch).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Build Features", command=self._run_news_build).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Fetch + Build", command=self._run_news_all).pack(side=tk.LEFT, padx=4)
+        self.news_status_var = tk.StringVar(value="Ready")
+        ttk.Label(btns, textvariable=self.news_status_var).pack(side=tk.LEFT, padx=10)
+
+    def _build_exec_tab(self):
+        f = self.exec_tab
+        pad = {"padx": 6, "pady": 4}
+
+        ttk.Label(f, text="Allocation CSV").grid(row=0, column=0, sticky="w", **pad)
+        self.exec_alloc_var = tk.StringVar(value="next_alloc.csv")
+        ttk.Entry(f, textvariable=self.exec_alloc_var, width=60).grid(row=0, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=lambda: self._pick_path(self.exec_alloc_var)).grid(row=0, column=2, **pad)
+
+        ttk.Label(f, text="Side").grid(row=1, column=0, sticky="w", **pad)
+        self.exec_side_var = tk.StringVar(value="buy")
+        ttk.Combobox(f, textvariable=self.exec_side_var, values=["buy", "sell"], state="readonly", width=10).grid(row=1, column=1, sticky="w", **pad)
+
+        ttk.Label(f, text="Min dollars").grid(row=1, column=2, sticky="w", **pad)
+        self.exec_min_var = tk.DoubleVar(value=50.0)
+        ttk.Entry(f, textvariable=self.exec_min_var, width=12).grid(row=1, column=3, sticky="w", **pad)
+
+        self.exec_dry_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="Dry run (no orders)", variable=self.exec_dry_var).grid(row=2, column=0, columnspan=2, sticky="w", **pad)
+
+        ttk.Button(f, text="Run Robinhood Executor", command=self._run_rh_executor).grid(row=2, column=2, sticky="w", **pad)
+        self.exec_status_var = tk.StringVar(value="Ready")
+        ttk.Label(f, textvariable=self.exec_status_var).grid(row=2, column=3, sticky="w", **pad)
+
+        f.columnconfigure(1, weight=1)
+
+    def _build_eval_tab(self):
+        f = self.eval_tab
+        pad = {"padx": 6, "pady": 4}
+
+        ttk.Label(f, text="Equity CSV").grid(row=0, column=0, sticky="w", **pad)
+        self.eval_eq_var = tk.StringVar(value="walkforward_equity.csv")
+        ttk.Entry(f, textvariable=self.eval_eq_var, width=60).grid(row=0, column=1, sticky="we", **pad)
+        ttk.Button(f, text="Browse", command=self._pick_eval_eq).grid(row=0, column=2, **pad)
+
+        ttk.Button(f, text="Evaluate Equity", command=self._evaluate_equity).grid(row=1, column=0, sticky="w", **pad)
+
+        # Plot area
+        self.eval_fig = Figure(figsize=(8, 4), dpi=100)
+        self.eval_ax = self.eval_fig.add_subplot(111)
+        self.eval_ax.set_title("Daily Returns")
+        self.eval_ax.set_xlabel("Date")
+        self.eval_ax.set_ylabel("Return")
+        self.eval_canvas = FigureCanvasTkAgg(self.eval_fig, master=f)
+        self.eval_canvas.get_tk_widget().grid(row=2, column=0, columnspan=4, sticky="nsew", padx=6, pady=6)
+        f.rowconfigure(2, weight=1)
+        f.columnconfigure(1, weight=1)
+
+    # File pickers
+    def _pick_model(self):
+        p = filedialog.askopenfilename(title="Pick model bundle", filetypes=[("Joblib", "*.joblib"), ("All", "*.*")])
+        if p:
+            self.model_var.set(p)
+
+    def _pick_tickers(self):
+        p = filedialog.askopenfilename(title="Pick tickers file", filetypes=[("Text", "*.txt"), ("All", "*.*")])
+        if p:
+            self.tickers_file_var.set(p)
+
+    def _pick_news(self):
+        p = filedialog.askopenfilename(title="Pick news features CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
+        if p:
+            self.news_file_var.set(p)
+
+    def _pick_out_eq(self):
+        p = filedialog.asksaveasfilename(defaultextension=".csv", title="Save equity CSV")
+        if p:
+            self.out_eq_var.set(p)
+
+    def _pick_out_bl(self):
+        p = filedialog.asksaveasfilename(defaultextension=".csv", title="Save blotter CSV")
+        if p:
+            self.out_bl_var.set(p)
+
+    def _pick_eval_eq(self):
+        p = filedialog.askopenfilename(title="Pick equity CSV", filetypes=[("CSV", "*.csv"), ("All", "*.*")])
+        if p:
+            self.eval_eq_var.set(p)
+
+    def _pick_path(self, var: tk.StringVar):
+        p = filedialog.askopenfilename(title="Pick file", filetypes=[("All", "*.*")])
+        if p:
+            var.set(p)
+
+    # Actions
+    def _pick_news_tickers(self):
+        p = filedialog.askopenfilename(title="Pick tickers file", filetypes=[("Text", "*.txt"), ("All", "*.*")])
+        if p:
+            self.news_tickers_var.set(p)
+
+    def _pick_news_raw(self):
+        p = filedialog.asksaveasfilename(defaultextension=".csv", title="Save raw news CSV")
+        if p:
+            self.news_raw_var.set(p)
+
+    def _apply_news_key(self):
+        os.environ["ALPHAVANTAGE_API_KEY"] = self.news_key_var.get().strip()
+        messagebox.showinfo("API Key", "API key set for this session.")
+
+    def _run_rh_executor(self):
+        threading.Thread(target=self._run_rh_executor_impl, daemon=True).start()
+
+    def _run_rh_executor_impl(self):
+        try:
+            alloc = self.exec_alloc_var.get()
+            if not os.path.exists(alloc):
+                raise RuntimeError("Allocation CSV not found")
+            side = self.exec_side_var.get()
+            min_dollars = float(self.exec_min_var.get())
+            dry_run = bool(self.exec_dry_var.get())
+
+            if not dry_run:
+                confirm = messagebox.askyesno(
+                    "Send live Robinhood orders",
+                    "This will submit live market orders via Robinhood using robin_stocks and your RH_* env vars. Continue?",
+                )
+                if not confirm:
+                    self.exec_status_var.set("Cancelled")
+                    return
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "scripts.robinhood_executor",
+                "--alloc_csv",
+                alloc,
+                "--side",
+                side,
+                "--min_dollars",
+                str(min_dollars),
+            ]
+            if dry_run:
+                cmd.append("--dry_run")
+
+            self.exec_status_var.set("Running...")
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            stdout = proc.stdout.strip()
+            stderr = proc.stderr.strip()
+            if proc.returncode != 0:
+                raise RuntimeError(stderr or stdout or f"Executor failed with code {proc.returncode}")
+            msg = stdout or "Done"
+            self.exec_status_var.set((msg.splitlines()[0])[:120])
+            messagebox.showinfo("Robinhood Executor", msg)
+        except Exception as e:
+            self.exec_status_var.set("Error")
+            messagebox.showerror("Robinhood Executor Error", str(e))
+
+    def _pick_tr_tickers(self):
+        p = filedialog.askopenfilename(title="Pick tickers file", filetypes=[("Text", "*.txt"), ("All", "*.*")])
+        if p:
+            self.tr_tickers_file_var.set(p)
+
+    def _pick_tr_out_eq(self):
+        p = filedialog.asksaveasfilename(defaultextension=".csv", title="Save equity CSV")
+        if p:
+            self.tr_out_eq_var.set(p)
+
+    def _pick_tr_out_model(self):
+        p = filedialog.asksaveasfilename(defaultextension=".joblib", title="Save model bundle")
+        if p:
+            self.tr_out_model_var.set(p)
+
+    def _default_universe_out_path(self) -> str:
+        base_dir = (self.uni_snapshot_dir_var.get().strip() or os.path.join(os.getcwd(), "universes"))
+        try:
+            year = int(self.uni_start_year_var.get())
+        except (ValueError, tk.TclError):
+            year = date.today().year
+        index = self.uni_index_var.get().strip() or "universe"
+        fname = f"{year}_{index}.txt"
+        return os.path.join(base_dir, fname)
+
+    def _auto_update_universe_out(self):
+        if getattr(self, "_universe_out_user_set", False):
+            return
+        if not hasattr(self, "uni_out_file_var"):
+            return
+        self._updating_universe_out = True
+        try:
+            self.uni_out_file_var.set(self._default_universe_out_path())
+        finally:
+            self._updating_universe_out = False
+
+    def _set_universe_default_out(self):
+        if not hasattr(self, "uni_out_file_var"):
+            return
+        self._universe_out_user_set = False
+        self._updating_universe_out = True
+        try:
+            self.uni_out_file_var.set(self._default_universe_out_path())
+        finally:
+            self._updating_universe_out = False
+
+    def _handle_universe_out_change(self, *args):
+        if getattr(self, "_updating_universe_out", False):
+            return
+        self._universe_out_user_set = True
+
+    def _pick_universe_out(self):
+        p = filedialog.asksaveasfilename(defaultextension=".txt", title="Save tickers file")
+        if p:
+            self.uni_out_file_var.set(p)
+
+    def _pick_snapshot_dir(self):
+        p = filedialog.askdirectory(title="Pick snapshot directory")
+        if p:
+            self.uni_snapshot_dir_var.set(p)
+
+    def _run_walkforward(self):
+        # Run in a thread to avoid freezing UI
+        threading.Thread(target=self._run_walkforward_impl, daemon=True).start()
+
+    def _run_walkforward_impl(self):
+        try:
+            kwargs = dict(
+                bundle_path=self.model_var.get(),
+                tickers=["AAPL"],  # ignored; we pass tickers via file in simulate args
+                start=self.start_var.get(),
+                end=self.end_var.get(),
+                top_n=int(self.topn_var.get()),
+                optimize=self.opt_var.get(),
+                cov_lookback=int(self.covlb_var.get()),
+                shrink=float(self.shrink_var.get()),
+                max_w=float(self.maxw_var.get()),
+                capital=float(self.capital_var.get()),
+                trade_cost_bps=float(self.cost_var.get()),
+                use_news=bool(self.use_news_var.get()),
+                news_features_csv=(self.news_file_var.get() or None),
+                rolling_retrain=bool(self.rr_var.get()),
+                retrain_freq=self.rr_freq_var.get(),
+                train_window_days=int(self.rr_window_var.get()),
+                min_train_days=int(self.rr_min_days_var.get()),
+                risk_overlay=bool(self.risk_var.get()),
+                risk_vol_window=int(self.risk_vol_win_var.get()),
+                risk_vol_threshold=float(self.risk_vol_thr_var.get()),
+                risk_dd_window=int(self.risk_dd_win_var.get()),
+                risk_dd_threshold=float(self.risk_dd_thr_var.get()),
+                risk_scale=float(self.risk_scale_var.get()),
+                event_calendar_csv=(self.event_csv_var.get() or None),
+            )
+
+            # Parse tickers file (one per line)
+            tfile = self.tickers_file_var.get()
+            if not os.path.exists(tfile):
+                raise RuntimeError("Tickers file not found")
+            with open(tfile, "r", encoding="utf-8") as f:
+                tickers = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            # Import parse_tickers from walkforward_sim to normalize (BRK.B -> BRK-B)
+            from walkforward_sim import parse_tickers as _pf
+            tickers = _pf(
+                ",".join(tickers),
+                None,
+            )
+
+            sig = inspect.signature(simulate_walkforward)
+            supported = set(sig.parameters.keys())
+            if "tickers" not in supported:
+                raise RuntimeError("simulate_walkforward() is missing the required 'tickers' parameter. Please update the package.")
+            if kwargs["rolling_retrain"] and "rolling_retrain" not in supported:
+                raise RuntimeError(
+                    "This build of simulate_walkforward() does not support rolling retraining. Update to the latest version to enable it."
+                )
+            call_kwargs = {k: v for k, v in kwargs.items() if k in supported}
+            call_kwargs["tickers"] = tickers
+
+            # Call simulate with the supported arguments only
+            equity_df, blotter_df = simulate_walkforward(**call_kwargs)
+
+            # Save outputs
+            out_eq = self.out_eq_var.get()
+            out_bl = self.out_bl_var.get()
+            equity_df.to_csv(out_eq)
+            blotter_df.to_csv(out_bl, index=False)
+
+            # Plot equity
+            self.ax.clear()
+            self.ax.plot(equity_df.index, equity_df["equity"], label="Strategy")
+            self.ax.set_title("Equity Curve (Walkforward)")
+            self.ax.set_xlabel("Date")
+            self.ax.set_ylabel("Equity ($)")
+            self.ax.legend()
+            self.canvas.draw_idle()
+
+            messagebox.showinfo("Done", f"Saved equity to {out_eq} and blotter to {out_bl}")
+        except Exception as e:
+            messagebox.showerror("Walkforward Error", str(e))
+
+    def _run_train(self):
+        threading.Thread(target=self._run_train_impl, daemon=True).start()
+
+    def _run_train_impl(self):
+        try:
+            # Load tickers
+            tfile = self.tr_tickers_file_var.get()
+            if not os.path.exists(tfile):
+                raise RuntimeError("Tickers file not found")
+            with open(tfile, "r", encoding="utf-8") as f:
+                tickers = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            # Normalize tickers using walkforward parser
+            from walkforward_sim import parse_tickers as _pf
+            tickers = _pf(
+                ",".join(tickers),
+                None,
+            )
+
+            cfg = BacktestConfig(
+                initial_cash=float(self.tr_initial_cash_var.get()),
+                top_n=int(self.tr_topn_var.get()),
+                trade_cost_bps=float(self.tr_cost_var.get()),
+                train_ratio=float(self.tr_split_var.get()),
+            )
+            # Run backtest/train
+            result = bt_simulate(tickers, self.tr_start_var.get(), self.tr_end_var.get(), cfg)
+            # Save equity
+            out_eq = self.tr_out_eq_var.get()
+            result.to_csv(out_eq)
+            # Save model bundle if available
+            if getattr(result, "_model", None) is not None:
+                bundle = {"model": result._model, "features": result._feat_cols}
+                joblib.dump(bundle, self.tr_out_model_var.get())
+            # Plot equity
+            self.tr_ax.clear()
+            self.tr_ax.plot(result.index, result["equity"], label="Equity")
+            self.tr_ax.set_title("Backtest Equity Curve")
+            self.tr_ax.set_xlabel("Date")
+            self.tr_ax.set_ylabel("Equity ($)")
+            self.tr_ax.legend()
+            self.tr_canvas.draw_idle()
+            messagebox.showinfo("Done", f"Saved equity to {out_eq} and model to {self.tr_out_model_var.get()}")
+        except Exception as e:
+            messagebox.showerror("Train/Backtest Error", str(e))
+
+    def _run_universe_builder(self):
+        threading.Thread(target=self._run_universe_builder_impl, daemon=True).start()
+
+    def _run_universe_builder_impl(self):
+        try:
+            self.uni_status_var.set("Building...")
+            index = self.uni_index_var.get().strip()
+            if not index:
+                raise RuntimeError("Index selection is required")
+            mode_label = self.uni_mode_var.get()
+            mode = self._universe_mode_map.get(mode_label, "refresh")
+            snapshot_dir = self.uni_snapshot_dir_var.get().strip() or os.path.join(os.getcwd(), "universes")
+            os.makedirs(snapshot_dir, exist_ok=True)
+
+            if mode == "as_of":
+                as_of_raw = self.uni_as_of_var.get().strip()
+                if not as_of_raw:
+                    raise RuntimeError("As-of date is required to load a stored snapshot")
+                as_of_date = dt.date.fromisoformat(as_of_raw)
+                tickers = load_as_of(snapshot_dir, index, as_of_date)
+            else:
+                tickers = fetch_index(index)
+                if mode == "refresh":
+                    save_snapshot(tickers, snapshot_dir, index)
+
+            topn_raw = self.uni_topn_var.get().strip()
+            if topn_raw:
+                top_n = int(topn_raw)
+                if top_n <= 0:
+                    raise RuntimeError("Top N must be positive")
+                tickers = top_n_by_market_cap(tickers, top_n)
+
+            out_path = self.uni_out_file_var.get().strip() or self._default_universe_out_path()
+            out_dir = os.path.dirname(out_path)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                for sym in tickers:
+                    f.write(sym + "\n")
+
+            self.uni_status_var.set(f"Wrote {len(tickers)} tickers to {out_path}")
+            messagebox.showinfo("Universe Builder", f"Saved {len(tickers)} tickers to {out_path}")
+        except Exception as e:
+            self.uni_status_var.set("Error")
+            messagebox.showerror("Universe Builder Error", str(e))
+
+    def _run_news_fetch(self):
+        threading.Thread(target=self._run_news_fetch_impl, daemon=True).start()
+
+    def _run_news_fetch_impl(self):
+        try:
+            self.news_status_var.set("Fetching...")
+            from news_fetch import parse_tickers as nf_parse, fetch_alpha_vantage_news, flatten_feed_to_rows, write_csv
+            key = self.news_key_var.get().strip() or os.getenv("ALPHAVANTAGE_API_KEY") or ""
+            if not key:
+                raise RuntimeError("Alpha Vantage API key not set")
+            tfile = self.news_tickers_var.get()
+            if not os.path.exists(tfile):
+                raise RuntimeError("Tickers file not found")
+            with open(tfile, "r", encoding="utf-8") as f:
+                raw_t = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            tickers = nf_parse(
+                ",".join(raw_t),
+                None,
+            )
+            feed = fetch_alpha_vantage_news(
+                key,
+                tickers,
+                self.news_from_var.get() or None,
+                self.news_to_var.get() or None,
+                sort=self.news_sort_var.get(),
+                limit=int(self.news_limit_var.get() or 1000),
+            )
+            rows = flatten_feed_to_rows(feed)
+            out_raw = self.news_raw_var.get()
+            write_csv(out_raw, rows)
+            self.news_status_var.set(f"Saved {len(rows)} rows to {out_raw}")
+            messagebox.showinfo("News Fetch", f"Saved {len(rows)} rows to {out_raw}")
+        except Exception as e:
+            self.news_status_var.set("Error")
+            messagebox.showerror("News Fetch Error", str(e))
+
+    def _run_news_build(self):
+        threading.Thread(target=self._run_news_build_impl, daemon=True).start()
+
+    def _run_news_build_impl(self):
+        try:
+            self.news_status_var.set("Building features...")
+            from news_features import load_news, build_daily_features
+            df = load_news(self.news_raw_var.get())
+            windows = [int(x) for x in (self.news_windows_var.get() or "3,5").split(",") if x.strip()]
+            feats = build_daily_features(df, windows)
+            out_csv = self.news_feats_var.get()
+            if feats.empty:
+                pd.DataFrame(columns=["date", "ticker"]).to_csv(out_csv, index=False)
+                self.news_status_var.set("No features (empty)")
+                messagebox.showwarning("News Features", "No features produced (empty result).")
+            else:
+                feats.to_csv(out_csv, index=False)
+                self.news_status_var.set(f"Saved features to {out_csv}")
+                # Autofill Walkforward tab input
+                self.news_file_var.set(out_csv)
+                messagebox.showinfo("News Features", f"Saved features to {out_csv}")
+        except Exception as e:
+            self.news_status_var.set("Error")
+            messagebox.showerror("News Features Error", str(e))
+
+    def _run_news_all(self):
+        def _chain():
+            self._run_news_fetch_impl()
+            if os.path.exists(self.news_raw_var.get()):
+                self._run_news_build_impl()
+        threading.Thread(target=_chain, daemon=True).start()
+
+    def _pick_data_dir(self):
+        p = filedialog.askdirectory(title="Pick data directory")
+        if p:
+            self.data_dir_var.set(p)
+
+    def _download_history(self):
+        # Download yfinance OHLCV for the chosen tickers and dates to CSV files
+        threading.Thread(target=self._download_history_impl, daemon=True).start()
+
+    def _download_history_impl(self):
+        try:
+            self.status_var.set("Downloading...")
+            tfile = self.tickers_file_var.get()
+            if not os.path.exists(tfile):
+                raise RuntimeError("Tickers file not found")
+            with open(tfile, "r", encoding="utf-8") as f:
+                tickers = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            from walkforward_sim import parse_tickers as _pf
+            tickers = _pf(
+                ",".join(tickers),
+                None,
+            )
+            out_dir = self.data_dir_var.get()
+            os.makedirs(out_dir, exist_ok=True)
+            start = pd.to_datetime(self.start_var.get()).date()
+            end = pd.to_datetime(self.end_var.get()).date()
+            # yfinance treats 'end' as exclusive; add one day to include the final date
+            end_inclusive = (pd.Timestamp(end) + pd.Timedelta(days=1)).date()
+            saved = 0
+            failures = []
+
+            def alt_symbols(sym: str):
+                alts = [sym]
+                if "." in sym:
+                    alts.append(sym.replace(".", "-"))
+                if "-" in sym:
+                    alts.append(sym.replace("-", "."))
+                # Deduplicate preserving order
+                seen = set()
+                out = []
+                for s in alts:
+                    if s not in seen:
+                        seen.add(s)
+                        out.append(s)
+                return out
+
+            # Batch downloads for speed
+            BATCH = 50
+            for i in range(0, len(tickers), BATCH):
+                batch = tickers[i:i+BATCH]
+                df = None
+                last_err = None
+                try:
+                    df = yf.download(batch, start=start, end=end_inclusive, interval="1d", group_by="ticker", auto_adjust=True, threads=True, progress=False)
+                except Exception as e:
+                    last_err = e
+                if df is None:
+                    # Fall back to per-symbol
+                    for t in batch:
+                        single = None
+                        err = None
+                        for sym in alt_symbols(t):
+                            try:
+                                tmp = yf.download(sym, start=start, end=end_inclusive, interval="1d", auto_adjust=True, progress=False)
+                                if isinstance(tmp, pd.DataFrame) and not tmp.empty:
+                                    single = tmp
+                                    break
+                            except Exception as e:
+                                err = e
+                        if single is not None and not single.empty:
+                            single.to_csv(os.path.join(out_dir, f"{t}.csv"))
+                            saved += 1
+                        else:
+                            failures.append((t, str(err) if err else "no data"))
+                else:
+                    # Split multi-index by ticker
+                    if isinstance(df.columns, pd.MultiIndex):
+                        for t in batch:
+                            if t in df:
+                                sub = df[t].dropna()
+                                if not sub.empty:
+                                    sub.to_csv(os.path.join(out_dir, f"{t}.csv"))
+                                    saved += 1
+                                else:
+                                    failures.append((t, "no data"))
+                            else:
+                                failures.append((t, "missing from batch"))
+                    else:
+                        # Batch of 1 returned flat frame
+                        t = batch[0]
+                        if isinstance(df, pd.DataFrame) and not df.empty:
+                            df.to_csv(os.path.join(out_dir, f"{t}.csv"))
+                            saved += 1
+                        else:
+                            failures.append((t, "no data"))
+
+            msg = f"Saved {saved} CSV files to {out_dir}."
+            if failures:
+                msg += f" Failed: {len(failures)} (see details)."
+            self.status_var.set(msg)
+            if failures:
+                detail = "\n".join([f"{t}: {err}" for t, err in failures[:20]])
+                messagebox.showwarning("Download Partial", msg + "\n\n" + detail)
+            else:
+                messagebox.showinfo("Download Complete", msg)
+        except Exception as e:
+            self.status_var.set("Error")
+            messagebox.showerror("Download Error", str(e))
+
+    def _evaluate_equity(self):
+        try:
+            path = self.eval_eq_var.get()
+            if not os.path.exists(path):
+                raise RuntimeError("Equity CSV not found")
+            df = pd.read_csv(path, index_col=0, parse_dates=True)
+            if "equity" not in df.columns:
+                raise RuntimeError("CSV must contain 'equity' column")
+            m = compute_metrics(df["equity"])  # dict
+
+            # Plot daily returns
+            ret = df["equity"].pct_change().dropna()
+            self.eval_ax.clear()
+            self.eval_ax.plot(ret.index, ret.values)
+            self.eval_ax.set_title("Daily Returns")
+            self.eval_ax.set_xlabel("Date")
+            self.eval_ax.set_ylabel("Return")
+            self.eval_canvas.draw_idle()
+
+            # Popup with metrics
+            text = []
+            order = [
+                "Initial", "Final", "TotalReturn", "Years(approx)",
+                "CAGR", "APR_simple", "Vol", "Sharpe", "MaxDD",
+            ]
+            for k in order:
+                v = m.get(k)
+                if isinstance(v, float):
+                    if k in ("TotalReturn", "CAGR", "APR_simple", "Vol", "MaxDD"):
+                        text.append(f"{k}: {v:.2%}")
+                    elif k == "Sharpe":
+                        text.append(f"{k}: {v:.2f}")
+                    else:
+                        text.append(f"{k}: {v:.2f}")
+                else:
+                    text.append(f"{k}: {v}")
+            messagebox.showinfo("Equity Metrics", "\n".join(text))
+        except Exception as e:
+            messagebox.showerror("Evaluate Error", str(e))
+
+
+def main():
+    app = App()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

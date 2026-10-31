@@ -1,0 +1,38 @@
+/idea
+
+Goal: NPCs can learn facts from talking to the player or each other, and
+those facts can spread — tell the baker a secret, the blacksmith can
+plausibly bring it up later.
+
+Context: This builds directly on the world-bus store from the schedules
+ticket (if shipped) or establishes it now if not. Facts should be structured
+records — {fact_id, subject, content, source, world_time_learned} — not
+free paragraphs, because contradiction-checking in the journal ticket
+depends on comparable, normalized fields.
+
+Scope:
+1. Fact writing — after a conversation, the LLM proposes new facts as
+   structured output (same discipline as affinity_delta from the
+   persistence work: propose, then validate, then commit — never write
+   directly from LLM output).
+2. Fact reading — NPC persona prompts pull relevant facts from the shared
+   store before responding, filtered to what that NPC plausibly knows.
+3. Propagation rules — decide how a fact spreads from one NPC to another
+   (proximity, social ties, elapsed world_time) so gossip isn't instant
+   and universal. This is what preserves mystery/investigation pacing if
+   that's the direction the story goes.
+4. Do not implement this as direct NPC-to-NPC message passing. It must go
+   through the shared store so the journal ticket can plug into the same
+   mechanism without new wiring.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Pick the most defensible option yourself, log the
+  decision and reasoning in OVERNIGHT_REPORT.md, and keep going.
+- If propagation rules are ambiguous, default to conservative (slower,
+  proximity-gated spread) rather than instant town-wide knowledge — easier
+  to loosen later than to walk back.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

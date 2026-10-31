@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Reusable issue label/comment transition.
+
+Usage: issue_transition.py N [--add L] [--remove L] [--comment TEXT] [--close]
+"""
+import argparse
+import os
+import time
+
+from github import Github, GithubException
+
+p = argparse.ArgumentParser()
+p.add_argument("number", type=int)
+p.add_argument("--add", action="append", default=[])
+p.add_argument("--remove", action="append", default=[])
+p.add_argument("--comment")
+p.add_argument("--close", action="store_true")
+args = p.parse_args()
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+issue = retry(lambda: repo.get_issue(args.number), "get issue")
+for label in args.add:
+    retry(lambda: issue.add_to_labels(label), f"add {label}")
+for label in args.remove:
+    def rm():
+        try:
+            issue.remove_from_labels(label)
+        except GithubException as e:
+            if e.status == 404:
+                return  # label wasn't present
+            raise
+    retry(rm, f"remove {label}")
+if args.comment:
+    retry(lambda: issue.create_comment(args.comment), "comment")
+if args.close:
+    retry(lambda: issue.edit(state="closed"), "close")
+print(f"#{args.number} ok: +{args.add} -{args.remove}"
+      f"{' closed' if args.close else ''}")

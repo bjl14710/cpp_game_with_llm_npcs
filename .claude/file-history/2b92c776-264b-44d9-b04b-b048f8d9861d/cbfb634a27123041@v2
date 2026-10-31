@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0024 — Inverted-Hull Outlines</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0024 · pairs with lesson 0025</div>
+<h1>Vocab: Inverted-Hull Outlines</h1>
+<dl>
+<dt>inverted hull</dt>
+<dd>An enlarged copy of an object drawn in the outline color with front
+faces culled, so only a silhouette-hugging rim of it survives behind the
+real object. The zero-shader cartoon outline.</dd>
+
+<dt>face culling</dt>
+<dd>Skipping triangles by winding order. BACK culling (normal) hides the far
+side; FRONT culling (<code>rlSetCullFace(RL_CULL_FACE_FRONT)</code>) hides
+the near side — the hull trick's key ingredient.</dd>
+
+<dt>render batch</dt>
+<dd>rlgl's accumulation buffer for immediate-mode shapes: draw calls queue
+geometry, the GPU sees it at flush time. GL state changes bind at the FLUSH,
+not the call.</dd>
+
+<dt>batch drain</dt>
+<dd><code>rlDrawRenderBatchActive()</code> — an explicit flush. Mandatory
+before any state change (cull, blend) that must not leak onto geometry
+already queued.</dd>
+
+<dt>hull scale</dt>
+<dd>The inflation factor (ours: 1.06 about each part's center). Sets rim
+thickness; uniform because every character is contract-scaled to the same
+1.8u height.</dd>
+
+<dt>grouped passes</dt>
+<dd>Outline pass for ALL parts, then color pass for all parts — two drains
+per character instead of two per part. Never interleave state switches per
+primitive in a batched renderer.</dd>
+
+<dt>corner gap</dt>
+<dd>The hull failure mode on hard edges: inflated flat faces separate at
+sharp corners, opening holes in the rim. Mitigations: small scale,
+per-recipe opt-out, or (elsewhere) post-process outlines.</dd>
+
+<dt>silhouette rim</dt>
+<dd>The visible band where the hull extends past the real object on screen —
+the outline itself, which follows the object's edge from every camera angle
+without any per-view work.</dd>
+</dl>
+</div></body>
+</html>

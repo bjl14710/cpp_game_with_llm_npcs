@@ -1,0 +1,159 @@
+# Glossary — HFT_practice
+
+Terms the learner has been introduced to. A term is promoted from *introduced* to
+*understood* only after they've answered a question about it correctly or used it
+correctly themselves.
+
+Status legend: `intro` = covered in a lesson · `solid` = demonstrably grasped.
+
+---
+
+### Algorithmic trading — `intro`
+Any trading where decisions are made by code rather than a human. A superset of HFT.
+
+### Ask (offer) — `intro`
+The lowest price a seller is currently willing to accept.
+
+### Adverse selection — `intro`
+The risk that the counterparty who hit your quote knew more than you did about
+where the price was about to go. The reason market makers cancel orders aggressively.
+
+### Bid — `intro`
+The highest price a buyer is currently willing to pay.
+
+### Colocation — `intro`
+Renting rack space inside the exchange's data center so your trading server is
+physically next to the matching engine, minimizing wire latency.
+
+### FPGA — `intro`
+Field-Programmable Gate Array. Reconfigurable hardware wired into a fixed
+pipeline at synthesis time. Used in HFT for deterministic nanosecond-scale latency.
+Example in this repo: `fpga/market_maker.vhd`.
+
+### HFT (High-Frequency Trading) — `intro`
+Automated trading defined by microsecond-to-nanosecond latency, very high order
+rates, and short (often sub-second) holding periods.
+
+### Limit order — `intro`
+"Buy/sell at price X or better." Rests passively in the book until matched or
+cancelled. The order type market makers post.
+
+### Limit Order Book (LOB) — `intro`
+The full list of resting buy and sell orders at every price level on a venue.
+The core data structure of modern electronic markets.
+
+### Market maker — `intro`
+A strategy that simultaneously posts both a bid and an ask, earning the spread
+when both sides fill. `fpga/market_maker.vhd` is a hardware example.
+
+### Market order — `intro`
+"Fill me now at the best available price." Crosses the spread and pays for
+immediacy. The order type takers send.
+
+### Mid-price — `intro`
+`(bid + ask) / 2`. A common reference for "fair value" between the two sides of
+the book. Computed explicitly in `fpga/market_maker.vhd`.
+
+### Q16.16 fixed-point — `intro`
+A 32-bit signed integer encoding where the lower 16 bits represent the
+fractional part: `real_value = integer_signal / 65536`. Used in
+`fpga/market_maker.vhd` so all arithmetic stays in one-cycle integer ops.
+
+### Spread — `intro`
+`ask − bid`. The cost of crossing the book; the prize a market maker tries to
+capture on round-trips.
+
+### Tick — `intro`
+A single market data update — a trade, a quote change, a cancel. The unit of
+input to an HFT pipeline.
+
+### Tick-to-trade latency — `intro`
+The time between receiving a market data tick and your responding order leaving
+your NIC. The headline latency number in HFT (top firms: ~100–500 ns on FPGA).
+
+---
+
+## Added in Lesson 0002 (FPGAs in HFT)
+
+### ASIC — `intro`
+Application-Specific Integrated Circuit. Silicon manufactured for one design.
+Fastest possible, but multi-million-dollar tape-out cost and frozen forever —
+which is why HFT firms use FPGAs (reconfigurable) instead.
+
+### Bitstream — `intro`
+The binary file produced by synthesis + place-and-route. Loading it onto the
+FPGA configures every LUT, flip-flop, and routing switch to realize your
+design. Reloading is a seconds-long operation, not a recompile of a chip.
+
+### Combinational logic — `intro`
+Logic whose outputs depend only on current inputs — no clock involved. Inside
+each pipeline stage in `fpga/*.vhd`, arithmetic between clock edges is
+combinational.
+
+### Determinism (FPGA sense) — `intro`
+The property that the same input takes the same number of cycles every time.
+The opposite of CPU jitter from OS scheduling, cache misses, branch prediction.
+The single biggest reason HFT firms tolerate the pain of FPGA development.
+
+### DSP slice — `intro`
+A dedicated multiply-accumulate block inside the FPGA fabric. Each `*` in
+VHDL (e.g. `W_F0 * feature_0` in `linear_regression_predictor.vhd`) typically
+maps to one DSP slice.
+
+### HDL — `intro`
+Hardware Description Language. VHDL or Verilog. Describes hardware
+register-by-register, not as an executing program.
+
+### HLS — `intro`
+High-Level Synthesis. Toolchain that takes annotated C/C++ and generates HDL
+for you. Faster to write than hand-VHDL; sometimes worse timing or area.
+`fpga/hls_synthesis.tcl` drives the HLS flow in this repo.
+
+### Jitter — `intro`
+Variability in latency from one event to the next. HFT cares about jitter as
+much as average latency, because strategies are sized against the worst-case
+not the median.
+
+### Kernel bypass — `intro`
+Networking techniques (DPDK, Solarflare OpenOnload, XDP) that route packets
+from the NIC directly to userspace, skipping the Linux kernel network stack.
+A 20–30% latency win for CPU-based HFT; obsolete on FPGA NICs where parsing
+is on-chip already.
+
+### LUT (Look-Up Table) — `intro`
+The basic configurable unit of FPGA fabric. A small truth table that can be
+programmed to compute any function of N inputs (typically N=6). LUT count is
+the headline capacity metric of an FPGA part.
+
+### Pipeline stage — `intro`
+A combinational chunk of logic terminated by a register (flip-flop). More
+stages = higher clock frequency but more cycles of latency. `linear_regression_predictor.vhd`
+has 2 stages; `market_maker.vhd` has 1.
+
+### Place-and-Route (PAR) — `intro`
+The step after synthesis that assigns each gate in your netlist to a physical
+LUT on the chip and routes the wires between them. Where timing closure is
+won or lost.
+
+### Sequential logic — `intro`
+Logic that uses flip-flops driven by a clock to hold state between cycles.
+Each pipeline stage boundary in the repo's VHDL is sequential.
+
+### Synthesis — `intro`
+The step that turns HDL source into a netlist of generic gates. Distinct from
+Place-and-Route, which maps those gates onto the physical chip.
+
+### Timing closure — `intro`
+The act of making your design meet the target clock period at every register-
+to-register path. The real bottleneck of FPGA HFT development — not the
+arithmetic, not the algorithm, but proving the silicon can run that fast.
+
+### Valid handshake — `intro`
+The convention of carrying a `valid` bit alongside every datum through a
+pipeline, so each stage knows which cycles contain real data. Used uniformly
+in all three `fpga/*.vhd` modules.
+
+### VHDL vs Verilog — `intro`
+Two HDLs that compile to the same gates. VHDL: verbose, strongly typed, used
+in this repo. Verilog/SystemVerilog: terser, more common at web-scale silicon
+firms. The choice is cultural, not technical.

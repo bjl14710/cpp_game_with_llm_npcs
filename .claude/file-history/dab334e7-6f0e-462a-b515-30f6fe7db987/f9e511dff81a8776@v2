@@ -1,0 +1,70 @@
+"""DailyStrategy adapter over a saved GBM model bundle.
+
+Wraps the existing joblib bundle format ``{"model": GradientBoostingRegressor,
+"features": [...]}`` (see CLAUDE.md "Model Bundles") behind the arena's daily
+contract. The model itself is never modified — this is inference only, using
+the same feature pipeline as walkforward_sim / predict_next.
+"""
+from __future__ import annotations
+
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class GBMStrategy(DailyStrategy):
+    """Predicted next-day return sign -> position; magnitude -> confidence."""
+
+    name = "gbm"
+
+    def __init__(self, bundle_path: str, min_abs_pred: float = 0.0) -> None:
+        """Store the bundle path; loading is deferred to first use.
+
+        Args:
+            bundle_path: Path to a model_bundle .joblib from paper_trading_sim.
+            min_abs_pred: Predictions with |value| below this are HOLD —
+                filters signal noise around zero. Default 0 = trade any sign.
+        """
+        self.bundle_path = bundle_path
+        self.min_abs_pred = min_abs_pred
+        self._model = None
+        self._feat_cols: list[str] | None = None
+
+    @property
+    def warmup_bars(self) -> int:
+        """Longest rolling window in build_features (10d vol/MA) + NaN buffer."""
+        return 30
+
+    def _ensure_loaded(self) -> None:
+        """Lazily load the joblib bundle on first signal.
+
+        TODO(implement): joblib.load(self.bundle_path); set self._model and
+        self._feat_cols from the "model" / "features" keys. Import joblib
+        here (function-local) so constructing the strategy stays cheap.
+
+        Security note: joblib.load executes pickled code, so bundles must
+        only ever come from models/ trained locally by paper_trading_sim —
+        never from a downloaded or user-supplied path. This matches the
+        existing trust model in walkforward_sim.py and predict_next.py.
+        """
+        raise NotImplementedError("scaffold: see TODO above")
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Predict next-day return for the final bar of df.
+
+        TODO(implement):
+          1. self._ensure_loaded()
+          2. feats = paper_trading_sim.build_features(df)  (import at module
+             top once implemented; kept out of the scaffold so importing the
+             strategies package never pulls yfinance transitively)
+          3. Take the LAST row; if any feature column is NaN -> HOLD
+             (fwd_ret_1d NaN on the last row is expected — it is the target,
+             not an input; do not drop the row because of it).
+          4. yhat = model.predict(row[self._feat_cols]) as float
+          5. |yhat| <= min_abs_pred -> HOLD; else position = sign(yhat),
+             confidence = abs(yhat), reason = f"pred_ret={yhat:+.4%}".
+        """
+        raise NotImplementedError("scaffold: see TODO above")
+
+
+__all__ = ["GBMStrategy"]

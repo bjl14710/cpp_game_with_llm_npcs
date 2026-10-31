@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0010 — Request-Id Routing</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1.5rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.3rem; margin-bottom:1.2rem; }
+  .q h3 { font-size:1rem; margin-bottom:.7rem; }
+  .opt { display:block; width:100%; text-align:left; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.55rem .8rem; margin-bottom:.45rem; cursor:pointer; font-size:.92rem; }
+  .opt:hover { border-color:var(--accent); }
+  .opt.right { border-color:var(--green); background:#16281f; }
+  .opt.wrong { border-color:var(--red); background:#2a1820; }
+  .why { display:none; color:var(--muted); font-size:.88rem; margin-top:.5rem; border-top:1px dashed var(--border); padding-top:.5rem; }
+  .q.done .why { display:block; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .3em; font-size:.88em; }
+  textarea { width:100%; min-height:70px; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.6rem; font-size:.92rem; }
+  details { margin-top:.5rem; color:var(--muted); }
+</style>
+<script>
+function pick(btn, ok) {
+  const q = btn.closest('.q');
+  if (q.classList.contains('done')) return;
+  q.classList.add('done');
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (!ok) q.querySelectorAll('.opt').forEach(o => { if (o.dataset.ok === '1') o.classList.add('right'); });
+}
+</script>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0010 · pairs with lesson 0010</div>
+<h1>Request-Id Routing</h1>
+
+<div class="q"><h3>1. Player 2 asks the baker a question. What key tells the host the resulting stream belongs to player 2?</h3>
+<button class="opt" onclick="pick(this,false)">The NPC index — the baker knows who asked</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">The request id returned by npc.ask()/LlmClient::submit(), recorded in the router's inflight_ map as {playerId, npcIndex}</button>
+<button class="opt" onclick="pick(this,false)">The TCP socket the deltas arrive on</button>
+<div class="why">Deltas arrive on the host's LLM queue, not a socket. The unique submit id is claimed at ask-time: inflight_[id] = {playerId, npcIndex}.</div></div>
+
+<div class="q"><h3>2. In the host loop, <code>routeDelta()</code> returning false means…</h3>
+<button class="opt" onclick="pick(this,false)">The delta was corrupt and dropped</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">The delta belongs to the host's own conversation; the pre-existing solo code handles it, unchanged</button>
+<button class="opt" onclick="pick(this,false)">The target player disconnected</button>
+<div class="why">Consume-or-pass: new consumer gets first refusal, old code path can't tell multiplayer exists. Disconnected players are handled inside routeDelta (sendToPlayer fails silently), which still returns true.</div></div>
+
+<div class="q"><h3>3. Two players message the same NPC at nearly the same time. What guarantees neither reply is lost or interleaved?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">The router queues lines per-NPC and only submits when !npc.waiting(); the second line waits for the first reply to resolve</button>
+<button class="opt" onclick="pick(this,false)">LlmClient's single worker thread is enough on its own</button>
+<button class="opt" onclick="pick(this,false)">The second message is rejected with an error</button>
+<div class="why">The worker serializes HTTP calls, but Npc tracks only ONE pendingId_ — a second ask() would clobber the first. The per-NPC queue is what protects Npc's single-pending invariant.</div></div>
+
+<div class="q"><h3>4. Why do <code>NpcSpeechBubble</code>/<code>NpcMoodUpdate</code> broadcast to everyone while the error case goes only to the asker?</h3>
+<button class="opt" onclick="pick(this,false)">Broadcasting errors would be too much bandwidth</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Speech and mood are world state every player can see; a failed LLM call is a private problem only the asker can act on (retry)</button>
+<button class="opt" onclick="pick(this,false)">Errors contain secrets</button>
+<div class="why">Audience follows meaning: shared consequences broadcast, private outcomes route to their owner.</div></div>
+
+<div class="q"><h3>5. Written recall:</h3>
+<p>A player disconnects while their reply is streaming. Walk through what happens to (a) the stream, (b) the NPC's history, (c) the next player who asks that NPC.</p>
+<textarea placeholder="(a) ..."></textarea>
+<details><summary>Reference answer</summary>(a) routeDelta/routeReply still fire, but sendToPlayer() finds no live connection and returns false — the payload evaporates. (b) npc.onReplyArrived() still runs, so history/mood update consistently (the world doesn't fork). (c) The router pumps that NPC's queue as usual; the NPC is free and answers normally — one client's death never wedges shared state.</details></div>
+</div></body></html>

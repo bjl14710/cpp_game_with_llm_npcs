@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0009 — Server-Authoritative Replication</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1.5rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.3rem; margin-bottom:1.2rem; }
+  .q h3 { font-size:1rem; margin-bottom:.7rem; }
+  .opt { display:block; width:100%; text-align:left; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.55rem .8rem; margin-bottom:.45rem; cursor:pointer; font-size:.92rem; }
+  .opt:hover { border-color:var(--accent); }
+  .opt.right { border-color:var(--green); background:#16281f; }
+  .opt.wrong { border-color:var(--red); background:#2a1820; }
+  .why { display:none; color:var(--muted); font-size:.88rem; margin-top:.5rem; border-top:1px dashed var(--border); padding-top:.5rem; }
+  .q.done .why { display:block; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .3em; font-size:.88em; }
+  textarea { width:100%; min-height:70px; background:var(--code-bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:.6rem; font-size:.92rem; }
+  details { margin-top:.5rem; color:var(--muted); }
+</style>
+<script>
+function pick(btn, ok) {
+  const q = btn.closest('.q');
+  if (q.classList.contains('done')) return;
+  q.classList.add('done');
+  btn.classList.add(ok ? 'right' : 'wrong');
+  if (!ok) q.querySelectorAll('.opt').forEach(o => { if (o.dataset.ok === '1') o.classList.add('right'); });
+}
+</script>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0009 · pairs with lesson 0009</div>
+<h1>Server-Authoritative Replication</h1>
+
+<div class="q"><h3>1. A joined client's copy of NPC positions is…</h3>
+<button class="opt" onclick="pick(this,false)">Simulated locally, corrected by the server when they disagree</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">A render-only replica, replaced wholesale by each WorldSnapshot; the client never runs npc.update()</button>
+<button class="opt" onclick="pick(this,false)">Authoritative for NPCs near that client, remote for the rest</button>
+<div class="why">Clients don't simulate at all — the cheapest way to never diverge from the authority is to never compute your own answer.</div></div>
+
+<div class="q"><h3>2. Why does <code>NetServer</code> spawn one reader thread per connection instead of one loop over all sockets?</h3>
+<button class="opt" data-ok="1" onclick="pick(this,true)">Blocking recv() on one slow client must not starve the others; a thread per connection isolates each blocking concern at this scale (4 players)</button>
+<button class="opt" onclick="pick(this,false)">Threads make the server faster at any player count</button>
+<button class="opt" onclick="pick(this,false)">SFML requires it</button>
+<div class="why">At 4 players, thread-per-connection is the simplest correct design; poll/epoll multiplexing earns its complexity at hundreds of sockets.</div></div>
+
+<div class="q"><h3>3. The tick thread needs NPC positions for snapshots. How does it get them?</h3>
+<button class="opt" onclick="pick(this,false)">It reads world.npcs()[i].position() under a global world mutex</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">It reads a value copy the host's main loop published via publishNpcPoses() — server threads never touch World</button>
+<button class="opt" onclick="pick(this,false)">It asks each client for their view and takes the majority</button>
+<div class="why">The thread contract: game state crosses into networking only as values through guarded queues. World stays single-threaded; solo play is untouched.</div></div>
+
+<div class="q"><h3>4. Correct shutdown order for a thread blocked in <code>recv()</code>:</h3>
+<button class="opt" onclick="pick(this,false)">close(fd) → join()</button>
+<button class="opt" data-ok="1" onclick="pick(this,true)">shutdown(fd) → join() → close(fd)</button>
+<button class="opt" onclick="pick(this,false)">Set an atomic stop flag and wait; recv will notice</button>
+<div class="why">shutdown() forces the blocked recv to return; join() guarantees the thread is done touching the fd; only then is close() safe (an early close risks the kernel recycling the fd number under the still-running thread). A flag alone never wakes a blocked syscall.</div></div>
+
+<div class="q"><h3>5. Written recall:</h3>
+<p>Why does the handshake carry <code>kNetProtocolVersion</code>, and what happens on mismatch?</p>
+<textarea placeholder="Because..."></textarea>
+<details><summary>Reference answer</summary>Different builds may speak different wire formats. The server compares the client's version to its own at JoinRequest time and answers a refusal Welcome with a human-readable reason ("update the game") instead of accepting a peer that would silently desync. One int compared once per join buys away a whole class of bugs.</details></div>
+</div></body></html>

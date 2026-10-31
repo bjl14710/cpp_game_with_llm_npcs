@@ -1,0 +1,90 @@
+# Overnight Build Report
+Date: 2026-07-05
+Session mode: LOCAL-ONLY (GitHub API unavailable — see Blockers)
+Issues attempted: 4 (from local specs, not GitHub issues)
+
+## Summary
+Implemented the entire Strategy Arena strategy layer planned in
+`.claude/plans/strategy-arena.md`: the four `DailyStrategy` implementations
+(engulfing adapter, technical, mean-reversion, GBM bundle adapter) on branch
+`feature/arena-strategy-layer`, with 15 new tests and the full suite green
+(85 passed). One lesson + drill generated on the session's core concept.
+GitHub issue tracking and draft-PR creation were impossible: `GH_TOKEN` is
+still the literal placeholder string `"TOKEN"`.
+
+## Blockers you should fix first ⚠️
+1. **`GH_TOKEN` is a placeholder.** The `/plan-github` issue batch (prepared
+   last session) was never created, so tonight ran from the local plan specs
+   instead. Fix: put a real PAT in your shell config, then run
+   `uv run python <scratchpad>/create_arena_issues.py` or re-run /plan-github.
+2. **No draft PR could be opened.** The branch DID push (git used your macOS
+   keychain credentials — only the REST API needs the token). Open the PR here:
+   https://github.com/bjl14710/HFT_practice/compare/main...feature/arena-strategy-layer
+
+## Completed ✅
+| Spec | Title | Commit | Tests |
+|------|-------|--------|-------|
+| A | DailyEngulfingStrategy adapter (delegates to intraday EngulfingStrategy) | e424b48 | 4 |
+| B | TechnicalStrategy — RSI + MACD + MA-crossover confluence | af3c29c | 3 |
+| C | MeanReversionStrategy — z-score fade with breakout override | 89021d2 | 3 |
+| D | GBMStrategy — model-bundle adapter with last-bar padding | 2bc3f66 | 2 |
+
+Plus: scaffold commit (interface/registry/stubs, 1c7c941) and a chore commit
+locking dev extras in `uv.lock` + adding `.gitignore` (497cf48).
+All on `feature/arena-strategy-layer`, pushed to origin.
+
+## Failed ❌
+None.
+
+## Skipped (needs human) ⏭
+| Item | Reason |
+|------|--------|
+| GitHub issue creation/labeling, draft PR | GH_TOKEN placeholder (see Blockers) |
+| Arena orchestrator, SQLite state, filter, comparison report (plan steps 4–7) | Deliberately out of tonight's scope — next milestone |
+
+## Notable finding (not fixed — needs a human decision) 🔍
+`predict_next.py:136–144` predicts off the **second-newest** bar:
+`build_features()` ends with `dropna()`, which always removes the newest row
+(its `fwd_ret_1d` target is NaN), so `feats.iloc[-1]` is yesterday. Live
+predictions run on one-day-stale features. Conservative direction (no
+lookahead), but it costs edge and skews any live-vs-backtest comparison.
+The new `strategies/gbm_adapter.py` avoids it via last-bar padding; porting
+that fix to `predict_next.py` changes live trading behavior, so it was left
+for a reviewed change. Suggested follow-up issue:
+`fix(inference): predict_next.py should predict on the current bar, not yesterday's`.
+
+## Test data corrections made
+Two scaffolded (skipped, never-validated) test fixtures were mathematically
+impossible and were corrected during implementation:
+- Technical: a monotonic `linspace` uptrend pins RSI at 100, which the
+  overbought filter correctly blocks — replaced with noisy trends
+  (verified RSI ≈ 61 long / ≈ 37 short).
+- Mean-reversion: the dip to 92 crossed the 55-bar low channel, correctly
+  triggering breakout-SHORT — replaced with a dip to 98.7 (z ≈ −2.7, inside
+  the channel).
+Both corrections are explained in the test docstrings.
+
+## Learning Materials Created
+| Concept | Lesson | Drill | Vocab |
+|---------|--------|-------|-------|
+| Feature contracts at inference: train/serve skew and the last-bar problem | ✅ lessons/0035 | ✅ drills/0006 | — (no GLOSSARY.md in repo; per-session precedent is lesson+drill) |
+
+`docs/learning/index.html` rebuilt (7 lessons, 6 drills). PROGRESS.md updated.
+Open with: `open docs/learning/lessons/0035-feature-contracts-at-inference.html`
+
+## Test Status
+`uv run pytest tests/ -m "not exercise"` → **85 passed, 54 deselected** (exercise
+stubs). Intraday-stack tests (`test_engulfing`, `test_intraday_sim`,
+`test_paper_trading`) pass unmodified — zero blast radius on existing code.
+
+## Suggested First Move
+Fix `GH_TOKEN` in `~/.zshrc`, then open the PR from the compare link above and
+review `strategies/gbm_adapter.py` first — the padding trick is the one piece
+of tonight's work with genuine subtlety (lesson 0035 explains it).
+
+## Draft PRs Awaiting Review
+None could be opened (token). One branch awaiting a PR:
+- `feature/arena-strategy-layer` — 6 commits, strategy layer complete, suite green.
+
+*Note: this report is committed on the feature branch, not main — the repo
+rule "never push directly to main" applies to the session itself.*

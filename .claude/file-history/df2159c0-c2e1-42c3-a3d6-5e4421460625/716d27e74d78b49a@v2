@@ -1,0 +1,120 @@
+# Plan: PWA Mobile Web App (iPhone Home Screen)
+Date: 2026-06-30
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: M
+
+## The Idea (one paragraph)
+The existing FastAPI webapp (`webapp/`) works in a desktop browser but is not optimised
+for mobile. This plan adds Progressive Web App (PWA) support so the app can be added to
+an iPhone home screen and used like a native app — full-screen, with an icon, and
+a touch-friendly layout. No App Store, no Apple Developer account, no cloud server
+required. During the testing phase the server runs on a Mac, and ngrok provides a free
+public HTTPS URL so the app is reachable over cellular when away from home.
+
+## Goal
+A user can add the trading webapp to their iPhone home screen, tap the icon to open it
+full-screen (no browser chrome), and use every existing feature on a phone-sized screen.
+
+## Out of Scope (this version)
+- Service worker / offline caching (iOS Safari PWA support is limited; adds complexity
+  for almost no benefit in a locally-hosted app)
+- Push notifications
+- Any new trading features
+- Cloud hosting / VPS setup (deferred until live trading phase)
+- App Store submission
+
+## Affected Areas
+- `webapp/templates/base.html` — add PWA meta tags, manifest link, apple-touch-icon
+- `webapp/static/style.css` — add mobile-responsive styles, touch-friendly sizing,
+  hamburger nav for small screens
+- `webapp/static/manifest.json` — new file: PWA manifest (name, icons, display mode)
+- `webapp/static/icons/` — new directory: PNG app icons at iOS-required sizes
+- `scripts/generate_icons.py` — new file: Python script that draws the icon and exports
+  all required PNG sizes (runs once, committed output)
+- `mac-setup.sh` — new file (repo root): Mac prerequisite checker + launch script
+- `MAC_SETUP.md` — new file (repo root): plain-English instructions for running on Mac
+  and exposing via ngrok
+
+## Implementation Order
+
+1. **Generate app icon PNGs** (`scripts/generate_icons.py`)
+   - Design: dark navy background (#111b2b, matching existing header), white candlestick
+     chart motif with a teal accent line (#2fd4c4 from learning site palette)
+   - Export sizes: 180×180 (iOS home screen), 192×192, 512×512 (PWA manifest)
+   - Uses only `matplotlib` (already a project dependency — no new packages)
+   - Run once and commit the generated PNGs into `webapp/static/icons/`
+
+2. **Add PWA manifest** (`webapp/static/manifest.json`)
+   - `name`: "Algo Trader"
+   - `short_name`: "AlgoTrade"
+   - `display`: "standalone"
+   - `background_color`: "#111b2b"
+   - `theme_color`: "#111b2b"
+   - `icons`: 192×192 and 512×512 entries
+
+3. **Update base template** (`webapp/templates/base.html`)
+   - Add `<meta name="viewport">` (currently missing — pages don't scale on mobile)
+   - Add `<meta name="apple-mobile-web-app-capable" content="yes">`
+   - Add `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`
+   - Add `<meta name="apple-mobile-web-app-title" content="AlgoTrade">`
+   - Add `<link rel="apple-touch-icon" href=".../icons/icon-180.png">`
+   - Add `<link rel="manifest" href=".../manifest.json">`
+
+4. **Mobile-responsive CSS** (`webapp/static/style.css`)
+   - Viewport-aware layout: `max-width`, `padding` adjustments below 600px
+   - Hamburger nav menu for small screens (CSS-only toggle using checkbox trick —
+     no JS dependency)
+   - Touch-friendly tap targets: buttons and links minimum 44×44px (Apple HIG guideline)
+   - Form inputs: larger text (16px minimum to prevent iOS auto-zoom on focus)
+   - `.form-grid` collapses to single column on mobile
+   - `.card-grid` already uses `auto-fit` — will naturally collapse, just needs
+     `minmax(160px, 1fr)` floor adjustment
+
+5. **Mac launch script** (`mac-setup.sh`)
+   - Prerequisite checks (exit with clear message if missing):
+     - Python ≥ 3.12 (`python3 --version`)
+     - `uv` installed (`uv --version`) — with install hint if missing
+     - `ngrok` installed (`ngrok version`) — with install hint if missing
+     - `.env` file exists (warn if `WEB_AUTH_USER` / `WEB_AUTH_PASS` not set)
+   - Installs Python deps: `uv sync` (or `pip install -e .` fallback)
+   - Starts FastAPI server on port 8000 in background
+   - Starts ngrok tunnel on port 8000
+   - Prints the public ngrok URL to terminal once it's up
+   - Traps SIGINT so both processes are cleaned up on Ctrl-C
+
+6. **Mac setup guide** (`MAC_SETUP.md`)
+   - Step-by-step: clone → run `mac-setup.sh` → open URL on iPhone → Add to Home Screen
+   - Screenshot callouts for iOS "Add to Home Screen" flow
+   - Troubleshooting: ngrok free tier URL rotation, firewall, port conflicts
+
+## Acceptance Criteria
+- [ ] Opening the public ngrok URL on iPhone Safari shows the app with no horizontal scroll
+- [ ] "Add to Home Screen" produces an icon matching the generated PNG, title "AlgoTrade"
+- [ ] Tapping the home screen icon opens the app full-screen (no Safari URL bar)
+- [ ] All nav links are tappable without zooming in
+- [ ] All form inputs do not trigger iOS auto-zoom (font-size ≥ 16px)
+- [ ] `mac-setup.sh` exits with a descriptive error if Python < 3.12 or ngrok missing
+- [ ] `mac-setup.sh` prints the ngrok public URL on success
+- [ ] `python3 scripts/generate_icons.py` regenerates icons without error
+- [ ] `pytest tests/ -m "not exercise" -q` still passes (no backend changes)
+
+## Edge Cases and Error Handling
+
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| ngrok free tier URL changes on restart | Script prints new URL each run; user re-shares link or bookmarks |
+| Mac firewall blocks port 8000 | `mac-setup.sh` prints hint to allow Python in System Settings → Firewall |
+| `WEB_AUTH_USER` not set | Server starts with no auth (fine for local/ngrok testing); script prints a warning |
+| iOS Safari adds to home screen without HTTPS | ngrok provides HTTPS automatically; local `http://` will not work for PWA install |
+| User is away from home (Mac asleep) | ngrok tunnel is down; app unreachable — expected, user must leave Mac awake |
+| Port 8000 already in use | `mac-setup.sh` detects with `lsof -ti:8000`, prints conflict message |
+
+## Open Questions
+None — plan is complete.
+
+## Suggested GitHub Issues
+1. **Generate PWA app icons** — `scripts/generate_icons.py`, export 180/192/512px PNGs
+2. **Add PWA manifest and iOS meta tags** — `manifest.json` + `base.html` updates
+3. **Mobile-responsive CSS** — hamburger nav, touch targets, form input sizing
+4. **Mac launch script** — `mac-setup.sh` prereq checks + server + ngrok + URL print
+5. **Mac setup guide** — `MAC_SETUP.md` with step-by-step and troubleshooting

@@ -1,0 +1,87 @@
+# Testable HFT Practice Exercises
+
+## Context
+
+The 24 HTML lessons in `docs/learning/` teach HFT concepts, but lessons 0009–0019 use *illustrative* code because the repo lacks real HFT building blocks. The user wants hands-on, exercism-style practice: skeleton modules with TODOs they implement, graded by pre-written pytest suites, with reference solutions to peek at after attempting. Scope confirmed: Python + C++ + VHDL, covering order book, market maker, stat-arb/risk utils, and SPSC ring / O(1) MA. Once solutions land, lessons can later be retrofitted with real repo code (existing standing instruction — out of scope here, but noted in PROGRESS.md).
+
+Toolchain facts (verified): `g++` and `make` installed; `cmake` and `ghdl` are **not**; `statsmodels` is not a dep (stat-arb utils must be numpy-only).
+
+## Directory tree
+
+```
+exercises/
+├── README.md                      # workflow, run commands, peek policy
+├── 01_order_book/{README.md, order_book.py}          # lesson 0016
+├── 02_market_maker/{README.md, market_maker.py}      # lesson 0017
+├── 03_stat_arb_risk/{README.md, pairs.py, risk.py}   # lessons 0018/0006/0019
+├── 04_spsc_ring/{README.md, ring_ma.hpp, spsc_ring.hpp}   # lessons 0009/0010
+└── 05_vhdl_testbench/{README.md, tb_market_maker.vhd,
+        tb_moving_average_trader.vhd, tb_linear_regression_predictor.vhd}  # lesson 0002
+
+solutions/                         # mirrors exercises/ exactly (same dirs/filenames)
+
+tests/exercises/
+├── __init__.py
+├── conftest.py                    # path-based loader + NotImplementedError→skip + markers
+├── test_01_order_book.py
+├── test_02_market_maker.py
+├── test_03_stat_arb_risk.py
+├── test_04_spsc_ring.py           # subprocess wrapper → cpp/run_cpp.sh
+├── test_05_vhdl.py                # skips unless ghdl on PATH
+└── cpp/{test_ring_ma.cpp, test_spsc_ring.cpp, run_cpp.sh}
+
+scripts/run_vhdl_tests.sh          # ghdl -a/-e/-r driver
+```
+
+Stubs are derived by hollowing solutions (keep signatures + docstrings, body → `raise NotImplementedError`) so they never drift.
+
+## Core mechanisms
+
+**Targeting (exercises vs solutions)** — exercise dirs like `01_order_book` aren't valid package names, so `tests/exercises/conftest.py` provides a `load_exercise(dir, module)` fixture that loads by file path via `importlib.util.spec_from_file_location`, rooted at `$HFT_EXERCISE_TARGET` (default `exercises`, set to `solutions` to verify the suite is solvable). `run_cpp.sh` reads the same env var for its `-I` include dir; `run_vhdl_tests.sh` for which `tb_*.vhd` to analyze. One mechanism, three languages.
+
+**Default suite stays green** — stubs raise `NotImplementedError`; a `pytest_runtest_call` wrapper hook in `tests/exercises/conftest.py` converts that to `pytest.skip("Exercise not implemented yet — fill in the TODO")`. So `uv run pytest tests/` shows "N passed, M skipped" (skip count = progress bar), and a filled-but-wrong stub fails normally — clean "not implemented" vs "wrong answer" separation. C++/VHDL stubs signal not-implemented via sentinel exit code 42 (`std::logic_error` / `report ... severity failure` TODO), which the pytest wrappers map to skip. Auto-apply `exercise` / `cpp` / `vhdl` markers via `pytest_collection_modifyitems` so `-m "not exercise"` reproduces today's suite.
+
+**C++ build** — no cmake; `run_cpp.sh` compiles directly: `g++ -std=c++20 -O2 -pthread -I "$ROOT/$TARGET/04_spsc_ring" test_*.cpp`. Wrapper skips if `g++` absent. C++ tests use the custom ASSERT-macro style from `tests/cpp/test_algorithms.cpp`.
+
+**VHDL opt-in** — `test_05_vhdl.py` skips when `shutil.which("ghdl")` is None. README documents `apt-get install ghdl` + gtkwave. Script: `ghdl -a fpga/<dut>.vhd $TARGET/05_vhdl_testbench/tb_<dut>.vhd && ghdl -e ... && ghdl -r ... --assert-level=error`.
+
+## Exercise specs and test coverage
+
+**01 — Order book** (`OrderBook`): `add_limit(order_id, side, price, qty)`, `cancel(order_id)`, `execute_market(side, qty) -> list[Fill]`, `best_bid()/best_ask()/bbo()`, `imbalance(levels)`. Tests: empty-book BBO None; BBO updates on add; price priority; FIFO at same price; partial fill leaves remainder at queue front; cancel re-derives BBO; unknown cancel → `KeyError`; market order walks levels; imbalance ∈ [−1,1] hand-computed.
+
+**02 — Market maker** (`InventoryAwareQuoter`, Avellaneda-Stoikov-lite; params `gamma, sigma, horizon, max_inventory`): `reservation_price(mid, inventory)`, `optimal_spread()`, `quote(mid, inventory)`. Tests: zero inventory → symmetric; long → skew down, short → up; spread monotone in gamma and sigma; quotes never cross; one-sided at ±max_inventory. README contrasts with the inventory-blind `fpga/market_maker.vhd`.
+
+**03 — Stat-arb + risk** (numpy-only). `pairs.py`: `hedge_ratio` (OLS), `spread_series`, `zscore`, `dickey_fuller_stat` (lag-0 DF: regress Δe on e₋₁), `half_life` (AR(1)). `risk.py`: `CUSUMDetector`, `OTRTracker` (`record_order/record_cancel/record_trade`, `ratio()`, `breached(threshold)`), `walkforward_splits(n, train, test, embargo)`. Tests: constructed cointegrated pair (seeded rng, like `tests/conftest.py`) → DF stat passes, independent random walks don't; CUSUM fires on injected shift, silent on noise; OTR arithmetic + breach; splits chronological, non-overlapping, embargo respected.
+
+**04 — C++** (header-only, C++20). Part A `RingMA<N>`: O(1) push/average, fixed array, no heap — fixes the O(window) flaw admitted in `gradient_boosting/sample_with_gradient_boosting.cpp`. Part B `SpscRing<T,N>` (power-of-two `static_assert`): `try_push/try_pop`, release/acquire atomics, `alignas(64)` head/tail separation. Tests: MA matches naive recompute across wraparound; FIFO order; full/empty; `offsetof` ≥64-byte check; 2-thread 1M-item sequenced transfer.
+
+**05 — VHDL testbenches**: stubs ship with entity, DUT instantiation, clock process complete; user writes the stimulus process (Q16.16 prices, valid handshake pulses) and `assert` checks (MM: buy=mid−spread/2, sell=mid+spread/2, latency cycles; MA: ramp vs signal; LR: known-weights dot product → signal).
+
+## Config/doc updates
+
+- `pyproject.toml`: add `markers = [...]` to `[tool.pytest.ini_options]` only. `testpaths` unchanged; `exercises/`/`solutions/` are never packaged (setuptools lists explicit py-modules/packages already).
+- `CLAUDE.md` Testing section: add `uv run pytest tests/exercises/ -k 01 -v`, `HFT_EXERCISE_TARGET=solutions uv run pytest tests/exercises/ -v`, `bash scripts/run_vhdl_tests.sh`.
+- `docs/learning/PROGRESS.md`: add "Lessons ↔ exercises" map (0016→01, 0017→02, 0006/0018/0019→03, 0009/0010→04, 0002→05) + note that lesson retrofitting comes later.
+
+## Implementation sequence
+
+1. `tests/exercises/conftest.py` (loader + skip hook + markers) + pyproject markers.
+2. Per Python exercise (01→02→03): write solution first, then tests against it, then hollow the solution into the stub.
+3. Exercise 04: headers (solution + stub), C++ tests, `run_cpp.sh`, pytest wrapper.
+4. Exercise 05: solution testbenches, hollowed stubs, `scripts/run_vhdl_tests.sh`, pytest wrapper.
+5. READMEs (top-level + per-exercise with spec/criteria/hints/lesson link), CLAUDE.md, PROGRESS.md.
+
+## Verification
+
+1. `uv run pytest tests/ -v` → all pre-existing tests pass; every exercise test **skipped** ("not implemented"); zero failures.
+2. `HFT_EXERCISE_TARGET=solutions uv run pytest tests/exercises/ -v` → all Python + C++ tests **pass** (proves solvability); VHDL skipped if ghdl absent.
+3. `HFT_EXERCISE_TARGET=solutions bash tests/exercises/cpp/run_cpp.sh` → binaries pass; default target exits 42.
+4. Sabotage check: implement one stub method wrongly → its test **fails**, not skips.
+5. `uv run pytest tests/ -m "not exercise"` → identical to today's green suite.
+
+## Key reference files
+
+- `tests/conftest.py` — seeded-rng fixture style to copy
+- `tests/cpp/test_algorithms.cpp` — ASSERT-macro style for C++ tests
+- `fpga/market_maker.vhd` — DUT ports / Q16.16 format for exercise 05; inventory-gap framing for 02
+- `gradient_boosting/sample_with_gradient_boosting.cpp` — the O(window) MA that exercise 04 Part A fixes

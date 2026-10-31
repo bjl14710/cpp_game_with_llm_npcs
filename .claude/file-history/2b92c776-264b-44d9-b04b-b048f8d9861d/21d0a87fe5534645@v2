@@ -1,0 +1,81 @@
+"""Open ONE draft PR for the aim/styles/preview branch and close #91-93."""
+import os, subprocess, re, sys, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Milestone #10 — three independent fixes, one stacked branch on
+`feature/player-journal` (one atomic commit each).
+
+**#91 fix(combat): aim the gun where the camera looks, from eye height.**
+The weapon was reconstructing a separate yaw-only, horizontal aim spawned
+from the player's feet, drifted from the camera's real 3D look — the
+moonwalk class of bug (cf. #61). Now one authoritative
+`lookDirection(yaw, pitch)` feeds both the camera and the weapon, and the
+shot leaves from eye height along the full 3D vector. Fixing it at the
+source means new weapons can't reintroduce it. `commit c811e88`
+
+**#92 feat(creator): more style-tagged parts and palettes.** +2 parts per
+category (body_slim/body_bulk, head_oval/head_tall, eyes_round/eyes_happy,
+hair_pony/hair_mohawk) and +3 palettes (berry/slate/mint), additive within
+the existing socket/style-tag contract, with renderer recipes. `commit 3ea616f`
+
+**#93 feat(creator): player-driven preview rotation.** Replaces the
+unconditional auto-spin with two states — drag/keys rotate; after an idle
+timeout the figure eases back to facing the camera. No autonomous spin
+remains. `commit 31b8c17`
+
+## Verification
+- `make -C tests test` green: **165 cases / 2343 assertions** (4 new aim
+  tests, a `shortestAngleDelta` test, and the exhaustive part-combination
+  test now covering the new parts).
+- Game target builds clean.
+- **#92 screenshot-verified**: rendered the new parts/palettes in-engine and
+  confirmed they draw correctly and match the art style.
+
+## Needs human verification (cannot be checked headlessly)
+- **#91 in-game feel**: firing while mouse-looking and watching rounds land
+  is interactive; the aim *math* is unit-tested but the felt behavior is
+  yours to confirm.
+- **#93 entirely**: the creator preview only renders with the Creator menu
+  page open, which can't be triggered in a headless smoke run. The rotation
+  logic compiles and is reasoned/reviewed, but drag feel, the idle
+  return-to-front, and "no spin" need you to open the Creator page and try it.
+
+## Notes
+- Stacked on `feature/player-journal` (base) — `main` lacks this code
+  (no `CharacterParts.cpp` there). Do not merge; review only.
+- Tunables for #93 are logged constants (idle 2.5s, ease 6.0, drag 0.4
+  deg/px, keys 90 deg/s).
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull, title="feat: gun-aim fix, more character styles, player-driven creator preview (#91-#93)",
+           body=BODY, base="feature/player-journal", head="feature/aim-styles-preview", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")
+
+for n in (91, 92, 93):
+    issue = retry(repo.get_issue, n)
+    labels = [l.name for l in issue.labels if l.name not in ("ready-for-ai", "ai-in-progress")]
+    if "ai-completed" not in labels:
+        labels.append("ai-completed")
+    retry(issue.edit, labels=labels)
+    retry(issue.create_comment,
+          f"Implemented on `feature/aim-styles-preview`. Draft PR #{pr.number} open for review (stacked on feature/player-journal). Not merged.")
+    retry(issue.edit, state="closed")
+    print(f"  #{n}: labels={labels}, closed, linked to PR #{pr.number}")
+
+print("done")

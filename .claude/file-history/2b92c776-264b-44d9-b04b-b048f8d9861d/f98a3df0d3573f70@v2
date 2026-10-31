@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0025 — Generate, Validate, Retry</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0025 · pairs with lesson 0026</div>
+<h1>Vocab: Generate, Validate, Retry</h1>
+<dl>
+<dt>schema-as-contract</dt>
+<dd>The model fills a defined structure the game already loads; it never
+acts on the world directly. The map JSON and persona formats ARE the
+generation API.</dd>
+
+<dt>closed-world vocabulary</dt>
+<dd>The prompt lists every id the model may use (pieces, parts, palettes,
+traits) — generation composes existing content, never invents new kinds.</dd>
+
+<dt>one-entrance rule</dt>
+<dd>Exactly one path from generated output into the game, through the
+validator. Any bypass makes the validator decoration.</dd>
+
+<dt>retry feedback</dt>
+<dd>The validator's error list appended verbatim to the next attempt's
+prompt. Written model-grade: names, positions, and nearest valid
+alternatives.</dd>
+
+<dt>contract fault vs model fault</dt>
+<dd>The diagnostic split: identical failures across models indict YOUR
+format or prompt; scattered per-model failures indict the model. Tonight's
+string-embedded personas and missing style families were contract faults.</dd>
+
+<dt>unsatisfiable instruction</dt>
+<dd>A prompt demand whose required information isn't in the prompt
+("style-consistent" without family labels). No amount of emphasis fixes
+it; the missing data does.</dd>
+
+<dt>auto-repair</dt>
+<dd>Silently fixing invalid output (nearest-id substitution, nudged
+placements). Banned: it hides model quality and removes retry pressure.
+Distinct from wrapper normalization, which strips packaging only.</dd>
+
+<dt>validity rate</dt>
+<dd>The bench's headline number: fraction of fixed-corpus generations that
+pass the real validator (within the retry cap / on the first attempt).
+The model is chosen by this measurement, never by label.</dd>
+
+<dt>repairable vs strict load</dt>
+<dd>Human files open with bad rows dropped and a toast; model output
+either passes whole or fails plainly. Forgiveness for people, feedback
+for models.</dd>
+</dl>
+</div></body>
+</html>

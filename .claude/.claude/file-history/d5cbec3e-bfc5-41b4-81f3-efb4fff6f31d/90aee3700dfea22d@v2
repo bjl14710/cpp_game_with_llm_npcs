@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0015 — Debugging runtime spikes</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .bad { background: rgba(239, 107, 140, 0.10); border-left: 3px solid var(--bad); padding-left: 6px; display: block; }
+  pre.code .ok  { background: rgba(109, 211, 166, 0.10); border-left: 3px solid var(--good); padding-left: 6px; display: block; }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.bug  { border-left-color: var(--bad); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .step-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0015 &middot; cpp_games / docs / learning</div>
+  <h1>Debugging runtime spikes</h1>
+  <p class="why">Why this matters: lessons 0003, 0005, 0009, and 0014 all ended with "measure before you change" &mdash; this is the lesson where you finally get the measuring kit. A game that averages 60 FPS but hitches for 80 ms once a second <em>feels broken</em>; a game that averages 45 FPS steadily feels fine. Spikes are a different beast from slowness, and they're hunted differently.</p>
+</header>
+
+<h2>1. The concept &mdash; spikes are not slowness</h2>
+
+<p>Two performance diseases, two different treatments:</p>
+
+<table class="compare">
+  <tr><th></th><th>Slow (chronic)</th><th>Spiky (acute)</th></tr>
+  <tr><td>Symptom</td><td>Every frame takes too long; FPS uniformly low</td><td>Most frames are fine; occasional frames take 3&ndash;30&times; longer</td></tr>
+  <tr><td>What the player feels</td><td>Sluggish but consistent</td><td>Stutter, hitching, "the game froze for a moment"</td></tr>
+  <tr><td>What reveals it</td><td>Average frame time</td><td><b>Worst frame</b> / 99th percentile &mdash; the average actively hides it</td></tr>
+  <tr><td>Typical cause</td><td>Too much work per frame (algorithmic)</td><td>Rare-event work landing on one frame: allocation storms, lock waits, blocking I/O, OS preemption</td></tr>
+  <tr><td>Typical fix</td><td>Do less work / better algorithm</td><td>Move the rare event off the hot path, amortize it, or pre-do it</td></tr>
+</table>
+
+<div class="callout">
+  <h3>Why the average lies</h3>
+  <p>1000 frames: 999 take 10 ms, one takes 100 ms. Average = 10.09 ms &mdash; "smooth 99 FPS!" But the player saw a visible hitch. The only numbers that catch it: <b>max</b> (100 ms) and <b>p99</b> (the time the worst 1% of frames exceed). Rule: <em>report frame times as worst/p99/median, never as average FPS</em>. This is lesson 0003's latency-vs-throughput distinction with teeth.</p>
+</div>
+
+<h3>The four-step spike hunt</h3>
+
+<div class="step-diagram">  1. CONFIRM    Record per-frame times into a ring buffer. Is there a spike
+                at all, how big, how often? (No tooling yet — 20 lines of code.)
+  2. LOCATE     Split the frame into sections (events / update / render /
+                display). Time each. When a spike frame happens, which
+                section ate the budget?
+  3. CLASSIFY   Match the guilty section against the usual-suspects table
+                (section 4): allocation? lock? syscall? GPU? OS?
+  4. FIX + RE-MEASURE
+                Apply the matching fix, then rerun step 1. If the worst
+                frame didn't improve, revert — the suspicion was wrong.</div>
+
+<p>The discipline matters more than the tools: <b>never skip from symptom to fix</b>. Every lesson so far that said "profile first" was protecting you from optimizing the wrong thing — lesson 0014's <code class="inline">wrap()</code> suspicion is exactly the kind of claim step 2 confirms or kills.</p>
+
+<h2>2. Minimal example &mdash; a 30-line spike detector</h2>
+
+<p>This is self-contained instrumentation you can paste into any of your three games today. Two pieces: the right clock, and spike-triggered logging.</p>
+
+<pre class="code"><span class="pp">#include</span> <span class="str">&lt;chrono&gt;</span>
+<span class="pp">#include</span> <span class="str">&lt;cstdio&gt;</span>
+
+<span class="com">// ALWAYS steady_clock for intervals. system_clock is wall-clock time and</span>
+<span class="com">// can jump (NTP sync, DST) — a "frame" could measure negative.</span>
+<span class="kw">using</span> Clock = std::chrono::steady_clock;
+
+<span class="kw">struct</span> SectionTimer {                       <span class="com">// RAII: times a scope (lesson 0006)</span>
+    Clock::time_point start = Clock::now();
+    <span class="typ">double</span>&amp; sink;                          <span class="com">// where to record milliseconds</span>
+    <span class="kw">explicit</span> SectionTimer(<span class="typ">double</span>&amp; s) : sink(s) {}
+    ~SectionTimer() {
+        sink = std::chrono::duration&lt;<span class="typ">double</span>, std::milli&gt;(Clock::now() - start).count();
+    }
+};
+
+<span class="com">// In the game loop:</span>
+<span class="typ">double</span> msUpdate = <span class="num">0</span>, msRender = <span class="num">0</span>;
+<span class="kw">auto</span> frameStart = Clock::now();
+
+{ SectionTimer t(msUpdate);  updateEverything(dt); }   <span class="com">// destructor records</span>
+{ SectionTimer t(msRender);  renderScene(window);  }
+
+<span class="typ">double</span> msFrame = std::chrono::duration&lt;<span class="typ">double</span>, std::milli&gt;(Clock::now() - frameStart).count();
+
+<span class="com">// SPIKE-TRIGGERED logging: only speak when something is wrong.</span>
+<span class="com">// Logging every frame would itself allocate/IO and distort the measurement</span>
+<span class="com">// (the observer effect). 25 ms = 1.5x the 60 Hz budget.</span>
+<span class="kw">if</span> (msFrame &gt; <span class="num">25.0</span>) {
+    std::printf(<span class="str">"SPIKE %.1fms (update %.1f, render %.1f)\n"</span>,
+                msFrame, msUpdate, msRender);
+}</pre>
+
+<ul>
+  <li><b><code class="inline">steady_clock</code>, never <code class="inline">system_clock</code></b> &mdash; steady is monotonic (only moves forward, at a constant rate). System clock is "what time is it," adjustable by the OS at any moment.</li>
+  <li><b>RAII timer</b> &mdash; the destructor records the time, so early returns and exceptions are timed correctly for free. Same pattern as <code class="inline">lock_guard</code> (lesson 0005).</li>
+  <li><b>Spike-triggered output</b> &mdash; the conditional <code class="inline">printf</code> runs ~never, so the instrumentation's own cost stays out of the numbers. This matters: instrumentation that's heavier than the thing measured produces fiction.</li>
+  <li><b>Measure in release</b> (<code class="inline">-O2</code>, <code class="inline">CMAKE_BUILD_TYPE=Release</code>) &mdash; debug builds are 5&ndash;30&times; slower in different *proportions* per function, so debug-build spikes often point at the wrong suspect entirely.</li>
+</ul>
+
+<h2>3. In this project</h2>
+
+<h3>The spike defense you already shipped</h3>
+<small class="path">cpp_shooter_game/src/main.cpp:1093</small>
+<pre class="code"><span class="kw">const</span> <span class="typ">float</span> dt = std::min(<span class="num">0.03f</span>, frameClock.restart().asSeconds());</pre>
+<p>This clamp says: "even if the last frame took 200 ms, pretend at most 30 ms passed." Without it, a single spike would feed a huge <code class="inline">dt</code> into the physics &mdash; projectiles tunneling through enemies, the player launched by one integration step. Understand what this is: <b>mitigation, not cure</b>. It stops a spike from corrupting the simulation, but the player still <em>sees</em> the hitch. (Side effect worth knowing: during a spike the game world runs slower than real time, because clamped dt &lt; real elapsed time.)</p>
+
+<h3>A real suspect hiding in the loop</h3>
+<small class="path">cpp_shooter_game/src/main.cpp:1108</small>
+<pre class="code"><span class="bad">window.setTitle(buildTitle(game));   <span class="com">// EVERY frame</span></span></pre>
+<p><code class="inline">setTitle</code> isn't a normal function call &mdash; on Linux it's a round-trip conversation with the X11/Wayland window manager (syscalls + IPC to another process, lesson 0009), and <code class="inline">buildTitle</code> constructs a fresh <code class="inline">std::string</code> first (allocation, lesson 0003). At 60 Hz that's 60 window-manager chats per second to display mostly-unchanged text. Whether it actually spikes depends on the WM &mdash; <em>which is precisely what step 2 instrumentation would tell you</em>. The fix shape, if guilty: update the title only when the text changes, or every 30 frames.</p>
+
+<h3>The two long-standing suspicions this lesson can close</h3>
+<small class="path">cpp_game_with_llm_npcs/src/DialogUI.cpp:109+ &middot; src/LlmClient.cpp:62</small>
+<p><b>(a)</b> Lesson 0003 flagged <code class="inline">DialogUI::render()</code>: it re-wraps and re-allocates transcript strings every frame. Wrap <code class="inline">ui.render(window)</code> in a <code class="inline">SectionTimer</code> and watch what happens as the transcript grows to 200 lines &mdash; that's the experiment, ~4 lines of code. <b>(b)</b> The main thread's <code class="inline">drainReplies()</code> takes a mutex the worker also takes. Could the worker make the main thread wait? Look at the design: the worker holds <code class="inline">replyMutex_</code> only to <code class="inline">push_back</code> one element (microseconds) &mdash; the long HTTP call happens <em>outside</em> any lock, and <code class="inline">drainReplies</code> uses <code class="inline">swap</code> to make its critical section tiny too. This was lesson 0005's design paying off: <b>the slow operation was kept outside the lock specifically so it can't become a main-thread spike</b>. Instrumentation should confirm near-zero wait — if it doesn't, something changed.</p>
+
+<h3>What 60 FPS limiting actually does</h3>
+<small class="path">cpp_game_with_llm_npcs/src/main.cpp:121 &middot; cpp_racing_game/src/main.cpp:1018</small>
+<pre class="code">window.setFramerateLimit(<span class="num">60</span>);</pre>
+<p>SFML implements this by <em>sleeping</em> the remainder of each frame. Sleeps are handled by the OS scheduler (lesson 0009) with ~1 ms granularity, so frame pacing under a sleep-based limiter is inherently a little jittery, and a "17.4 ms frame" in your logs may just be sleep overshoot &mdash; not your code. Know your instrument: measure the <em>work</em> portion (before the implicit sleep in <code class="inline">display()</code>) separately from the whole frame, or your spike log fills with false positives.</p>
+
+<h2>4. The usual suspects — classify the guilty section</h2>
+
+<table class="compare">
+  <tr><th>Cause</th><th>Signature</th><th>Fix shape</th></tr>
+  <tr><td><b>Heap allocation in hot path</b> (lesson 0003/0006)</td><td>Small frequent spikes; worse as data grows (transcript, projectiles)</td><td>Reuse buffers, <code>reserve()</code>, move work out of the loop</td></tr>
+  <tr><td><b>Vector reallocation</b> (lesson 0002)</td><td>One spike exactly when a vector crosses a capacity boundary, then quiet</td><td><code>reserve()</code> the realistic maximum up front</td></tr>
+  <tr><td><b>Lock contention</b> (lesson 0005)</td><td>Spikes only while the other thread is busy (e.g. during an LLM reply)</td><td>Shrink critical sections; never hold a lock across slow work</td></tr>
+  <tr><td><b>Blocking syscall / I/O on main thread</b> (lesson 0009)</td><td>Spike correlated with a file read, font load, network call, <code>setTitle</code></td><td>Do it once at startup, cache it, or move to a worker thread</td></tr>
+  <tr><td><b>OS preemption / other processes</b></td><td>Random, uncorrelated with your code; worse when the machine is busy</td><td>Mostly accept it; close background hogs; (extreme: thread priority)</td></tr>
+  <tr><td><b>First-use / cold-start costs</b></td><td>Spikes only the first time something happens (first shot fired, first reply)</td><td>Pre-warm during loading: touch the code path once before play starts</td></tr>
+  <tr><td><b>GPU / vsync stall</b></td><td><code>display()</code> section spikes while CPU sections stay flat</td><td>Reduce draw cost; check vsync vs framerate-limit interaction</td></tr>
+</table>
+
+<div class="callout warn">
+  <h3>One spike cause lives outside your process</h3>
+  <p>Your game shares the machine with Ollama. When the model is generating, the GPU and several CPU cores are saturated &mdash; and your game's frame times <em>will</em> degrade during replies even though no line of your code changed. Instrumentation that logs "spike during companion reply" is reporting a real phenomenon: a sidecar process (lesson 0001) competing for hardware. The fix is capacity planning (smaller model, limited threads), not C++.</p>
+</div>
+
+<h2>5. When in-code timers aren't enough — the tool ladder</h2>
+
+<ul>
+  <li><b>Rung 1: what you built in section 2.</b> Frame ring buffer + section timers + spike-triggered logs. Zero dependencies, answers "is there a spike and which quarter of the frame owns it." Start here, stay here as long as it keeps answering questions.</li>
+  <li><b>Rung 2: <code class="inline">perf</code> (Linux).</b> A <em>sampling</em> profiler: interrupts your process thousands of times/sec and records where it was. <code class="inline">perf record ./shooter</code> &rarr; <code class="inline">perf report</code> shows which functions eat CPU overall. Great for chronic slowness; weaker for rare spikes (a 1-in-1000 frame contributes few samples).</li>
+  <li><b>Rung 3: Tracy.</b> The game-industry standard frame profiler: an <em>instrumentation</em> profiler with a live timeline UI &mdash; you see every frame as a bar, click the tall one, and read exactly which zones ran. It's a header + macros (<code class="inline">ZoneScoped</code>) and would slot into your CMake like httplib did. The natural upgrade once rung 1 says "render() spikes" and you need to know <em>which part</em> of render.</li>
+</ul>
+
+<h2>6. Often confused</h2>
+
+<h3><code>steady_clock</code> vs <code>system_clock</code></h3>
+<p><b>Share:</b> both are <code class="inline">std::chrono</code> clocks returning <code class="inline">time_point</code>s. <b>Diverge:</b> <code class="inline">system_clock</code> tracks wall-clock time and may jump backward/forward when the OS adjusts time (NTP, timezone); <code class="inline">steady_clock</code> is monotonic &mdash; meaningless as a date, perfect as a stopwatch. <b>Pick:</b> durations/intervals &rarr; steady; timestamps for humans &rarr; system. (SFML's <code class="inline">sf::Clock</code> is monotonic too &mdash; your games' <code class="inline">frameClock</code> is already the right kind.)</p>
+
+<h3>Sampling vs instrumentation profilers</h3>
+<p><b>Share:</b> both tell you where time goes. <b>Diverge:</b> sampling (perf) statistically interrupts &mdash; near-zero setup, low overhead, but rare events hide between samples; instrumentation (Tracy, your SectionTimer) records every entry/exit of marked zones &mdash; exact and spike-friendly, but only sees what you marked, and each marker costs a little. <b>Pick:</b> chronic slowness &rarr; sampling; spikes &rarr; instrumentation. They complement; pros run both.</p>
+
+<h3>Profiler vs debugger</h3>
+<p><b>Share:</b> both inspect a live program. <b>Diverge:</b> a debugger (gdb) answers "what is the program doing / why is state wrong" by pausing it; a profiler answers "where does time go" by watching it run at speed. Pausing destroys timing &mdash; you can't debug a spike with breakpoints, because the breakpoint <em>is</em> a million-times-bigger spike.</p>
+
+<h3>Spike vs slow (one more time, as a reflex)</h3>
+<p>Before touching code, classify: is the worst frame an outlier (spike &rarr; find the rare event) or is the median frame already over budget (slow &rarr; reduce per-frame work)? The fixes don't transfer. <code class="inline">reserve()</code> won't fix a slow algorithm; a better algorithm won't fix an allocation storm that hits one frame in 500.</p>
+
+<h2>7. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">1. Your spike log uses <code>system_clock</code> and one night reports a frame that took <b>-3,600,000 ms</b>. What happened?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Integer overflow produces garbage values, but -3,600,000 ms is suspiciously exactly negative one hour — that's a clock adjustment, not arithmetic.">A signed integer overflow in the duration math</li>
+    <li data-correct="true" data-why="Exactly — system_clock is wall-clock time, and the OS adjusted it (DST ended / NTP correction) mid-frame, so 'end minus start' went negative by precisely an hour. steady_clock is monotonic and can never do this. That's why intervals always use steady_clock.">The OS moved the wall clock back an hour mid-frame; system_clock followed it</li>
+    <li data-correct="false" data-why="A real stall makes a hugely POSITIVE measurement, never negative — time still moved forward.">The game genuinely stalled for negative time due to a scheduler bug</li>
+    <li data-correct="false" data-why="duration<double, milli> handles unit conversion correctly; mixing units gives wrong magnitudes, not an exact negative hour.">Mixing milliseconds and microseconds in the conversion</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">2. The game averages 60 FPS but players report stutter. Which single number is most likely to expose the problem?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The average is exactly the number that's hiding the problem — 999 good frames drown one terrible frame.">Average frame time over the session</li>
+    <li data-correct="false" data-why="Total CPU usage tells you the machine isn't saturated, but a spike can happen at 20% average CPU — it's about one frame, not the aggregate.">Overall CPU utilization percentage</li>
+    <li data-correct="true" data-why="Right — worst frame (or p99) is where spikes live. A 100 ms max against a 16.7 ms median says 'stutter' even when the average looks perfect.">Maximum (or 99th-percentile) frame time</li>
+    <li data-correct="false" data-why="Median is even more spike-blind than the average — it ignores outliers by construction.">Median frame time</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">3. Why does the section-2 detector only <code>printf</code> when a frame exceeds 25 ms, instead of logging every frame?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Disk space is a side benefit, not the reason — a session's frame log is a few MB at most.">To save disk space over long play sessions</li>
+    <li data-correct="true" data-why="Correct — printf does formatting and I/O (a syscall, lesson 0009). Doing that 60×/sec adds cost to every frame and can CAUSE the spikes you're hunting. Conditional logging keeps the instrument's cost out of the measurement — the observer effect, managed.">So the instrumentation itself doesn't distort the timing it's measuring</li>
+    <li data-correct="false" data-why="printf is thread-safe per call in practice — and this runs on one thread anyway. The concern is cost, not safety.">Because printf isn't thread-safe inside a game loop</li>
+    <li data-correct="false" data-why="The threshold isn't about correctness of the numbers — sub-25 ms frames are measured fine; they're just not worth reporting.">Frames under 25 ms can't be measured accurately</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">4. Instrumentation shows the NPC game's frame times degrade only while the companion is generating a reply, even though <code>drainReplies()</code> shows ~0 ms lock wait. Best explanation?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The measurement just told you the lock wait is ~0 — believing the suspicion over the measurement is the exact anti-pattern this lesson exists to break.">The mutex contention is real but too fast for steady_clock to see</li>
+    <li data-correct="true" data-why="Right — Ollama is a separate process saturating the GPU and CPU cores during generation (lesson 0009: shared machine, OS scheduler arbitrates). Your code didn't get slower; the hardware got busier. Fix is capacity planning, not C++.">The Ollama sidecar process is competing for CPU/GPU while generating</li>
+    <li data-correct="false" data-why="The worker thread spends its time BLOCKED in the HTTP call (waiting on recv — lesson 0009), which uses no CPU. One mostly-blocked thread doesn't starve a modern multi-core machine.">The LlmClient worker thread is hogging the core the game needs</li>
+    <li data-correct="false" data-why="The reply only enters DialogUI after it arrives — during generation the transcript isn't growing yet, so render cost is unchanged.">DialogUI::render gets slower because the transcript is growing during generation</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">5. The shooter's <code>dt = std::min(0.03f, frameClock.restart().asSeconds())</code> clamp — what does it actually do about spikes?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="It changes nothing about how long frames take — it only changes what the simulation is TOLD about elapsed time.">It prevents frames from taking longer than 30 ms</li>
+    <li data-correct="false" data-why="Backwards — it makes the simulation run SLOWER than real time during a spike (less simulated time passes than wall time).">It speeds the simulation up to catch up after a hitch</li>
+    <li data-correct="true" data-why="Exactly — it's damage control, not prevention. The hitch is still visible to the player, but the physics never integrates a giant dt (which would tunnel projectiles through enemies). Mitigation ≠ cure; you still have to hunt the spike.">It stops a spike from corrupting the physics, but the visible hitch remains</li>
+    <li data-correct="false" data-why="The clamp doesn't measure or report anything — it silently absorbs the anomaly, which is arguably why the spike was never investigated.">It logs oversized frames so spikes can be diagnosed later</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>8. Check your understanding — scenarios</h2>
+
+<div class="scenario">
+  <b>Scenario A.</b> You add section timers to the shooter and the log shows: spike frames always blame <code>renderScene</code>, but only on the <em>first</em> frame after an enemy dies. Walk the four-step hunt: which suspect from the section-4 table fits, and what's the fix shape?
+</div>
+
+<div class="scenario">
+  <b>Scenario B.</b> A friend says "just run it under gdb and break when the frame is slow." Explain in two sentences why that can't work, and what the right tool for "which function ate this one frame" actually is.
+</div>
+
+<div class="scenario">
+  <b>Scenario C.</b> You instrument the NPC game and see a steady ~17 ms per frame... but ~5 ms is your code and ~12 ms is inside <code>window.display()</code>. Is that a problem? What two different things could that 12 ms be, and how would you tell them apart?
+</div>
+
+<h2>9. Lesson progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can say why averages hide spikes and what p99/worst-frame means</label></li>
+  <li><label><input type="checkbox"> Read section 2 &mdash; I could paste the SectionTimer into a game today</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I know what the dt clamp does and doesn't do, and why setTitle is a suspect</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I can match a spike signature to a suspect class</label></li>
+  <li><label><input type="checkbox"> Read section 6 &mdash; steady vs system clock is now a reflex</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Actually instrumented one of the games (the real graduation)</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://en.cppreference.com/w/cpp/chrono/steady_clock">cppreference: <code>std::chrono::steady_clock</code></a> &middot;
+    <a href="https://github.com/wolfpld/tracy">Tracy &mdash; frame profiler for games (GitHub)</a> &middot;
+    <a href="https://perfwiki.github.io/main/">Linux <code>perf</code> wiki</a> &middot;
+    <a href="https://www.sfml-dev.org/documentation/2.6.1/classsf_1_1Window.php">SFML: <code>setFramerateLimit</code> vs <code>setVerticalSyncEnabled</code></a>
+  </p>
+  <p>Lesson 0015 &middot; <code class="inline">docs/learning/lessons/0015-debugging-runtime-spikes.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

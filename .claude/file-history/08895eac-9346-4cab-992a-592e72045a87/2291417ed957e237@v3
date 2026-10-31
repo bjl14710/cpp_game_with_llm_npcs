@@ -1,0 +1,88 @@
+# Glossary
+
+Terms introduced across all learning modules in this repo. Each term links to the vocab file where it is defined in full.
+
+---
+
+## 0001 — pybind11 + CMake FetchContent
+
+Source: [vocab/0001-pybind11-cmake-extension.html](vocab/0001-pybind11-cmake-extension.html)
+
+| Term | Type | One-line definition |
+|------|------|---------------------|
+| **pybind11** | Library | Header-only C++ library that exposes C++ types and functions to Python via compile-time template metaprogramming — no code generation step. |
+| **PYBIND11_MODULE** | C++ Macro | Generates the `extern "C" PyObject* PyInit_<name>()` entry point that Python's import machinery calls after `dlopen()`-ing the shared library. |
+| **pybind11_add_module** | CMake Function | CMake wrapper around `add_library(SHARED)` that sets the correct Python extension suffix, strips the `lib` prefix, applies `-fvisibility=hidden`, and enables LTO in Release mode. |
+| **FetchContent** | CMake Module | Downloads external CMake dependencies at configure time and makes their targets available in the same CMake scope. Used as a fallback when pybind11 is not pip-installed. |
+| **scikit-build-core** | Build Backend | PEP 517 build backend that invokes CMake when pip builds a wheel, enabling `pip install .` to compile C++ extensions automatically. |
+| **PYBIND11_FINDPYTHON** | CMake Variable | When set to `ON` before `find_package(pybind11)`, instructs pybind11 to use CMake's modern `FindPython3` module instead of the deprecated `FindPythonLibs` — essential for venv and uv-managed Pythons. |
+| **editable install** | Python Packaging | `pip install -e .` mode where Python source changes are immediately importable; C++ extension changes still require a recompile. |
+| **ABI** | Concept | Application Binary Interface — the compiled-code contract. Python C extensions are ABI-tagged (e.g. `cpython-312`) and are not binary-compatible across Python versions. |
+| **shared object (.so)** | OS Concept | Native library loaded at runtime via `dlopen()`. A Python C extension is a `.so` with a `PyInit_` entry point. On macOS it is `.dylib`; on Windows, `.pyd`. |
+| **parity test** | Testing Pattern | Verifies a C++ implementation produces the same output as a NumPy reference within floating-point tolerance (e.g. `1e-9`). Serves as both a correctness gate and a regression guard. |
+| **type caster** | pybind11 Concept | Compile-time template specialisation that converts C++ types to Python objects and back at the function call boundary (e.g. `std::vector<double>` ↔ `list[float]` via `pybind11/stl.h`). |
+
+---
+
+## 0003 — Order-Book Reconstruction from Incremental Feeds
+
+Source: [vocab/0003-order-book-reconstruction.html](vocab/0003-order-book-reconstruction.html)
+
+| Term | Type | One-line definition |
+|------|------|---------------------|
+| **incremental feed** | Market data | Feed of order-level events; every consumer maintains its own book with no resync — one mishandled type diverges silently and permanently. |
+| **snapshot feed** | Market data | Periodic top-N book publication; stateless consumers self-heal on the next snapshot. |
+| **event sourcing** | Architecture | State = a fold over an ordered event log; the order book is this at nanosecond scale. |
+| **phantom depth** | Failure mode | Resting size present in your reconstruction but not at the exchange, from a missed removal message. |
+| **partial cancel ('X')** | ITCH message | Removes N shares from a resting order without deleting it; full removal is 'D'. Skipping it created this repo's crossed-book bug. |
+| **crossed book** | Market state | Best bid ≥ best ask; persistently crossed reconstruction in continuous trading = stale state, not a real market. |
+| **stock locate** | ITCH field | Per-session symbol integer from the 'R' directory message; enables single-pass symbol filtering. |
+| **market invariant check** | Testing pattern | Real-data assertion (uncrossed post-open book, in-range prices) that catches divergence synthetic tests can't. |
+
+---
+
+## 0004 — Kyle's Lambda & Price Impact
+
+Source: [vocab/0004-kyles-lambda-price-impact.html](vocab/0004-kyles-lambda-price-impact.html)
+
+| Term | Type | One-line definition |
+|------|------|---------------------|
+| **Kyle's lambda (λ)** | Statistic | OLS slope of price change on signed order flow — $ of price move per share of net flow; measured 1.48e-5 for AAPL 2019-12-30. |
+| **price impact** | Concept | Adverse price movement caused by your own demand; grows with size, unlike the fixed spread toll. |
+| **order-flow imbalance (OFI)** | Signal | Best-level net buying pressure incl. quote/depth changes (Cont–Kukanov–Stoikov), not just prints. |
+| **signed volume** | Signal | Net traded volume signed by aggressor; prints only — misses pulled quotes that OFI captures. |
+| **regression observation (bar)** | Method | One (x, y) OLS pair — here 1-second bars: x = summed OFI, y = close-to-close microprice change. |
+| **rolling window estimate** | Method | Refit per fixed-width window to expose intraday variation a session aggregate averages away. |
+| **ok flag / low-confidence gate** | Design pattern | Fitted values carried with an explicit trust flag; under-populated fits visible but never silently consumed. |
+| **r-squared (r²)** | Statistic | Share of variance explained: λ = how hard flow moves price, r² = how much of the move flow explains. |
+
+---
+
+## 0005 — The Cost of Observability
+
+Source: [vocab/0005-cost-of-observability.html](vocab/0005-cost-of-observability.html)
+
+| Term | Type | One-line definition |
+|------|------|---------------------|
+| **observability cost** | Concept | The compute cost of measurement/signal code itself — 31 ns book update vs 72 µs per-event top-of-book read. |
+| **hot path** | Performance | Code run once per event; anything added there is multiplied by the event count. |
+| **domain parameter** | Performance | Problem-domain quantity (tick range, depth, symbols) that silently sets a complexity class's constant. |
+| **parameter-variation experiment** | Method | Rerun with only the suspected parameter changed; cost scaling with the ratio confirms the mechanism. |
+| **O(N·R) trap** | Performance | Per-event O(R) work inside an N-event loop — neither factor alarming alone, the product dominates. |
+| **decimation** | Data reduction | Every k-th point: cheap, shape-preserving, knowingly drops extremes (dashboard plots). |
+| **aggregation (bars)** | Data reduction | Per-bucket summaries preserving totals/extremes (λ estimator's 1-second bars). |
+| **incremental tracking** | Optimization | Maintain a derived value on mutation instead of recomputing by scan on read — the proposed O(1) best-index fix. |
+
+---
+
+## 0008 — Streamlit's Rerun Model
+
+Source: [lessons/0008-streamlit-dashboard-tour.html](lessons/0008-streamlit-dashboard-tour.html)
+
+| Term | Type | One-line definition |
+|------|------|---------------------|
+| **rerun** | Streamlit Concept | Streamlit's unit of reactivity: any widget interaction re-executes the entire script from the top, not just a handler tied to that widget. |
+| **st.session_state** | Streamlit API | A dict-like object that is the *only* state guaranteed to survive from one rerun to the next; plain local variables are recreated fresh every rerun. |
+| **event-callback model** | GUI Concept | The traditional GUI pattern (Tkinter, PyQt): widgets and their state persist for the whole session, and a click runs only its own registered handler — contrasted here with Streamlit's full-script rerun. |
+| **sticky flag pattern** | Design Pattern | Storing a boolean in `session_state` (e.g. `volume_loaded`) so a UI section stays rendered across future reruns, even though the button that first revealed it (`run_volume`) resets to `False` on the very next rerun. |
+| **path-keyed cache guard** | Design Pattern | `if session_state.get("key") != current_value:` — skips an expensive recomputation (e.g. parsing a multi-million-row file) unless the input actually changed, even though the surrounding script reruns on every unrelated interaction. |

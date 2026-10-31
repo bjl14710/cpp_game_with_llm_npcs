@@ -1,0 +1,101 @@
+# Plan: Implement All simulator_plans.zip Plans (MSP430 Quality Suite)
+Date: 2026-07-05
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: XL (umbrella over 5 plans: M + S + M + M + XL)
+
+## The Idea (one paragraph)
+`simulator_plans.zip` contains five READY plans that together form an MSP430
+quality suite for Silmulator: audit the simulated MSP430 against real TI
+documentation, add doc-derived edge-case tests, model realistic drift/faults,
+semantically review pasted user code for sequencing bugs, and validate a
+vendor-doc→block-spec generator against the hand-built device model. This
+umbrella plan sequences all five, resolves their open questions, and corrects
+two false assumptions found during grounding.
+
+## Goal
+A user gets a doc-cited compliance report for `msp430.py`, an edge-case test
+suite guarding it, a datasheet-grounded corner-case simulation mode, sequencing
+warnings in the Code Input block, and a doc→spec generator with a diff report —
+all grounded in the actual SLAU367 User's Guide and MSP430FR5994 datasheet.
+
+## Corrections to the source plans (found during grounding)
+1. **TI docs are absent.** `hardware_docs/ti/` holds only `.gitkeep`. Decision:
+   download SLAU367 + the MSP430FR5994 datasheet from ti.com into
+   `hardware_docs/ti/MSP430FR5994/` before any doc-dependent step.
+2. **The custom-block wizard does not exist.** Plan 2 assumes it does; only the
+   JSON spec loader stub (`silmulator/custom_blocks/`) and `hello_world.json`
+   exist. Decision (user-confirmed): build plan 2 from scratch as XL —
+   doc→spec extraction pipeline plus diff comparator.
+
+## Decisions adopted from the plans' open questions
+- Audit: UNDOCUMENTED commands sit **outside** the compliance score.
+- Generator: CONFLICT items **warn**, never block generation; report header
+  records the SLAU367 revision used (whatever revision we download becomes the
+  declared ground truth, since msp430.py's original source revision is unknown).
+- Fault modeling: **per-peripheral** corner-case toggles (drifted clock with
+  nominal ADC is a valid teaching configuration).
+- Semantic reviewer: **flat** flagged/not-flagged list for v1 (plus the
+  LOW_CONFIDENCE marker for ambiguous ordering, per that plan's edge cases).
+- Test suite: runs **after** the audit so it targets the boundaries the audit
+  proves matter.
+
+## Out of Scope (this version)
+- Everything the five plans individually exclude (other devices, GUI fault
+  panel, auto-fixing user code, full peripheral coverage in the generator,
+  auto-replacing msp430.py).
+- Git/GitHub workflow — repo is not a git repository; work lands directly in
+  the working tree this session.
+- Fixing gaps the audit finds in `msp430.py` (its own follow-up plan), except
+  where the edge-case test plan explicitly records failures as a list.
+
+## Affected Areas
+All paths relative to `Silmulator/Silmulator/`:
+- `hardware_docs/ti/MSP430FR5994/` — downloaded SLAU367 + datasheet (new)
+- `silmulator/devices/msp430.py` — read-only for plans 1/2/5; extended by plan 3
+- `silmulator/utils/waveform.py` — possible noise-shaping helpers (plan 3)
+- `silmulator/code_parser/base_parser.py`, `project.py` — semantic-review hook (plan 4)
+- `silmulator/code_parser/semantic_review.py` — new (plan 4)
+- `silmulator/gui/blocks/code_input_block.py` — surface findings (plan 4)
+- `silmulator/custom_blocks/` — extraction pipeline + `diff_report.py` (plan 2)
+- `scripts/audit_msp430.py`, `docs/audits/msp430-compliance-report.md` — new (plan 1)
+- `tests/test_msp430_edge_cases.py`, `tests/test_msp430_fault_modeling.py`,
+  `tests/test_semantic_review_msp430.py`, `tests/test_vendor_doc_diff.py` — new
+
+## Implementation Order
+1. **Docs**: download SLAU367 + MSP430FR5994 datasheet into `hardware_docs/ti/`
+2. **Plan 1 — compliance auditor**: enumerate msp430.py SCPI surface, score
+   against SLAU367 (ADC12_B + Timer_A at 100% coverage), emit re-runnable
+   report via `scripts/audit_msp430.py`
+3. **Plan 5 — edge-case tests**: doc-cited boundary tests for GPIO/ADC/Timer_A;
+   failures recorded, not silently patched
+4. **Plan 3 — fault/drift modeling**: datasheet-grounded ADC quantization/INL,
+   DCO drift, per-peripheral nominal/corner-case profiles; composes with inject()
+5. **Plan 4 — semantic reviewer**: sequencing rules over extracted SCPI calls,
+   non-blocking warnings in the Code Input block
+6. **Plan 2 — vendor-doc block generator** (from scratch): scoped SLAU367
+   extraction → JSON block spec → MATCH/MISSING/CONFLICT diff vs msp430.py,
+   Markdown + JSON report
+
+## Acceptance Criteria
+- [ ] All acceptance criteria in the five source plans (see their files in
+      `.claude/plans/`) — they remain the per-plan definition of done
+- [ ] TI PDFs present under `hardware_docs/ti/MSP430FR5994/` with revision noted
+- [ ] Full suite passes: `python -m pytest tests/ -v` (edge-case tests may
+      carry xfail/documented-failure markers per plan 5's rules)
+- [ ] `nominal` mode produces zero behavior change in existing MSP430 tests
+
+## Edge Cases and Error Handling
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| TI download blocked/unavailable | Stop and report; do not substitute memory for citations without flagging it |
+| Audit finding vs. test expectation disagree | Audit report wins; test becomes xfail citing the report |
+| Plans conflict on shared files | Later plan rebases on earlier plan's changes (order above is dependency order) |
+
+## Open Questions
+None — plan is complete. (Per-plan leanings adopted above; user confirmed doc
+download, plan-2 rebuild, and same-session implementation.)
+
+## Suggested GitHub Issues
+Not applicable this round — user chose same-session implementation and the
+repo has no git remote. The five source plans each carry their own suggested
+issue breakdowns if this is later queued for overnight work.

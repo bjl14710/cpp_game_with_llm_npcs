@@ -1,0 +1,35 @@
+## What to change
+Ensure the overnight session can run visual tests headlessly on EC2
+without any manual xvfb setup. Update the test command and document
+the one-time EC2 setup.
+
+## Specifically
+1. Verify `pytest-xvfb` is in `requirements-dev.txt`
+   (when installed, pytest starts Xvfb automatically — no xvfb-run prefix needed)
+2. Update the test command in CLAUDE.md or README to just:
+   `pytest tests/ -v`
+   (visual tests included automatically via pytest-xvfb)
+3. Add `docs/visual-testing.md` explaining:
+   - How to update golden images after intentional UI changes
+   - How to read diff images when tests fail
+   - The EC2 one-time setup command (setup-visual-testing.sh)
+4. Add a CI-ready `.env.test` or document the DISPLAY variable is not needed
+   when pytest-xvfb is installed
+
+## How to verify it's done
+`pytest tests/ -v` runs all tests including visual tests in one command.
+No `xvfb-run` prefix needed.
+docs/visual-testing.md exists and explains the update-golden workflow.
+
+## Constraints
+Do not add a Makefile or separate test runner script — one pytest command only.
+Do not require DISPLAY to be manually set.
+
+## Code economy note
+pytest-xvfb handles all the xvfb lifecycle. No custom session management.
+
+## Branch name
+`feature/issue-N-visual-test-overnight-integration`
+
+## Concept for learning materials
+"Headless display servers and virtual framebuffers for CI GUI testing"

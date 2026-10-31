@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0014 — Benchmarking LLMs Against an Output Contract</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul, ol { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  pre code { border:none; padding:0; background:none; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); } .good { border-left-color:var(--green); }
+  table { border-collapse:collapse; width:100%; margin-bottom:1rem; }
+  th, td { border:1px solid var(--border); padding:.5rem .8rem; text-align:left; }
+  th { background:var(--surface); color:var(--accent2); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0014 · LLM engineering · from tools/bench_npc_models.py</div>
+<h1>Benchmarking LLMs Against an Output Contract</h1>
+<p>"Which local model should my NPCs use?" is answerable with numbers — if you
+measure the thing your game actually depends on.</p>
+
+<h2>The contract is the benchmark</h2>
+<p>Generic leaderboards rank models on math, coding, and trivia. Your game
+doesn't need any of that: it needs every reply to end with a parseable
+<code>[[MOOD: happy]]</code> tag, stay in character for twenty turns, and
+arrive fast on a laptop. That triple — <strong>format compliance, behavioral
+consistency, latency</strong> — is the whole evaluation. Anything else is
+someone else's benchmark.</p>
+<div class="callout warn">First rule: benchmark the REAL contract. This project's brief
+said "measure valid-JSON rate" — but the game doesn't use JSON mode; it parses
+directive tags from plain text. Measuring JSON compliance would have ranked
+models on a protocol the game never speaks. Always read the code before
+writing the harness.</div>
+
+<h2>One source of truth for the prompt</h2>
+<p>A benchmark that hand-copies the system prompt drifts the moment someone
+edits <code>renderSystemPrompt()</code>. This harness instead calls a 20-line
+CLI (<code>persona_prompt</code>) that links the game's own core library and
+prints exactly what an NPC would send. The harness can't drift because it has
+no prompt of its own.</p>
+
+<h2>The three metrics, concretely</h2>
+<table>
+<tr><th>Metric</th><th>How it's measured</th><th>Why it matters</th></tr>
+<tr><td>Compliance</td><td>N single-shot probes across all personas; a reply passes if it carries a known-keyword mood tag and no malformed directives (mirrors <code>parseDirectives</code> tolerance)</td><td>A non-compliant reply = an NPC with no facial expression and ignored actions</td></tr>
+<tr><td>Consistency</td><td>A scripted 20-turn conversation scored for fourth-wall breaks ("as an AI..."), identity drift (wrong name), sustained tag compliance, and style-length conformance</td><td>Small models degrade over long context — turn 18 matters more than turn 1</td></tr>
+<tr><td>Latency</td><td>Median time-to-first-token + total time (streamed)</td><td>TTFT is what the player feels; totals bound the conversation rhythm</td></tr>
+</table>
+
+<h2>Proxy scoring and its honesty budget</h2>
+<p>Fully-local means no GPT-4-as-judge. Regex proxies (fourth-wall phrases,
+name checks, length bounds) are crude — they miss subtle character breaks and
+false-positive on legitimate lines like "I'm no robot, honey." The discipline
+is to <em>say so</em>: the report labels consistency as proxy-scored and keeps
+the raw transcripts for spot-reading. A proxy you've documented is a metric; a
+proxy you've forgotten is a lie.</p>
+
+<h2>Design details that keep numbers trustworthy</h2>
+<ul>
+<li><strong>Same temperature as production</strong> (0.8) — benchmarking at 0
+measures a model nobody ships.</li>
+<li><strong>Deterministic scripts, not random prompts</strong> — reruns are
+comparable; the 20-turn script deliberately includes mood shifts, action
+requests, identity probes, and a "are you a robot?" trap.</li>
+<li><strong>Failures score, they don't crash</strong> — a model that can't
+load or times out gets skipped-with-reason, and the ranking proceeds.</li>
+<li><strong>A weighted single score for ranking, raw numbers for judgment</strong>
+— compliance dominates (it's binary player-facing breakage), consistency
+second, latency as a tie-breaker with a cap so a fast-but-sloppy model can't
+buy its way up.</li>
+</ul>
+<div class="callout good">Takeaway: an LLM benchmark is just a test suite where the
+assertions are statistical. Pin the prompt to the production code path, measure
+the contract your parser enforces, state N, and let failure be data.</div>
+</div></body></html>

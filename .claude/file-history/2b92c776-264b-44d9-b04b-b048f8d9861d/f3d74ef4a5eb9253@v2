@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Milestone + tickets for world time / schedules / day-night (overnight)."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+USERNAME = "bjl14710"
+
+TEMPLATE = """## What to change
+{what}
+
+## Where it is
+{where}
+
+## How to verify it's done
+{verify}
+
+## Constraints
+{constraints}
+
+## Code economy note
+{economy}
+
+## Branch name
+`feature/world-time` (single stacked branch; one PR closes all four)
+
+## Concept for learning materials
+{concept}
+"""
+
+COMMON = ("Plan: .claude/plans/world-time-and-schedules.md. ONE clock: every "
+          "consumer reads WorldState's world_time; nothing keeps a private "
+          "timer. Sky, fog color, and light level derive from the same hour "
+          "(fog must keep melting into the horizon at night). "
+          "make -C tests test stays green.")
+
+SPECS = [
+    {"title": "feat(core): WorldState — shared fact store with the world clock",
+     "what": ("Generic string-keyed fact store (WorldFact{number,text}) owned "
+              "by World — the 'world bus' gossip/journal will reuse. First "
+              "fact: world_time_seconds, advanced by World::update at 1 real "
+              "second = 1 game minute, starting 09:00, wrapping 24h; typed "
+              "convenience accessors read the same fact any system could."),
+     "where": "NEW src/core/WorldState.{hpp,cpp}; src/core/World.{hpp,cpp}; tests/test_world_state.cpp.",
+     "verify": "Fact round-trips, clock advance/wrap, fallback reads — tests green.",
+     "constraints": COMMON,
+     "economy": "No subscriptions, persistence, or replication tonight — a map with helpers, nothing more.",
+     "concept": "A shared world bus vs per-system private state"},
+    {"title": "feat(core): NPC schedules from persona files, driven by world_time",
+     "what": ("Optional repeated 'schedule = HH-HH, x, z, activity' persona "
+              "header lines -> ScheduleEntry list on LoadedPersona; Npc walks "
+              "to the active entry (ReturnHome movement pattern) when "
+              "behavior is None and combat Idle, pausing within talk range; "
+              "activity() exposed for nameplates. update() takes the hour as "
+              "a parameter — the NPC has no clock of its own."),
+     "where": ("src/core/PersonaLoader.{hpp,cpp}, src/core/Npc.{hpp,cpp}; "
+               "tests/test_persona_roster.cpp, tests/test_npc_behavior.cpp."),
+     "verify": ("Tests: active-entry selection incl. midnight wrap and "
+                "[start,end); same NPC at different passed hours heads to "
+                "different spots; pause near player; idle without a schedule."),
+     "constraints": COMMON,
+     "economy": "Reuse the ReturnHome walk pattern and existing persona parse conventions; no pathfinding work.",
+     "concept": "Injected time: systems that take the clock as a parameter"},
+    {"title": "feat(render): day/night sky, fog, and light from the shared clock",
+     "what": ("Pure curves in core (DayNight.hpp: skyColorAt/lightLevelAt) "
+              "with dawn/dusk lerp windows; renderer setTimeOfDay(hours) "
+              "feeds ClearBackground color and the fog shader's fogColor + "
+              "new lightLevel uniform each frame."),
+     "where": ("NEW src/core/DayNight.hpp; src/app/RaylibRenderer.{hpp,cpp}; "
+               "src/app/Assets.{hpp,cpp} (shader + uniform loc); "
+               "tests/test_day_night.cpp."),
+     "verify": ("Curve continuity tests; screenshots at 09:00/19:00/00:00 "
+                "show day/dusk/night with fog matching the sky in each."),
+     "constraints": COMMON,
+     "economy": "Two uniforms total on the existing fog shader; no shadows, stars, or lamp glow.",
+     "concept": "Driving a render pass from simulation state, not timers"},
+    {"title": "feat(game): wire clock, schedules, and visuals + --hour smoke flag",
+     "what": ("main.cpp advances the clock once per frame, passes the hour "
+              "to npc.update and renderer.setTimeOfDay, appends the activity "
+              "to nameplates; smoke runs accept --hour H (like --camera) so "
+              "screenshots stay deterministic; example schedules authored "
+              "for baker/teacher/musician/barista."),
+     "where": "src/app/main.cpp; personas/*.persona.",
+     "verify": ("--hour pins the clock; default (09:00) screenshots match "
+                "the daylight baseline; schedules visibly move NPCs when "
+                "the hour changes."),
+     "constraints": COMMON,
+     "economy": "Schedule content only for the four named personas; others keep standing at home.",
+     "concept": "Deterministic harness flags for time-dependent rendering"},
+]
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+milestone = None
+for m in repo.get_milestones(state="open"):
+    if m.title.startswith("World time"):
+        milestone = m
+        break
+if milestone is None:
+    milestone = retry(lambda: repo.create_milestone(
+        title="World time: shared clock, schedules, day/night",
+        description=("One authoritative world clock in a generic shared-fact "
+                     "store (the bus gossip/journal will reuse), NPC "
+                     "schedules, and a day/night visual cycle. Plan: "
+                     ".claude/plans/world-time-and-schedules.md")), "milestone")
+print(f"milestone #{milestone.number}: {milestone.title}")
+
+existing = {i.title.lower() for i in repo.get_issues(state="all") if not i.pull_request}
+for spec in SPECS:
+    if spec["title"].lower() in existing:
+        print(f"exists: {spec['title']}")
+        continue
+    issue = retry(lambda: repo.create_issue(
+        title=spec["title"], body=TEMPLATE.format(**spec),
+        labels=["ai-in-progress"], assignees=[USERNAME], milestone=milestone),
+        spec["title"])
+    print(f"created #{issue.number}: {spec['title']}")

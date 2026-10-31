@@ -1,0 +1,22 @@
+# Core data + analysis
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+statsmodels>=0.14
+
+# Data sources
+yfinance>=0.2.40
+pandas-datareader>=0.10
+fredapi>=0.5
+
+# Storage / config
+pyarrow>=14.0
+python-dotenv>=1.0
+
+# GUI
+streamlit>=1.30
+plotly>=5.18
+
+# Dev / test
+pytest>=7.4
+ruff>=0.4

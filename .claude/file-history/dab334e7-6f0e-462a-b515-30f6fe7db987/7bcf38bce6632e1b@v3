@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+import argparse
+import math
+import pandas as pd
+
+
+def compute_metrics(eq: pd.Series) -> dict:
+    eq = eq.dropna()
+    if len(eq) < 2:
+        return {"error": "Not enough data"}
+
+    initial, final = float(eq.iloc[0]), float(eq.iloc[-1])
+    total_return = final / initial - 1.0
+
+    ret = eq.pct_change().dropna()
+    n = len(ret)
+    ann = 252.0
+
+    cagr = (final / initial) ** (ann / max(1.0, n)) - 1.0
+    vol = float(ret.std()) * math.sqrt(ann) if n else 0.0
+    apr_simple = float(ret.mean()) * ann if n else 0.0
+    sharpe = (float(ret.mean()) * ann) / vol if vol > 0 else 0.0
+
+    cum = (1.0 + ret).cumprod()
+    roll_max = cum.cummax()
+    maxdd = float((cum / roll_max - 1.0).min()) if len(cum) else 0.0
+
+    years = n / ann
+
+    return {
+        "Initial": initial,
+        "Final": final,
+        "TotalReturn": total_return,
+        "Years(approx)": years,
+        "CAGR": cagr,
+        "APR_simple": apr_simple,
+        "Vol": vol,
+        "Sharpe": sharpe,
+        "MaxDD": maxdd,
+    }
+
+
+def compare_strategies(conn) -> pd.DataFrame:
+    """Build the arena's side-by-side comparison table from a SQLite connection.
+
+    One row per strategy ever backtested, deliberately unranked (the human
+    picks the winner). EXCLUDED strategies keep their backtest metrics and
+    appear with empty live columns — visible, never silently dropped.
+    ``sharpe_divergence`` (live minus backtest) is the overfitting canary:
+    a strategy that collapses live relative to its backtest is suspect even
+    if its absolute numbers still look fine.
+
+    Args:
+        conn: sqlite3 connection to an arena_state DB (tables: strategies,
+            equity, trades — see strategy_arena.py).
+
+    Returns:
+        DataFrame with columns strategy, status, live_sharpe, live_cagr,
+        live_maxdd, win_rate, trades, backtest_sharpe, sharpe_divergence,
+        paused_since (latest circuit-breaker TRIP date, only when currently PAUSED).
+    """
+    strategies = pd.read_sql_query("SELECT * FROM strategies", conn)
+    equity = pd.read_sql_query("SELECT * FROM equity", conn, parse_dates=["date"])
+    trades = pd.read_sql_query("SELECT * FROM trades", conn)
+    latest_trips = pd.read_sql_query(
+        "SELECT strategy, MAX(date) AS date FROM breaker_events WHERE event='TRIP' GROUP BY strategy",
+        conn,
+    ).set_index("strategy")["date"].to_dict()
+    latest_diverged = pd.read_sql_query(
+        "SELECT strategy, MAX(date) AS date FROM divergence_events WHERE event='DIVERGED' GROUP BY strategy",
+        conn,
+    ).set_index("strategy")["date"].to_dict()
+
+    rows = []
+    for _, s in strategies.iterrows():
+        name = s["name"]
+        eq = (equity[equity["strategy"] == name]
+              .set_index("date")["equity"].sort_index())
+        live = compute_metrics(eq) if len(eq) >= 2 else {}
+        t = trades[trades["strategy"] == name].dropna(subset=["fwd_ret"])
+        wins = int(((t["position"] * t["fwd_ret"]) > 0).sum())
+        n_trades = int(len(t))
+        live_sharpe = live.get("Sharpe")
+        bt_sharpe = s["backtest_sharpe"]
+        divergence = (live_sharpe - bt_sharpe
+                      if live_sharpe is not None and pd.notna(bt_sharpe) else None)
+
+        # Statistical divergence (z-test of live daily returns vs. the
+        # backtest's daily-return fingerprint) — recomputed fresh here for
+        # display; the boolean `diverged` flag itself only transitions when
+        # arena-run live evaluates it, so it may lag this number slightly.
+        divergence_z = None
+        vol_ratio = None
+        bt_mean = s.get("bt_mean_daily")
+        bt_std = s.get("bt_std_daily")
+        if bt_mean is not None and pd.notna(bt_mean) and bt_std is not None and pd.notna(bt_std) and bt_std > 0:
+            live_ret = eq.pct_change().dropna()
+            if len(live_ret) > 0:
+                se = bt_std / math.sqrt(len(live_ret))
+                if se > 0:
+                    divergence_z = (float(live_ret.mean()) - bt_mean) / se
+                live_std = float(live_ret.std())
+                vol_ratio = live_std / bt_std
+
+        is_diverged = bool(s.get("diverged")) if pd.notna(s.get("diverged")) else False
+        rows.append({
+            "strategy": name,
+            "status": s["status"],
+            "live_sharpe": live_sharpe,
+            "live_cagr": live.get("CAGR"),
+            "live_maxdd": live.get("MaxDD"),
+            "win_rate": wins / n_trades if n_trades else None,
+            "trades": n_trades,
+            "backtest_sharpe": bt_sharpe,
+            "sharpe_divergence": divergence,
+            "divergence_z": divergence_z,
+            "vol_ratio": vol_ratio,
+            "diverged": is_diverged,
+            "diverged_since": latest_diverged.get(name) if is_diverged else None,
+            "paused_since": latest_trips.get(name) if s["status"] == "PAUSED" else None,
+        })
+    return pd.DataFrame(rows)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Compute portfolio performance metrics from an equity CSV")
+    p.add_argument("--equity_csv", type=str, default="walkforward_equity.csv", help="Path to equity CSV (date index, column 'equity')")
+    args = p.parse_args()
+
+    df = pd.read_csv(args.equity_csv, index_col=0, parse_dates=True)
+    if "equity" not in df.columns:
+        raise SystemExit("CSV must contain an 'equity' column")
+
+    m = compute_metrics(df["equity"])        
+    for k, v in m.items():
+        if isinstance(v, float):
+            if k in ("TotalReturn", "CAGR", "APR_simple", "Vol", "Sharpe", "MaxDD"):
+                # Print returns/vol as percents except Sharpe
+                if k == "Sharpe":
+                    print(f"{k}: {v:.2f}")
+                else:
+                    print(f"{k}: {v:.2%}")
+            else:
+                print(f"{k}: {v:.4f}")
+        else:
+            print(f"{k}: {v}")
+
+
+if __name__ == "__main__":
+    main()
+

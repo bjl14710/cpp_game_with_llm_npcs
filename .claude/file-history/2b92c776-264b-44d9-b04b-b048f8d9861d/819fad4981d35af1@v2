@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "MR 2 of the pair you asked for (MR 1 = #57, last night's memory/model work — "
+    "this branch is based on it so they merge in order: #57 first, then this).\n\n"
+    "**Premise reconciliation (decision log: `.claude/plans/size-contract-and-weapons.md`):**\n"
+    "- The game renders 3D glTF, not sprites — but your diagnosis mapped exactly: "
+    "vehicles/props were stretched non-uniformly to fill collision AABBs (taxi = "
+    "street-wide blob). Fixed at the contract level as you required.\n"
+    "- The menu + dialogue UI you asked for already shipped last night (PR #52, "
+    "merged) — verified present, nothing re-invented. If 'speaking options' means "
+    "canned selectable replies, that's a real design change worth its own ticket.\n"
+    "- Weapon work exists in exactly one place (the merged weapons stack on "
+    "`initial_npcs_and_world`) — ported and reconciled per issue #46's map.\n\n"
+    "**1. Size contracts:** one `Assets::SizeSpec` table — Fill (buildings occupy "
+    "their footprints) vs Uniform (scale uniformly to a declared world height, "
+    "grounded, centered; the AABB stays collision-only). Applied to taxi/cart/"
+    "bench/fountain + all street props; zero per-asset scale constants, which is "
+    "what makes future art swaps cheap. Screenshot-verified: the taxi reads as a "
+    "car next to a person.\n\n"
+    "**2. Weapons:** complete core ported (CombatEvents/Player/Weapon/World combat "
+    "sim, NPC health/state machine union'd with the mood-era Npc, `armed` persona "
+    "flag). The branch's TODO stubs were audited — all sat above working code, "
+    "stripped. App layer rebuilt on raylib: LMB attack, 1/2 weapon switch, "
+    "health+ammo HUD, hurt flash, combat callouts, death poses, death screen with "
+    "plaza respawn; dead/fleeing/hostile NPCs refuse conversation.\n\n"
+    "**Left out (flagged, not silently):** LLM-generated combat reaction lines "
+    "(the old branch's #12) — canned callouts ship instead; multiplayer combat "
+    "replication (combat is host-side; protocol untouched).\n\n"
+    "**Verified:** 124 tests / 771 assertions green (incl. both ported combat "
+    "suites), game builds, 90-frame smoke run + screenshots at each step.\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(
+            title="feat: entity size contracts + weapons system on raylib",
+            body=body, head="feature/size-contract-and-weapons",
+            base="integration/npc-memory-into-raylib", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)

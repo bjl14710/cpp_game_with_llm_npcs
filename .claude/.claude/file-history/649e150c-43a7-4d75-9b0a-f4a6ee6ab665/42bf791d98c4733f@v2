@@ -1,0 +1,84 @@
+"""Exercise 01: price-time priority limit order book.
+
+Implement every method below, replacing `raise NotImplementedError` with
+real code. Grade yourself with:
+
+    uv run pytest tests/exercises/test_01_order_book.py -v
+
+See README.md in this directory for the full spec, and lesson 0016
+(docs/learning/lessons/0016-order-book-dynamics.html) for the theory.
+"""
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Fill:
+    """One execution against a resting order."""
+    order_id: int
+    price: float
+    qty: int
+
+
+class OrderBook:
+    """Limit order book with price-time (FIFO) priority.
+
+    Sides are "buy" (bids) and "sell" (asks). Resting liquidity is stored
+    per price level as a FIFO queue, so orders at the same price fill in
+    arrival order. Hint: a dict mapping price -> collections.deque of
+    [order_id, remaining_qty], plus a dict order_id -> (side, price),
+    is enough.
+    """
+
+    def __init__(self) -> None:
+        # TODO: set up your data structures
+        pass
+
+    def add_limit(self, order_id: int, side: str, price: float, qty: int) -> None:
+        """Rest a limit order in the book.
+
+        Must raise ValueError on an unknown side, non-positive qty/price,
+        or a duplicate order_id.
+        """
+        raise NotImplementedError
+
+    def cancel(self, order_id: int) -> None:
+        """Remove a resting order. Must raise KeyError for an unknown
+        order_id. An emptied price level must disappear from the book
+        (so BBO re-derives correctly)."""
+        raise NotImplementedError
+
+    def best_bid(self) -> float | None:
+        """Highest resting bid price, or None if no bids."""
+        raise NotImplementedError
+
+    def best_ask(self) -> float | None:
+        """Lowest resting ask price, or None if no asks."""
+        raise NotImplementedError
+
+    def bbo(self) -> tuple[float | None, float | None]:
+        """(best_bid, best_ask)."""
+        raise NotImplementedError
+
+    def level_qty(self, side: str, price: float) -> int:
+        """Total resting quantity at a price level (0 if level absent)."""
+        raise NotImplementedError
+
+    def execute_market(self, side: str, qty: int) -> list[Fill]:
+        """Execute a market order of `qty` for the aggressor `side`.
+
+        A "buy" lifts the asks from the lowest price up; a "sell" hits the
+        bids from the highest price down. Within a level, fills are FIFO —
+        a partially filled resting order keeps its place at the front of
+        the queue. Returns the list of Fills (against resting order ids);
+        if the book runs out of liquidity the order fills partially.
+        """
+        raise NotImplementedError
+
+    def imbalance(self, levels: int = 1) -> float:
+        """Order-book imbalance over the top `levels` price levels per side:
+
+            (bid_qty - ask_qty) / (bid_qty + ask_qty)
+
+        Return 0.0 when both sides are empty. Result must be in [-1, 1].
+        """
+        raise NotImplementedError

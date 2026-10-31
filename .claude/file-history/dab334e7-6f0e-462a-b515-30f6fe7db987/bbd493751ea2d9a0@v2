@@ -1,0 +1,80 @@
+"""Technical-indicator strategy: RSI + MACD + moving-average crossover.
+
+Indicators are computed inline with pandas — no new dependencies (repo rule).
+Note ``paper_trading_sim.build_features`` already contains an RSI(14)
+implementation; mirror its Wilder-style rolling-mean formula here so both
+paths agree, but do NOT import it (build_features drags in the ML target
+column and yfinance-shaped assumptions the rule strategies don't need).
+"""
+import pandas as pd
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+
+
+class TechnicalStrategy(DailyStrategy):
+    """Long when trend and momentum agree, short on the mirror condition.
+
+    Intended signal logic (see plan step 2):
+      - LONG  (+1): fast MA above slow MA, MACD line above its signal line,
+                    and RSI not overbought (< rsi_overbought).
+      - SHORT (-1): fast MA below slow MA, MACD line below its signal line,
+                    and RSI not oversold (> rsi_oversold).
+      - Otherwise HOLD. Confidence = normalized |MACD histogram| so stronger
+        momentum ranks higher in the arena's top_n selection.
+    """
+
+    name = "technical"
+
+    def __init__(
+        self,
+        rsi_period: int = 14,
+        rsi_overbought: float = 70.0,
+        rsi_oversold: float = 30.0,
+        macd_fast: int = 12,
+        macd_slow: int = 26,
+        macd_signal: int = 9,
+        ma_fast: int = 10,
+        ma_slow: int = 50,
+    ) -> None:
+        self.rsi_period = rsi_period
+        self.rsi_overbought = rsi_overbought
+        self.rsi_oversold = rsi_oversold
+        self.macd_fast = macd_fast
+        self.macd_slow = macd_slow
+        self.macd_signal = macd_signal
+        self.ma_fast = ma_fast
+        self.ma_slow = ma_slow
+
+    @property
+    def warmup_bars(self) -> int:
+        """Slowest lookback plus MACD signal smoothing."""
+        return max(self.ma_slow, self.macd_slow + self.macd_signal, self.rsi_period) + 1
+
+    def _rsi(self, close: pd.Series) -> pd.Series:
+        """RSI over self.rsi_period.
+
+        TODO(implement): same formula as paper_trading_sim.build_features —
+        gains/losses from close.diff(), rolling mean over rsi_period,
+        100 - 100 / (1 + rs).
+        """
+        raise NotImplementedError("scaffold: see TODO above")
+
+    def _macd(self, close: pd.Series) -> tuple[pd.Series, pd.Series]:
+        """(macd_line, signal_line) via EMAs.
+
+        TODO(implement): macd_line = ewm(span=macd_fast) - ewm(span=macd_slow);
+        signal_line = macd_line.ewm(span=macd_signal).
+        """
+        raise NotImplementedError("scaffold: see TODO above")
+
+    def generate_signal(self, df: pd.DataFrame) -> DailySignal:
+        """Combine MA crossover, MACD, and RSI on the latest bar.
+
+        TODO(implement): compute indicators on df["Close"], evaluate the
+        class-docstring rules on the final row, return HOLD when history
+        is shorter than warmup_bars or conditions conflict.
+        """
+        raise NotImplementedError("scaffold: see TODO above")
+
+
+__all__ = ["TechnicalStrategy"]

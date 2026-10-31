@@ -1,0 +1,194 @@
+"""Tests for the Strategy Arena daily-strategy layer.
+
+Covers the behaviours promised in .claude/plans/strategy-arena.md (plan
+steps 1-3). No live API calls: every test uses synthetic OHLCV frames
+built in-process, and the GBM tests train a throwaway model per-test.
+"""
+import numpy as np
+import pandas as pd
+import pytest
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+from strategies.registry import available_strategies, get_strategy
+
+
+def make_ohlcv(closes, opens=None, highs=None, lows=None) -> pd.DataFrame:
+    """Build a date-indexed OHLCV frame from close prices (fetch_history shape)."""
+    closes = list(closes)
+    n = len(closes)
+    opens = list(opens) if opens is not None else closes
+    highs = list(highs) if highs is not None else [max(o, c) * 1.01 for o, c in zip(opens, closes)]
+    lows = list(lows) if lows is not None else [min(o, c) * 0.99 for o, c in zip(opens, closes)]
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    return pd.DataFrame(
+        {"Open": opens, "High": highs, "Low": lows, "Close": closes, "Volume": [1000] * n},
+        index=idx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Interface contract
+# ---------------------------------------------------------------------------
+
+def test_hold_sentinel_is_flat():
+    """The shared HOLD sentinel is position 0 with zero confidence."""
+    assert HOLD.position == 0
+    assert HOLD.confidence == 0.0
+
+
+def test_registry_lists_all_four_strategy_types():
+    """Acceptance: every implemented strategy is selectable by CLI name."""
+    assert available_strategies() == ["engulfing", "gbm", "lowvol", "meanrev", "pead", "technical", "tsmom"]
+
+
+def test_registry_unknown_name_lists_options():
+    """Unknown names raise a KeyError that names the valid choices."""
+    with pytest.raises(KeyError, match="engulfing"):
+        get_strategy("nope")
+
+
+# ---------------------------------------------------------------------------
+# DailyEngulfingStrategy (adapter over the intraday EngulfingStrategy)
+# ---------------------------------------------------------------------------
+
+def test_engulfing_daily_bullish():
+    """Red bar then engulfing green bar on daily closes -> position +1.
+
+    Same pattern as tests/test_engulfing.py::test_bullish_engulf, expressed
+    as the last two rows of a daily history frame.
+    """
+    df = make_ohlcv(closes=[100, 100, 106], opens=[100, 105, 99])
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == 1
+
+
+def test_engulfing_daily_bearish():
+    """Green bar then engulfing red bar -> position -1."""
+    df = make_ohlcv(closes=[100, 105, 99], opens=[100, 100, 106])
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == -1
+
+
+def test_engulfing_daily_no_pattern_is_hold():
+    """Acceptance edge case: no valid 2-candle pattern -> hold, not error."""
+    df = make_ohlcv(closes=[100, 101, 102], opens=[99, 100, 101])  # steady greens
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == 0
+
+
+def test_engulfing_daily_insufficient_history_is_hold():
+    """Fewer bars than warmup_bars -> hold with a logged reason, no crash."""
+    df = make_ohlcv(closes=[100])
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == 0
+
+
+# ---------------------------------------------------------------------------
+# TechnicalStrategy (RSI + MACD + MA crossover)
+# ---------------------------------------------------------------------------
+
+def test_technical_uptrend_goes_long():
+    """Noisy sustained uptrend (fast MA > slow MA, MACD > signal, RSI < 70) -> +1.
+
+    The trend needs pullbacks: a perfectly monotonic series has zero losses,
+    pinning RSI at 100 and (correctly) blocking the long as overbought.
+    """
+    closes = [100 + 0.35 * i + 1.5 * np.sin(i) for i in range(80)]  # RSI ~61
+    sig = get_strategy("technical").generate_signal(make_ohlcv(closes))
+    assert sig.position == 1
+    assert sig.confidence > 0
+
+
+def test_technical_downtrend_goes_short():
+    """Mirror condition on a noisy sustained downtrend -> -1.
+
+    Bounces keep RSI above the oversold floor (~37 here); the sine phase is
+    chosen so the final bars sit on a downswing (MACD below its signal line).
+    """
+    closes = [130 - 0.25 * i + 2.5 * np.sin(i + 1) for i in range(80)]
+    sig = get_strategy("technical").generate_signal(make_ohlcv(closes))
+    assert sig.position == -1
+
+
+def test_technical_flat_series_is_hold():
+    """No trend, conflicting indicators -> hold."""
+    closes = [100.0] * 80
+    sig = get_strategy("technical").generate_signal(make_ohlcv(closes))
+    assert sig.position == 0
+
+
+# ---------------------------------------------------------------------------
+# MeanReversionStrategy (z-score fade + breakout override)
+# ---------------------------------------------------------------------------
+
+def test_meanrev_buys_the_dip():
+    """A drop pushing z below -entry_z -> +1 (fade the move).
+
+    The dip (98.7, z~-2.7) must stay ABOVE the 55-bar low channel (~98.5) —
+    any deeper and the breakout override correctly fires SHORT instead.
+    """
+    closes = [100 + 0.5 * np.sin(i) for i in range(60)] + [98.7]
+    sig = get_strategy("meanrev").generate_signal(make_ohlcv(closes))
+    assert sig.position == 1
+
+
+def test_meanrev_breakout_overrides_fade():
+    """A close above the 55-bar high is a breakout long, not a short fade."""
+    closes = list(np.linspace(100, 101, 60)) + [115.0]  # explosive new high
+    sig = get_strategy("meanrev").generate_signal(make_ohlcv(closes))
+    assert sig.position == 1
+    assert "breakout" in sig.reason
+
+
+def test_meanrev_flat_series_zero_std_is_hold():
+    """Rolling std ~0 must not divide by zero -> hold."""
+    closes = [100.0] * 60
+    sig = get_strategy("meanrev").generate_signal(make_ohlcv(closes))
+    assert sig.position == 0
+
+
+# ---------------------------------------------------------------------------
+# GBMStrategy (model-bundle adapter)
+# ---------------------------------------------------------------------------
+
+GBM_FEATURES = ["close", "ret_1d", "ma_5", "ma_10", "ma_gap", "vol_10", "rsi_14"]
+
+
+def _make_tiny_bundle(tmp_path):
+    """Train a throwaway 5-tree GBM on synthetic prices; return (path, ohlcv_df).
+
+    Built entirely in-process: no shipped model file, no network.
+    """
+    import joblib
+    from sklearn.ensemble import GradientBoostingRegressor
+
+    from paper_trading_sim import build_features
+
+    rng = np.random.RandomState(42)
+    closes = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.01, 200))
+    df = make_ohlcv(closes)
+    feats = build_features(df)
+    model = GradientBoostingRegressor(n_estimators=5, random_state=42)
+    model.fit(feats[GBM_FEATURES].values, feats["fwd_ret_1d"].values)
+    path = tmp_path / "tiny_bundle.joblib"
+    joblib.dump({"model": model, "features": GBM_FEATURES}, path)
+    return str(path), df
+
+
+def test_gbm_adapter_signals_from_tiny_bundle(tmp_path):
+    """Adapter loads a bundle and emits sign(pred) / abs(pred) / reason."""
+    path, df = _make_tiny_bundle(tmp_path)
+    strat = get_strategy("gbm", bundle_path=path)
+    sig = strat.generate_signal(df)
+    assert sig.position in (-1, 0, 1)
+    assert sig.confidence >= 0.0
+    assert "pred_ret=" in sig.reason
+
+
+def test_gbm_adapter_nan_features_is_hold(tmp_path):
+    """History shorter than the feature warmup -> hold, bundle untouched."""
+    path, df = _make_tiny_bundle(tmp_path)
+    strat = get_strategy("gbm", bundle_path=path)
+    sig = strat.generate_signal(df.iloc[:10])
+    assert sig.position == 0
+    assert sig.confidence == 0.0

@@ -1,0 +1,58 @@
+// Exercises the exact in-game pipeline headlessly: real persona prompt + real
+// Ollama + the same parseActionTag the game uses. Prints what behavior each
+// instruction produces so we can see whether the model emits usable tags.
+#include <chrono>
+#include <iostream>
+#include <string>
+#include <thread>
+
+#include "LlmClient.hpp"
+#include "Npc.hpp"
+#include "PersonaLoader.hpp"
+
+using namespace llm_npc;
+
+static const char* name(NpcAction a) {
+    switch (a) {
+        case NpcAction::None: return "None";
+        case NpcAction::Follow: return "Follow";
+        case NpcAction::Stop: return "Stop";
+        case NpcAction::Face: return "Face";
+        case NpcAction::RaiseHand: return "RaiseHand";
+        case NpcAction::Wave: return "Wave";
+        case NpcAction::Arrest: return "Arrest";
+    }
+    return "?";
+}
+
+static void run(const LoadedPersona& lp, LlmClient& client, const std::string& line) {
+    Npc npc(lp.persona, client);
+    const auto id = npc.ask(line);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (const auto& r : client.drainReplies()) {
+            if (r.id != id) continue;
+            const auto text = npc.onReplyArrived(r);
+            std::cout << "[" << lp.id << "] \"" << line << "\"\n"
+                      << "   reply: " << text.value_or("<none>") << "\n"
+                      << "   behavior=" << name(npc.behavior())
+                      << " pose=" << name(npc.pose()) << "\n\n";
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    std::cout << "[" << lp.id << "] TIMEOUT on \"" << line << "\"\n\n";
+}
+
+int main() {
+    auto personas = loadAllPersonas("personas", nullptr);
+    const LoadedPersona* cop = nullptr;
+    for (const auto& p : personas) if (p.id == "cop") cop = &p;
+    if (!cop) { std::cerr << "cop persona not found (run from repo root)\n"; return 1; }
+
+    LlmClient client({});  // defaults: localhost:11434, qwen2.5:3b-instruct
+    run(*cop, client, "Follow me, officer.");
+    run(*cop, client, "Raise your right hand.");
+    run(*cop, client, "I stole something — arrest me if you can!");
+    return 0;
+}

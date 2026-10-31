@@ -1,0 +1,50 @@
+#pragma once
+#include <cstdint>
+
+// Shadow order: our simulated passive quote inside a real FIFO queue
+// (SCAFFOLD). Plan: .claude/plans/avellaneda-stoikov-mm-sim.md, step 2.
+//
+// Placement snapshots the queue AHEAD (sum of real shares resting at the
+// level at placement time). Thereafter, deterministically:
+//   - an execution at the level consumes ahead-shares first; once ahead is
+//     exhausted, further executed shares fill US (up to size) — shadow
+//     no-impact assumption: the real order that traded still trades;
+//   - a cancel/delete of a specific order AHEAD of us reduces ahead;
+//     cancels behind us are irrelevant;
+//   - requoting = cancel + new placement = rejoin at the BACK. Losing
+//     queue position is a real, modeled cost.
+//
+// TODO(mm-2): implement the mechanics + fill notification.
+
+namespace itch {
+
+struct ShadowFill {
+    uint64_t timestamp_ns;
+    char     side;          // 'B' or 'S'
+    uint32_t price_raw;
+    uint32_t shares;
+};
+
+class ShadowOrder {
+public:
+    ShadowOrder(char side, uint32_t price_raw, uint32_t size,
+                uint64_t queue_ahead_shares);
+
+    // Tape events at our level. Return value of on_execution: shares WE fill.
+    uint32_t on_execution_at_level(uint32_t executed_shares);   // TODO(mm-2)
+    void on_ahead_order_reduced(uint32_t canceled_shares);       // TODO(mm-2)
+
+    uint32_t remaining() const { return remaining_; }
+    uint64_t queue_ahead() const { return queue_ahead_; }
+    bool     filled() const { return remaining_ == 0; }
+    char     side() const { return side_; }
+    uint32_t price_raw() const { return price_raw_; }
+
+private:
+    char     side_;
+    uint32_t price_raw_;
+    uint32_t remaining_;
+    uint64_t queue_ahead_;
+};
+
+}  // namespace itch

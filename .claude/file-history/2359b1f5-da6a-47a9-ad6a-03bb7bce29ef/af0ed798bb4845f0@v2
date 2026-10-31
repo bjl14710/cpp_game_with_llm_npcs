@@ -1,0 +1,110 @@
+# Plan: Weapons, HUD, Combat & LLM Reactions
+Date: 2026-06-28
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: XL
+
+## The Idea (one paragraph)
+Add a full combat layer to `cpp_game_with_llm_npcs`. The player gets health and an inventory of weapons (fists, pistol, at minimum); a HUD shows health, current weapon, and ammo. Attacking a civilian makes them take damage and flee. Cops are armed, fight back with probabilistic accuracy, and can take damage too. When an NPC is attacked or witnesses violence nearby, the game injects a combat-context message into their LLM prompt so they react in-character ("Hey! Hands where I can see them!") before switching to code-driven fight/flee AI.
+
+## Goal
+A player can pick a fight in the city, see visual feedback (HUD, animated attacks, a visible weapon in hand), watch NPCs flee or fight back, and have cops verbally challenge them via LLM before opening fire.
+
+## Out of Scope (this version)
+- Inventory UI / item pickup from the ground
+- Multiple gun types beyond fist + pistol (no shotgun, rifle, etc.)
+- NPC pathfinding beyond simple flee-away-from-player movement
+- Multiplayer
+- Persistent wanted level across sessions
+- Destructible environment
+- Weapon reload animations (reload is instant with a counter)
+
+---
+
+## Affected Areas
+
+- `src/core/Npc.hpp/.cpp` — add `health`, `NpcState` enum (Idle / Fleeing / Hostile), `isArmed` flag, damage intake, flee vector, LLM combat trigger
+- `src/core/Persona.hpp` — add `armed` bool field so `.persona` files can declare cops/guards as armed
+- `src/core/PersonaLoader.cpp` — parse `armed = true/false` from persona files
+- `src/core/World.hpp/.cpp` — add `Player` struct (health, weapon, ammo), `updateCombat(dt)`, melee/ranged hit detection, NPC->player fire logic
+- `src/app/main.cpp` — left-click attack input, HUD rendering, weapon visual draw call
+- `src/app/Renderer3D.hpp/.cpp` — `drawWeaponOverlay(weapon, animFrame)` for first-person arm/gun, `drawNpcAnimated(NpcVisual, state, animFrame)` for flee/recoil
+- New: `src/core/Weapon.hpp` — `WeaponKind` enum, `WeaponDef` struct (damage, range, ammo capacity, fire rate, accuracy)
+- New: `src/core/Player.hpp` — `Player` struct (health, `WeaponKind`, ammo map, attack cooldown, animFrame)
+- New: `src/core/CombatEvents.hpp` — lightweight event structs (`MeleeHitEvent`, `ShotFiredEvent`, `NpcDamagedEvent`) passed from `World::updateCombat` to `main.cpp` to trigger LLM messages
+
+---
+
+## Implementation Order
+
+1. **`Weapon.hpp` + `Player.hpp`** — define `WeaponKind` enum (`Fist`, `Pistol`), `WeaponDef` table, `Player` struct with health/ammo/cooldown. No game logic yet; just data.
+
+2. **Add player state to `World`** — move player position out of `main.cpp` camera into `World` so combat logic can access it. `World` owns a `Player`; `main.cpp` syncs camera position from `world.player().position`.
+
+3. **NPC health + state machine in `Npc`** — add `hp_`, `NpcState state_` (`Idle`/`Fleeing`/`Hostile`), `takeDamage(int)` method. Fleeing NPCs move away from player at fixed speed each frame; hostile (armed) NPCs move toward preferred range and fire.
+
+4. **`CombatEvents.hpp` event structs** — simple POD structs returned from `World::updateCombat`. No allocations, no virtual dispatch.
+
+5. **`World::updateCombat(dt)`** — melee range check on left-click, bullet travel (simple projectile list, not raycasting), NPC retaliatory fire with hit-chance roll, propagate `NpcDamagedEvent` / `ShotFiredEvent`.
+
+6. **Attack input in `main.cpp`** — left mouse button fires `world.playerAttack()`, consuming cooldown and ammo. Dispatched combat events are checked here to trigger LLM reaction messages via `npc.ask(combatPrompt)`.
+
+7. **LLM combat trigger** — when an `NpcDamagedEvent` arrives for an NPC or a `ShotFiredEvent` lands within hearing range of an armed NPC, build a one-shot system-injected user message: `"[GAME EVENT] You've just been attacked. Respond in character, briefly."` and call `npc.ask()`. The reply routes through the existing `pendingRoutes` map and surfaces in a small on-screen callout (not the full dialogue panel).
+
+8. **HUD overlay in `main.cpp`** — bottom-left: red health bar + HP number. Bottom-right: weapon name + ammo `12/30`. Drawn in the SFML overlay pass with the existing `drawCenteredHudText` style.
+
+9. **Weapon visual in `Renderer3D`** — `drawWeaponOverlay(WeaponKind, float animFraction)` draws a simple GL immediate-mode arm/gun in the bottom-right of the viewport in screen space (glOrtho pass, no depth test). Fist shows a blocky arm; pistol shows a box-gun shape. `animFraction` 0→1 drives a brief kick-back translate for the attack swing/recoil.
+
+10. **`Persona.hpp` `armed` field + cop persona update** — parse `armed = true` from `cop.persona`. Armed NPCs start in `Hostile` state immediately on witnessing or receiving damage; civilians go to `Fleeing`.
+
+11. **NPC flee movement** — in `World::updateCombat`, fleeing NPCs compute a direction away from the player, call `city_.resolveMovement` (already exists) to slide around buildings.
+
+12. **Cop retaliation** — armed NPCs in `Hostile` state track preferred range (~8 units), fire on a cooldown (1.2–2.0 s), roll accuracy (60–80% base hit chance), deal damage to player. Player death → game over screen (fade to black, "You died", space to restart).
+
+---
+
+## Acceptance Criteria
+
+- [ ] Left-click with fists damages the nearest NPC within 1.8 units; NPC HP decreases visibly (not tested yet via UI, but internal state changes)
+- [ ] A damaged civilian enters Fleeing state and moves away from the player each frame
+- [ ] A damaged cop enters Hostile state, moves to preferred range, and fires back on a cooldown
+- [ ] Cop fires with ~70% hit chance; player takes damage on a hit
+- [ ] Player health reaches 0 → "You died" overlay appears, space restarts
+- [ ] Pistol ammo decrements on fire; reaching 0 disables ranged attack
+- [ ] HUD shows health bar and ammo count in Playing mode
+- [ ] Weapon visual (arm/gun) is visible in the bottom-right of the first-person view
+- [ ] Punch animation plays a brief frame kick (animFraction cycles 0→1 over ~0.15 s on attack)
+- [ ] When the player attacks an NPC, that NPC's LLM fires a one-shot combat reaction line visible as a floating callout above their head
+- [ ] Armed NPC persona files have `armed = true` parsed correctly; unarmed NPCs never retaliate with guns
+- [ ] Tests pass: `src/tests/` — unit test for `Npc::takeDamage` state transitions, `World::updateCombat` melee hit detection
+
+---
+
+## Edge Cases and Error Handling
+
+| Situation | Expected behaviour |
+|-----------|-------------------|
+| Player attacks NPC in dialogue mode | Attack input disabled during `AppMode::Dialogue` |
+| NPC already at 0 HP receives another hit | `takeDamage` is a no-op; NPC stays dead (collapsed visual) |
+| Pistol fired with 0 ammo | `playerAttack()` returns false; no cooldown consumed; HUD flashes |
+| LLM combat reply arrives after NPC is dead | Reply discarded via existing `pendingRoutes` map; no callout shown |
+| Cop LLM reply takes >2 s (model slow) | Combat AI runs independently; reply surfaces whenever it arrives |
+| Player walks into cop's line of fire from behind a building | Hit chance roll still applies — no ray-cast occlusion in v1 |
+| Two armed NPCs both target player simultaneously | Both fire independently; damage stacks; intended |
+
+---
+
+## Open Questions
+
+None — plan is complete.
+
+---
+
+## Suggested GitHub Issues
+
+1. **Player state + weapon data structs** — `Player.hpp`, `Weapon.hpp`, `CombatEvents.hpp`; pure data, no game logic
+2. **NPC health + state machine** — `Npc::takeDamage`, `NpcState` enum, flee/hostile transitions
+3. **`World::updateCombat`** — melee hit detection, projectile list, NPC retaliatory fire, event emission
+4. **Attack input + HUD** — left-click attack in `main.cpp`, health bar + ammo HUD overlay
+5. **Weapon visual + attack animation** — `Renderer3D::drawWeaponOverlay`, animFraction punch/recoil frame
+6. **LLM combat reaction** — inject combat event into `npc.ask()`, floating callout above NPC head
+7. **Cop persona + armed NPC AI** — `armed` persona field, cop preferred-range tracking, accuracy roll, player death screen

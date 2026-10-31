@@ -1,0 +1,33 @@
+-- Disable health checks for snacks.image: this Docker environment has no GUI
+-- terminal (kitty/wezterm/ghostty), so the image-rendering feature is unusable.
+-- Also eagerly initialize snacks sub-modules so :checkhealth reports cleanly
+-- even when the dashboard hasn't been opened yet.
+return {
+  {
+    "folke/snacks.nvim",
+    init = function()
+      vim.api.nvim_create_autocmd("User", {
+        pattern = "LazyDone",
+        once = true,
+        callback = function()
+          local ok, meta = pcall(require, "snacks.meta")
+          if ok and meta and meta.get then
+            for _, plugin in ipairs(meta.get()) do
+              if plugin.name == "image" then
+                plugin.meta.health = false
+                plugin.health = nil
+              end
+            end
+          end
+          pcall(function() require("snacks").dashboard.setup() end)
+          pcall(function() require("snacks").input.enable() end)
+          pcall(function() require("snacks.picker").setup() end)
+          vim.notify = function(msg, level, o)
+            vim.notify = require("snacks.notifier").notify
+            return require("snacks.notifier").notify(msg, level, o)
+          end
+        end,
+      })
+    end,
+  },
+}

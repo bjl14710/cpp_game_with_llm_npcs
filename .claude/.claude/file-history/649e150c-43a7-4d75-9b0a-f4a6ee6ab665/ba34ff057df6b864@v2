@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0027 — Logistic Regression, and How It Differs From Linear</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:30px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}pre .kw{color:var(--code-kw)}pre .str{color:var(--code-str)}pre .num{color:var(--code-num)}pre .com{color:var(--code-com);font-style:italic}pre .fn{color:var(--code-fn)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0027</span><span class="small">Quiz: <strong id="quizScore">0 / 5</strong></span></div>
+<h1>Logistic Regression — and How It Differs From Linear</h1>
+<p class="lead">Why this matters: this repo contains <strong>zero</strong> logistic regressions, and that absence is a design decision worth understanding. Lesson 0003 asserted "regression beats classification for ranking"; this lesson gives you the machinery to defend that claim — and to recognize the cases where logistic regression is exactly the right tool.</p>
+
+<h2>1. The model: a linear core wearing a sigmoid</h2>
+<p>Logistic regression computes the <em>same</em> linear score as linear regression — <code>z = β₀ + β₁x₁ + … + β_px_p</code> — and then squashes it through the <strong>sigmoid</strong> (logistic) function:</p>
+<div class="callout"><p style="margin:0"><strong>P(y = 1 | x) = σ(z) = 1 / (1 + e<sup>−z</sup>)</strong> &nbsp;&nbsp;— output is a probability in (0, 1), never a raw number.<sup><a class="fn" href="#fn-1">[1]</a></sup></p></div>
+<p>Anchor points worth memorizing: σ(0) = 0.5, σ(2) ≈ 0.88, σ(−2) ≈ 0.12, and σ is symmetric: σ(−z) = 1 − σ(z). Equivalently, the model says the <em>log-odds</em> are linear in the features: <code>ln(p/(1−p)) = z</code>. Each coefficient moves the log-odds, not the probability, by a fixed amount — that's the price of bounded output.</p>
+
+<h3>The loss: log-loss, not squared error</h3>
+<p>Training maximizes the likelihood of the observed labels, equivalent to minimizing <strong>log-loss</strong>: −[y·ln(p̂) + (1−y)·ln(1−p̂)]. Feel the asymmetry: predicting p̂ = 0.9 when y = 1 costs −ln(0.9) ≈ 0.105; the same p̂ = 0.9 when y = 0 costs −ln(0.1) ≈ 2.30 — twenty-two times more. Confident wrongness is punished brutally, which is what forces the probabilities to be <em>calibrated</em> rather than just ordered.</p>
+<p>Unlike OLS there is <strong>no closed form</strong>: the first-order conditions are nonlinear in β, so fitting is iterative (Newton's method / IRLS, or gradient descent). Convexity still guarantees one global optimum — logistic regression keeps most of linear regression's tractability, just not its one-line solution.</p>
+
+<h2>2. The contrast (the point of this lesson)</h2>
+<table>
+<tr><th></th><th>Linear regression</th><th>Logistic regression</th></tr>
+<tr><td><strong>Shared core</strong></td><td colspan="2">identical linear score z = Xβ; both parametric (p+1 numbers); both convex fits; both "regression" by name</td></tr>
+<tr><td>Target</td><td>continuous number (e.g. <code>fwd_ret_1d</code>)</td><td>probability of a discrete label (e.g. "up day")</td></tr>
+<tr><td>Output range</td><td>(−∞, ∞)</td><td>(0, 1)</td></tr>
+<tr><td>Loss</td><td>squared error</td><td>log-loss (negative log-likelihood)</td></tr>
+<tr><td>Fit</td><td>closed form (normal equations / lstsq)</td><td>iterative (no closed form)</td></tr>
+<tr><td>Coefficient meaning</td><td>Δy per unit Δx</td><td>Δlog-odds per unit Δx</td></tr>
+<tr><td>Decision boundary</td><td>—</td><td>the hyperplane z = 0 (p = 0.5); linear, just like LDA's</td></tr>
+</table>
+<div class="callout warn"><strong>The name trap:</strong> "logistic <em>regression</em>" is a classifier. The name survives from statistics, where "regression" means modeling a conditional expectation — here E[y|x] = P(y=1|x). When an interviewer asks "is logistic regression a regression or a classification model?", the expected answer covers both: it <em>regresses the probability</em>, which you then threshold to <em>classify</em>.</div>
+
+<h2>3. Why this repo deliberately has neither label nor sigmoid</h2>
+<p>You could absolutely rebuild this repo's pipeline as classification. Illustratively <span class="illus">(illustrative — not in the repo)</span>:</p>
+<pre><span class="com"># What the classification version of paper_trading_sim would look like:</span>
+<span class="kw">from</span> sklearn.linear_model <span class="kw">import</span> LogisticRegression
+y_label = (feat[<span class="str">"fwd_ret_1d"</span>] &gt; <span class="num">0</span>).<span class="fn">astype</span>(<span class="kw">int</span>)      <span class="com"># +2.0% day and +0.01% day → both just "1"</span>
+clf = <span class="fn">LogisticRegression</span>().<span class="fn">fit</span>(X, y_label)
+p_up = clf.<span class="fn">predict_proba</span>(X_today)[:, <span class="num">1</span>]              <span class="com"># P(up) per ticker</span>
+picks = p_up.<span class="fn">argsort</span>()[-<span class="num">5</span>:]                          <span class="com"># top-5 by probability</span>
+</pre>
+<p>The line that should bother you is the first one. Thresholding at zero throws away <strong>magnitude</strong>: a +4% day and a +0.02% day become the same label, and a −0.02% day becomes maximally different from the +0.02% day it's economically identical to. The strategy's P&amp;L, however, is paid in magnitudes. A stock that's 55%-likely to go up 0.1% is a worse pick than one 45%-likely to go up 3% — the regression's expected-return ranking gets this right; P(up) ranking gets it wrong. That's the precise content of Lesson 0003's slogan.</p>
+<p><strong>Where the logistic shape would genuinely fit this repo:</strong> targets that are <em>natively binary or event-like</em> — P(stop-loss hit this week), P(earnings gap &gt; 2σ), P(regime = stressed) as a supervised alternative to the GaussianMixture overlay, or a meta-model P(my GBM's pick is profitable) used to scale position size. The rule: classify events, regress magnitudes.</p>
+
+<h3>The one <code>predict_proba</code> already in the repo — and why it isn't logistic regression</h3>
+<pre><span class="com"># walkforward_sim.py:307 — regime filter, NOT logistic regression</span>
+probs = gm.<span class="fn">predict_proba</span>(arr)     <span class="com"># gm is a GaussianMixture</span>
+</pre>
+<p>Same method name, different species. The GMM is <strong>unsupervised</strong>: nobody gave it labels; it invented its own clusters from return/vol shape and reports membership probabilities (Lesson 0005's "filtering"). Logistic regression is <strong>supervised</strong>: you define the label, it learns the boundary. Probability output is a property of many models — seeing <code>predict_proba</code> tells you nothing about which one you're holding.</p>
+
+<h2>4. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Logistic regression vs Linear regression on 0/1 labels</h4><p>You CAN fit OLS to a 0/1 target (the "linear probability model"). It sort of works, but predictions escape [0,1], the constant-variance assumption breaks, and squared error under-penalizes confident wrongness. Logistic is the same linear machinery with the right link and loss for probabilities.</p></div>
+<div class="card"><h4>Sigmoid vs Softmax</h4><p><strong>Sigmoid</strong>: one number → probability of one binary event. <strong>Softmax</strong>: a vector of scores → a probability distribution over K classes. Multinomial logistic regression = linear scores + softmax; the sigmoid is its K=2 special case. Also the same softmax living at the output of classification neural nets (Lesson 0007).</p></div>
+<div class="card"><h4>Probability vs Calibrated probability</h4><p>A model can RANK well (high AUC) while its probabilities are miscalibrated — "0.9" events happening 70% of the time. Log-loss training pushes logistic regression toward calibration; tree ensembles and SVMs often need post-hoc calibration (Platt scaling — which is literally fitting a logistic regression on the model's scores).</p></div>
+<div class="card"><h4>Classification threshold vs The model</h4><p>The fitted model outputs probabilities; the 0.5 threshold is a DECISION, not part of the model. With asymmetric costs (false-buy vs missed-buy), the right threshold moves — and in trading you often skip thresholding entirely and size positions by probability × magnitude.</p></div>
+</div>
+
+<h2>5. Practice</h2>
+<div class="question" data-question><p class="q">Q1. A logistic model gives z = 2 for a ticker. What is P(up), roughly, and what would z = −2 give?</p><ul class="options">
+<li data-correct="false" data-why="2 and −2 are the log-odds (the linear scores), not probabilities — probabilities must live in (0,1).">P(up) = 2; P(up) = −2.</li>
+<li data-correct="true" data-why="Right. σ(2) = 1/(1+e⁻²) ≈ 0.88, and by symmetry σ(−2) = 1 − σ(2) ≈ 0.12. Worth caching: z = 0 → 0.5, |z| = 2 → ~0.88/0.12, |z| = 4 → ~0.98/0.02.">≈ 0.88; ≈ 0.12 — symmetric around 0.5.</li>
+<li data-correct="false" data-why="0.5 corresponds to z = 0. A positive score must push the probability above one half.">Both ≈ 0.5, since the sigmoid centers everything.</li>
+<li data-correct="false" data-why="σ never reaches 0 or 1 exactly — it saturates asymptotically. z = ±2 is far from saturation.">Exactly 1.0 and exactly 0.0.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. Why does logistic regression have no closed-form solution while linear regression does?</p><ul class="options">
+<li data-correct="true" data-why="Right. OLS's gradient is linear in β, so 'gradient = 0' is a linear system (the normal equations) solvable in one shot. Log-loss's gradient contains σ(Xβ) — nonlinear in β — so the first-order conditions can't be rearranged into β = (something)·y. Convexity still guarantees a unique optimum; you just iterate (Newton/IRLS) to find it.">Setting the log-loss gradient to zero gives equations that are nonlinear in β (they contain the sigmoid), so there's no algebraic rearrangement to isolate β.</li>
+<li data-correct="false" data-why="Log-loss IS convex for logistic regression — that's why the iterative fit reliably converges to the global optimum.">Because log-loss is non-convex with many local minima.</li>
+<li data-correct="false" data-why="Both models handle any number of features; dimensionality isn't the obstacle.">Because logistic regression has too many features.</li>
+<li data-correct="false" data-why="Binary targets are fine in closed-form-land too (the linear probability model has a closed form). The nonlinearity of the sigmoid in β is what breaks it.">Because binary data can't be put into matrix form.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. The repo predicts <code>fwd_ret_1d</code> with regression rather than classifying up/down. The strongest justification is:</p><ul class="options">
+<li data-correct="false" data-why="Logistic regression trains fast — speed isn't the issue at this scale.">Classification is too slow to train daily.</li>
+<li data-correct="true" data-why="Right. The label (fwd_ret > 0) collapses +4% and +0.02% into the same class while putting −0.02% in the opposite class. The portfolio is paid in magnitudes, and the top-N selection needs to prefer the +3%-expected stock over the +0.1%-expected one even at lower probability of being positive. Expected return = Σ(outcome × probability) needs the magnitude; the binary label deletes it at the source.">Binarizing the target destroys magnitude information the top-N ranking needs — P(up) and E[return] order stocks differently, and P&amp;L follows E[return].</li>
+<li data-correct="false" data-why="predict_proba provides continuous scores in (0,1) that CAN be ranked — the problem is they rank by the wrong quantity, not that they can't be ranked.">Classifiers can't output continuous scores for ranking.</li>
+<li data-correct="false" data-why="Class imbalance is mild for up/down days (~50/50) — that's not the binding objection here.">Up/down classes are too imbalanced to learn.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. With y = 1, model A predicted p̂ = 0.6 and model B predicted p̂ = 0.99 on one observation; on a second observation with y = 0, A predicted 0.4 and B predicted 0.99. Who wins on log-loss?</p><ul class="options">
+<li data-correct="false" data-why="B's first prediction is great (−ln 0.99 ≈ 0.01) but its second is catastrophic (−ln 0.01 ≈ 4.6). Log-loss is unbounded for confident errors.">B — it was more confident and confidence is rewarded.</li>
+<li data-correct="true" data-why="Right. A: −ln(0.6) − ln(0.6) ≈ 0.51 + 0.51 = 1.02. B: −ln(0.99) − ln(0.01) ≈ 0.01 + 4.61 = 4.62. One confidently-wrong call outweighs many good ones — log-loss's unbounded penalty is exactly the mechanism that forces calibration, and exactly why risk systems prefer it to accuracy as a metric.">A by a wide margin (≈1.02 vs ≈4.62) — B's single confident miss costs more than everything else combined.</li>
+<li data-correct="false" data-why="Accuracy at a 0.5 threshold would say A got both right and B got one wrong — but the question asks about log-loss, which also weighs HOW wrong. They're not tied on either metric.">They tie — each got one right and one wrong.</li>
+<li data-correct="false" data-why="Log-loss is computable for any probabilities in (0,1); nothing here is undefined.">Log-loss is undefined for these values.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q5. <code>walkforward_sim.py:307</code> calls <code>gm.predict_proba(arr)</code>. A teammate says "ah, the repo does use logistic regression." What's the correct correction?</p><ul class="options">
+<li data-correct="true" data-why="Right. predict_proba is a generic sklearn interface — GaussianMixture, LogisticRegression, RandomForestClassifier all expose it. The gm object is an UNSUPERVISED GaussianMixture: it clustered return/vol patterns without labels and reports cluster-membership probabilities for regime filtering (Lesson 0005). Logistic regression would require a labeled target and learns a supervised decision boundary. Same method name, fundamentally different model.">That's a GaussianMixture — unsupervised clustering reporting cluster-membership probabilities; logistic regression is a supervised classifier needing labels. Probability output doesn't identify the model.</li>
+<li data-correct="false" data-why="The teammate isn't right — no LogisticRegression object exists anywhere in the repo.">The teammate is right; GMM is a kind of logistic regression.</li>
+<li data-correct="false" data-why="The probabilities are real probabilities (they sum to 1 across components); the issue is which model produced them, not their validity.">The probabilities from GMM aren't real probabilities.</li>
+<li data-correct="false" data-why="predict_proba on a fitted GMM is fully supported sklearn API — not deprecated.">predict_proba is deprecated and the code is broken.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>6. Scenarios</h2>
+<details class="scenario"><summary>S1. You build a "P(stop-loss hit within 5 days)" logistic model to veto trades. It shows AUC 0.71 but the vetoed trades would have been profitable on average. What's going on?</summary>
+<p>Two distinct possibilities to separate. (1) <strong>Correlation between risk and reward</strong>: stop-loss probability rises with volatility, and so does expected return — your veto may be systematically removing the high-vol, high-expected-return tail. Check the vetoed set's Sharpe, not its mean return: if vetoes have high mean but terrible Sharpe/drawdown, the veto is doing its actual job (risk control), and "would have been profitable on average" is survivor-flavored hindsight. (2) <strong>Threshold miscalibration</strong>: AUC measures ranking, not the threshold. If you veto at P &gt; 0.5 but the model's probabilities run hot (predicting 0.6 where the true frequency is 0.35), you're vetoing far too much. Fix by checking a calibration curve and choosing the veto threshold from the cost asymmetry (cost of a stopped-out trade vs opportunity cost of a skipped winner), not from the 0.5 default.</p></details>
+
+<details class="scenario"><summary>S2. An interviewer asks: "Linear and logistic regression — same model or different models?" Sketch the answer that scores full marks.</summary>
+<p>Both, depending on the layer. <strong>Same</strong>: identical linear score z = Xβ — same features, same parametric form, same coefficient count, both convex to fit, both members of the generalized linear model family. <strong>Different</strong>: the link and the loss. Linear uses the identity link with squared error, modeling E[y|x] directly for a continuous y; logistic uses the logit link with log-loss, modeling P(y=1|x) for a binary y. Practical consequences of that one change: bounded output, coefficients act on log-odds, no closed form (iterative fit), and decision-making requires a threshold that's a business choice, not a model property. Bonus point: name when each fails in finance — regression when the target is genuinely an event, classification when downstream economics depend on magnitudes (this repo's case).</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression">scikit-learn User Guide §1.1.11 — Logistic regression (model, log-loss, solvers)</a></li>
+<li id="fn-2"><a href="https://www.statlearning.com/">James, Witten, Hastie, Tibshirani — An Introduction to Statistical Learning, ch. 4 (logistic regression vs linear regression for classification)</a></li>
+<li id="fn-3"><a href="https://en.wikipedia.org/wiki/Logistic_regression">Logistic regression — log-odds formulation, IRLS fitting, linear probability model comparison</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

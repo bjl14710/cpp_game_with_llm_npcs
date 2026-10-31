@@ -1,0 +1,280 @@
+"""Base class for all draggable hardware blocks on the canvas."""
+
+from __future__ import annotations
+from typing import Optional, List, Tuple
+import uuid
+
+from PyQt6.QtWidgets import (
+    QGraphicsItem, QGraphicsRectItem, QGraphicsTextItem,
+    QGraphicsEllipseItem, QGraphicsScene, QMenu, QInputDialog,
+    QGraphicsDropShadowEffect,
+)
+from PyQt6.QtCore import Qt, QRectF, QPointF, QSizeF
+from PyQt6.QtGui import (
+    QPainter, QColor, QPen, QBrush, QFont, QPainterPath,
+    QLinearGradient,
+)
+
+from silmulator.devices.base_device import BaseDevice
+
+
+class ConnectionPort(QGraphicsEllipseItem):
+    """A small circle on a block that represents a connection point."""
+
+    PORT_RADIUS = 6.0
+    COLOR_IDLE = QColor(100, 180, 255)
+    COLOR_HOVER = QColor(255, 200, 50)
+    COLOR_CONNECTED = QColor(50, 220, 100)
+
+    def __init__(self, parent: "BaseBlock", port_id: str, label: str = "") -> None:
+        r = self.PORT_RADIUS
+        super().__init__(-r, -r, 2 * r, 2 * r, parent)
+        self.parent_block = parent
+        self.port_id = port_id
+        self.label = label
+        self.connected_to: Optional["ConnectionPort"] = None
+        self.setAcceptHoverEvents(True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
+        self._update_color()
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def _update_color(self) -> None:
+        color = self.COLOR_CONNECTED if self.connected_to else self.COLOR_IDLE
+        self.setBrush(QBrush(color))
+        self.setPen(QPen(QColor(30, 30, 30), 1.5))
+
+    def hoverEnterEvent(self, event) -> None:
+        self.setBrush(QBrush(self.COLOR_HOVER))
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event) -> None:
+        self._update_color()
+        super().hoverLeaveEvent(event)
+
+    def connect_to(self, other: "ConnectionPort") -> None:
+        self.connected_to = other
+        other.connected_to = self
+        self._update_color()
+        other._update_color()
+
+    def disconnect(self) -> None:
+        if self.connected_to:
+            self.connected_to.connected_to = None
+            self.connected_to._update_color()
+        self.connected_to = None
+        self._update_color()
+
+
+class BaseBlock(QGraphicsItem):
+    """Abstract base for all hardware blocks.
+
+    Provides:
+    - Drag-and-drop movement
+    - Title bar with device type and name
+    - Connection ports
+    - Right-click context menu
+    - SCPI command routing to the underlying device
+    """
+
+    BLOCK_WIDTH = 220
+    BLOCK_HEIGHT = 160
+    TITLE_HEIGHT = 30
+    HEADER_COLOR = QColor(60, 80, 120)
+    BODY_COLOR = QColor(240, 245, 255)
+    BORDER_COLOR = QColor(30, 50, 90)
+    SELECTED_COLOR = QColor(255, 160, 0)
+
+    def __init__(self, device: BaseDevice, device_type: str, parent=None) -> None:
+        super().__init__(parent)
+        self.device = device
+        self.device_type = device_type
+        self.block_id = str(uuid.uuid4())[:8]
+        self.name = f"{device_type}-{self.block_id}"
+        self._ports: List[ConnectionPort] = []
+        self._command_log: List[Tuple[str, str]] = []
+
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setAcceptHoverEvents(True)
+        self.setCacheMode(QGraphicsItem.CacheMode.DeviceCoordinateCache)
+
+        # Shadow effect
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setOffset(4, 4)
+        shadow.setColor(QColor(0, 0, 0, 80))
+        self.setGraphicsEffect(shadow)
+
+        self._setup_ports()
+        self._setup_ui()
+
+    # ------------------------------------------------------------------
+    # Geometry
+    # ------------------------------------------------------------------
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, self.BLOCK_WIDTH, self.BLOCK_HEIGHT)
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addRoundedRect(self.boundingRect(), 8, 8)
+        return path
+
+    # ------------------------------------------------------------------
+    # Painting
+    # ------------------------------------------------------------------
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:
+        rect = self.boundingRect()
+
+        # Body gradient
+        gradient = QLinearGradient(0, 0, 0, rect.height())
+        gradient.setColorAt(0.0, self.BODY_COLOR)
+        gradient.setColorAt(1.0, self.BODY_COLOR.darker(110))
+        painter.setBrush(QBrush(gradient))
+
+        # Border (highlighted when selected)
+        border_color = self.SELECTED_COLOR if self.isSelected() else self.BORDER_COLOR
+        painter.setPen(QPen(border_color, 2.0 if self.isSelected() else 1.5))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        # Title bar
+        title_rect = QRectF(0, 0, rect.width(), self.TITLE_HEIGHT)
+        header_gradient = QLinearGradient(0, 0, 0, self.TITLE_HEIGHT)
+        header_gradient.setColorAt(0, self.HEADER_COLOR.lighter(120))
+        header_gradient.setColorAt(1, self.HEADER_COLOR)
+        painter.setBrush(QBrush(header_gradient))
+        painter.setPen(Qt.PenStyle.NoPen)
+        path = QPainterPath()
+        path.addRoundedRect(title_rect, 8, 8)
+        # Square off bottom corners
+        path.addRect(QRectF(0, self.TITLE_HEIGHT / 2, rect.width(), self.TITLE_HEIGHT / 2))
+        painter.drawPath(path)
+
+        # Title text
+        painter.setPen(QPen(QColor(255, 255, 255)))
+        font = QFont("Consolas", 9, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(
+            QRectF(8, 0, rect.width() - 16, self.TITLE_HEIGHT),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            f"{self.device_type}"
+        )
+
+        # Block name (smaller)
+        font.setPointSize(7)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QPen(QColor(200, 230, 255)))
+        painter.drawText(
+            QRectF(rect.width() - 70, 0, 60, self.TITLE_HEIGHT),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+            self.block_id
+        )
+
+        # Draw device-specific content
+        self._paint_content(painter, rect)
+
+    def _paint_content(self, painter: QPainter, rect: QRectF) -> None:
+        """Subclasses override to draw device-specific content."""
+
+    # ------------------------------------------------------------------
+    # Ports
+    # ------------------------------------------------------------------
+
+    def _setup_ports(self) -> None:
+        """Subclasses override to add ports."""
+
+    def add_port(self, port_id: str, label: str, x_frac: float, y_frac: float) -> ConnectionPort:
+        port = ConnectionPort(self, port_id, label)
+        port.setPos(self.BLOCK_WIDTH * x_frac, self.BLOCK_HEIGHT * y_frac)
+        self._ports.append(port)
+        return port
+
+    @property
+    def ports(self) -> List[ConnectionPort]:
+        return self._ports
+
+    # ------------------------------------------------------------------
+    # SCPI command routing
+    # ------------------------------------------------------------------
+
+    def send_command(self, cmd: str) -> str:
+        response = self.device.process(cmd)
+        self._command_log.append((cmd, response))
+        if len(self._command_log) > 500:
+            self._command_log = self._command_log[-500:]
+        self.update()
+        return response
+
+    @property
+    def command_log(self) -> List[Tuple[str, str]]:
+        return list(self._command_log)
+
+    # ------------------------------------------------------------------
+    # Context menu
+    # ------------------------------------------------------------------
+
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu()
+        menu.addAction("Send SCPI command", self._prompt_command)
+        menu.addAction("Reset device", self._reset_device)
+        menu.addAction("View command log", self._show_log)
+        menu.addSeparator()
+        menu.addAction("Rename block", self._rename_block)
+        menu.addAction("Delete block", self._delete_block)
+        self._add_device_menu_actions(menu)
+        menu.exec(event.screenPos())
+
+    def _prompt_command(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+        cmd, ok = QInputDialog.getText(None, "Send SCPI Command", "Command:")
+        if ok and cmd:
+            response = self.send_command(cmd)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(None, "Response", response or "(no response)")
+
+    def _reset_device(self) -> None:
+        self.device.reset()
+        self.update()
+
+    def _show_log(self) -> None:
+        from PyQt6.QtWidgets import QDialog, QTextEdit, QVBoxLayout, QPushButton
+        dlg = QDialog()
+        dlg.setWindowTitle(f"Command Log — {self.name}")
+        dlg.resize(600, 400)
+        layout = QVBoxLayout(dlg)
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setFont(QFont("Consolas", 9))
+        for cmd, resp in self._command_log[-100:]:
+            text.append(f">> {cmd}")
+            if resp:
+                text.append(f"<< {resp}")
+        layout.addWidget(text)
+        btn = QPushButton("Close")
+        btn.clicked.connect(dlg.accept)
+        layout.addWidget(btn)
+        dlg.exec()
+
+    def _rename_block(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(None, "Rename Block", "Name:", text=self.name)
+        if ok and name:
+            self.name = name
+            self.update()
+
+    def _delete_block(self) -> None:
+        if self.scene():
+            self.scene().removeItem(self)
+
+    def _add_device_menu_actions(self, menu: QMenu) -> None:
+        """Subclasses override to add device-specific menu items."""
+
+    # ------------------------------------------------------------------
+    # Setup UI (text labels etc.)
+    # ------------------------------------------------------------------
+
+    def _setup_ui(self) -> None:
+        """Subclasses override to add QGraphicsItem children."""

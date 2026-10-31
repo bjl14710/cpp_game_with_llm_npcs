@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vocab 0016 — Composite Modeling from Primitives</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --text:#e0e2f0; --muted:#8589a8; --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  dt { color:var(--accent2); font-weight:600; margin-top:1.1rem; }
+  dd { margin-left:0; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Vocab 0016 · pairs with lesson 0016</div>
+<h1>Vocab: Composite Modeling from Primitives</h1>
+<dl>
+<dt>composite model</dt>
+<dd>An object assembled at draw time from several primitive shapes (cylinders,
+boxes, discs) instead of loaded from a mesh file. Cheap to author, zero asset
+dependencies; only suitable for simple convex silhouettes.</dd>
+
+<dt>immediate-mode primitive</dt>
+<dd>A shape drawn by a direct API call each frame (<code>DrawCylinder</code>,
+<code>DrawCube</code>) rather than retained as a mesh. raylib re-tessellates
+per call — fine for a dozen shapes, wasteful for thousands.</dd>
+
+<dt>capped solid</dt>
+<dd>What most "cylinder" draw calls actually produce: a closed volume with top
+and bottom caps, not a hollow tube. Geometry nested inside is occluded from
+above by the object's own cap.</dd>
+
+<dt>curated mapping</dt>
+<dd>This codebase's explicit id→model-stem table (<code>curated_</code> in
+<code>Assets.cpp</code>) for landmarks that must look a specific way, as
+opposed to filler ids that hash into a generic pool.</dd>
+
+<dt>dispatch-before-fallback</dt>
+<dd>Ordering rule for lookups with defaults: handle special cases before
+consulting the map, because the fallback path cannot distinguish "meant to be
+special" from "missing". The fountain check runs before
+<code>modelForBuilding</code>.</dd>
+
+<dt>size contract (recap)</dt>
+<dd>The <code>SizeSpec</code> table as the only sizing authority: Fill
+stretches a model to its collision AABB, Uniform scales it to a declared
+world height. Composites obey it too — the fountain reads its height from
+the table and its radii from the AABB.</dd>
+</dl>
+</div></body>
+</html>

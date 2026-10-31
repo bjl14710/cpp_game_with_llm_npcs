@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0009 — OS fundamentals: what runs your code under the surface</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 30px; margin: 8px 0 6px; line-height: 1.25; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+  small.path { color: var(--ink-dim); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; display: block; margin-bottom: -4px; }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+  pre.code .sys { color: var(--bad); }
+  pre.code .lib { color: var(--accent); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout.real { border-left-color: var(--good); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+  table.compare code { font-size: 13px; }
+
+  .arch-diagram {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; color: var(--ink-dim); white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+
+  .job-row {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 14px 0 18px;
+  }
+  .job-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px; font-size: 13.5px;
+  }
+  .job-card h4 { margin: 0 0 6px; font-size: 14px; color: var(--accent-2); }
+  .job-card.j1 { border-top: 3px solid #a0d8ff; }
+  .job-card.j2 { border-top: 3px solid #c4e08a; }
+  .job-card.j3 { border-top: 3px solid #ffb780; }
+  .job-card.j4 { border-top: 3px solid #ef6b8c; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .job-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0009 &middot; cpp_games / docs / learning</div>
+  <h1>OS fundamentals: what runs your code under the surface</h1>
+  <p class="why">Why this matters: lesson 0005 taught you the concurrency primitives. This lesson teaches you the OS layer they sit on. Your game, Ollama, the worker thread, the localhost HTTP call &mdash; every one is an OS abstraction working behind the scenes. Knowing the layer down lets you reason about failure modes lesson 0005 couldn't.</p>
+</header>
+
+<h2>1. The concept &mdash; the four jobs of the OS</h2>
+
+<p>Strip an operating system down to fundamentals and it does four things on your behalf. Every line of code you've written so far has been quietly riding on them.</p>
+
+<div class="job-row">
+  <div class="job-card j1">
+    <h4>Process model</h4>
+    <p>"Multiple programs share one machine, none of them can step on each other." Each program runs in its own isolated address space. Your game and Ollama are two processes.</p>
+  </div>
+  <div class="job-card j2">
+    <h4>Virtual memory</h4>
+    <p>Each process sees a private 64-bit address space the OS fakes out of real RAM via page tables and the MMU. Two processes can both use address <code class="inline">0x0040_1234</code> for completely unrelated data.</p>
+  </div>
+  <div class="job-card j3">
+    <h4>System calls</h4>
+    <p>The doorways from your program (user space) into the kernel. Opening a file, allocating memory beyond what you have, sending bytes on a socket &mdash; all are syscalls. ~100&ndash;200 ns each on modern hardware.</p>
+  </div>
+  <div class="job-card j4">
+    <h4>Scheduling</h4>
+    <p>Decides which runnable thread runs on which core, when. A blocked thread (e.g. one in <code class="inline">cv.wait</code>) is removed from the scheduler entirely until something wakes it.</p>
+  </div>
+</div>
+
+<h3>The architecture diagram</h3>
+
+<div class="arch-diagram">  user space (your code, libraries, Ollama)
+   +------------------------------------------------------------+
+   |  cpp_game_with_llm_npcs                Ollama (the model)  |
+   |  - main thread                         - one of its threads|
+   |  - LlmClient worker thread                                 |
+   |  - SFML, libstdc++, httplib...         - go runtime...     |
+   +------------------------------------------------------------+
+                      |                            |
+                      | system call boundary       |
+                      v                            v
+                ====[ syscall: ~100-200 ns ]====
+                      |                            |
+   +------------------------------------------------------------+
+   |                     kernel space                           |
+   |  scheduler          virtual memory       network stack     |
+   |  filesystem         page tables / MMU    TCP loopback      |
+   |  signal delivery    page faults          (127.0.0.1)       |
+   +------------------------------------------------------------+
+                      |
+                      v
+                 hardware (CPU, RAM, NIC, GPU, disk)</div>
+
+<p>That syscall boundary is where your program ends and the kernel begins. Calling <code class="inline">printf</code> doesn't cross it (it's all library code until the very last <code class="inline">write</code>). Calling <code class="inline">open</code> does. The cost difference is real: a library call is a function call (~1 ns). A syscall is at least 100x that, and the kernel side may involve disk, the network, or context switching that costs thousands of ns more.</p>
+
+<div class="callout">
+  <h3>The one-sentence mental model</h3>
+  <p>The OS gives your code <em>two illusions</em> &mdash; "you have the whole machine" (virtual memory + scheduling) and "you have safe paths to hardware" (syscalls). Everything else is built on those.</p>
+</div>
+
+<h2>2. A minimal example &mdash; tracing one <code class="inline">cli.Post()</code> call through the OS</h2>
+
+<p>What actually happens when <code class="inline">LlmClient::processOne()</code> calls <code class="inline">cli.Post("/api/chat", ...)</code>? In your code it's one line. At the OS level it's a half-dozen syscalls.</p>
+
+<pre class="code"><span class="com">// Your C++ (one line):</span>
+<span class="kw">auto</span> res = cli.Post(<span class="str">"/api/chat"</span>, body.dump(), <span class="str">"application/json"</span>);
+
+<span class="com">// What httplib does, library-side only (no syscalls yet):</span>
+<span class="com">//   - format the HTTP/1.1 request as a string</span>
+<span class="com">//   - check connection state, set timeouts, etc.</span>
+
+<span class="com">// What httplib does that CROSSES INTO THE KERNEL:</span>
+fd = <span class="sys">socket</span>(AF_INET, SOCK_STREAM, <span class="num">0</span>);              <span class="com">// open a TCP socket</span>
+<span class="sys">connect</span>(fd, <span class="str">"127.0.0.1:11434"</span>);                     <span class="com">// TCP handshake (loopback)</span>
+<span class="sys">send</span>(fd, requestBytes, requestLen, <span class="num">0</span>);             <span class="com">// hand the request to the kernel</span>
+<span class="com">// — worker thread blocks here, removed from scheduler —</span>
+<span class="sys">recv</span>(fd, replyBuffer, bufLen, <span class="num">0</span>);                  <span class="com">// wake when reply bytes arrive</span>
+<span class="sys">close</span>(fd);                                          <span class="com">// release the socket</span></pre>
+
+<p>Five syscalls highlighted in red, each ~100&ndash;200 ns. The <em>cost</em> of the call isn't the syscalls though &mdash; it's the second between <code class="inline">send</code> and <code class="inline">recv</code> while Ollama actually runs the model. During that second, your worker thread is asleep: the scheduler has removed it from the runnable set, freeing the CPU for the main thread (and everything else on the machine). When Ollama writes its reply to the socket, the kernel notes that data is available, marks your thread runnable again, and at the next scheduling opportunity it wakes up inside <code class="inline">recv</code>. <em>This</em> is the OS as your silent collaborator.</p>
+
+<div class="callout warn">
+  <h3>"localhost" is still networking</h3>
+  <p>People sometimes say "Ollama on localhost isn't really a network call." It is. The data goes through the TCP stack, gets a sequence number, hits the loopback interface, comes back up through the network stack on the other side. It's just that the wire is zero meters long. You skip the NIC, you skip the cable, you skip routing &mdash; but you keep socket creation, TCP framing, copy-into-kernel and copy-out, and scheduler latency. That's why a localhost ping is microseconds, not zero.</p>
+</div>
+
+<h2>3. In your project &mdash; the OS abstractions hiding in code you've written</h2>
+
+<h3>Two processes (game and Ollama) and why we needed HTTP</h3>
+
+<p>Lesson 0001 picked Ollama as a sidecar without explaining the deeper reason: two processes <em>cannot</em> just share memory. The OS makes sure of it &mdash; that's what isolation means. Your game can't access Ollama's <code class="inline">std::queue</code>, even though it's on the same machine, because they live in different virtual address spaces. The OS's page tables for each process are different. The only ways across the boundary are:</p>
+
+<ul>
+  <li><b>Files</b> &mdash; both processes can open the same file (via syscalls).</li>
+  <li><b>Pipes / sockets</b> &mdash; the kernel hands one end to each process. Bytes flow through the kernel.</li>
+  <li><b>Shared memory regions</b> &mdash; the kernel maps the same physical pages into both processes' address spaces, by explicit request.</li>
+  <li><b>Signals</b> &mdash; one-bit notifications like <code class="inline">SIGINT</code> (Ctrl-C).</li>
+</ul>
+
+<p>The HTTP call to Ollama is option 2: a TCP socket via the loopback interface. The kernel routes bytes from your game's process to Ollama's process, copying them through kernel buffers on the way. Compared to "two threads sharing a <code class="inline">std::queue</code> with a mutex" (lesson 0005), this is dramatically more expensive &mdash; but it's also the only way to talk to a separate program.</p>
+
+<h3>One process, two threads: why <code class="inline">LlmClient</code> works so differently</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/LlmClient.cpp:48 (recap from lesson 0005)</small>
+<pre class="code"><span class="kw">void</span> LlmClient::workerLoop() {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        std::unique_lock&lt;std::mutex&gt; lock(requestMutex_);
+        requestCv_.wait(lock, [<span class="kw">this</span>] {
+            <span class="kw">return</span> stop_.load() || !requests_.empty();
+        });
+        <span class="com">// ... dequeue, process ...</span>
+    }
+}</pre>
+
+<p>The main thread and the worker thread are in the <em>same</em> process &mdash; one virtual address space &mdash; so <code class="inline">requests_</code> is literally the same memory to both. No syscall is needed to "share" it; they already share it. The mutex protects them from racing, but the data itself doesn't have to travel anywhere.</p>
+
+<p>What about <code class="inline">cv.wait</code>? That's an OS scheduler call. <code class="inline">wait()</code> hands the kernel a request: "remove me from the runnable threads until someone notifies this CV." A blocked thread costs zero CPU until the notify wakes it. The "sleep cheaply" promise from lesson 0005 is literally the OS scheduler doing its job.</p>
+
+<h3>Files, the unsung syscall storm</h3>
+
+<small class="path">cpp_game_with_llm_npcs/src/main.cpp:31</small>
+<pre class="code">std::unordered_map&lt;std::string, std::string&gt; readKv(<span class="kw">const</span> fs::path&amp; path) {
+    std::ifstream in(path);   <span class="com">// → open() syscall</span>
+    <span class="com">// std::getline calls into read() repeatedly</span>
+    <span class="kw">while</span> (std::getline(in, line)) { <span class="com">/* ... */</span> }
+    <span class="com">// ifstream destructor calls close()</span>
+}</pre>
+
+<p>Three syscalls minimum: <code class="inline">open</code>, one or more <code class="inline">read</code>s, <code class="inline">close</code>. The <code class="inline">read</code> calls return data that the kernel already buffered (Linux's page cache), so they're fast once the file is cached, but the first <code class="inline">read</code> may pull from disk &mdash; tens of microseconds on an SSD, milliseconds on a spinning disk. Game code that opens files <em>per frame</em> is one of the classic per-frame-budget destroyers from lesson 0003.</p>
+
+<h3>The signals you haven't used yet, but will</h3>
+
+<p>Press Ctrl-C while your game is running. The terminal asks the kernel to send your process <code class="inline">SIGINT</code>. The kernel interrupts your code &mdash; literally yanks the CPU out of whatever it was doing &mdash; and runs a handler. By default the handler exits the program. <code class="inline">LlmClient</code> never registered a signal handler, so destructors don't run; the worker thread is killed mid-HTTP-call. If you want a clean shutdown via Ctrl-C, you'd register a handler that sets <code class="inline">stop_</code> and notifies the CV &mdash; the same pattern as the destructor in lesson 0005. We don't have that today; it's a real follow-up.</p>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Process vs. thread &mdash; from the OS angle this time</h3>
+<p>Lesson 0005 contrasted these from the C++ standpoint: threads share memory, processes don't. From the OS standpoint the distinction is sharper: on Linux, threads and processes are <em>both</em> created by the same syscall (<code class="inline">clone</code>), and the difference is just which flags are passed. <code class="inline">CLONE_VM</code> says "share the parent's address space" &mdash; that's a thread. Without it, you get a separate address space &mdash; a process. So at the kernel level there's only one mechanism; "process" and "thread" are user-space labels for two configurations of it.</p>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th>Thread</th><th>Process</th></tr></thead>
+  <tbody>
+    <tr><td>Address space</td><td>Shared with parent</td><td>Own copy (via copy-on-write)</td></tr>
+    <tr><td>Creation cost</td><td>Cheap (clone with CLONE_VM)</td><td>Heavier (clone without it; page tables to copy)</td></tr>
+    <tr><td>Context switch cost</td><td>~thousands of ns (no TLB flush)</td><td>~tens of thousands of ns (TLB flush — softened by PCID on modern x86)</td></tr>
+    <tr><td>Crash impact</td><td>Kills the whole process</td><td>Just kills itself</td></tr>
+    <tr><td>Used for in your code</td><td><code class="inline">LlmClient</code>'s worker</td><td>game &harr; Ollama</td></tr>
+  </tbody>
+</table>
+
+<h3>System call vs. library call</h3>
+<p>A library call is a regular function call inside your process. <code class="inline">std::string::push_back</code> &mdash; library call. <code class="inline">std::sin</code> &mdash; library call. <code class="inline">std::ifstream</code>'s constructor doing the actual file open? That's a library call that <em>internally</em> makes a system call. The line is fuzzy from your seat but extremely sharp from the CPU's: a syscall flips the CPU into kernel mode, which is a special privileged execution state. Library calls don't. The cost difference (~1 ns vs ~100+ ns) is one consequence.</p>
+
+<h3>User space vs. kernel space</h3>
+<p>Two execution modes the CPU itself supports. <b>User space</b> is where your program runs; it can't touch hardware directly, can't read/write other processes' memory, can't change the page tables. <b>Kernel space</b> can. A syscall is the controlled door between them. The reason this distinction matters: a buggy program in user space can crash itself; a buggy driver in kernel space can crash the whole machine. The OS uses the CPU's mode bit to enforce the boundary.</p>
+
+<h3>Blocking vs. non-blocking I/O</h3>
+<p>When the worker calls <code class="inline">recv</code> on the socket, the thread is removed from the scheduler until the reply arrives &mdash; that's <b>blocking</b> I/O. The alternative is <b>non-blocking</b>: <code class="inline">recv</code> returns immediately with "no data yet" and you poll later. Blocking is simpler and cheaper if you have a thread to spare; non-blocking is what you need when one thread must juggle thousands of connections (a web server). Your worker thread design is blocking by choice &mdash; one thread, one job, simple.</p>
+
+<h3>Concurrency vs. parallelism (one more time)</h3>
+<p>Lesson 0003 mentioned this; lesson 0005 hinted at it. Restated here in OS terms: <b>concurrency</b> is a property of the program ("multiple tasks are in flight at the same time"). <b>Parallelism</b> is a property of the hardware ("multiple cores actually execute simultaneously"). The OS scheduler gives you concurrency on a single core by time-slicing; multi-core CPUs let you also have real parallelism. <code class="inline">LlmClient</code>'s two threads are concurrent always; whether they're <em>parallel</em> depends on the user's CPU.</p>
+
+<h2>5. Quiz</h2>
+
+<div class="question" data-question>
+  <p class="q">Why can't <code class="inline">cpp_game_with_llm_npcs</code> just read Ollama's <code class="inline">std::queue</code> of pending requests directly &mdash; they're on the same machine after all?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A mutex isn't useful across process boundaries — they live in different address spaces, so they can't even see the same mutex object.">
+      Ollama doesn't expose a mutex for it.
+    </li>
+    <li data-correct="true" data-why="Right. Each process has its own virtual address space. The same numeric address means different physical memory in each process. The kernel enforces this isolation; that's why we need a deliberate IPC channel (HTTP over loopback in our case).">
+      They run in different processes — different virtual address spaces. The same C++ address points to different physical memory in each.
+    </li>
+    <li data-correct="false" data-why="A real syscall to read Ollama's data structures *as if* they were files would still need cooperation from Ollama's process. Address-space isolation is the underlying reason, not the syscall layer itself.">
+      It would require the <code class="inline">read</code> syscall, which is privileged.
+    </li>
+    <li data-correct="false" data-why="The structs match in size (you'd compile against the same headers if it were possible); the language isn't the obstacle, the address-space isolation is.">
+      <code class="inline">std::queue</code> has different sizes in Go (Ollama) and C++ (your game).
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A naive estimate: how many syscalls does one <code class="inline">cli.Post("/api/chat", ...)</code> from your worker thread minimally cost during the network round-trip itself? (Don't count syscalls inside Ollama's process; just yours.)</p>
+  <ul class="options">
+    <li data-correct="false" data-why="One syscall is way too few — Post needs at minimum to open the socket, connect, send, recv, close. Each is its own syscall.">
+      One — <code class="inline">cli.Post</code> bundles everything into a single <code class="inline">sendto</code> syscall.
+    </li>
+    <li data-correct="true" data-why="Right — minimum ~5: socket(), connect() (for the TCP handshake on loopback), send(), recv() (often multiple times for a long reply, but at least one), close(). Keep-alive connections amortize some of these across requests but milliseconds spent in the model dwarf microseconds spent in syscalls either way.">
+      Around 5 — <code class="inline">socket</code>, <code class="inline">connect</code>, <code class="inline">send</code>, <code class="inline">recv</code>, <code class="inline">close</code> at minimum.
+    </li>
+    <li data-correct="false" data-why="Hundreds of syscalls is what something like a debugger or strace might generate, not a normal HTTP POST. The OS interaction is fairly lean here.">
+      Hundreds — every byte of the request and reply is its own syscall.
+    </li>
+    <li data-correct="false" data-why="Zero would imply httplib never touches the kernel — but it has to, in order for bytes to actually leave the process.">
+      Zero — httplib uses memory-mapped I/O internally.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">The worker thread calls <code class="inline">recv()</code> and blocks for 1.5 seconds waiting for Ollama's reply. During that 1.5 s, what is the worker thread actually <em>doing</em> from the OS's perspective?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A polling check would consume CPU. The blocking call is precisely what lets the thread stop using the CPU entirely.">
+      Polling the socket once per millisecond from inside the kernel.
+    </li>
+    <li data-correct="false" data-why="Spinning would burn CPU. Blocking I/O is the opposite of spinning.">
+      Spinning on a flag in user space waiting for the reply.
+    </li>
+    <li data-correct="true" data-why="Right. The scheduler removed it from the runnable set. It uses zero CPU. When the kernel network stack sees reply bytes for that socket, it marks the thread runnable again; the next scheduling tick picks it up. This is the OS doing exactly the same kind of cheap-sleep your CV does, just triggered by a network event instead of a notify.">
+      Nothing — it's marked unrunnable; the scheduler will mark it runnable again when the kernel sees reply data on its socket.
+    </li>
+    <li data-correct="false" data-why="It would still drain a battery for any sleep-loop or busy approach. The point of blocking I/O is that the thread is truly idle.">
+      Draining the CPU's battery while it waits.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">The shooter game reads <code class="inline">arial.ttf</code> in <code class="inline">loadHudAssets()</code> at startup. The next frame after start, opening the same file would be much faster than the first open. Why?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="No optimisation around 'std::ifstream is smarter the second time' exists. The speedup is below the C++ library — it's the kernel's page cache.">
+      <code class="inline">std::ifstream</code> caches the file contents across instances.
+    </li>
+    <li data-correct="true" data-why="Right. The first read pulled the file bytes off the SSD into the kernel's page cache; subsequent reads of the same file are served directly from RAM without touching the disk. This is a per-OS-kernel cache, not per-program — even relaunching the game keeps the speedup as long as the OS hasn't evicted those pages.">
+      The kernel cached the file's pages in RAM after the first read; the second access doesn't touch the disk.
+    </li>
+    <li data-correct="false" data-why="The font isn't loaded into a globally shared library cache that way. The mechanism is the kernel page cache, not a font-specific feature.">
+      The OS pre-loaded the font into a global font cache when SFML started up.
+    </li>
+    <li data-correct="false" data-why="Filesystem mounts have nothing to do with this. The first read on a freshly-booted machine takes the slow path even for typical mounts.">
+      The filesystem is mounted with <code class="inline">noatime</code>, making the second read much faster.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A user runs both your game and Ollama, but only has a single-core CPU (rare in 2026, but pretend). Is concurrency between the worker thread and main thread still useful, or does the single core kill it?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Single-core doesn't kill concurrency, only true parallelism. Concurrency still helps because the main thread can run while the worker is blocked on the network.">
+      Useless &mdash; without two cores, both threads are just fighting for the same one and waste each other's time.
+    </li>
+    <li data-correct="true" data-why="Right. When the worker thread is blocked on the recv() of the HTTP reply, the OS marks it unrunnable and schedules the main thread on the single core. The main thread keeps the game loop running while Ollama produces tokens — that's the win, and it has nothing to do with how many cores you have. Concurrency wins even with one core; you only need parallelism for math-bound work.">
+      Useful &mdash; while the worker is blocked on the network <code class="inline">recv</code>, the OS schedules the main thread, which keeps the game responsive on the one core available.
+    </li>
+    <li data-correct="false" data-why="On a single-core machine, threading doesn't somehow cause data corruption — the OS still correctly serialises shared-memory access via the mutexes. The single core just means only one thread runs at a time, but they still cooperate correctly.">
+      Useful, but you'd need an atomic CAS on every memory access to prevent corruption on a single core.
+    </li>
+    <li data-correct="false" data-why="The OS scheduler can't 'merge' threads. It can only multiplex them onto cores. What lets it work is blocking I/O removing the worker from contention while it waits.">
+      Useful only if the OS automatically merges your two threads into one.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> The user closes the game window via the X button while a request is mid-flight (<code class="inline">cli.Post</code> is waiting for Ollama). Walk through what happens to the worker thread &mdash; the main thread, the destructor sequence, the syscall the worker is blocked in, all of it. Where does the OS step in?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> You want a feature where Ctrl-C in the terminal cleanly stops the game (LlmClient joins, files close, dialog state is saved). Without writing the code, sketch what you'd register with the OS and which existing primitive in <code class="inline">LlmClient</code> you'd reuse to make the worker actually exit. Use the words <em>signal handler</em>, <em>atomic</em>, and <em>condition variable</em>.</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> A teammate says "let's just <code class="inline">mmap</code> a shared memory region between the game and Ollama instead of HTTP &mdash; it'll be way faster." Argue the technical case for it (one paragraph) and the practical case against (one paragraph). Bring in what you know about the IPC options from §3.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read section 1 &mdash; I can name the four OS jobs in one sentence each</label></li>
+  <li><label><input type="checkbox"> Walked through the syscall trace &mdash; I can identify which lines cross into the kernel</label></li>
+  <li><label><input type="checkbox"> Read section 3 &mdash; I see HTTP/CV/file/signal as four different OS mechanisms</label></li>
+  <li><label><input type="checkbox"> Read section 4 &mdash; I won't conflate library call / syscall, user space / kernel space</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://man7.org/linux/man-pages/man2/syscalls.2.html">man syscalls(2) &mdash; the full Linux system call list</a> &middot;
+    <a href="https://man7.org/linux/man-pages/man2/clone.2.html">man clone(2) &mdash; thread vs process at the syscall level</a> &middot;
+    <a href="https://eli.thegreenplace.net/2018/measuring-context-switching-and-memory-overheads-for-linux-threads/">Eli Bendersky &mdash; measuring context switch overhead</a> &middot;
+    <a href="https://man7.org/linux/man-pages/man7/signal.7.html">man signal(7) &mdash; signals on Linux</a>
+  </p>
+  <p>Lesson 0009 &middot; <code class="inline">docs/learning/lessons/0009-os-fundamentals.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true';
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

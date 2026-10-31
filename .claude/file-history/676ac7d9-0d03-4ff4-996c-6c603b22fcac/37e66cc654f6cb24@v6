@@ -1,0 +1,27 @@
+# Checkpoint
+Session: 2026-07-17 overnight — Stack Convergence (issue #35)
+Status: COMPLETE
+
+Issues to process: [#35]
+Issues completed: [#35]  (closed; work landed on the converged stack)
+Issues failed: []
+Issues skipped: []
+
+## What happened
+PROGRESS.md Session-3 collision resolved (keep-both, June first, renumber);
+sessions now 1-10 unique/chronological. Brandon merged #29-#33 top-down
+live during the session; converged with the upward cascade at issue-20.
+Auto-merge had created a duplicate "Session 4" + off-by-one tail (fixed
+with invariant assertions) and an index.html add/add (fixed by
+regeneration — generator now committed as scripts/build_learning_index.py).
+issue-18/19/20 branch refs all point at the converged history.
+
+## Verification
+408 passed, 3 xfailed (+9 pre-existing macOS visual-golden failures,
+identical on bare master). Audit: 139 families, 0 stale. PR #28
+merge-tree vs master: clean.
+
+## Morning recipe
+1. Merge PR #28 (delivers the whole milestone + learning 0009-0015 + reports)
+2. Delete the six feature/issue-* stack branches
+3. Triage PR #34 (claude.ai cloud session artifact, unreviewed)

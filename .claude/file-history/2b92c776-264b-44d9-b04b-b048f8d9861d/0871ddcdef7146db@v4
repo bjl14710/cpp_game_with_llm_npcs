@@ -1,0 +1,139 @@
+# Plan: Detail the town — enterable buildings, interiors, a real jail cell
+
+## Context
+
+The city today is a set of **solid** axis-aligned boxes (`City::makeDowntown`
+in src/core/City.cpp): you can walk up to a shop but never inside, every
+building is one flat textured block, and an "arrest" just freezes you on the
+sidewalk outside the station. Play-testing wants the town to feel real — walk
+through a door into the library, the guitar shop, the grocery; see the
+shopkeeper standing inside; and an arrest should put you in an actual cell.
+
+Decisions locked with the user:
+1. **Hollow buildings, one seamless world** — enterable shops become wall
+   segments with a doorway gap; no separate scenes, no loading.
+2. **Auto-open doors** — a door panel swings as you approach (purely visual;
+   the gap is always physically passable).
+3. **Detail the 5 existing buildings + add a guitar shop and a grocery**, with
+   each resident standing inside their shop, plus an exterior detailing pass.
+
+## Architecture
+
+### World model (src/core/City.hpp / City.cpp)
+`Building` keeps its footprint AABB and gains interior metadata:
+- `bool enterable = false;`
+- `int doorSide = 0;` (which face holds the doorway: +Z/-Z/+X/-X)
+- `float wallThickness = 0.6f;`
+- door width is a constant (~3.5 units, wide enough for the 0.45 player radius).
+
+New: `std::vector<AABB> City::collisionBoxes()` (AABB = the 4 floats already on
+Building). Non-enterable buildings yield their single solid box (unchanged
+behavior for apartments/office/props). Enterable buildings expand into **four
+perimeter wall boxes**, with the door side split into two segments leaving the
+gap — so `circleIntersectsAny`/`resolveMovement` (src/core/City.cpp:56-75) keep
+working unchanged except they iterate `collisionBoxes()` instead of raw
+`buildings_`. The doorway gap is always open in collision; the swinging panel is
+cosmetic, and since it auto-opens on approach the player never meets a "closed"
+door they can't pass.
+
+The **jail cell**: a small fully-walled enclosure inside the police station
+(bars on the open side). Containment is handled by the existing 10 s movement
+lock (src/app/main.cpp), so the cell is collision walls + a teleport target;
+no dynamic door state needed.
+
+`makeDowntown()` is rewritten: mark bakery/police/coffee/library/hardware
+enterable, add `guitar` (music shop) and `grocery`, give each a `doorSide`
+facing its street, and shrink enterable shops to a single-story height (~5.5)
+so open interiors light cleanly. Filler apartments/office/tower stay tall and
+solid. Add a `cellAnchor()` helper (or reuse `findBuilding("police")` plus
+constants) for the jail position.
+
+### Rendering (src/app/Renderer3D.hpp / .cpp)
+- `drawBuilding` branches: non-enterable → current solid box; enterable →
+  `drawHollowBuilding` that draws the four walls (door side as two segments +
+  a lintel box above the gap), a flat **roof**, an interior **floor** patch
+  (wood/tile texture), and the back-wall **fixtures** themed per shop.
+- **Lighting for interiors**: add a dim camera-positioned fill light
+  (`GL_LIGHT1`, set each frame in `beginFrame` at `eye_`) — a subtle headlamp
+  so roofed interiors are readable without affecting daylit exteriors. Reuses
+  the existing legacy-GL lighting already set up in `init()`.
+- **Door panel**: a thin box hinged at one side of the gap; swing angle is a
+  pure function of `distance(eye_, doorCenter)` (no state) — fully open within
+  ~3 units, closed beyond ~5. Uses the same `glPushMatrix`/`glRotatef` pivot
+  pattern as `drawArm`.
+- **Detailing pass** (procedural, matches existing texture style in
+  src/app/Renderer3D.cpp:27-80): window insets (dark-glass quads proud of
+  facades), door frames, shop signs (colored header band), awnings over shop
+  fronts, plus street props drawn in `drawCity`: lamp posts, a few trees
+  (trunk cylinder + foliage box/sphere-ish), and curbs. New procedural
+  textures as needed (wood floor, foliage, shelving) via the existing
+  `makeCheckerTexture`/`makeBrickTexture` helpers.
+- **Cell bars**: a row of thin vertical boxes (steel tint) across the cell
+  opening, drawn when rendering the police interior.
+- New per-shop fixtures kept simple and themed: library = bookshelf rows;
+  guitar shop = wall-mounted guitar-shaped boxes + counter; grocery = shelf
+  rows + produce crates; bakery = display counter; coffee = bar + stools;
+  hardware = pegboard shelves.
+
+`NpcVisual` is unaffected; NPCs just get interior positions.
+
+### NPCs & personas (personas/*.persona, +1 new file)
+Reposition each resident to stand inside their shop (interior center, facing
+the door): baker→bakery, barista→coffee, librarian→library, hardware→hardware,
+musician→new guitar shop. Add **personas/grocer.persona** (a new shopkeeper)
+placed inside the grocery. Hot-dog/taxi/tourist/teacher/cop stay outdoors
+(cop at her post; arrest still routes through the station cell). Persona files
+only change `position`/`facing` (+ the new grocer); the loader and prompt are
+untouched.
+
+### Arrest → cell (src/app/main.cpp)
+The existing capture handler (the `commandReturnHome` + jail block) changes its
+teleport target from "station front" to the **cell interior**, and the
+post-sentence release teleports the player to just outside the station door.
+HUD text stays. The arresting officer still walks home.
+
+## Files
+- **src/core/City.hpp / City.cpp** — Building interior fields, `collisionBoxes()`,
+  rewritten `makeDowntown` (enterable flags, doors, new guitar+grocery, cell),
+  collision iterates collision boxes.
+- **src/app/Renderer3D.hpp / .cpp** — hollow-building + interior + door + bars
+  rendering, fill light, exterior detailing, new textures.
+- **src/app/main.cpp** — arrest teleports into the cell; release at the door.
+- **personas/*.persona** — reposition residents indoors; **personas/grocer.persona** new.
+- **tests/test_world.cpp / test_city.cpp** — see below.
+
+## Tests (offline, auto-globbed by tests/Makefile)
+- `collisionBoxes()`: an enterable building blocks its walls but a point in the
+  **doorway gap** and the **interior center** are passable; a non-enterable
+  building still blocks its whole footprint.
+- `resolveMovement` lets a path through the doorway gap reach the interior, and
+  blocks a path into a wall.
+- Update the existing "every NPC outside building walls" test
+  (tests/test_world.cpp:59) — residents now stand *inside* shops, so the
+  invariant becomes "no NPC is embedded in a collision wall" (interior centers
+  pass; this should hold by construction).
+- Jail target resolves to a point inside the police footprint and is enclosed.
+
+## Out of scope / notes
+- Interiors are lit by a simple fill light, not radiosity; shops are
+  single-story so open/roofed interiors read well.
+- Doors are visual; no lockable/closable collision.
+- No minimap or fast-travel; the world stays one continuous space.
+- NPC pathfinding is still the `resolveMovement` slide (a follower can bump a
+  doorframe); unchanged from today.
+
+## Verification
+- `make -C tests test` — full offline suite incl. new collision tests.
+- `cmake --build build -j`; relaunch (Ollama up). Walk into the library/guitar
+  shop/grocery through their doors (door swings open), see the shopkeeper
+  inside; confirm you can't walk through walls, only the doorway. Get arrested
+  (shout at a shopkeeper until the cop catches you) → you're placed in the
+  station cell behind bars for the sentence, then released at the door.
+- Screenshot exterior + an interior to sanity-check the look.
+
+## Commits (incremental, on `be_able_to_instruct_npcs`)
+1. `feat(city): hollow enterable buildings with doorway collision` (model+tests)
+2. `feat(render): interiors, doors, and town detailing`
+3. `feat(npc): move shopkeepers indoors; add grocer + guitar shop`
+4. `feat(game): arrest sends the player to a cell in the station`
+Run `/code-review` at the end (syntax + performance), no push.

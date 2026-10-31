@@ -1,0 +1,138 @@
+"""Tests for EnsembleStrategy (pure combination rule) and ensemble_weights
+(track-record weighting with floor + all-or-nothing bootstrap)."""
+import pandas as pd
+import pytest
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+from strategies.ensemble import EnsembleStrategy
+from strategy_arena import ArenaState, ensemble_weights
+
+
+class Fixed(DailyStrategy):
+    """Test double emitting one fixed signal forever."""
+
+    def __init__(self, position: int, confidence: float, warmup: int = 2):
+        self._sig = DailySignal(position, confidence, "fixed")
+        self._warmup = warmup
+
+    @property
+    def warmup_bars(self):
+        return self._warmup
+
+    def generate_signal(self, df):
+        return self._sig
+
+
+DF = pd.DataFrame({"Close": [100, 101, 102]},
+                  index=pd.bdate_range("2024-01-02", periods=3))
+
+
+# ---------------------------------------------------------------------------
+# Combination rule
+# ---------------------------------------------------------------------------
+
+def test_agreement_combines_in_that_direction():
+    ens = EnsembleStrategy({"a": Fixed(1, 0.8), "b": Fixed(1, 0.4)},
+                           {"a": 0.5, "b": 0.5})
+    sig = ens.generate_signal(DF)
+    assert sig.position == 1
+    assert sig.confidence == pytest.approx(0.5 * 0.8 + 0.5 * 0.4)
+
+
+def test_equal_weighted_exact_disagreement_is_hold():
+    ens = EnsembleStrategy({"a": Fixed(1, 0.6), "b": Fixed(-1, 0.6)},
+                           {"a": 0.5, "b": 0.5})
+    assert ens.generate_signal(DF) is HOLD
+
+
+def test_weighted_majority_wins():
+    """Same confidences, but 'a' carries 3x the track-record weight."""
+    ens = EnsembleStrategy({"a": Fixed(-1, 0.5), "b": Fixed(1, 0.5)},
+                           {"a": 0.75, "b": 0.25})
+    sig = ens.generate_signal(DF)
+    assert sig.position == -1
+    assert sig.confidence == pytest.approx(0.75 * 0.5 - 0.25 * 0.5)
+
+
+def test_holding_constituents_do_not_dilute_the_vote():
+    """A HOLD member contributes nothing (not a zero-confidence vote)."""
+    ens = EnsembleStrategy({"a": Fixed(1, 0.5), "b": Fixed(0, 0.0)},
+                           {"a": 0.5, "b": 0.5})
+    sig = ens.generate_signal(DF)
+    assert sig.position == 1
+    assert sig.confidence == pytest.approx(0.25)
+
+
+def test_warmup_is_max_of_constituents():
+    ens = EnsembleStrategy({"a": Fixed(1, 1.0, warmup=2), "b": Fixed(1, 1.0, warmup=30)},
+                           {"a": 0.5, "b": 0.5})
+    assert ens.warmup_bars == 30
+
+
+def test_constructor_validation():
+    with pytest.raises(ValueError, match="at least one"):
+        EnsembleStrategy({}, {})
+    with pytest.raises(ValueError, match="mismatch"):
+        EnsembleStrategy({"a": Fixed(1, 1.0)}, {"b": 1.0})
+    with pytest.raises(ValueError, match="negative"):
+        EnsembleStrategy({"a": Fixed(1, 1.0)}, {"a": -0.5})
+    inner = EnsembleStrategy({"a": Fixed(1, 1.0)}, {"a": 1.0})
+    with pytest.raises(ValueError, match="nested"):
+        EnsembleStrategy({"outer": inner}, {"outer": 1.0})
+
+
+def test_single_constituent_degenerates_to_that_strategy():
+    ens = EnsembleStrategy({"solo": Fixed(-1, 0.7)}, {"solo": 1.0})
+    sig = ens.generate_signal(DF)
+    assert sig.position == -1
+    assert sig.confidence == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# ensemble_weights
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def state(tmp_path):
+    return ArenaState(str(tmp_path / "arena.db"))
+
+
+def _seed_equity_path(state, name, daily_ret, n=30, start_equity=1000.0, seed=1):
+    """Seed n equity rows compounding at daily_ret plus noise.
+
+    Noise matters: a perfectly constant return has zero volatility, and
+    compute_metrics defines Sharpe as 0 in that degenerate case — which
+    would floor every constituent identically and defeat the test.
+    """
+    import numpy as np
+
+    rng = np.random.RandomState(seed)
+    dates = pd.bdate_range("2026-03-02", periods=n)
+    rows, equity = [], start_equity
+    for d in dates:
+        equity *= (1 + daily_ret + rng.normal(0, 0.002))
+        rows.append((d.date().isoformat(), equity))
+    state.append_ledger(name, rows, [])
+
+
+def test_weights_sum_to_one_and_favor_the_better_track_record(state):
+    _seed_equity_path(state, "winner", 0.01)
+    _seed_equity_path(state, "meh", 0.001)
+    w = ensemble_weights(state, ["winner", "meh"], min_live_days=20)
+    assert sum(w.values()) == pytest.approx(1.0)
+    assert w["winner"] > w["meh"] > 0
+
+
+def test_negative_sharpe_clipped_to_floor_not_excluded(state):
+    _seed_equity_path(state, "winner", 0.01)
+    _seed_equity_path(state, "loser", -0.01)
+    w = ensemble_weights(state, ["winner", "loser"], min_live_days=20, floor=0.05)
+    assert w["loser"] > 0  # token vote survives
+    assert sum(w.values()) == pytest.approx(1.0)
+
+
+def test_bootstrap_fallback_when_any_member_is_fresh(state):
+    _seed_equity_path(state, "veteran", 0.01, n=30)
+    _seed_equity_path(state, "rookie", 0.02, n=3)  # under min_live_days
+    w = ensemble_weights(state, ["veteran", "rookie"], min_live_days=20)
+    assert w == pytest.approx({"veteran": 0.5, "rookie": 0.5})

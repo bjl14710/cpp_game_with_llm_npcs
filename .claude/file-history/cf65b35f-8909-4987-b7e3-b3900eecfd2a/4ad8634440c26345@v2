@@ -1,0 +1,33 @@
+"""Diagnostic plots for microstructure signals (scaffold).
+
+Consumed by the dashboard's microstructure panel (``app/dashboard.py``).
+Follows the dashboard's existing plotly conventions (see ``_ccf_figure`` /
+``_line`` there): one figure per function, ``height=300``-ish, tight margins.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import plotly.graph_objects as go
+
+from oil_alpha.microstructure.kyles_lambda import KylesLambdaResult
+
+
+def ofi_vs_price_figure(events: pd.DataFrame) -> go.Figure:
+    """Cumulative OFI vs microprice over the session, twin y-axes.
+
+    TODO(micro-5): cumsum(ofi) on the left axis, microprice on the right,
+    x = timestamp_ns converted to wall-clock ET. Downsample to ~5k points
+    before plotting — the full day has ~1.5M events and plotly will choke.
+    """
+    raise NotImplementedError("TODO(micro-5): see docstring")
+
+
+def lambda_stability_figure(result: KylesLambdaResult) -> go.Figure:
+    """Per-window Kyle's lambda across the session with the session aggregate.
+
+    TODO(micro-5): bar/line of LambdaWindow.lam vs window start time; windows
+    with ok=False greyed out; horizontal line at session_lambda. This is the
+    plot the rolling-window decision exists for.
+    """
+    raise NotImplementedError("TODO(micro-5): see docstring")

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0036 — Monitoring Live Strategies Statistically: Drift, Divergence, and Drawdown</title>
+<style>
+  :root { --bg:#0f1419; --panel:#161d26; --ink:#e6e1d7; --dim:#9aa4b2; --accent:#e8a33d;
+          --good:#4cc38a; --bad:#e5534b; --code-bg:#1c2530; --border:#2a3644; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#faf8f4; --panel:#ffffff; --ink:#1f2933; --dim:#5b6572; --accent:#b06f0e;
+            --good:#0e7a4f; --bad:#c0362c; --code-bg:#f0ede6; --border:#ddd6c8; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.65 Georgia, 'Times New Roman', serif; }
+  main { max-width:46rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1 { font-size:1.7rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size:1.25rem; margin:2.8rem 0 .8rem; color:var(--accent);
+       border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+  .kicker { color:var(--dim); font-size:.85rem; letter-spacing:.12em; text-transform:uppercase; }
+  .why { background:var(--panel); border-left:4px solid var(--accent); padding:.8rem 1rem;
+         margin:1.2rem 0; border-radius:0 8px 8px 0; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; overflow-x:auto; font:13.5px/1.5 'SF Mono', Menlo, Consolas, monospace; }
+  code { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:.88em;
+         background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+  pre code { background:none; padding:0; }
+  .cm { color:var(--dim); font-style:italic; }
+  .path { font-family:'SF Mono', Menlo, monospace; font-size:.8em; color:var(--dim);
+          display:block; margin-bottom:.4rem; }
+  table { border-collapse:collapse; width:100%; font-size:.92em; margin:1rem 0; }
+  th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+  th { background:var(--panel); }
+  .options { list-style:none; padding:0; }
+  .options li { background:var(--panel); border:1px solid var(--border); border-radius:8px;
+                padding:.6rem .9rem; margin:.45rem 0; cursor:pointer; }
+  .options li:hover { border-color:var(--accent); }
+  .options li.picked-right { border-color:var(--good); }
+  .options li.picked-wrong { border-color:var(--bad); }
+  .feedback { font-size:.92em; padding:.5rem .8rem; border-radius:6px; background:var(--panel); }
+  .question { margin:2rem 0; }
+  #score { font-weight:bold; }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">HFT Practice · Lesson 0036</p>
+<h1>Monitoring Live Strategies Statistically: Drift, Divergence, and Drawdown</h1>
+<div class="why"><strong>Why this matters here:</strong> the July 6 batch added three
+watchdogs to the arena — PSI drift checks (<code>drift.py</code>), the live-vs-backtest
+z-test (<code>strategy_arena.divergence_stats</code>), and the drawdown circuit breaker.
+They look unrelated, but they are one idea applied at three points in the pipeline:
+<em>is the live process still consistent with the reference I validated?</em></div>
+
+<h2 id="s1">1 · One idea, three checkpoints</h2>
+<table>
+<tr><th>Checkpoint</th><th>Question</th><th>Reference</th><th>Tool in this repo</th></tr>
+<tr><td><strong>Inputs</strong></td><td>Do the features the model sees still look like training data?</td><td>Decile histogram of each training feature</td><td>PSI — <code>drift.py</code>, <code>predict-next --check_drift</code></td></tr>
+<tr><td><strong>Outputs</strong></td><td>Are live returns consistent with what the backtest promised?</td><td>Backtest daily-return mean/std/n ("fingerprint")</td><td>One-sided z-test — <code>divergence_stats</code>, flagged in the report</td></tr>
+<tr><td><strong>Path</strong></td><td>Has the equity path lost more than I can tolerate, regardless of statistics?</td><td>Running peak since the last human sign-off</td><td>Drawdown breaker — PAUSED status, <code>arena-run resume</code></td></tr>
+</table>
+<p>Inputs can drift while outputs still look fine (the model coasts on a regime it
+half-recognizes). Outputs can diverge while inputs look normal (overfitting: same
+inputs, worse decisions). And a path can breach risk tolerance even when nothing is
+statistically "wrong" — a 2σ-consistent losing streak still loses money. Three
+different failure surfaces, three watchdogs. Only the path check acts autonomously
+(pausing), and even it never un-pauses itself — detection is automated, judgment is human.</p>
+
+<h2 id="s2">2 · The math, minimally</h2>
+<p><span class="path">drift.py — Population Stability Index</span></p>
+<pre><code>PSI = Σ (live%ᵢ − ref%ᵢ) · ln(live%ᵢ / ref%ᵢ)   <span class="cm"># over 10 decile bins</span>
+<span class="cm"># ref% is 1/10 per bin BY CONSTRUCTION — the edges are the training data's
+# own quantiles. Convention: &lt;0.1 fine · 0.1–0.25 moderate · &gt;0.25 flagged.</span></code></pre>
+<p><span class="path">strategy_arena.divergence_stats — one-sided z-test</span></p>
+<pre><code>z = (live_mean − bt_mean) / (bt_std / √n_live)
+<span class="cm"># Flag when z &lt; −2 after ≥20 live days. One-sided: only UNDERperformance
+# signals overfitting; outperformance is luck, not an alarm.
+# NOT a same-period shadow backtest — live and backtest share one
+# deterministic code path here, so that comparison is zero by construction
+# (lesson 0035 covers the shared-path design).</span></code></pre>
+<p>Both formulas ask "how far is the live sample from the reference, in units of
+the reference's own noise?" — PSI in distribution space, z in mean space.</p>
+
+<h2 id="s3">3 · Calibration: respect the sampling noise</h2>
+<p>The regime classifier (same batch) taught this the hard way. The plan set the
+trending/mean-reverting threshold at |lag-1 autocorrelation| &gt; 0.05. But the
+standard error of an autocorrelation estimate over 60 days is ≈ 1/√60 ≈ 0.13 —
+so <em>pure white noise</em> lands outside ±0.05 most of the time, and "neutral"
+would have been a rare label for markets with no signal at all. The shipped
+threshold is 0.15 (~1 SE). The general rule: <strong>a monitoring threshold
+tighter than the estimator's own sampling noise doesn't detect anomalies —
+it manufactures them.</strong> That's also why divergence needs
+<code>min_live_days</code> before it evaluates: with n=3, the SE is enormous and
+every strategy would flag.</p>
+
+<h2 id="s4">4 · Often confused with</h2>
+<table>
+<tr><th></th><th>Input drift (PSI)</th><th>Output divergence (z)</th><th>Drawdown breach</th></tr>
+<tr><td><strong>Detects</strong></td><td>World changed under the model</td><td>Model's edge wasn't real (overfit)</td><td>Loss exceeded tolerance</td></tr>
+<tr><td><strong>Can fire alone?</strong></td><td>Yes — outputs may still be fine</td><td>Yes — inputs may look normal</td><td>Yes — no statistical anomaly needed</td></tr>
+<tr><td><strong>Action</strong></td><td>Flag; consider retraining</td><td>Flag; human reviews the strategy</td><td>Auto-pause; human resume only</td></tr>
+</table>
+<p>Also distinct: lesson 0035's <em>train/serve skew</em> is a pipeline bug (your code
+feeds different inputs); PSI drift is the world legitimately changing while your
+pipeline is correct. Same symptom in the report, different fix.</p>
+
+<h2 id="s5">5 · Practice</h2>
+<p>Score: <span id="score">0 / 0</span></p>
+
+<div class="question" data-question>
+  <p><strong>Q1.</strong> Live Sharpe looks fine, but <code>predict-next --check_drift</code>
+  flags <code>vol_10</code> at PSI 0.4. What does that combination tell you?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="PSI measures inputs, not returns — it cannot be 'overridden' by good performance.">Nothing — good live returns mean the drift flag is a false positive</li>
+    <li data-correct="true" data-why="Exactly: the model is operating outside its training regime even though results haven't degraded YET. That's the point of monitoring inputs separately — you get the warning before the loss.">The model is running on inputs it wasn't trained for; performance may follow later</li>
+    <li data-correct="false" data-why="The breaker watches the equity path, not feature distributions — separate watchdog entirely.">The circuit breaker should have paused it already</li>
+    <li data-correct="false" data-why="Backwards — the fingerprint is for the OUTPUT divergence test. PSI's reference is the feature histograms.">The backtest fingerprint needs re-recording</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q2.</strong> Why is the divergence test one-sided (only z &lt; −2 flags)?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Two-sided would be symmetric, but the point is what the flag MEANS, not statistical convention.">Because two-sided tests need twice the sample size</li>
+    <li data-correct="true" data-why="Right — the alert exists to catch overfitting, and overfitting shows up as live UNDERperformance vs. the backtest. Outperformance is luck; alarming on it would train you to ignore the flag.">Only underperformance is evidence of overfitting; outperformance is just luck</li>
+    <li data-correct="false" data-why="The breaker handles losses in dollar terms; the z-test is about statistical consistency, and it deliberately doesn't pause anything.">Because gains can't trip the drawdown breaker anyway</li>
+    <li data-correct="false" data-why="The sign convention is a design decision, not a limitation of the z statistic.">z-scores are only defined for negative deviations</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q3.</strong> A strategy pauses at −21% drawdown. You resume it. Why does the
+  arena reset the high-water mark to the resume point instead of keeping the old peak?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="It's not about generosity — with the old peak, the very next tick re-evaluates ≤ −20% and re-pauses instantly, making resume meaningless.">To be generous and give the strategy a fresh start</li>
+    <li data-correct="true" data-why="Correct. Equity is still ~21% below the old peak, so against that anchor the breaker re-trips on the next tick. Resume is a human vote of confidence — it gets full threshold headroom measured from here.">Against the old peak it would still be past the threshold and re-pause immediately</li>
+    <li data-correct="false" data-why="The paused window is excluded from BACKFILL (since_date), which is a different mechanism from the drawdown anchor.">Because the paused window's equity rows were deleted</li>
+    <li data-correct="false" data-why="Thresholds don't accumulate slack in this design — that option was explicitly rejected in the plan as hard to reason about.">Because the threshold widens by 5% after each resume</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q4.</strong> Why did the regime classifier's neutral band move from ±0.05 to ±0.15?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Backtests weren't slow — the issue was statistical, not computational.">±0.05 made backtests too slow</li>
+    <li data-correct="false" data-why="Opposite direction — the tight band made trending/mean_reverting far too COMMON, not rare.">±0.05 made trending days too rare</li>
+    <li data-correct="true" data-why="Yes — SE of lag-1 autocorrelation at 60 samples is ≈1/√60≈0.13, so white noise exceeded ±0.05 most of the time and 'no signal' markets got gated as if they had structure. Thresholds must sit at or beyond the estimator's own noise floor.">White noise routinely exceeded ±0.05 by sampling error alone (SE ≈ 0.13 at n=60)</li>
+    <li data-correct="false" data-why="high_vol has its own separate threshold (annualized vol), checked before autocorrelation at all.">To make high_vol easier to reach</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p><strong>Q5.</strong> Which watchdog is allowed to act autonomously, and how far does its autonomy go?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Right — the breaker pauses on breach (stop digging now), but resume is exclusively `arena-run resume` by a human. Drift and divergence only ever flag.">The drawdown breaker may pause a strategy, but only a human can resume it</li>
+    <li data-correct="false" data-why="Divergence deliberately never pauses — it's a diagnostic; the breaker is the actuator.">The divergence alert pauses strategies whose z drops below −2</li>
+    <li data-correct="false" data-why="Drift flags and suggests retraining; automatic retraining was explicitly scoped out as a human decision.">The drift monitor retrains the model when PSI exceeds 0.25</li>
+    <li data-correct="false" data-why="One of them does act: the breaker pauses. Pure-flag-everything was not the design.">None — all three only write report columns</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<script>
+function shuffle(arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+let answered = 0, right = 0;
+const total = document.querySelectorAll('[data-question]').length;
+document.querySelectorAll('[data-question]').forEach(q => {
+  const list = q.querySelector('.options');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  const feedback = q.querySelector('.feedback');
+  let done = false;
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      const correct = li.dataset.correct === 'true';
+      if (!done){ answered++; if (correct) right++; done = true; }
+      li.classList.add(correct ? 'picked-right' : 'picked-wrong');
+      feedback.hidden = false;
+      feedback.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      feedback.style.color = correct ? 'var(--good)' : 'var(--bad)';
+      document.getElementById('score').textContent = right + ' / ' + answered;
+    });
+  });
+});
+</script>
+</main>
+</body>
+</html>

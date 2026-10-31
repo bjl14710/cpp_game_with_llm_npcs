@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0004 — Kyle's Lambda: Measuring Price Impact</title>
+<style>
+  :root { --bg:#fbfaf7; --ink:#1f2430; --muted:#5c6470; --accent:#0e639c; --accent2:#9c4a0e;
+          --ok:#1a7f37; --bad:#c0392b; --border:#e3ded4; --code-bg:#22262e; --code-ink:#d8dee9;
+          --kw:#7fb4e8; --str:#a3be8c; --com:#7a828e; --num:#d08770; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         background:var(--bg); color:var(--ink); line-height:1.6; }
+  .wrap { max-width:860px; margin:0 auto; padding:2rem 1.25rem 5rem; }
+  header.lesson { border-bottom:3px solid var(--accent); padding-bottom:1rem; margin-bottom:2rem; }
+  .kicker { color:var(--accent); font-weight:700; letter-spacing:.08em; text-transform:uppercase; font-size:.8rem; }
+  h1 { font-size:1.8rem; margin:.2rem 0 .4rem; line-height:1.25; }
+  .why { color:var(--muted); font-style:italic; }
+  h2 { font-size:1.3rem; margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--border); }
+  code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.88em; background:#efece4;
+         padding:.1em .35em; border-radius:4px; }
+  pre { background:var(--code-bg); color:var(--code-ink); padding:1rem 1.1rem; border-radius:8px;
+        overflow-x:auto; font-size:.84rem; line-height:1.55; }
+  pre code { background:none; padding:0; color:inherit; }
+  .kw{color:var(--kw)} .str{color:var(--str)} .com{color:var(--com)} .num{color:var(--num)}
+  .path { font-family:ui-monospace,Menlo,monospace; font-size:.82rem; background:#eef4f9;
+          color:var(--accent); border:1px solid #cfe0ec; border-radius:5px; padding:.1em .5em; }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.92rem; }
+  th,td { border:1px solid var(--border); padding:.5rem .65rem; text-align:left; }
+  th { background:#f2efe8; }
+  .scrollbox { overflow-x:auto; }
+  .formula { background:#fff; border:1.5px solid var(--border); border-radius:10px;
+             padding:.9rem 1.2rem; margin:1rem 0; font-size:1.05rem; text-align:center; }
+  .callout { background:#eef6ee; border-left:4px solid var(--ok); padding:.7rem 1rem;
+             border-radius:0 8px 8px 0; margin:1.2rem 0; }
+  .question { background:#fff; border:1.5px solid var(--border); border-radius:10px;
+              padding:1rem 1.2rem; margin:1.2rem 0; }
+  .question > p:first-child { font-weight:600; margin-top:0; }
+  .options { list-style:none; margin:.6rem 0 0; padding:0; }
+  .options li { border:1.5px solid var(--border); border-radius:8px; padding:.55rem .8rem;
+                margin:.45rem 0; cursor:pointer; font-size:.95rem; }
+  .options li:hover { border-color:var(--accent); background:#f4f9fd; }
+  .options li.right { border-color:var(--ok); background:#eef8ee; }
+  .options li.wrong { border-color:var(--bad); background:#fdeeec; }
+  .options li.locked { cursor:default; opacity:.9; }
+  .feedback { font-size:.9rem; margin:.6rem 0 0; }
+  #score { font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="lesson">
+  <div class="kicker">Lesson 0004 · HFT Trading Practice Repo</div>
+  <h1>Kyle's Lambda: Measuring Price Impact</h1>
+  <p class="why">Why this matters: this repo just measured, from real ITCH data, that ~10,000 shares of
+  net order-flow imbalance moves AAPL about 15 cents. That number — λ — is the price of demanding
+  liquidity, and it's the first genuinely microstructural alpha statistic in the codebase.</p>
+</header>
+
+<h2>1 · The concept</h2>
+<p>In Kyle's (1985) model, a market maker can't tell informed traders from noise traders, so they
+protect themselves by moving the price <em>against</em> whichever side is pressing: net buying pushes
+quotes up, net selling pushes them down, linearly:</p>
+<div class="formula">Δprice = λ · (signed order flow) + noise</div>
+<p><strong>λ is the slope</strong>: dollars of price move per share of net flow. It's estimated with
+ordinary least squares. High λ = shallow/fragile market (small flow moves price a lot; illiquid,
+or lots of informed trading). Low λ = deep market. Three practical decisions turn the idea into an
+estimator:</p>
+<ul>
+  <li><strong>What is "signed flow"?</strong> Here: summed <strong>OFI</strong> (order-flow imbalance,
+  Cont–Kukanov–Stoikov best-level definition) — depth added to the bid or consumed from the ask is
+  buying pressure (+), and vice versa. Classic alternatives sign the <em>trades</em>; OFI also counts
+  quote changes, and empirically explains mid-price moves better.</li>
+  <li><strong>What is "Δprice"?</strong> Here: the <strong>microprice</strong> change bar-close to
+  bar-close over 1-second bars — each bar is one regression observation (x = bar's OFI sum,
+  y = close-to-close microprice change), so consecutive observations telescope the price path
+  without double counting.</li>
+  <li><strong>One λ or many?</strong> Liquidity varies through the day, so this repo fits one OLS per
+  <strong>rolling window</strong> (default 5 min) plus a whole-session aggregate — and any window with
+  too few observations is flagged <code>ok=False</code> rather than silently fitted.</li>
+</ul>
+
+<h2>2 · Minimal standalone example</h2>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+rng = np.random.default_rng(<span class="num">0</span>)
+TRUE_LAMBDA = <span class="num">2e-6</span>                      <span class="com"># $ per share of net flow (ground truth)</span>
+
+flow  = rng.normal(<span class="num">0</span>, <span class="num">500</span>, <span class="num">2000</span>)       <span class="com"># signed flow per bar (shares)</span>
+dpx   = TRUE_LAMBDA * flow + rng.normal(<span class="num">0</span>, <span class="num">2e-4</span>, <span class="num">2000</span>)  <span class="com"># price change + noise</span>
+
+lam, intercept = np.polyfit(flow, dpx, <span class="num">1</span>)   <span class="com"># OLS slope = lambda-hat</span>
+<span class="fn">print</span>(<span class="str">f"recovered {lam:.2e} vs true {TRUE_LAMBDA:.2e}"</span>)
+<span class="com"># The estimator is 10 lines; the craft is in the OBSERVATIONS —</span>
+<span class="com"># what you sign, what you difference, and when you refuse to fit.</span></code></pre>
+
+<h2>3 · In this project</h2>
+<p><span class="path">src/oil_alpha/microstructure/kyles_lambda.py</span> — <code>estimate_kyles_lambda()</code>:
+events → 1-second bars (<code>groupby(timestamp_ns // 1e9)</code>: x = summed OFI, y = close-to-close
+microprice diff) → per-window OLS → <code>LambdaWindow{lam, intercept, r_squared, n_obs, ok}</code> →
+session OLS. Sparse bars telescope correctly because OFI is a per-event <em>increment</em>: a missing
+second contributes zero flow, and the next bar's close-to-close diff spans the gap.</p>
+<p><span class="path">tests/test_kyles_lambda.py</span> — the estimator is validated the same way the
+CCF sign convention was: a synthetic stream with an <em>injected</em> λ = 2.5×10⁻⁶ must be recovered
+within 5% (signal-to-noise ~25:1, so a sign flip or bar misalignment fails decisively). Plus:
+low-observation windows must report <code>ok=False</code>, and an empty frame raises.</p>
+<div class="callout"><strong>Real-day result (AAPL 2019-12-30, regular hours):</strong>
+λ = 1.48×10⁻⁵ $/share of OFI, r² = 0.61 over 23,347 one-second bars; all 78 five-minute windows fit,
+per-window λ ranging 4.8×10⁻⁶ → 2.6×10⁻⁵ (impact varies ~5× through the day — the rolling-window
+decision earning its keep). Magnitudes and r² match the Cont–Kukanov–Stoikov (2014) findings.</div>
+<p><span class="path">src/oil_alpha/microstructure/plots.py</span> — <code>lambda_stability_figure()</code>
+greys out <code>ok=False</code> windows so an illiquid stretch reads as "no evidence," not "zero impact."</p>
+
+<h2>4 · Often confused: λ (impact) vs the spread (cost)</h2>
+<div class="scrollbox"><table>
+  <tr><th></th><th>Kyle's λ — price impact</th><th>Bid-ask spread — transaction cost</th></tr>
+  <tr><td>What it prices</td><td>Moving the market: cost that <em>grows with size</em></td><td>Immediacy: fixed toll per share, any size that fits at touch</td></tr>
+  <tr><td>Who pays</td><td>Anyone trading meaningful size (and everyone after them)</td><td>Every market order, even 1 share</td></tr>
+  <tr><td>Scaling</td><td>Linear in flow: 10× size ≈ 10× move (in-model)</td><td>Constant per share</td></tr>
+  <tr><td>In this repo</td><td><code>microstructure/kyles_lambda.py</code> (measured: 1.48e-5 $/sh)</td><td><code>config.COST_MODEL</code> half-spread bp (assumed, daily layer)</td></tr>
+  <tr><td>Also confused:</td><td colspan="2"><strong>OFI vs signed trade volume</strong> — OFI counts quote/depth
+  changes too (a canceled ask is buying pressure that never traded); signed volume only counts prints.
+  And <strong>r² vs λ</strong>: λ says how hard flow moves price; r² says how much of the price move flow explains.</td></tr>
+</table></div>
+
+<h2>5 · Practice quiz</h2>
+<p>Score: <span id="score">0 / 4</span></p>
+
+<div class="question" data-question>
+  <p>Q1. Window A: λ = 2.5×10⁻⁵. Window B: λ = 5×10⁻⁶. Where is a 20,000-share buy program more expensive in impact terms?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Lower λ means deeper market — the SAME flow moves price less. B is the cheap window.">Window B — lower λ means each share does more damage</li>
+    <li data-correct="true" data-why="Impact ≈ λ × flow: A costs ≈ 20,000 × 2.5e-5 = $0.50/share of adverse move vs $0.10 in B. Execute size when λ is low.">Window A — 5× the λ, so roughly 5× the adverse price move</li>
+    <li data-correct="false" data-why="λ is exactly the quantity that differentiates them; identical cost would need identical λ.">The same — impact depends on the spread, not λ</li>
+    <li data-correct="false" data-why="r² measures explanatory power, not cost level; a window can have high r² and low λ or vice versa.">Cannot say without comparing the windows' r² first</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q2. Why does the estimator regress on bar-close-to-bar-close microprice changes rather than each bar's internal first-to-last change?</p>
+  <ul class="options">
+    <li data-correct="true" data-why="Close-to-close diffs telescope the full price path: bar k's y spans exactly the flow in bar k (since OFI increments partition events), so no price movement falls between observations. First-to-last inside a bar drops the move between bars — including the first event's own impact — biasing λ down.">Close-to-close changes partition the price path exactly against each bar's flow; intra-bar changes leak movement between bars</li>
+    <li data-correct="false" data-why="Both need two prices per observation; the computation cost is identical.">It's computationally cheaper to difference closes</li>
+    <li data-correct="false" data-why="Noise exists either way; the issue is systematic attenuation bias, not noise level.">Intra-bar changes are noisier, close-to-close is smoother</li>
+    <li data-correct="false" data-why="Backwards — close-to-close spans gaps correctly BECAUSE missing bars contribute zero flow; that's why sparse data works.">Close-to-close only works when every second has events</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q3. A 5-minute window has 4 observations and fits λ = 9×10⁻⁴ (60× the session value). What does this repo's estimator report?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Silently returning an absurd fit is exactly the failure mode the design forbids — 4 points can fit anything.">λ = 9×10⁻⁴, since the regression converged</li>
+    <li data-correct="true" data-why="n_obs=4 < min_obs=30 ⇒ ok=False: the fitted values are carried for transparency but flagged untrustworthy, and the dashboard greys the bar out.">The window with ok=False — values present but explicitly not to be trusted</li>
+    <li data-correct="false" data-why="Windows are never dropped — an invisible gap would misread as 'nothing happened' rather than 'not enough evidence'.">Nothing — under-populated windows are removed from the result</li>
+    <li data-correct="false" data-why="The estimator never substitutes values — that would fabricate agreement with the session estimate.">The session λ, substituted as the window's best estimate</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p>Q4. Session r² = 0.61. What does the other 39% of microprice variance represent?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="0.61 for a one-variable linear model of 1-second price changes is strikingly HIGH — the paper this follows reports similar values as a headline result.">Evidence the linear model failed and λ is meaningless</li>
+    <li data-correct="true" data-why="Price also moves on things best-level OFI doesn't see: deeper-book changes, news, cross-asset information, discreteness. λ remains a valid impact slope; r² honestly bounds what flow alone explains.">Price movement driven by information and book changes that best-level OFI doesn't capture</li>
+    <li data-correct="false" data-why="The estimator's numerics are exact for OLS; r² < 1 is a property of markets, not of float arithmetic.">Numerical error accumulated across 23,347 bars</li>
+    <li data-correct="false" data-why="More windows change granularity, not the session-level share of variance explained by flow.">Variance that would disappear with shorter windows</li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6 · Check your understanding</h2>
+<p><strong>Scenario:</strong> Your intraday λ plot shows λ tripling in the last 30 minutes of every
+session. Give one liquidity-based explanation and one estimator-based suspicion you'd check first.
+<em>(Liquidity: end-of-day inventory unwinding and thinner books make impact genuinely higher.
+Estimator: check n_obs and the ok flags for those windows — if closing-auction message patterns cut
+the observation count, you may be trusting fits the design says to distrust.)</em></p>
+
+<script>
+(function () {
+  "use strict";
+  var right = 0;
+  var qs = document.querySelectorAll("[data-question]");
+  function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+  qs.forEach(function (q) {
+    var list = q.querySelector(".options");
+    shuffle(Array.prototype.slice.call(list.children)).forEach(function(li){ list.appendChild(li); });
+    var fb = q.querySelector(".feedback");
+    var done = false;
+    list.querySelectorAll("li").forEach(function (li) {
+      li.addEventListener("click", function () {
+        if (done) return;
+        done = true;
+        var ok = li.dataset.correct === "true";      // attribute, never position
+        if (ok) right++;
+        li.classList.add(ok ? "right" : "wrong");
+        list.querySelectorAll("li").forEach(function (el) {
+          el.classList.add("locked");
+          if (el.dataset.correct === "true") el.classList.add("right");
+        });
+        fb.hidden = false;
+        fb.textContent = (ok ? "✓ Correct. " : "✗ Not quite. ") + li.dataset.why;
+        fb.style.color = ok ? "var(--ok)" : "var(--bad)";
+        document.getElementById("score").textContent = right + " / " + qs.length;
+      });
+    });
+  });
+})();
+</script>
+</div>
+</body>
+</html>

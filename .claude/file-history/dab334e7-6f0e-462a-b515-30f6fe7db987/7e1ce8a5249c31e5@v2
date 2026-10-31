@@ -1,0 +1,128 @@
+"""Concept drift monitoring: Population Stability Index (PSI) per feature.
+
+Compares the feature distributions a GBM model sees at inference time
+against the distributions it was trained on — the model's own inputs
+moving out of its training regime, independent of whether its predictions
+currently look right. Conventional PSI reading: < 0.1 no significant
+shift, 0.1-0.25 moderate, > 0.25 significant (the default flag line here).
+
+The training reference is stored ADDITIVELY in the model bundle as
+``bundle["feature_reference"] = {feature: [decile edges]}`` at
+``paper_trading_sim --save_model`` time. Bundles saved before this feature
+simply lack the key and drift checks degrade to a clear skip — every
+existing bundle in models/ keeps loading exactly as before.
+
+See .claude/plans/concept-drift-monitoring.md.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Dict, List
+
+import numpy as np
+import pandas as pd
+
+#: Laplace-style smoothing so an empty bin never yields log(0)/division by zero.
+_EPS = 1e-4
+
+
+def compute_reference(train_df: pd.DataFrame, feat_cols: List[str],
+                      n_bins: int = 10) -> Dict[str, List[float]]:
+    """Quantile bin edges per feature from the training frame.
+
+    Args:
+        train_df: The training feature frame (same one the model fit on).
+        feat_cols: Feature columns to fingerprint — the bundle's "features".
+        n_bins: Number of quantile bins (deciles by default). Edges returned
+            are the n_bins-1 INTERIOR cut points; binning at check time uses
+            (-inf, e1], (e1, e2], ..., (e9, +inf) so live values outside the
+            training range still land in the outermost bins.
+
+    Returns:
+        {feature: [interior edges]} for every feature present in train_df.
+        Constant features get an empty edge list (PSI 0 by convention —
+        there is no distribution to shift).
+    """
+    reference: Dict[str, List[float]] = {}
+    quantiles = [i / n_bins for i in range(1, n_bins)]
+    for col in feat_cols:
+        if col not in train_df.columns:
+            continue
+        values = pd.to_numeric(train_df[col], errors="coerce").dropna()
+        if values.empty:
+            reference[col] = []
+            continue
+        edges = sorted(set(float(values.quantile(q)) for q in quantiles))
+        if len(edges) <= 1 and values.nunique() <= 1:
+            edges = []  # constant feature: no distribution to compare
+        reference[col] = edges
+    return reference
+
+
+def psi(ref_edges: List[float], live_values: pd.Series) -> float:
+    """Population Stability Index of live values vs. the reference deciles.
+
+    The reference population is uniform across bins BY CONSTRUCTION (the
+    edges are its own quantiles), so ref_pct is 1/n_bins per bin; live
+    values are binned against the same edges. Smoothed with a small epsilon
+    so empty bins never divide by zero.
+    """
+    if not ref_edges:
+        return 0.0  # constant training feature: PSI 0 by convention
+    values = pd.to_numeric(live_values, errors="coerce").dropna()
+    if values.empty:
+        return 0.0
+    n_bins = len(ref_edges) + 1
+    ref_pct = 1.0 / n_bins
+    bins = np.searchsorted(np.asarray(ref_edges, dtype=float), values.to_numpy(), side="right")
+    counts = np.bincount(bins, minlength=n_bins).astype(float)
+    live_pct = counts / counts.sum()
+    total = 0.0
+    for i in range(n_bins):
+        lp = max(live_pct[i], _EPS)
+        rp = max(ref_pct, _EPS)
+        total += (lp - rp) * math.log(lp / rp)
+    return float(total)
+
+
+@dataclass
+class DriftReport:
+    """Per-feature PSI plus the flagged subset."""
+
+    psi_by_feature: Dict[str, float] = field(default_factory=dict)
+    flagged: List[str] = field(default_factory=list)
+    threshold: float = 0.25
+
+    @property
+    def overall_flagged(self) -> bool:
+        """True when any feature crossed the significant-shift line."""
+        return bool(self.flagged)
+
+
+def check_drift(feature_reference: Dict[str, List[float]] | None,
+                live_feats: pd.DataFrame,
+                threshold: float = 0.25) -> DriftReport | None:
+    """PSI every referenced feature against the day's pooled live values.
+
+    Args:
+        feature_reference: ``bundle.get("feature_reference")`` — None for
+            bundles saved before this feature (returns None: nothing to
+            check, caller prints a skip notice).
+        live_feats: Live feature rows pooled across tickers for the day —
+            PSI needs a distribution, not a single point, which is why the
+            check runs once per day over all tickers rather than per ticker.
+        threshold: Flag line (default 0.25, the conventional significant-
+            shift boundary).
+    """
+    if not feature_reference:
+        return None
+    report = DriftReport(threshold=threshold)
+    for feature, edges in feature_reference.items():
+        if feature not in live_feats.columns:
+            continue  # feature absent live today — excluded, noted by caller
+        value = psi(edges, live_feats[feature])
+        report.psi_by_feature[feature] = value
+        if value > threshold:
+            report.flagged.append(feature)
+    return report

@@ -1,0 +1,180 @@
+"""Tests that connector wires stay glued to block ports when blocks move.
+
+Regression coverage for the bug where wires were drawn once at creation
+(and refreshed only during wire-drawing gestures), so dragging a block —
+or moving it programmatically with setPos() — left stale wire geometry
+behind: the line stayed at the block's old position.
+
+The fix routes ItemPositionHasChanged from BaseBlock.itemChange to
+CanvasScene.update_wires_for_block, so wires track continuously during a
+drag, not just after release.
+"""
+from __future__ import annotations
+import pytest
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtWidgets import QApplication, QGraphicsScene
+
+from silmulator.gui.blocks.oscilloscope_block import OscilloscopeBlock
+from silmulator.gui.canvas import CanvasScene, CanvasView, WireItem
+
+
+@pytest.fixture
+def scene(qapp):
+    return CanvasScene()
+
+
+def _wire_endpoints(wire: WireItem) -> tuple:
+    return wire.line().p1(), wire.line().p2()
+
+
+def _assert_wire_on_ports(wire: WireItem) -> None:
+    """The wire's line must sit exactly on its ports' live scene positions."""
+    p1, p2 = _wire_endpoints(wire)
+    assert p1 == wire.src_port.scenePos(), (
+        f"wire start {p1} detached from src port {wire.src_port.scenePos()}"
+    )
+    assert p2 == wire.dst_port.scenePos(), (
+        f"wire end {p2} detached from dst port {wire.dst_port.scenePos()}"
+    )
+
+
+def _connect(scene: CanvasScene, src_block, dst_block,
+             src_idx: int = 0, dst_idx: int = 0) -> WireItem:
+    wire = scene.connect_ports(src_block.ports[src_idx], dst_block.ports[dst_idx])
+    assert isinstance(wire, WireItem)
+    return wire
+
+
+def test_setpos_moves_wire_with_source_block(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    wire = _connect(scene, osc, psu)
+
+    osc.setPos(QPointF(-200, 300))
+
+    _assert_wire_on_ports(wire)
+
+
+def test_setpos_moves_wire_with_destination_block(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    wire = _connect(scene, osc, psu)
+
+    psu.setPos(QPointF(900, -150))
+
+    _assert_wire_on_ports(wire)
+
+
+def test_all_wires_on_a_block_update_not_just_first(scene):
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    fgen = scene.add_block("Function Generator", QPointF(0, 500))
+    wire_a = _connect(scene, osc, psu, src_idx=0)
+    wire_b = _connect(scene, osc, fgen, src_idx=1)
+
+    osc.setPos(QPointF(250, 250))
+
+    _assert_wire_on_ports(wire_a)
+    _assert_wire_on_ports(wire_b)
+
+
+def test_both_endpoint_blocks_moved_together(scene):
+    """Multi-select drag equivalent: both endpoints move, wire tracks both."""
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    wire = _connect(scene, osc, psu)
+
+    osc.setPos(osc.pos() + QPointF(120, 80))
+    psu.setPos(psu.pos() + QPointF(120, 80))
+
+    _assert_wire_on_ports(wire)
+
+
+def test_delete_block_via_context_menu_action_removes_wires(scene):
+    """BaseBlock._delete_block must clean up wires and registries, not
+    leave a dangling wire pointing at a removed block."""
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    _connect(scene, osc, psu)
+
+    osc._delete_block()
+
+    assert osc.block_id not in [b.block_id for b in scene.blocks]
+    assert scene._wires == {}
+    assert not any(isinstance(i, WireItem) for i in scene.items())
+    assert psu.ports[0].connected_to is None
+
+
+def test_setpos_before_scene_add_does_not_raise(qapp):
+    """itemChange fires for setPos() while the block has no scene yet
+    (add_block positions blocks before addItem) — must not raise."""
+    block = OscilloscopeBlock()
+    block.setPos(QPointF(100, 100))
+    assert block.scene() is None
+
+
+def test_block_in_plain_qgraphicsscene_is_safe(qapp):
+    """A block hosted outside CanvasScene (no update_wires_for_block, no
+    remove_block) must still move and delete without raising."""
+    plain = QGraphicsScene()
+    block = OscilloscopeBlock()
+    plain.addItem(block)
+
+    block.setPos(QPointF(50, 75))
+    assert block.scenePos() == QPointF(50, 75)
+
+    block._delete_block()
+    assert block not in plain.items()
+
+
+# ---------------------------------------------------------------------------
+# Real mouse-drag path through the view: the wire must track the block
+# continuously DURING the drag and sit exactly on the port after release.
+# The pre-fix behavior updated wires before the block moved (one move-event
+# lag) and never on release, leaving the wire detached by the last step.
+# ---------------------------------------------------------------------------
+
+
+def _send_mouse(view: CanvasView, etype: QEvent.Type, scene_pos: QPointF,
+                button: Qt.MouseButton, buttons: Qt.MouseButton) -> None:
+    """Deliver a synthetic mouse event to the view's viewport, the same way
+    a real click arrives (view → scene), in viewport coordinates."""
+    viewport = view.viewport()
+    view_pt = view.mapFromScene(scene_pos)
+    event = QMouseEvent(
+        etype, QPointF(view_pt), QPointF(viewport.mapToGlobal(view_pt)),
+        button, buttons, Qt.KeyboardModifier.NoModifier,
+    )
+    QApplication.sendEvent(viewport, event)
+
+
+def test_mouse_drag_keeps_wire_on_port_during_and_after_drag(scene, qapp):
+    view = CanvasView(scene)
+    view.resize(1200, 800)
+    view.show()
+
+    osc = scene.add_block("Oscilloscope", QPointF(0, 0))
+    psu = scene.add_block("Power Supply", QPointF(500, 0))
+    wire = _connect(scene, osc, psu)
+    view.centerOn(QPointF(350, 100))
+
+    # Grab the PSU by its title bar (away from any port).
+    grab = psu.scenePos() + QPointF(psu.BLOCK_WIDTH / 2, 8)
+    _send_mouse(view, QEvent.Type.MouseButtonPress, grab,
+                Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+
+    for step in range(1, 5):
+        _send_mouse(view, QEvent.Type.MouseMove,
+                    grab + QPointF(30 * step, 20 * step),
+                    Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton)
+        # Continuous tracking: after every intermediate move event the
+        # wire must already sit on the port — not one event behind.
+        _assert_wire_on_ports(wire)
+
+    _send_mouse(view, QEvent.Type.MouseButtonRelease, grab + QPointF(120, 80),
+                Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton)
+
+    assert psu.pos() != QPointF(500, 0), "drag did not move the block"
+    _assert_wire_on_ports(wire)
+    view.close()

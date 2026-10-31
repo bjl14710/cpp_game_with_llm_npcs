@@ -1,0 +1,25 @@
+{
+  "state": "failed",
+  "detail": "SIGKILL (137) before init",
+  "tempo": "idle",
+  "output": null,
+  "children": null,
+  "linkScanOffset": 0,
+  "template": "claude",
+  "respawnFlags": [
+    "--agent",
+    "claude",
+    "--permission-mode",
+    "auto"
+  ],
+  "intent": "please continue",
+  "sessionId": "f8807219-77e0-4a97-8f75-65412aa1f935",
+  "resumeSessionId": "f8807219-77e0-4a97-8f75-65412aa1f935",
+  "daemonShort": "f8807219",
+  "cwd": "/Users/brandonlee/development/repos/products/HFT_Trading_Practice_Repo",
+  "createdAt": "2026-07-07T07:00:29.731Z",
+  "updatedAt": "2026-07-07T07:00:49.592Z",
+  "firstTerminalAt": "2026-07-07T07:00:49.592Z",
+  "originCwd": "/Users/brandonlee/development/repos/products/HFT_Trading_Practice_Repo",
+  "backend": "daemon"
+}

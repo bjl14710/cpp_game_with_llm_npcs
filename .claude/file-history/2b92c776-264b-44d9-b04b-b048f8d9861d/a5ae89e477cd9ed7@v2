@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+body = (
+    "Five KayKit adventurers with name-resolved clips (Idle/Walking_A/Cheer); stable "
+    "index->variant mapping, Knight for police. Per-entity animation clocks share one "
+    "model via CPU skinning applied before each draw; walking detected from per-frame "
+    "position deltas. Uniform 1.8-unit height, feet grounded.\n\n"
+    "**Findings fixed:** raylib 5.5 CPU skinning segfaults on the packs' unskinned "
+    "attachment meshes (null boneWeights) — compacted out at load, v1 characters are "
+    "bare-handed; unattended smoke runs accumulated GetMouseDelta noise — --frames "
+    "runs now use a fixed plaza-facing camera.\n\n"
+    "**Verified:** 120-frame screenshot shows characters standing in the plaza at "
+    "correct scale beside the taxi and storefronts. Suite green (96).\n\n"
+    "**Stack position:** bases on #47. Merge in order.\n\n"
+    "Closes #38\n\n---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+for attempt in range(3):
+    try:
+        pr = repo.create_pull(
+            title="feat(render): animated glTF characters for NPCs",
+            body=body, head="feature/issue-38-raylib-characters",
+            base="feature/issue-37-raylib-city-scene", draft=True)
+        print(f"PR #{pr.number}: {pr.html_url}")
+        break
+    except GithubException as e:
+        print(f"attempt {attempt+1}: {e.status}")
+        time.sleep(5)
+
+issue = repo.get_issue(38)
+issue.remove_from_labels("ai-in-progress")
+issue.add_to_labels("ai-completed")
+issue.create_comment(f"Implemented. Draft PR: #{pr.number} — closes on merge.")
+print("issue 38 ai-completed")

@@ -1,0 +1,19 @@
+# Checkpoint
+Session: 2026-07-07 "July 6 ideas" pipeline
+Status: COMPLETE
+Branch: feature/july6-batch (PR #63, stacked on #53 → #52)
+Issues: #54–#62 all implemented, one commit each, labeled ai-completed
+Tests: 193 passed (67 new); suite green after every commit
+Learning: lessons/0036 + drills/0007 (statistical strategy monitoring), index rebuilt
+Side quest: cpp_game_with_llm_npcs PR #56 conflict resolved (merged main in,
+  127 tests + full build verified, pushed; now mergeable:true). Leftover
+  build_merge_check/ scratch dir there.
+Deviations documented in OVERNIGHT_REPORT.md: resume-anchor (breaker),
+  regime neutral band ±0.15, HOLD-gap cost simplification.
+Follow-up candidates: costs into simulate_walkforward/paper_trading_sim,
+  Kelly sizing from blotter, arena --stress wiring, drift in GBMStrategy live.
+
+## Prior sessions
+- 2026-07-05: arena strategy layer + orchestrator (PRs #52, #53), lesson 0035
+- 2026-06-30: PWA batch #42-#46 (PRs #47-#51)
+- 2026-06-28: intraday batch (PRs #34-#41)

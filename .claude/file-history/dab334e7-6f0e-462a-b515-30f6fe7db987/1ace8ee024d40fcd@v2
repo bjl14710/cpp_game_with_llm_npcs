@@ -1,0 +1,170 @@
+"""Tests for the Strategy Arena daily-strategy layer.
+
+One stub per strategy behaviour promised in .claude/plans/strategy-arena.md
+(plan steps 1-3). All stubs are skipped until the implementations land —
+the suite stays green on the scaffold. No live API calls: every test uses
+synthetic OHLCV frames built in-process.
+"""
+import numpy as np
+import pandas as pd
+import pytest
+
+from strategies.daily import HOLD, DailySignal, DailyStrategy
+from strategies.registry import available_strategies, get_strategy
+
+SKIP_REASON = "scaffold: strategy not implemented yet"
+
+
+def make_ohlcv(closes, opens=None, highs=None, lows=None) -> pd.DataFrame:
+    """Build a date-indexed OHLCV frame from close prices (fetch_history shape)."""
+    closes = list(closes)
+    n = len(closes)
+    opens = list(opens) if opens is not None else closes
+    highs = list(highs) if highs is not None else [max(o, c) * 1.01 for o, c in zip(opens, closes)]
+    lows = list(lows) if lows is not None else [min(o, c) * 0.99 for o, c in zip(opens, closes)]
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    return pd.DataFrame(
+        {"Open": opens, "High": highs, "Low": lows, "Close": closes, "Volume": [1000] * n},
+        index=idx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Interface contract
+# ---------------------------------------------------------------------------
+
+def test_hold_sentinel_is_flat():
+    """The shared HOLD sentinel is position 0 with zero confidence."""
+    assert HOLD.position == 0
+    assert HOLD.confidence == 0.0
+
+
+def test_registry_lists_all_four_strategy_types():
+    """Acceptance: all 4 strategy types are selectable by CLI name."""
+    assert available_strategies() == ["engulfing", "gbm", "meanrev", "technical"]
+
+
+def test_registry_unknown_name_lists_options():
+    """Unknown names raise a KeyError that names the valid choices."""
+    with pytest.raises(KeyError, match="engulfing"):
+        get_strategy("nope")
+
+
+# ---------------------------------------------------------------------------
+# DailyEngulfingStrategy (adapter over the intraday EngulfingStrategy)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_engulfing_daily_bullish():
+    """Red bar then engulfing green bar on daily closes -> position +1.
+
+    Same pattern as tests/test_engulfing.py::test_bullish_engulf, expressed
+    as the last two rows of a daily history frame.
+    """
+    df = make_ohlcv(closes=[100, 100, 106], opens=[100, 105, 99])
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == 1
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_engulfing_daily_bearish():
+    """Green bar then engulfing red bar -> position -1."""
+    df = make_ohlcv(closes=[100, 105, 99], opens=[100, 100, 106])
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == -1
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_engulfing_daily_no_pattern_is_hold():
+    """Acceptance edge case: no valid 2-candle pattern -> hold, not error."""
+    df = make_ohlcv(closes=[100, 101, 102], opens=[99, 100, 101])  # steady greens
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == 0
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_engulfing_daily_insufficient_history_is_hold():
+    """Fewer bars than warmup_bars -> hold with a logged reason, no crash."""
+    df = make_ohlcv(closes=[100])
+    sig = get_strategy("engulfing").generate_signal(df)
+    assert sig.position == 0
+
+
+# ---------------------------------------------------------------------------
+# TechnicalStrategy (RSI + MACD + MA crossover)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_technical_uptrend_goes_long():
+    """Sustained uptrend (fast MA > slow MA, MACD positive, RSI < 70) -> +1."""
+    closes = list(np.linspace(100, 130, 80))  # smooth 80-bar uptrend
+    sig = get_strategy("technical").generate_signal(make_ohlcv(closes))
+    assert sig.position == 1
+    assert sig.confidence > 0
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_technical_downtrend_goes_short():
+    """Mirror condition on a sustained downtrend -> -1."""
+    closes = list(np.linspace(130, 100, 80))
+    sig = get_strategy("technical").generate_signal(make_ohlcv(closes))
+    assert sig.position == -1
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_technical_flat_series_is_hold():
+    """No trend, conflicting indicators -> hold."""
+    closes = [100.0] * 80
+    sig = get_strategy("technical").generate_signal(make_ohlcv(closes))
+    assert sig.position == 0
+
+
+# ---------------------------------------------------------------------------
+# MeanReversionStrategy (z-score fade + breakout override)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_meanrev_buys_the_dip():
+    """A sharp drop pushing z below -entry_z -> +1 (fade the move)."""
+    closes = [100 + np.sin(i) for i in range(60)] + [92.0]  # sudden dip
+    sig = get_strategy("meanrev").generate_signal(make_ohlcv(closes))
+    assert sig.position == 1
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_meanrev_breakout_overrides_fade():
+    """A close above the 55-bar high is a breakout long, not a short fade."""
+    closes = list(np.linspace(100, 101, 60)) + [115.0]  # explosive new high
+    sig = get_strategy("meanrev").generate_signal(make_ohlcv(closes))
+    assert sig.position == 1
+    assert "breakout" in sig.reason
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_meanrev_flat_series_zero_std_is_hold():
+    """Rolling std ~0 must not divide by zero -> hold."""
+    closes = [100.0] * 60
+    sig = get_strategy("meanrev").generate_signal(make_ohlcv(closes))
+    assert sig.position == 0
+
+
+# ---------------------------------------------------------------------------
+# GBMStrategy (model-bundle adapter)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_gbm_adapter_signals_from_tiny_bundle(tmp_path):
+    """Adapter loads a bundle and emits sign(pred) / abs(pred) / reason.
+
+    Train a throwaway 5-tree GradientBoostingRegressor on synthetic features
+    in-test, joblib.dump it to tmp_path as {"model", "features"}, then assert
+    generate_signal returns position in {-1, 0, 1}, confidence >= 0, and a
+    reason containing the predicted return. No shipped model, no network.
+    """
+    raise NotImplementedError
+
+
+@pytest.mark.skip(reason=SKIP_REASON)
+def test_gbm_adapter_nan_features_is_hold(tmp_path):
+    """History shorter than the feature warmup (NaN features) -> hold."""
+    raise NotImplementedError

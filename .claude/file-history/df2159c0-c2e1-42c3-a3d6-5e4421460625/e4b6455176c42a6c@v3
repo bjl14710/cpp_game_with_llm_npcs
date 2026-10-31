@@ -1,0 +1,183 @@
+# Plan: Intraday Candlestick Strategy Engine (Engulfing v1)
+Date: 2026-06-28
+Status: READY FOR IMPLEMENTATION
+Estimated complexity: L
+
+## The Idea (one paragraph)
+Add an intraday day-trading strategy layer to the existing algo trading platform,
+starting with the Bullish/Bearish Engulfing pattern. The system downloads intraday
+OHLCV bars (5-minute default) via yfinance, detects engulfing signals bar-by-bar, and
+simulates trades with configurable position sizing, stop-loss, and take-profit on paper
+money. A strategy base class makes it straightforward to add new candlestick or other
+intraday patterns later without rewriting the simulation engine. Paper testing runs over
+weeks or months of historical intraday data before any real-money connection is made.
+
+## Goal
+A user can run `intraday-sim --strategy engulfing --tickers AAPL,MSFT --interval 5m
+--start 2026-01-01` and get a paper P&L report showing how the engulfing strategy
+would have performed intraday, with per-trade log and equity curve CSV.
+
+## Out of Scope (this version)
+- Live / real-money execution (Robinhood connection for this strategy comes later)
+- Intraday ML signal (the GBM model stays on daily bars for now)
+- GUI or web UI integration (add after the CLI is validated)
+- Anything under 5-minute bars (yfinance 1m data is only 7 days; 5m covers ~60 days)
+- Combining engulfing signal with the existing GBM score (future work)
+- Any second candlestick pattern beyond engulfing (designed for, not built)
+
+---
+
+## Ticket Triage — All 23 Open Issues
+
+### Implementing in this plan
+| # | Title | Notes |
+|---|-------|-------|
+| NEW | Engulfing intraday strategy | Core new feature described in this plan |
+
+### Implementing as companion GitHub issues (actionable, no blockers)
+| # | Title | Notes |
+|---|-------|-------|
+| #26 | Morning runner / pipeline | Wire retrain → predict → execute on a schedule |
+| #6  | Shorting option | Add short signal path to engulfing engine (paper only first) |
+| #9  | NASDAQ ticker file creator | Extend universe_builder; risk filter for micro-caps |
+| #10 | Date-range return checker | Add `--start` display to equity report alongside Robinhood |
+| #4  | Make Robinhood run continuously | Wrap executor in a loop with sleep-until-market-open |
+| #5  | Crypto attachment | yfinance supports BTC-USD etc.; add ticker-type flag |
+| #23 | Document scripts | Auto-generate with pdoc or write DEVELOPER_GUIDE addendum |
+| #28 | Refine web app + Robinhood | Depends on #26 being stable; do after morning runner is tested |
+
+### Skipped — prerequisites not met or already done
+| # | Title | Why skipped |
+|---|-------|-------------|
+| #7  | S&P 500 ticker creator | **Already done** — `scripts/universe_builder.py` + `refresh-tickers` entry point exist |
+| #16 | Research Docker | **Already done** — `docker-compose.yml`, `Dockerfile`, `Dockerfile.gui` all exist |
+| #21 | Ensure uv is working | **Already done** — `uv sync` is the documented install path in CLAUDE.md |
+| #8  | Get RDP working | **Requires hardware/OS config** — not a code change; set up manually on the host machine |
+| #17 | App Store deployment | **Requires Apple Developer account** ($99/yr enrollment) before any code can be submitted |
+| #19 | Cloud hosting | **Requires cloud account + infra decision** (AWS/GCP/Fly); needs to happen after #26 is proven stable |
+| #20 | Look into licenses | **Human decision required** — MIT is the obvious choice for open-source; nothing to code |
+| #18 | Cybersecurity measures | **Explicitly gated** — ticket says "only if the project is shared"; do after #19 |
+| #11 | Research finance news | **Research only** — no code until a specific feed and integration point are chosen |
+| #12 | Research tech news | Same as #11 |
+| #13 | Research trend topics | Same as #11 |
+| #14 | Oil drum example | **No spec** — needs a data source and a concrete prediction target before it can be built |
+| #15 | List of 5–10 strategies | Research / reading list; punt until the candlestick engine has a few strategies in it |
+| #22 | Look into C++ / Rust | **Investigation task** — do after performance profiling shows Python is the bottleneck |
+| #24 | Investigate C++ model deployment | **Investigation task** — `gradient_boosting/` directory exists; flesh out after the daily model is stable |
+
+---
+
+## Affected Areas
+
+- `strategies/__init__.py` — new package
+- `strategies/base.py` — `BaseStrategy` ABC with `generate_signals(df) -> pd.DataFrame`
+- `strategies/engulfing.py` — Bullish/Bearish Engulfing detector + signal dataclass
+- `strategies/paper_engine.py` — intraday paper simulation loop (bar-by-bar replay)
+- `intraday_sim.py` — CLI entry point (`intraday-sim`)
+- `pyproject.toml` — register `intraday-sim` script entry point, add `py-modules` entry
+- `tests/test_intraday_sim.py` — unit tests for signal detection and engine math
+- `tests/test_engulfing.py` — pattern-specific tests with synthetic OHLCV fixtures
+
+New files needed:
+- `strategies/` (directory + 4 files above)
+- `intraday_sim.py`
+- `tests/test_intraday_sim.py`
+- `tests/test_engulfing.py`
+
+---
+
+## Implementation Order
+
+1. **`strategies/base.py`** — define `BaseStrategy` ABC and `Signal` dataclass (BUY / SELL / HOLD, bar index, price). Nothing runs yet but the contract is set.
+
+2. **`strategies/engulfing.py`** — implement `EngulfingStrategy(BaseStrategy)`:
+   - `detect(prev, curr)` → `Signal` — pure function, easy to unit test
+   - Bullish: prev is red (open > close), curr is green (close > open), curr engulfs prev body entirely
+   - Bearish: opposite direction
+   - No lookahead: only prev and curr bar are used
+
+3. **`tests/test_engulfing.py`** — 8+ synthetic OHLCV rows covering:
+   - Classic bullish engulf → BUY signal
+   - Classic bearish engulf → SELL signal
+   - Partial overlap (not engulfing) → HOLD
+   - Doji candles (tiny bodies) → HOLD
+   - Same-direction candles → HOLD
+   All tests use hard-coded DataFrames; no network calls.
+
+4. **`strategies/paper_engine.py`** — bar-by-bar replay engine:
+   - Accepts any `BaseStrategy` instance + intraday DataFrame
+   - Manages one open position at a time (flat → long or short → flat)
+   - Configurable: `position_dollars`, `stop_loss_pct`, `take_profit_pct`
+   - Closes position at end of session regardless (no overnight holds)
+   - Returns per-trade log DataFrame and equity curve Series
+
+5. **`tests/test_intraday_sim.py`** — engine tests with synthetic bar sequences:
+   - Signal fires → position opens at next bar open
+   - Stop-loss hit → position closes at stop price
+   - Take-profit hit → closes at TP price
+   - End-of-session force-close
+   - Equity math correct (no lookahead into close price at signal bar)
+
+6. **`intraday_sim.py`** — CLI wiring:
+   - `--strategy engulfing` (default, extensible)
+   - `--tickers` / `--tickers_file`
+   - `--interval 5m` (default; also accepts `15m`, `30m`, `60m`)
+   - `--start` / `--end` date range
+   - `--position_dollars`, `--stop_loss_pct`, `--take_profit_pct`
+   - `--out_csv` for equity curve, `--trades_csv` for trade log
+   - Fetches data via `yfinance.download(..., interval=interval)` — no live feed needed
+
+7. **`pyproject.toml`** — add `intraday-sim = "intraday_sim:main"` to `[project.scripts]`, add `intraday_sim` to `py-modules`.
+
+8. **Verify full run** — `uv run intraday-sim --strategy engulfing --tickers AAPL --interval 5m --start 2026-04-01` produces a trades CSV and prints a metrics summary.
+
+---
+
+## Acceptance Criteria
+
+- [ ] `uv run pytest tests/test_engulfing.py -v` — all signal-detection tests pass with no network calls
+- [ ] `uv run pytest tests/test_intraday_sim.py -v` — all engine math tests pass with synthetic data
+- [ ] `uv run intraday-sim --strategy engulfing --tickers AAPL --interval 5m --start 2026-01-01` runs end-to-end and writes `equity.csv` and `trades.csv`
+- [ ] A bullish engulfing pattern in synthetic data produces a long position that opens at the next bar's open price, not the signal bar's close
+- [ ] A trade that hits stop-loss closes at the stop price, not worse
+- [ ] No position is held overnight — all open trades are force-closed on the last bar of each session
+- [ ] `uv run pytest tests/ -m "not exercise"` — existing test suite stays green
+
+---
+
+## Edge Cases and Error Handling
+
+| Situation | Expected behaviour |
+|-----------|--------------------|
+| yfinance returns empty DataFrame for a ticker | Skip ticker, log warning, continue with others |
+| Interval `1m` requested | Warn user that yfinance only provides ~7 days of 1m data; suggest `5m` |
+| Fewer than 2 bars in a session | No signals generated; session logged as flat |
+| Both stop-loss and take-profit triggered same bar | Stop-loss takes priority (more conservative) |
+| `position_dollars` larger than simulated cash | Clamp to available cash, log warning |
+| Ticker has a gap (market holiday mid-range) | Engine skips gap days; equity curve has no entry for those dates |
+| Short signal when `--no_short` flag set | Ignore SELL signals; only take long side |
+
+---
+
+## Open Questions
+
+None — plan is complete.
+
+**Resolved:**
+1. **Short-side day trades in paper mode** — enabled by default (paper money); `--no_short` flag to restrict to long-only.
+   - Note: "short trading" here means taking the bearish side of an intraday signal (open short, close same session). This is distinct from stock-shorting as an investment strategy (issue #6), which is a separate feature for the position-level portfolio and will be planned separately.
+2. **Session boundary definition** — derive from yfinance bar timestamps (not hard-coded NYSE hours).
+
+---
+
+## Suggested GitHub Issues
+(For `/plan-github` or manual creation; label all `ready-for-ai`)
+
+1. **Add `strategies/` package with `BaseStrategy` ABC** — base contract for all intraday strategies
+2. **Implement Bullish/Bearish Engulfing signal detector** — `strategies/engulfing.py` with unit tests
+3. **Build intraday paper simulation engine** — `strategies/paper_engine.py`, bar-by-bar replay with stop/TP/EOD close
+4. **Add `intraday-sim` CLI entry point** — wire yfinance intraday fetch + strategy + engine + CSV output
+5. **Morning runner pipeline** — issue #26: scheduled retrain → predict → execute script
+6. **Shorting option** — issue #6: add short-side path to paper engine and eventually executor
+7. **NASDAQ ticker universe builder** — issue #9: extend universe_builder for NASDAQ with micro-cap risk filter
+8. **Continuous Robinhood runner** — issue #4: wrap executor in market-hours loop

@@ -1,0 +1,175 @@
+"""Tests for regime.py — deterministic market regime classification —
+and the regime gating hook in run_strategy_walkforward."""
+import numpy as np
+import pandas as pd
+import pytest
+
+from regime import classify_regime, market_proxy_returns, regime_series_for_dates
+from strategies.candlestick_daily import DailyEngulfingStrategy
+from strategies.daily import DailySignal, DailyStrategy
+from strategies.technical import TechnicalStrategy
+from walkforward_sim import run_strategy_walkforward
+
+
+def _returns(vals):
+    idx = pd.bdate_range("2024-01-02", periods=len(vals))
+    return pd.Series(vals, index=idx)
+
+
+# ---------------------------------------------------------------------------
+# classify_regime
+# ---------------------------------------------------------------------------
+
+def test_high_vol_wins_regardless_of_autocorrelation():
+    """Huge alternating returns are strongly mean-reverting by autocorr, but
+    the vol check runs first and overrides."""
+    rets = _returns([0.05, -0.05] * 40)  # ~80% annualized vol, ac ~ -1
+    assert classify_regime(rets) == "high_vol"
+
+
+def test_trending_from_positive_autocorrelation():
+    """A persistent AR(1) process with positive coefficient -> trending."""
+    rng = np.random.RandomState(3)
+    vals = [0.001]
+    for _ in range(99):
+        vals.append(0.7 * vals[-1] + rng.normal(0, 0.002))
+    assert classify_regime(_returns(vals)) == "trending"
+
+
+def test_mean_reverting_from_negative_autocorrelation():
+    rng = np.random.RandomState(3)
+    vals = [0.001]
+    for _ in range(99):
+        vals.append(-0.7 * vals[-1] + rng.normal(0, 0.002))
+    assert classify_regime(_returns(vals)) == "mean_reverting"
+
+
+def test_neutral_when_no_signal():
+    """White noise (no autocorrelation, low vol) -> neutral.
+
+    Seed chosen so the sample autocorrelation (~-0.01) sits well inside the
+    +/-0.15 neutral band — any single white-noise draw can land outside it
+    by chance (SE ~ 0.13 at 60 samples), which is exactly why the band is
+    that wide in the first place.
+    """
+    rng = np.random.RandomState(0)
+    rets = _returns(rng.normal(0, 0.003, 100))
+    assert classify_regime(rets) == "neutral"
+
+
+def test_neutral_with_insufficient_history():
+    """Fewer bars than the trend window (and vol window) -> neutral, gates nothing."""
+    assert classify_regime(_returns([0.01, -0.02, 0.005])) == "neutral"
+    assert classify_regime(pd.Series(dtype=float)) == "neutral"
+    assert classify_regime(None) == "neutral"
+
+
+# ---------------------------------------------------------------------------
+# market_proxy_returns
+# ---------------------------------------------------------------------------
+
+def test_proxy_prefers_spy_when_present(make_ohlcv):
+    spy = make_ohlcv([100, 110, 121])         # +10% daily
+    other = make_ohlcv([100, 100, 100])       # flat
+    proxy = market_proxy_returns({"SPY": spy, "AAA": other}, end_date=spy.index[-1])
+    assert proxy.iloc[-1] == pytest.approx(0.10)
+
+
+def test_proxy_falls_back_to_cross_sectional_mean(make_ohlcv):
+    a = make_ohlcv([100, 102])   # +2%
+    b = make_ohlcv([100, 104])   # +4%
+    proxy = market_proxy_returns({"AAA": a, "BBB": b}, end_date=a.index[-1])
+    assert proxy.iloc[-1] == pytest.approx(0.03)  # mean of 2% and 4%
+
+
+def test_proxy_empty_data_returns_empty_series():
+    assert market_proxy_returns({}, end_date=pd.Timestamp("2024-01-02")).empty
+
+
+# ---------------------------------------------------------------------------
+# Gating in run_strategy_walkforward
+# ---------------------------------------------------------------------------
+
+class FireAlways(DailyStrategy):
+    """Test double that always signals — lets gating be observed directly."""
+
+    name = "fire-always"
+    compatible_regimes = frozenset({"mean_reverting", "neutral"})
+
+    def generate_signal(self, df):
+        return DailySignal(1, 1.0, "fire")
+
+
+def test_gated_days_produce_no_trades(make_ohlcv):
+    """Days labeled with an incompatible regime yield holds; compatible days trade."""
+    df = make_ohlcv([100, 101, 102, 103, 104, 105])
+    labels = ["trending", "trending", "mean_reverting", "trending", "mean_reverting", "trending"]
+    regimes = pd.Series(labels, index=df.index)
+    _, blot = run_strategy_walkforward(FireAlways(), {"AAA": df},
+                                       top_n=1, trade_cost_bps=0.0,
+                                       regime_series=regimes)
+    traded_days = set(blot["date"])
+    # bars 2 and 4 are mean_reverting AND have forward returns -> only those trade
+    assert traded_days == {df.index[2], df.index[4]}
+
+
+def test_omitting_regime_series_is_ungated(make_ohlcv):
+    """No regime series -> identical to pre-gating behavior (regression pin)."""
+    df = make_ohlcv([100, 101, 102, 103])
+    _, blot = run_strategy_walkforward(FireAlways(), {"AAA": df},
+                                       top_n=1, trade_cost_bps=0.0)
+    assert len(blot) == 2  # warmup=2 -> bars 1,2 trade; final bar has no fwd return
+
+
+def test_engulfing_is_gated_on_trending_days(make_ohlcv):
+    """The user's founding example: a 2-candle reversal must not trade in a
+    trending regime, even when its raw pattern fires."""
+    # bullish engulfing on the last-but-one bar (same fixture as its unit test)
+    df = make_ohlcv(closes=[100, 100, 106, 107], opens=[100, 105, 99, 106])
+    regimes = pd.Series(["trending"] * 4, index=df.index)
+    _, blot = run_strategy_walkforward(DailyEngulfingStrategy(), {"AAA": df},
+                                       top_n=1, trade_cost_bps=0.0,
+                                       regime_series=regimes)
+    assert blot.empty  # pattern fired, regime gate said no
+
+    # identical data, mean_reverting regime -> the same pattern trades
+    regimes_ok = pd.Series(["mean_reverting"] * 4, index=df.index)
+    _, blot_ok = run_strategy_walkforward(DailyEngulfingStrategy(), {"AAA": df},
+                                          top_n=1, trade_cost_bps=0.0,
+                                          regime_series=regimes_ok)
+    assert not blot_ok.empty
+
+
+def test_technical_is_gated_on_mean_reverting_days(make_ohlcv):
+    """TechnicalStrategy (momentum) must not trade on mean_reverting days."""
+    closes = [100 + 0.35 * i + 1.5 * np.sin(i) for i in range(80)]  # known-long fixture
+    df = make_ohlcv(closes)
+    regimes = pd.Series(["mean_reverting"] * len(df), index=df.index)
+    _, blot = run_strategy_walkforward(TechnicalStrategy(), {"AAA": df},
+                                       top_n=1, trade_cost_bps=0.0,
+                                       regime_series=regimes)
+    assert blot.empty
+
+
+def test_default_compatible_regimes_is_all_four():
+    """Base contract: unrestricted strategies trade in every regime."""
+
+    class Unrestricted(DailyStrategy):
+        name = "u"
+
+        def generate_signal(self, df):
+            return DailySignal(1, 1.0, "u")
+
+    assert Unrestricted.compatible_regimes == frozenset(
+        {"trending", "mean_reverting", "high_vol", "neutral"})
+
+
+# ---------------------------------------------------------------------------
+# regime_series_for_dates
+# ---------------------------------------------------------------------------
+
+def test_regime_series_labels_every_requested_date(make_ohlcv):
+    df = make_ohlcv([100 + i for i in range(10)])
+    series = regime_series_for_dates({"AAA": df}, list(df.index))
+    assert len(series) == 10
+    assert set(series.unique()) <= {"trending", "mean_reverting", "high_vol", "neutral"}

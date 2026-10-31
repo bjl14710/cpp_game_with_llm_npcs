@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0001 — Embedded LLMs in Game Applications</title>
+<style>
+  :root {
+    --bg: #15171c;
+    --panel: #1c1f26;
+    --panel-2: #232732;
+    --ink: #e6e8ee;
+    --ink-dim: #a4a9b6;
+    --accent: #7fb3ff;
+    --accent-2: #ffb780;
+    --good: #6dd3a6;
+    --bad: #ef6b8c;
+    --line: #2b2f3a;
+    --code-bg: #11131a;
+    --kw: #c897ff;
+    --str: #c3e88d;
+    --com: #6a7180;
+    --num: #ffcb6b;
+    --typ: #82aaff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.lesson {
+    border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 28px;
+  }
+  .crumb { color: var(--ink-dim); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+  h1 { font-size: 32px; margin: 8px 0 6px; line-height: 1.2; }
+  h2 {
+    font-size: 22px; margin: 44px 0 12px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+  p { margin: 0 0 14px; }
+  .why { color: var(--ink-dim); font-style: italic; }
+  a { color: var(--accent); }
+
+  pre, code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
+  code.inline {
+    background: var(--code-bg); color: var(--accent-2);
+    padding: 1px 6px; border-radius: 4px; font-size: 14px;
+  }
+  pre.code {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; margin: 12px 0 18px; overflow-x: auto;
+    font-size: 13.5px; line-height: 1.55;
+  }
+  pre.code .kw  { color: var(--kw); }
+  pre.code .str { color: var(--str); }
+  pre.code .com { color: var(--com); font-style: italic; }
+  pre.code .num { color: var(--num); }
+  pre.code .typ { color: var(--typ); }
+  pre.code .pp  { color: var(--accent-2); }
+
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--accent);
+    padding: 12px 16px; margin: 16px 0; border-radius: 6px;
+  }
+  .callout.warn { border-left-color: var(--accent-2); }
+  .callout h3 { margin-top: 0; color: var(--ink); }
+
+  table.compare {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    background: var(--panel); border-radius: 8px; overflow: hidden;
+  }
+  table.compare th, table.compare td {
+    text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+  }
+  table.compare th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; font-size: 13px; }
+  table.compare tr:last-child td { border-bottom: none; }
+
+  .question {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .question p.q { font-weight: 600; margin-bottom: 12px; }
+  ul.options { list-style: none; margin: 0; padding: 0; }
+  ul.options li {
+    background: var(--panel-2); margin: 8px 0; padding: 10px 14px;
+    border-radius: 6px; cursor: pointer; border: 1px solid var(--line);
+    transition: background 0.15s, border-color 0.15s;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px;
+  }
+  ul.options li:hover { background: #2a2f3b; }
+  ul.options li.picked-correct {
+    background: rgba(109, 211, 166, 0.15); border-color: var(--good);
+  }
+  ul.options li.picked-wrong {
+    background: rgba(239, 107, 140, 0.12); border-color: var(--bad);
+  }
+  ul.options li.locked { cursor: default; opacity: 0.6; }
+  .feedback {
+    margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+    background: var(--panel-2); font-size: 14px;
+  }
+  .feedback.correct { color: var(--good); }
+  .feedback.wrong   { color: var(--bad); }
+  .feedback[hidden] { display: none; }
+
+  .score-box {
+    position: sticky; top: 14px; float: right;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; color: var(--ink-dim);
+    margin-left: 16px;
+  }
+  .score-box strong { color: var(--ink); font-size: 15px; }
+
+  .progress-list { list-style: none; padding: 0; margin: 14px 0 0; }
+  .progress-list li {
+    background: var(--panel); border-radius: 6px; padding: 8px 12px; margin: 6px 0;
+    display: flex; align-items: center; gap: 10px; font-size: 14px;
+  }
+  .progress-list input[type=checkbox] { transform: scale(1.2); accent-color: var(--accent); }
+  .progress-list li.done { text-decoration: line-through; color: var(--ink-dim); }
+
+  .scenario {
+    background: var(--panel); border-left: 3px solid var(--accent-2);
+    padding: 14px 18px; border-radius: 6px; margin: 12px 0;
+  }
+  .scenario b { color: var(--accent-2); }
+
+  footer.lesson {
+    margin-top: 60px; padding-top: 18px; border-top: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-dim);
+  }
+  footer.lesson a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<aside class="score-box" id="scoreBox">Quiz: <strong id="scoreText">0 / 0</strong></aside>
+
+<header class="lesson">
+  <div class="crumb">Lesson 0001 &middot; cpp_games / docs / learning</div>
+  <h1>Embedded LLMs in Game Applications</h1>
+  <p class="why">Why this matters for <code class="inline">cpp_game_with_llm_npcs</code>: every line of dialogue your companion Wren says will come out of a model running on the player's machine. The architectural choices on this page <em>are</em> the architecture of your game.</p>
+</header>
+
+<h2>1. The concept</h2>
+
+<p>An <b>embedded LLM in a game</b> is a language model whose output is consumed by the running game process &mdash; usually to generate NPC dialogue, narrate events, or interpret freeform player input. "Embedded" here doesn't necessarily mean the model lives inside the game's <em>binary</em>; it means the game itself drives inference rather than the user opening a chatbot in another window. There are three ways to plug one in, and the choice shapes everything else.</p>
+
+<table class="compare">
+  <thead><tr><th style="width:24%">Style</th><th>What it is</th><th>Best when</th></tr></thead>
+  <tbody>
+    <tr><td><b>Cloud API</b></td><td>POST to a remote service (OpenAI, Anthropic, Inworld, Convai).</td><td>You want top quality and can require internet, payment, and trusting a third party with player prompts.</td></tr>
+    <tr><td><b>Sidecar process</b></td><td>A separate local process (Ollama, LM Studio, llamafile) hosts the model and exposes HTTP on <code class="inline">localhost</code>.</td><td>You want fully local with the smallest engineering cost. This is what we picked.</td></tr>
+    <tr><td><b>In-process library</b></td><td>The model lives in the game binary, called via a C/C++ API (<code class="inline">llama.cpp</code>, ONNX Runtime, candle, MLC-LLM).</td><td>You're ready to ship to non-technical players and own GPU detection, quantization, and threading.</td></tr>
+  </tbody>
+</table>
+
+<p>Why do this at all? Pre-LLM NPCs used <b>dialogue trees</b>: finite hand-authored graphs of <em>"if player picks option B, NPC says line 47."</em> Linear in writer-hours, canned by the second playthrough. LLM-driven NPCs trade authorial control for combinatorial breadth: the same blacksmith can answer a question no writer anticipated, in voice, because the persona prompt constrains <em>how</em> he talks rather than <em>what</em> he can say. The price is loss of guarantees &mdash; an unconstrained NPC might hallucinate a quest item, break character, or wander into real-world topics. The mitigations form a ladder of complexity:</p>
+
+<ul>
+  <li><b>Persona prompt + bounded history</b> &mdash; cheapest, what we use. Just rules and recent context.</li>
+  <li><b>Structured output</b> &mdash; force JSON with an allowed-action enum, validated with a grammar.</li>
+  <li><b>Retrieval-augmented generation (RAG)</b> &mdash; the NPC's "memory" is a searched knowledge base.</li>
+</ul>
+
+<p>Industry footprint as of mid-2026: <em>AI Dungeon</em> (2019) pioneered the pattern with cloud calls. <em>Suck Up!</em> (2023) shipped with cloud LLM NPCs. Modders shipped Skyrim and Stardew Valley LLM-NPC mods using Ollama as a local sidecar. In 2026 we now have <b>Gemma3NPC</b> &mdash; a Gemma 3 fine-tune specifically for NPC roleplay &mdash; and <b>Llama 4 Scout 9B</b> as the low-VRAM darling. No AAA title has shipped with a fully embedded local LLM yet, mainly because consumer GPU VRAM is finite and competes with the rest of the game.</p>
+
+<div class="callout">
+  <h3>Our pick for milestone 1</h3>
+  <p>Ollama sidecar serving <code class="inline">qwen2.5:3b-instruct</code> &mdash; small, fast, permissive license, and the same shape we'd swap to a 9B Gemma3NPC or Llama 4 Scout later with one config-line change.</p>
+</div>
+
+<h2>2. A minimal standalone example</h2>
+
+<p>The sidecar technique in its entirety is 15 lines. The real game just wraps this in a worker thread and a reply queue.</p>
+
+<pre class="code"><span class="pp">#include</span> <span class="str">"httplib.h"</span>   <span class="com">// single-header HTTP client</span>
+<span class="pp">#include</span> <span class="str">"json.hpp"</span>    <span class="com">// single-header JSON</span>
+<span class="kw">using</span> nlohmann::json;
+
+<span class="typ">int</span> main() {
+    <span class="com">// 1. Build the chat body. "system" = persona; "user" = player line.</span>
+    json body = {
+        {<span class="str">"model"</span>, <span class="str">"qwen2.5:3b-instruct"</span>},
+        {<span class="str">"stream"</span>, <span class="kw">false</span>},
+        {<span class="str">"messages"</span>, {
+            {{<span class="str">"role"</span>, <span class="str">"system"</span>}, {<span class="str">"content"</span>, <span class="str">"You are a gruff blacksmith. 1-2 sentences."</span>}},
+            {{<span class="str">"role"</span>, <span class="str">"user"</span>},   {<span class="str">"content"</span>, <span class="str">"Have you seen any travelers today?"</span>}},
+        }},
+    };
+
+    <span class="com">// 2. POST to Ollama on localhost. No auth — it's local.</span>
+    httplib::Client cli(<span class="str">"localhost"</span>, <span class="num">11434</span>);
+    <span class="kw">auto</span> res = cli.Post(<span class="str">"/api/chat"</span>, body.dump(), <span class="str">"application/json"</span>);
+
+    <span class="com">// 3. Ollama replies with { "message": { "role", "content" }, ... }</span>
+    <span class="kw">auto</span> parsed = json::parse(res-&gt;body);
+    std::cout &lt;&lt; parsed[<span class="str">"message"</span>][<span class="str">"content"</span>].get&lt;std::string&gt;() &lt;&lt; <span class="str">"\n"</span>;
+}</pre>
+
+<p>What this example doesn't show but a real game needs:</p>
+<ul>
+  <li><b>Async</b> &mdash; that <code class="inline">cli.Post()</code> blocks for 1&ndash;3 seconds. A 60 fps game loop can't sit on it.</li>
+  <li><b>History</b> &mdash; each NPC needs its own prior <code class="inline">messages[]</code> so context carries.</li>
+  <li><b>Bounding</b> &mdash; history grows forever otherwise. Cap to <em>N</em> recent turns.</li>
+  <li><b>Failure handling</b> &mdash; Ollama might not be running. Don't crash; surface it in character.</li>
+</ul>
+
+<h2>3. In this project</h2>
+
+<p>Each bullet above maps to a real file in your repo. The minimal example is what <code class="inline">LlmClient::processOne()</code> would look like with the production concerns ripped out.</p>
+
+<table class="compare">
+  <thead><tr><th>Concept</th><th>File</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td>HTTP POST to Ollama</td><td><code class="inline">cpp_game_with_llm_npcs/src/LlmClient.cpp</code></td><td><code class="inline">processOne()</code></td></tr>
+    <tr><td>Persona &rarr; system prompt</td><td><code class="inline">.../src/Persona.hpp</code></td><td><code class="inline">renderSystemPrompt()</code></td></tr>
+    <tr><td>Per-NPC history</td><td><code class="inline">.../src/Npc.hpp</code></td><td><code class="inline">std::vector&lt;ChatTurn&gt; history_</code></td></tr>
+    <tr><td>Bounded to 10 turns</td><td><code class="inline">.../src/Npc.cpp</code></td><td><code class="inline">trimHistory()</code></td></tr>
+    <tr><td>Async worker thread</td><td><code class="inline">.../src/LlmClient.cpp</code></td><td><code class="inline">workerLoop()</code></td></tr>
+    <tr><td>Non-blocking polling</td><td><code class="inline">.../src/LlmClient.cpp</code></td><td><code class="inline">drainReplies()</code></td></tr>
+    <tr><td>In-character failure</td><td><code class="inline">.../src/main.cpp</code></td><td>"[Wren seems distracted...]"</td></tr>
+  </tbody>
+</table>
+
+<h3>Walkthrough &mdash; the heart of LlmClient.cpp</h3>
+
+<p>This is the real function from your repo. Each comment block names the concept it implements.</p>
+
+<pre class="code"><span class="com">// SIDECAR INTEGRATION — game talks to Ollama via plain HTTP.</span>
+ChatReply LlmClient::processOne(<span class="kw">const</span> ChatRequest&amp; req) {
+    ChatReply reply;
+    reply.id = req.id;
+
+    <span class="com">// PERSONA + HISTORY — system prompt, then prior turns, then user line.</span>
+    json messages = json::array();
+    <span class="kw">if</span> (!req.systemPrompt.empty()) {
+        messages.push_back({{<span class="str">"role"</span>, <span class="str">"system"</span>}, {<span class="str">"content"</span>, req.systemPrompt}});
+    }
+    <span class="kw">for</span> (<span class="kw">const auto</span>&amp; turn : req.history) {
+        messages.push_back({{<span class="str">"role"</span>, turn.role}, {<span class="str">"content"</span>, turn.content}});
+    }
+    messages.push_back({{<span class="str">"role"</span>, <span class="str">"user"</span>}, {<span class="str">"content"</span>, req.userMessage}});
+
+    <span class="com">// stream=false → one reply at the end. Switch to true for streaming.</span>
+    json body = {
+        {<span class="str">"model"</span>, config_.model},
+        {<span class="str">"messages"</span>, messages},
+        {<span class="str">"stream"</span>, <span class="kw">false</span>},
+        {<span class="str">"options"</span>, {{<span class="str">"temperature"</span>, config_.temperature}}},
+    };
+
+    <span class="com">// FAILURE-FRIENDLY TRANSPORT — bounded timeouts so a hung Ollama</span>
+    <span class="com">// can't freeze the worker thread forever.</span>
+    httplib::Client cli(config_.host, config_.port);
+    cli.set_read_timeout(config_.requestTimeoutSeconds, <span class="num">0</span>);
+    cli.set_connection_timeout(<span class="num">5</span>, <span class="num">0</span>);
+
+    <span class="kw">auto</span> res = cli.Post(<span class="str">"/api/chat"</span>, body.dump(), <span class="str">"application/json"</span>);
+    <span class="kw">if</span> (!res) {
+        reply.errorMessage = <span class="str">"could not reach Ollama"</span>;
+        <span class="kw">return</span> reply;  <span class="com">// reply.ok stays false; UI handles it</span>
+    }
+    <span class="com">// ... parse res-&gt;body into reply.content ...</span>
+    <span class="kw">return</span> reply;
+}</pre>
+
+<h3>Walkthrough &mdash; the async drain pattern</h3>
+
+<p>This is what lets a 60 fps game loop talk to a model that takes seconds to reply. Submit from the main thread, drain from the main thread, never block.</p>
+
+<pre class="code"><span class="com">// MAIN THREAD, game loop frame N: submit and move on.</span>
+companion.ask(<span class="str">"Have you seen any travelers?"</span>);
+ui.setThinking(<span class="kw">true</span>);
+
+<span class="com">// MAIN THREAD, every frame after: empty whatever has landed.</span>
+<span class="kw">for</span> (<span class="kw">const auto</span>&amp; reply : client.drainReplies()) {
+    <span class="kw">auto</span> text = companion.onReplyArrived(reply);
+    <span class="kw">if</span> (text) ui.appendLine({Kind::Npc, <span class="str">"Wren"</span>, *text});
+    ui.setThinking(<span class="kw">false</span>);
+}</pre>
+
+<p>And the worker, the classic condition-variable consumer:</p>
+
+<pre class="code"><span class="kw">void</span> LlmClient::workerLoop() {
+    <span class="kw">while</span> (<span class="kw">true</span>) {
+        ChatRequest req;
+        {
+            std::unique_lock&lt;std::mutex&gt; lock(requestMutex_);
+            requestCv_.wait(lock, [<span class="kw">this</span>] {
+                <span class="kw">return</span> stop_.load() || !requests_.empty();
+            });
+            <span class="kw">if</span> (stop_.load() &amp;&amp; requests_.empty()) <span class="kw">return</span>;
+            req = std::move(requests_.front());
+            requests_.pop();
+        }
+        ChatReply reply = processOne(req);  <span class="com">// the slow part</span>
+        {
+            std::lock_guard&lt;std::mutex&gt; lock(replyMutex_);
+            replies_.push_back(std::move(reply));
+        }
+    }
+}</pre>
+
+<p>Two separate mutexes (one for the request queue, one for the reply list) is intentional: producer and consumer never contend, and the main thread can drain replies without ever blocking the worker mid-call.</p>
+
+<h2>4. Often confused with...</h2>
+
+<h3>Sidecar process vs. embedded library</h3>
+<p>People hear "embedded LLM" and assume the model is linked into the binary. It might be (in-process), or it might be a separate program speaking HTTP (sidecar). Both qualify as "embedded in a game" the way we use the term &mdash; what matters is that <em>your code</em> drives inference. The line between them is which process holds the model in RAM.</p>
+
+<table class="compare">
+  <thead><tr><th>&nbsp;</th><th>Sidecar (Ollama, what we use)</th><th>In-process (llama.cpp linked in)</th></tr></thead>
+  <tbody>
+    <tr><td>Who hosts the model?</td><td>A separate process you started</td><td>Your game's own process</td></tr>
+    <tr><td>Player install</td><td>They must install Ollama too</td><td>One executable, drop in</td></tr>
+    <tr><td>Switch models</td><td>One config line</td><td>Recompile or runtime model loader</td></tr>
+    <tr><td>Latency floor</td><td>+localhost HTTP overhead (low)</td><td>Function call (lowest)</td></tr>
+    <tr><td>Engineering cost</td><td>Vendor cpp-httplib, you're done</td><td>Own GPU/CUDA/quantization wiring</td></tr>
+  </tbody>
+</table>
+
+<h3>Concurrency vs. parallelism</h3>
+<p>Our worker thread gives us <b>concurrency</b> &mdash; the game loop and the LLM call are <em>interleaved in time</em>, both making progress &mdash; even on a single core. We get <b>parallelism</b> &mdash; <em>literally executing simultaneously</em> &mdash; only because modern CPUs have multiple cores. The architecture would work fine on a single-core machine; it would just be slower. Don't conflate "I added a thread" with "now it runs in parallel." You added concurrency; whether it's parallel depends on the hardware.</p>
+
+<h3>System prompt vs. RAG memory</h3>
+<p>Both supply context to the model. The <b>system prompt</b> is fixed identity ("you are Wren, a curious traveler"). <b>Retrieval-augmented memory</b> is dynamic recall ("look up what Wren learned about the player last session, paste the relevant bits into this turn's prompt"). Confusing the two is what produces NPCs that endlessly re-explain their own backstory: that's identity, it goes in the system prompt, not in retrieved memory.</p>
+
+<h2>5. Quiz</h2>
+
+<p>Click an answer; you'll see immediately whether it's right and why. The score badge in the corner tracks your progress.</p>
+
+<div class="question" data-question>
+  <p class="q">Why does each <code class="inline">Npc</code> keep its own conversation history rather than the shared <code class="inline">LlmClient</code> keeping one history for the whole game?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="The HTTP request and JSON encoding cost are nearly identical either way — history size dominates token cost, not connection count.">
+      Because keeping multiple histories saves on HTTP connection overhead.
+    </li>
+    <li data-correct="true" data-why="Right. Jim's conversation must not leak into Jane's. Per-NPC history is what gives each persona its own continuity; a shared history would mix everyone's context.">
+      So Jim the pharmacist's prior turns don't leak into Jane the pedestrian's prompts.
+    </li>
+    <li data-correct="false" data-why="The LlmClient is intentionally a singleton; we want exactly one chokepoint to Ollama. Per-NPC history has nothing to do with that.">
+      So we can have multiple <code class="inline">LlmClient</code> instances running in parallel.
+    </li>
+    <li data-correct="false" data-why="The model is stateless across requests; it never 'remembers' anything between calls. History on the client side is the only way it gets context.">
+      Because the model itself already remembers previous chats with each character.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">In the minimal example, <code class="inline">cli.Post()</code> blocks for 1&ndash;3 seconds. Which two pieces of machinery in our real code prevent the game from freezing?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A frame-rate cap controls rendering speed, not whether a blocking call freezes the loop. Even at 1 fps the call would still freeze for seconds.">
+      <code class="inline">setFramerateLimit(60)</code> and a smaller temperature value.
+    </li>
+    <li data-correct="false" data-why="Streaming changes <em>when</em> tokens arrive, but the main thread would still be the one waiting on them. The async machinery is what actually unblocks the loop.">
+      Streaming responses and a shorter system prompt.
+    </li>
+    <li data-correct="true" data-why="Exactly. The worker thread does the slow Post() off the game loop; drainReplies() is non-blocking so the main thread can collect results whenever it's free.">
+      A worker thread doing the POST, and a thread-safe reply queue drained each frame.
+    </li>
+    <li data-correct="false" data-why="UDP wouldn't help — the slow part is the model generating tokens, not the transport. And Ollama doesn't expose a UDP interface.">
+      A UDP socket and a callback registered with the OS.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">What is the role of <code class="inline">stream: false</code> in the request body?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Temperature is set separately under <code>options</code>. <code>stream</code> doesn't affect determinism.">
+      It makes the model's output deterministic.
+    </li>
+    <li data-correct="true" data-why="Correct. With stream=true Ollama returns one JSON object per token. With stream=false you get one big reply at the end — simpler to parse, fine for milestone 1.">
+      It tells Ollama to return one complete reply at the end, not token-by-token.
+    </li>
+    <li data-correct="false" data-why="HTTPS vs HTTP is a separate concern (the URL scheme). Ollama on localhost is plain HTTP regardless of this flag.">
+      It forces HTTPS so the reply is encrypted.
+    </li>
+    <li data-correct="false" data-why="History is in the request body's messages[] array. <code>stream</code> doesn't add or remove memory.">
+      It disables the model's conversational memory.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">You decide to ship your game to players who don't want to install Ollama. Which migration does our architecture already make cheap?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="Cloud calls reintroduce the original problem (third-party dependency) and require internet. Possible, but not what the architecture pushes you toward.">
+      Switch every NPC to call OpenAI's API directly.
+    </li>
+    <li data-correct="true" data-why="Right. Only LlmClient::processOne() needs to change; the public submit/drainReplies interface stays identical. Every Npc keeps working unchanged.">
+      Replace <code class="inline">processOne()</code> with a call into linked <code class="inline">llama.cpp</code>, leaving the public <code class="inline">LlmClient</code> interface unchanged.
+    </li>
+    <li data-correct="false" data-why="A dialogue tree is a totally different system; you'd be throwing away the LLM-NPC pattern, not migrating it.">
+      Convert all NPC dialogue back to a hand-authored dialogue tree.
+    </li>
+    <li data-correct="false" data-why="Per-NPC threads multiply contention for one GPU and don't help with shipping — the GPU is the bottleneck, not concurrency.">
+      Give each NPC its own dedicated worker thread.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<div class="question" data-question>
+  <p class="q">A player asks Wren <em>"what year is it in real life?"</em> and she answers correctly with the current year. What is the most likely failure here?</p>
+  <ul class="options">
+    <li data-correct="false" data-why="A higher temperature changes randomness, not which facts the model knows or refuses to share. It wouldn't cause this specific behaviour.">
+      The temperature in <code class="inline">llm.cfg</code> is too high.
+    </li>
+    <li data-correct="false" data-why="History grows the prompt but doesn't add new facts about the real world — and trimming is about token budget, not character drift.">
+      We forgot to call <code class="inline">trimHistory()</code> often enough.
+    </li>
+    <li data-correct="true" data-why="Exactly. The system prompt is the only thing keeping her in character. Either it's empty, or its 'never mention real-world topics' constraint is weak. Strengthen <code>knowledgeBoundary</code> and the extra directives.">
+      The persona's <code class="inline">knowledgeBoundary</code> and directives aren't strong enough to keep her in-frame.
+    </li>
+    <li data-correct="false" data-why="Ollama is just transport. Whether the model breaks character is a prompt-design issue, not a server-side one.">
+      Ollama is overriding our system prompt with its own.
+    </li>
+  </ul>
+  <p class="feedback" hidden></p>
+</div>
+
+<h2>6. Check your understanding (scenario)</h2>
+
+<p>These are open-ended &mdash; jot down answers and we'll work through them. There's no auto-grader here on purpose; the goal is for you to explain it in your own words.</p>
+
+<div class="scenario">
+  <p><b>Scenario A.</b> You add a second NPC, <code class="inline">Jim the pharmacist</code>. After a few turns Jim starts referring to "your friend Wren" by name. Where in the codebase is the bug, and what fix would you make?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario B.</b> Players complain that the 1&ndash;3 second "thinking..." delay feels dead. You don't want to change models. What single configuration change in the JSON body would help, and what code in <code class="inline">LlmClient.cpp</code> would you have to rewrite to take advantage of it?</p>
+</div>
+<div class="scenario">
+  <p><b>Scenario C.</b> You decide to swap to <code class="inline">hermes3:8b</code>. Walk through everywhere you have to touch &mdash; and everywhere you explicitly don't.</p>
+</div>
+
+<h2>7. Track your progress</h2>
+
+<p>Tick these off as you go &mdash; resets when you reload (in-page only).</p>
+
+<ul class="progress-list" id="progressList">
+  <li><label><input type="checkbox"> Read sections 1&ndash;3 (concept &rarr; minimal example &rarr; in-project)</label></li>
+  <li><label><input type="checkbox"> Read section 4 (sidecar vs in-process, concurrency vs parallelism)</label></li>
+  <li><label><input type="checkbox"> Took the quiz, scored at least 4/5</label></li>
+  <li><label><input type="checkbox"> Wrote answers to all three scenarios</label></li>
+  <li><label><input type="checkbox"> Discussed scenarios in chat and locked in the right answer</label></li>
+</ul>
+
+<footer class="lesson">
+  <p><b>Further reading</b> &mdash;
+    <a href="https://github.com/ollama/ollama/blob/main/docs/api.md">Ollama API reference</a> &middot;
+    <a href="https://github.com/ggml-org/llama.cpp">llama.cpp on GitHub</a> &middot;
+    <a href="https://huggingface.co/blog/chimbiwide/gemma3npc">Gemma3NPC announcement</a> &middot;
+    <a href="https://github.com/yhirose/cpp-httplib">cpp-httplib</a>
+  </p>
+  <p>Lesson 0001 &middot; <code class="inline">docs/learning/lessons/0001-embedded-llm-in-games.html</code></p>
+</footer>
+
+</div>
+
+<script>
+  // Fisher-Yates shuffle so correct answers never sit in the same position.
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const totalQuestions = document.querySelectorAll('[data-question]').length;
+  let answered = 0;
+  let correct = 0;
+  const scoreText = document.getElementById('scoreText');
+  function renderScore() { scoreText.textContent = correct + ' / ' + totalQuestions; }
+  renderScore();
+
+  document.querySelectorAll('[data-question]').forEach(q => {
+    const list = q.querySelector('.options');
+    // Reorder DOM children at load — position can't encode correctness.
+    shuffle([...list.children]).forEach(li => list.appendChild(li));
+
+    const feedback = q.querySelector('.feedback');
+    list.querySelectorAll('li').forEach(li => {
+      li.addEventListener('click', () => {
+        if (q.dataset.answered === '1') return;
+        q.dataset.answered = '1';
+
+        const isRight = li.dataset.correct === 'true'; // attribute, NOT position
+        li.classList.add(isRight ? 'picked-correct' : 'picked-wrong');
+
+        // Lock all options so the user can't keep clicking for credit.
+        list.querySelectorAll('li').forEach(other => {
+          if (other !== li) other.classList.add('locked');
+        });
+
+        feedback.hidden = false;
+        feedback.className = 'feedback ' + (isRight ? 'correct' : 'wrong');
+        feedback.textContent = (isRight ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+
+        answered++;
+        if (isRight) correct++;
+        renderScore();
+      });
+    });
+  });
+
+  // Progress checkboxes — pure in-page state, strike on tick.
+  document.querySelectorAll('#progressList input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.closest('li').classList.toggle('done', cb.checked);
+    });
+  });
+</script>
+</body>
+</html>

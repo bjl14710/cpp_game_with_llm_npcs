@@ -1,0 +1,96 @@
+"""Grading suite — Exercise 02: inventory-aware market-maker quoting.
+
+Run:  uv run pytest tests/exercises/test_02_market_maker.py -v
+"""
+import pytest
+
+
+@pytest.fixture
+def mm_mod(load_exercise):
+    return load_exercise("02_market_maker", "market_maker")
+
+
+@pytest.fixture
+def quoter(mm_mod):
+    # sigma^2 * horizon = 4 here, comfortably > 1/k^2, so the optimal spread
+    # is monotone increasing in gamma over the gammas tested below.
+    return mm_mod.InventoryAwareQuoter(
+        gamma=0.1, sigma=2.0, horizon=1.0, max_inventory=10, k=1.5
+    )
+
+
+class TestReservationPrice:
+    def test_flat_inventory_reservation_is_mid(self, quoter):
+        assert quoter.reservation_price(100.0, 0) == pytest.approx(100.0)
+
+    def test_long_inventory_skews_below_mid(self, quoter):
+        assert quoter.reservation_price(100.0, 5) < 100.0
+
+    def test_short_inventory_skews_above_mid(self, quoter):
+        assert quoter.reservation_price(100.0, -5) > 100.0
+
+    def test_known_value(self, quoter):
+        # r = 100 - 5 * 0.1 * 4 * 1 = 98.0
+        assert quoter.reservation_price(100.0, 5) == pytest.approx(98.0)
+
+
+class TestSpread:
+    def test_spread_positive(self, quoter):
+        assert quoter.optimal_spread() > 0.0
+
+    def test_spread_widens_with_sigma(self, mm_mod):
+        common = dict(gamma=0.1, horizon=1.0, max_inventory=10, k=1.5)
+        calm = mm_mod.InventoryAwareQuoter(sigma=1.0, **common)
+        wild = mm_mod.InventoryAwareQuoter(sigma=3.0, **common)
+        assert wild.optimal_spread() > calm.optimal_spread()
+
+    def test_spread_widens_with_gamma(self, mm_mod):
+        common = dict(sigma=2.0, horizon=1.0, max_inventory=10, k=1.5)
+        bold = mm_mod.InventoryAwareQuoter(gamma=0.1, **common)
+        timid = mm_mod.InventoryAwareQuoter(gamma=0.5, **common)
+        assert timid.optimal_spread() > bold.optimal_spread()
+
+
+class TestQuote:
+    def test_flat_inventory_quotes_symmetric_around_mid(self, quoter):
+        bid, ask = quoter.quote(100.0, 0)
+        assert bid is not None and ask is not None
+        assert (bid + ask) / 2.0 == pytest.approx(100.0)
+        assert ask - bid == pytest.approx(quoter.optimal_spread())
+
+    def test_long_inventory_skews_both_quotes_down(self, quoter):
+        bid0, ask0 = quoter.quote(100.0, 0)
+        bid_long, ask_long = quoter.quote(100.0, 5)
+        assert bid_long < bid0
+        assert ask_long < ask0
+
+    def test_short_inventory_skews_both_quotes_up(self, quoter):
+        bid0, ask0 = quoter.quote(100.0, 0)
+        bid_short, ask_short = quoter.quote(100.0, -5)
+        assert bid_short > bid0
+        assert ask_short > ask0
+
+    def test_quotes_never_cross(self, quoter):
+        for inv in range(-9, 10):
+            bid, ask = quoter.quote(100.0, inv)
+            assert bid < ask
+
+    def test_one_sided_at_max_long(self, quoter):
+        bid, ask = quoter.quote(100.0, 10)
+        assert bid is None
+        assert ask is not None
+
+    def test_one_sided_at_max_short(self, quoter):
+        bid, ask = quoter.quote(100.0, -10)
+        assert bid is not None
+        assert ask is None
+
+
+class TestValidation:
+    def test_rejects_nonpositive_params(self, mm_mod):
+        with pytest.raises(ValueError):
+            mm_mod.InventoryAwareQuoter(gamma=0.0, sigma=2.0, horizon=1.0,
+                                        max_inventory=10)
+        with pytest.raises(ValueError):
+            mm_mod.InventoryAwareQuoter(gamma=0.1, sigma=2.0, horizon=1.0,
+                                        max_inventory=0)

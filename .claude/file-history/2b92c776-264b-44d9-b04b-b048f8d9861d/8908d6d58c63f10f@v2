@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Draft PR for the character creator + ticket bookkeeping (#72-#76)."""
+import os
+import time
+
+from github import Github, GithubException
+
+gh = Github(os.environ["GH_TOKEN"])
+repo = gh.get_repo("bjl14710/cpp_game_with_llm_npcs")
+
+
+def retry(fn, what):
+    for attempt in range(4):
+        try:
+            return fn()
+        except GithubException as e:
+            print(f"{what} attempt {attempt+1}: {e.status}")
+            time.sleep(5)
+    raise SystemExit(f"gave up: {what}")
+
+
+body = (
+    "Closes #72, closes #73, closes #74, closes #75, closes #76 "
+    "(milestone #6). Stacks on #71 (base = "
+    "`feature/issue-67-atmosphere-pass`); plan: "
+    "`.claude/plans/character-creator.md`.\n\n"
+    "## What this delivers\n"
+    "Create a character from the pause menu: write a personality (name, "
+    "backstory, traits), assemble a Mii-style look from socketed 3D parts "
+    "with a palette, watch a live turning preview, and Save & Spawn it "
+    "into the town — where it chats through the exact same LLM persona "
+    "pipeline (and cross-session memory) as the designer NPCs, and comes "
+    "back after a restart.\n\n"
+    "## Design (autonomy decisions logged in the plan + report)\n"
+    "- **Socket contracts, not per-pair offsets**: every `PartDef` "
+    "declares its local size and named child sockets; `CategorySpec` rows "
+    "say which parent socket each category snaps to. New part = one data "
+    "row; new category = one spec row + sockets on parents.\n"
+    "- **Size-contract resolution**: sockets resolve in unscaled local "
+    "space, then ONE uniform scale takes the whole assembly to the same "
+    "1.8-unit height contract pack characters use — no parallel sizing "
+    "system.\n"
+    "- **Persona/look independence**: two SQLite tables "
+    "(`character_persona`, `character_look`) keyed by character_id, "
+    "separate records end to end; the spawn path is the only join. "
+    "Player personas serialize via the new `renderPersonaText` — the "
+    "exact inverse of `parsePersonaText`, so stored and file personas "
+    "share one format and one parser.\n"
+    "- **Style tags** (round/blocky/any) gate combinations in the "
+    "validator, the picker, and the randomizer; the body anchors the "
+    "family and cycling it re-validates the other picks.\n"
+    "- **3D premise correction**: the brief's 'sprite pixel dimensions' "
+    "predates the raylib migration; parts are low-poly primitive recipes "
+    "(the fountain pattern), since KayKit's rigged characters can't "
+    "donate swappable parts.\n\n"
+    "## Verification\n"
+    "- Suite 139 cases / 1384 assertions green (exhaustive part-combo "
+    "assembly, determinism, serialization gates, store round-trips, "
+    "unopenable-DB degradation, renderPersonaText round-trip).\n"
+    "- End-to-end screenshot: three planted store records spawned as "
+    "three distinct, correctly-snapped composites at pack-character "
+    "height (blocky visor+spikes, round dot+tuft, round wide+bowl).\n"
+    "- Composite characters get fog/tint automatically (batch draw path).\n\n"
+    "## Needs a human eyeball\n"
+    "The Creator page itself (typing, cycling, randomize, save toast) — "
+    "scripted smoke runs can't click the menu. Everything below the UI is "
+    "test- or screenshot-verified.\n\n"
+    "## Known v1 limits (logged)\n"
+    "- Composite characters: procedural bob only (no skeleton/gestures/"
+    "death pose), no multiplayer look replication (guests see a pack "
+    "model), duplicate names share memory rows (names key the memory "
+    "store).\n\n"
+    "---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+)
+
+pr = retry(lambda: repo.create_pull(
+    title="feat: character creator — player-authored persona + socketed look",
+    body=body,
+    head="feature/character-creator",
+    base="feature/issue-67-atmosphere-pass",
+    draft=True), "create pr")
+print(f"PR #{pr.number}: {pr.html_url}")
+
+for number in (72, 73, 74, 75, 76):
+    issue = retry(lambda: repo.get_issue(number), f"issue {number}")
+    retry(lambda: issue.add_to_labels("ai-completed"), "label")
+    try:
+        issue.remove_from_labels("ai-in-progress")
+    except GithubException:
+        pass
+    retry(lambda: issue.create_comment(
+        f"Implemented in draft PR #{pr.number}. Suite 139/1384 green; "
+        "spawn/render verified by screenshot. Creator page needs a human "
+        "eyeball pass (noted in the PR)."), "comment")
+    retry(lambda: issue.edit(state="closed"), "close")
+    print(f"issue #{number} closed")

@@ -1,0 +1,57 @@
+# HFT Practice Exercises
+
+Hands-on, graded companions to the lessons in
+[`docs/learning/`](../docs/learning/). Each exercise is a skeleton module
+full of TODOs; a pre-written test suite grades your implementation; a
+reference solution lives in [`solutions/`](../solutions/) for after you've
+attempted it.
+
+## Workflow
+
+1. Read the exercise's `README.md` and the linked lesson.
+2. Implement the stubs (replace `raise NotImplementedError` / the C++
+   `throw` placeholders / the VHDL sentinel).
+3. Run the tests. Unimplemented parts show as **skipped** ("Exercise not
+   implemented yet"); wrong answers **fail**; done means all green.
+4. Compare with the solution and read its comments.
+
+## Commands
+
+```bash
+uv run pytest tests/exercises/ -v                  # grade everything
+uv run pytest tests/exercises/ -k 01 -v            # one exercise
+uv run pytest tests/ -m "not exercise"             # repo suite without exercises
+
+# prove the test suites are solvable (runs them against solutions/):
+HFT_EXERCISE_TARGET=solutions uv run pytest tests/exercises/ -v
+
+# language-specific direct runners:
+bash tests/exercises/cpp/run_cpp.sh                # C++ (needs g++)
+bash scripts/run_vhdl_tests.sh                     # VHDL (needs ghdl; opt-in)
+```
+
+## The exercises
+
+| # | Exercise | Language | Lesson(s) | What you build |
+|---|----------|----------|-----------|----------------|
+| 01 | [Order book](01_order_book/) | Python | 0016 | Price-time priority LOB: add/cancel/execute, BBO, imbalance |
+| 02 | [Market maker](02_market_maker/) | Python | 0017 | Inventory-aware quoting (Avellaneda-Stoikov-lite) — fixes the gap in `fpga/market_maker.vhd` |
+| 03 | [Stat-arb + risk](03_stat_arb_risk/) | Python | 0018, 0006, 0019 | Cointegration utils, CUSUM detector, OTR tracker, walk-forward splits |
+| 04 | [SPSC ring + O(1) MA](04_spsc_ring/) | C++20 | 0009, 0010 | Lock-free SPSC queue with release/acquire + cache-line padding; O(1) moving average |
+| 05 | [VHDL testbenches](05_vhdl_testbench/) | VHDL | 0002 | GHDL testbenches for all three `fpga/*.vhd` modules |
+
+Recommended order: 01 → 02 → 03 (Python ramp), then 04 (C++), then 05
+(new toolchain). 03 is independent if you want to jump around.
+
+## How grading works
+
+- Tests load your code from `exercises/` by file path; setting
+  `HFT_EXERCISE_TARGET=solutions` points the same tests at the reference
+  implementations instead.
+- Python stubs raise `NotImplementedError` → reported as a skip, so the
+  repo-wide `uv run pytest tests/` stays green while you work. The skip
+  count is your progress bar.
+- C++ placeholders throw (`exit 42` from the harness) and the VHDL stubs
+  hit a `severity failure` sentinel — both map to the same skip.
+- Exercises and solutions are never imported by production code and are
+  not part of the installed package.

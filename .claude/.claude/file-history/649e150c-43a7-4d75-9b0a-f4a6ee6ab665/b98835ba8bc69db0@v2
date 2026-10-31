@@ -1,0 +1,55 @@
+// Exercise 04 Part B: lock-free single-producer / single-consumer ring.
+//
+// The production pattern from lesson 0010: the market-data thread pushes,
+// the strategy thread pops, no locks anywhere. Correctness rests on exactly
+// two atomics with release/acquire ordering, and performance on keeping the
+// producer's and consumer's counters on different cache lines.
+//
+// Grade yourself: uv run pytest tests/exercises/test_04_spsc_ring.py -v
+//   (or directly: bash tests/exercises/cpp/run_cpp.sh test_spsc_ring)
+//
+// Spec:
+//  - N must be a power of two (static_assert provided) so the wrap is a
+//    cheap mask: (i + 1) & (N - 1).
+//  - Usable capacity is N - 1: one slot stays empty so full != empty.
+//  - try_push (producer only): false when full. The store to head_ must be
+//    memory_order_release so the consumer's acquire-load sees the slot
+//    write before it reads the slot.
+//  - try_pop (consumer only): false when empty; mirror image of try_push.
+//  - head_ and tail_ must live on separate cache lines (alignas(64)) so the
+//    two cores don't false-share. The grading test checks the object is big
+//    enough for this padding.
+//  - Add `noexcept` to try_push/try_pop once implemented.
+#pragma once
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <stdexcept>
+
+template <typename T, std::size_t N>
+class SpscRing {
+    static_assert(N >= 2 && (N & (N - 1)) == 0, "N must be a power of two");
+
+public:
+    // Producer side only. Returns false when the ring is full.
+    bool try_push(const T& v) {
+        (void)v;
+        throw std::logic_error("not implemented");  // TODO
+    }
+
+    // Consumer side only. Returns false when the ring is empty.
+    bool try_pop(T& out) {
+        (void)out;
+        throw std::logic_error("not implemented");  // TODO
+    }
+
+    static constexpr std::size_t capacity() noexcept { return N - 1; }
+
+private:
+    std::array<T, N> buf_{};
+    // TODO: these two counters must NOT share a cache line — add the
+    // padding the spec asks for.
+    std::atomic<std::size_t> head_{0};
+    std::atomic<std::size_t> tail_{0};
+};

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Run the exercise 05 VHDL testbenches against the fpga/ modules with GHDL.
+#
+# Usage:
+#   bash scripts/run_vhdl_tests.sh                      # all three testbenches
+#   bash scripts/run_vhdl_tests.sh tb_market_maker      # just one
+#
+# HFT_EXERCISE_TARGET=solutions switches from the user stubs in
+# exercises/05_vhdl_testbench to the reference testbenches.
+#
+# Exit codes: 0 = pass, 1 = analysis/sim failure, 2 = ghdl missing,
+#             42 = testbench not implemented yet (stub sentinel hit).
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+TARGET="${HFT_EXERCISE_TARGET:-exercises}"
+TB_DIR="$ROOT/$TARGET/05_vhdl_testbench"
+
+if ! command -v ghdl >/dev/null 2>&1; then
+    echo "ghdl not installed — see exercises/05_vhdl_testbench/README.md"
+    exit 2
+fi
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+dut_for() {
+    case "$1" in
+        tb_market_maker)                 echo market_maker ;;
+        tb_moving_average_trader)        echo moving_average_trader ;;
+        tb_linear_regression_predictor)  echo linear_regression_predictor ;;
+        *)                               echo "" ;;
+    esac
+}
+
+if [ $# -gt 0 ]; then
+    tbs=("$@")
+else
+    tbs=(tb_market_maker tb_moving_average_trader tb_linear_regression_predictor)
+fi
+
+status=0
+for tb in "${tbs[@]}"; do
+    dut="$(dut_for "$tb")"
+    if [ -z "$dut" ]; then
+        echo "unknown testbench: $tb"
+        exit 1
+    fi
+    echo "== $tb (target: $TARGET) =="
+    out="$( (ghdl -a --std=08 --workdir="$WORK" "$ROOT/fpga/$dut.vhd" "$TB_DIR/$tb.vhd" \
+        && cd "$WORK" \
+        && ghdl --elab-run --std=08 --workdir="$WORK" "$tb" --assert-level=error) 2>&1 )"
+    rc=$?
+    echo "$out"
+    if echo "$out" | grep -q "EXERCISE-NOT-IMPLEMENTED"; then
+        echo "$tb: NOT IMPLEMENTED"
+        if [ "$status" -eq 0 ]; then status=42; fi
+    elif [ "$rc" -ne 0 ]; then
+        echo "$tb: FAILED"
+        exit 1
+    else
+        echo "$tb: PASSED"
+    fi
+done
+exit "$status"

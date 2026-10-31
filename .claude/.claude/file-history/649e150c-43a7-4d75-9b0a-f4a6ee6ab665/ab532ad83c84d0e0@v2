@@ -1,0 +1,32 @@
+# Learning Progress — HFT_practice
+
+A running map of what's been taught, how well it landed, and what to teach next.
+The HTML lessons in `lessons/` are the durable artifact; this file is the index.
+
+## Lessons completed
+
+| # | Topic | File | Date | Grasp |
+|---|-------|------|------|-------|
+| 0001 | Basic HFT concepts: bid/ask/spread, LOB, market making, latency, FPGA vs CPU | [0001-basic-hft-concepts.html](lessons/0001-basic-hft-concepts.html) | 2026-06-09 | TBD — quiz pending |
+
+## What the learner now knows
+(Update after each lesson based on quiz performance and chat questions.)
+
+- *To be confirmed by Q&A after Lesson 0001.*
+
+## What was hard
+- *Capture friction points here — they signal what to drill next.*
+
+## Suggested next lessons (in order)
+
+1. **The Limit Order Book in depth** — price-time priority, queue position, what "top of book" means, why being early matters more than being right at this timescale. Ground in `fpga/market_maker.vhd` quoting logic.
+2. **Latency budgets** — break down where nanoseconds go: wire, NIC, kernel bypass, FPGA pipeline. Tie to the `valid_in`/`order_valid_out` handshake pattern in the VHDL.
+3. **What the Python actually does (and doesn't)** — walk `paper_trading_sim.py` and `walkforward_sim.py` honestly: this is daily-frequency quant, not HFT. Concepts: walk-forward backtesting, leakage, look-ahead bias.
+4. **From model to silicon** — the ONNX bridge in `gradient_boosting/main.cpp`. Why HFT firms compile models, what gets cut for latency, what stays in CPU/Python.
+5. **Adverse selection and inventory risk** — the two things that kill market makers, illustrated against `market_maker.vhd`'s blind quote logic (it has no inventory tracking — that's a gap to fix).
+
+## Notes for future-me (the teacher)
+
+- This repo is named "HFT_practice" but its Python is daily-frequency. Don't perpetuate the misnomer — be clear about which files are genuinely HFT-style (the VHDL + C++ ONNX path) and which are quant rebalancing.
+- Best teaching examples already in repo: `fpga/market_maker.vhd`, `gradient_boosting/main.cpp`, `paper_trading_sim.py` (`build_features`), `walkforward_sim.py` for risk overlay concepts.
+- User reads code; lean on real files over abstractions.

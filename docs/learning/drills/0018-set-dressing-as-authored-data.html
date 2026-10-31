@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0018 — Set Dressing as Authored Data</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0018 · pairs with lesson 0018</div>
+<h1>Drill: Set Dressing as Authored Data</h1>
+
+<div class="q"><h3>1. Adding a mailbox</h3>
+<p>You want a mailbox outside the bakery. List the three data edits — and
+the zero code edits — required.</p>
+<details><summary>Answer</summary><div class="a">
+<p>(1) A Building row in <code>City::makeDowntown</code> (id + AABB +
+height), (2) a <code>curated_</code> entry mapping the id to a model stem,
+(3) a <code>sizeSpecs_</code> Uniform height. The renderer's buildings pass
+and collision pick it up automatically; add the id to the completeness
+test's table.</p>
+</div></details></div>
+
+<div class="q"><h3>2. Why does the police car park beside the station, not
+in front of it?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>The station fronts an X-running street, but KayKit cars are Z-long at
+identity and <code>drawModelUniform</code> applies no rotation — a car
+there would sit perpendicular to the road. Parking on the Z-running street
+flanking the station block keeps the orientation correct with pure data
+(the zero-new-rendering-code constraint).</p>
+</div></details></div>
+
+<div class="q"><h3>3. The invisible cage</h3>
+<p>The first draft gave each car a 6.5-unit-long AABB centered in the lane.
+Both failure modes?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Visually the car floats mid-lane (the Uniform draw centers the small
+model in the big box), and physically the player bounces off empty air
+around it — an invisible wall. Colliders must match the visual footprint:
+hug the curb, ~4 units long.</p>
+</div></details></div>
+
+<div class="q"><h3>4. What does the clearance test actually check, and why
+probe circles instead of points?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>For every persona home spot and the four zebra centers,
+<code>circleIntersectsAny(x, z, 0.5)</code> must be false. The 0.5 radius is
+a walking NPC's collision circle — a point probe could pass while the NPC's
+body still clips a collider, silently trapping ReturnHome pathing.</p>
+</div></details></div>
+
+<div class="q"><h3>5. When is a new system actually warranted?</h3>
+<p>Under what conditions would authored data rows stop being the right tool
+for set dressing?</p>
+<details><summary>Answer</summary><div class="a">
+<p>When placement stops being hand-designed: procedural scatter (hundreds of
+props), runtime spawning/despawning, or physics-driven props. Until the
+count or dynamism outgrows a reviewable list, rows in the authored table
+stay simpler, testable, and diffable.</p>
+</div></details></div>
+</div></body>
+</html>

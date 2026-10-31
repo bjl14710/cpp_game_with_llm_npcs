@@ -1,0 +1,12 @@
+# Cloud API key for OpenAI-compatible providers (OpenRouter, OpenAI, ...).
+#
+# To use cloud LLMs:
+#   1. Copy this file to config/secrets.cfg  (which is gitignored)
+#   2. Paste your key below
+#   3. Set provider/base_url/model in config/llm.cfg
+#
+# Alternatively, skip this file and export the key as the environment variable
+# named by api_key_env in llm.cfg (default OPENROUTER_API_KEY) — the env var
+# wins when both are present. NEVER commit a real key.
+
+api_key = sk-or-...your-openrouter-key...

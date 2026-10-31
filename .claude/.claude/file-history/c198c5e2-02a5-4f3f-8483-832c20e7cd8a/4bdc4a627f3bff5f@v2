@@ -1,0 +1,45 @@
+## What to change
+Add the visual regression testing foundation to the Silmulator repo.
+No GUI tests yet — just the infrastructure everything else builds on.
+
+## Specifically
+1. Create `tests/visual/conftest.py` with the `compare_screenshot()` helper
+   (pixel capture via QWidget.grab(), PIL diff against golden, threshold check,
+   diff image saved to tests/visual/diffs/ on failure)
+2. Create `tests/visual/golden/` directory with a `.gitkeep`
+3. Add to `.gitignore`:
+   ```
+   tests/visual/diffs/
+   tests/visual/actual/
+   ```
+4. Add to `pytest.ini` (or create it):
+   ```ini
+   [pytest]
+   qt_api = pyqt6
+   ```
+5. Add to `requirements-dev.txt`:
+   ```
+   pytest-qt
+   pytest-xvfb
+   Pillow
+   numpy
+   ```
+
+## How to verify it's done
+`pytest tests/visual/ -v` runs without import errors (no tests yet = fine).
+`tests/visual/golden/` directory exists and is tracked by git.
+`tests/visual/diffs/` is in `.gitignore`.
+
+## Constraints
+Do not write any actual GUI tests yet — just the infrastructure.
+`compare_screenshot()` must match the interface in the visual-testing skill.
+Threshold default is 5 (not 0 — allows minor antialiasing differences).
+
+## Code economy note
+Use stdlib only: PIL, numpy, pathlib. No additional testing frameworks.
+
+## Branch name
+`feature/issue-N-visual-test-infrastructure`
+
+## Concept for learning materials
+"Visual regression testing with golden image comparison"

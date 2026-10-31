@@ -1,0 +1,56 @@
+#pragma once
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+// ITCH replay clock: deterministic, speed-controlled playback (SCAFFOLD).
+// Plan: .claude/plans/itch-replay-clock.md.
+//
+// Sits BELOW the parser: delivers raw framed messages (bytes + peeked
+// timestamp); consumers parse. Determinism contract: delivery order and
+// bytes are identical across all modes — only wall-clock timing differs.
+//
+// TODO(replay-1): implement MaxSpeed + SingleStep (no timing code).
+// TODO(replay-2): implement WallClock pacing — schedule = start +
+//   cumulative (itch-timestamp delta / speed), drift-corrected against
+//   std::chrono::steady_clock; negative deltas clamp to zero sleep.
+
+namespace itch {
+
+enum class ReplayMode { MaxSpeed, WallClock, SingleStep };
+
+struct ReplayStats {
+    uint64_t messages_delivered   = 0;
+    uint64_t bytes_delivered      = 0;
+    uint64_t first_timestamp_ns   = 0;
+    uint64_t last_timestamp_ns    = 0;
+    uint64_t zero_len_frames_skipped = 0;
+};
+
+// Raw framed message + its ITCH timestamp (0 when the message is too short
+// to carry one — the clock never over-reads).
+using MessageSink =
+    std::function<void(const uint8_t* msg, uint16_t len, uint64_t timestamp_ns)>;
+
+class ReplayClock {
+public:
+    explicit ReplayClock(std::vector<uint8_t> buffer);
+    static ReplayClock from_file(const std::string& path);  // whole-file gulp,
+                                                            // filtered days only
+
+    // Batch playback. WallClock requires speed > 0 (std::invalid_argument).
+    void run(const MessageSink& sink, ReplayMode mode, double speed = 1.0);
+
+    // Deliver exactly one message; false when the stream is exhausted.
+    bool step(const MessageSink& sink);
+
+    const ReplayStats& stats() const { return stats_; }
+
+private:
+    std::vector<uint8_t> buf_;
+    std::size_t pos_ = 0;
+    ReplayStats stats_;
+};
+
+}  // namespace itch

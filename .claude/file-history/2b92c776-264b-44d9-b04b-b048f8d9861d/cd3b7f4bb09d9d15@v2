@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0020 — Socket Contracts</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0020 · pairs with lesson 0020</div>
+<h1>Drill: Socket Contracts</h1>
+
+<div class="q"><h3>1. Adding a third head</h3>
+<p>Under per-pair offsets vs socket contracts: how many entries does a new
+"head_oval" require in each scheme, with 3 eye parts and 4 hair parts in
+the catalog?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Per-pair: 7 hand-tuned offsets (one per eye and hair part), each a
+potential floating-eyeball bug. Socket contract: 1 PartDef with its own
+<code>eyes</code> and <code>hair</code> sockets — every existing eye/hair
+part snaps correctly with zero further edits.</p>
+</div></details></div>
+
+<div class="q"><h3>2. Scale order</h3>
+<p>Why must the assembly resolve sockets BEFORE the character-height scale
+is applied, rather than scaling each part to world size first?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Sockets are authored in each part's local space. Scaling parts
+individually would move their sockets relative to differently-scaled
+neighbors — alignment drifts. Resolving in unscaled local space and then
+applying ONE uniform scale to the finished figure preserves every relative
+placement and satisfies the 1.8-unit contract in a single step.</p>
+</div></details></div>
+
+<div class="q"><h3>3. New category: hats</h3>
+<p>List the exact data changes to add a Hat category that sits on the
+head, without touching assembly code.</p>
+<details><summary>Answer</summary><div class="a">
+<p>(1) Add <code>Hat</code> to PartCategory and bump
+<code>kPartCategoryCount</code>; (2) one CategorySpec row
+<code>{Hat, Head, "hat"}</code>; (3) add a <code>hat</code> socket to each
+head PartDef; (4) hat parts (including a zero-size "hat_none"). The
+recursive assembly, validator, randomizer, and picker all pick it up from
+the spec table.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Where's the one join between persona and look?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>The spawn path (main.cpp startup + onCreate): it loads both records by
+character_id, builds the Npc from the persona, and registers the look for
+rendering. Storage, editing, and validation never touch both — enforced by
+two separate SQLite tables rather than convention.</p>
+</div></details></div>
+
+<div class="q"><h3>5. The exhaustive test's invariant</h3>
+<p>The combination test asserts <code>assembled.ok == compatible</code>.
+Why is the equality (not just implication) important?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Both directions catch bugs: a compatible combo failing to assemble means
+a missing socket (contract hole); an INcompatible combo assembling means
+the style gate leaks and the picker could offer mixed-style characters.
+The promise is "valid iff compatible", so the test asserts exactly that.</p>
+</div></details></div>
+</div></body>
+</html>

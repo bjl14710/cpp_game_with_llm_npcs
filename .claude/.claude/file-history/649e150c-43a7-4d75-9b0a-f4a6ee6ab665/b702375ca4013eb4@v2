@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Lesson 0024 — AI: Geometric Calculus &amp; Geometric Deep Learning</title>
+<style>
+:root{--bg:#0f1115;--panel:#161a22;--panel-2:#1d222c;--ink:#e7ecf3;--ink-dim:#aab3c0;--accent:#7cc4ff;--accent-2:#ffd479;--good:#4ade80;--bad:#f87171;--rule:#2b313d;--code-bg:#0b0d12;--code-kw:#ff8ec3;--code-str:#c5e478;--code-num:#ffd479;--code-com:#6b7585;--code-fn:#ffe18a;}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink)}body{font:16px/1.65 -apple-system,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:40px 24px 120px}main{max-width:880px;margin:0 auto}h1{font-size:30px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;border-bottom:1px solid var(--rule);padding-bottom:6px}h3{font-size:17px;margin:22px 0 8px;color:var(--accent)}.lead{color:var(--ink-dim);font-size:17px;margin:0 0 28px}.pill{display:inline-block;background:var(--panel-2);color:var(--accent);padding:2px 10px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin-right:6px}code,pre{font-family:"JetBrains Mono",monospace}code{background:var(--code-bg);padding:1px 6px;border-radius:4px;font-size:14px}pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;font-size:13.5px;line-height:1.55;border:1px solid var(--rule)}pre .kw{color:var(--code-kw)}pre .str{color:var(--code-str)}pre .num{color:var(--code-num)}pre .com{color:var(--code-com);font-style:italic}pre .fn{color:var(--code-fn)}.illus{color:var(--accent-2);font-size:12px;font-style:italic}.callout{border-left:3px solid var(--accent);background:var(--panel);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}.callout.warn{border-left-color:var(--accent-2)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.grid2{grid-template-columns:1fr}}.card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}.card h4{margin:0 0 6px;color:var(--accent-2);font-size:14px}.question{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:14px 0}.question p.q{margin:0 0 10px;font-weight:600}ul.options{list-style:none;padding:0;margin:8px 0 0}ul.options li{cursor:pointer;padding:10px 12px;border-radius:8px;background:var(--panel-2);margin:6px 0;border:1px solid transparent}ul.options li:hover{border-color:var(--accent)}ul.options li.picked-good{border-color:var(--good);background:rgba(74,222,128,.08)}ul.options li.picked-bad{border-color:var(--bad);background:rgba(248,113,113,.08)}.feedback{margin:10px 2px 0;font-size:14px}.scenario{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;margin:12px 0}.scenario summary{cursor:pointer;font-weight:600}.scoreboard{position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter:blur(6px);padding:10px 14px;border:1px solid var(--rule);border-radius:10px;display:flex;gap:18px;align-items:center;margin:0 0 28px;font-size:14px;flex-wrap:wrap}table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}th{color:var(--accent-2);font-weight:600}.small{font-size:13px;color:var(--ink-dim)}sup a.fn{color:var(--accent);text-decoration:none;font-weight:600}.sources{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:14px 20px}.sources ol{padding-left:20px;margin:6px 0}.sources li{margin:6px 0;font-size:13px;color:var(--ink-dim)}.sources li a{color:var(--accent)}
+</style></head><body><main>
+<div class="scoreboard"><span class="pill">Lesson 0024</span><span class="small">Quiz: <strong id="quizScore">0 / 4</strong></span></div>
+<h1>AI: Geometric Calculus &amp; Geometric Deep Learning</h1>
+<p class="lead">Why this matters: "geometric calculus" in modern ML usage points at <strong>geometric deep learning</strong> — neural networks built on non-Euclidean structures (graphs, manifolds, Lie groups). This is where the most rigorous structural-prior ML work lives in 2025, and it's directly relevant to quant: portfolios are graphs, returns live on manifolds, symmetries matter.</p>
+
+<h2>1. The big idea</h2>
+<p>Classical neural networks assume data lives in flat Euclidean space ℝⁿ. A lot of real data does not.<sup><a class="fn" href="#fn-1">[1]</a></sup></p>
+<table>
+<tr><th>Data type</th><th>Actual structure</th><th>Symmetry the model should respect</th></tr>
+<tr><td>Images</td><td>Pixels on a 2D grid</td><td>Translation (object can move)</td></tr>
+<tr><td>3D molecules</td><td>Atoms in ℝ³</td><td>Rotation + translation (chemistry doesn't depend on orientation)</td></tr>
+<tr><td>Social network</td><td>Graph of nodes + edges</td><td>Node permutation (relabeling shouldn't change meaning)</td></tr>
+<tr><td>Robot pose</td><td>Element of SE(3) — Lie group of rigid motions</td><td>Lie group composition</td></tr>
+<tr><td>Stock returns</td><td>Points on the simplex (weights sum to 1) or on the cone of positive-definite covariance matrices</td><td>Riemannian structure of these manifolds</td></tr>
+</table>
+
+<p><strong>Geometric Deep Learning (GDL)</strong> is the program of designing neural networks that are <em>equivariant</em> to the natural symmetries of the data. A model is equivariant to a transformation if applying the transformation to the input and applying it to the output give the same result.</p>
+
+<h2>2. The four pillars (Bronstein-style taxonomy)</h2>
+<div class="grid2">
+<div class="card"><h4>1. CNNs — grids</h4><p>Translation-equivariant by design. The convolution operation produces the same response whether the dog is in the upper-left or center-right of the image. The foundational geometric DL architecture, although it predated the framing.</p></div>
+<div class="card"><h4>2. GNNs — graphs</h4><p>Permutation-equivariant by message passing. The graph is the data; nodes pass messages to neighbors; aggregation must be order-independent (sum, max, mean). PyTorch Geometric is the workhorse library.<sup><a class="fn" href="#fn-2">[2]</a></sup></p></div>
+<div class="card"><h4>3. Group-equivariant networks — Lie groups</h4><p>Generalization of CNNs to arbitrary symmetry groups. For 3D molecules: SE(3)-equivariant networks (e3nn, SEGNN). Used in AlphaFold and modern protein-structure prediction.<sup><a class="fn" href="#fn-3">[3]</a></sup></p></div>
+<div class="card"><h4>4. Manifold networks — Riemannian</h4><p>Networks that operate on data lying on curved manifolds (sphere, hyperbolic space, SPD matrices). Geomstats is the standard library; used in covariance-matrix learning, hyperbolic embeddings of hierarchies.<sup><a class="fn" href="#fn-4">[4]</a></sup></p></div>
+</div>
+
+<h2>3. "Geometric calculus" specifically</h2>
+<p>The phrase has two flavors in 2024–25 usage:</p>
+
+<h3>Flavor A: differential geometry on neural nets</h3>
+<p>Treating the loss landscape, the data manifold, or the parameter space as Riemannian objects. Practical artifacts:</p>
+<ul>
+<li><strong>Riemannian optimizers</strong>: Adam/SGD adapted to non-Euclidean parameter spaces. Used when weights are constrained to live on a manifold (orthogonal matrices, SPD covariances).</li>
+<li><strong>Information geometry</strong>: the Fisher information matrix turns the parameter space into a Riemannian manifold; natural gradient descent moves along its geodesics.</li>
+<li><strong>Neural ODEs on manifolds</strong>: extend the ResNet → neural-ODE bridge to curved spaces. 2025 active research direction with extensions to Lie groups.<sup><a class="fn" href="#fn-5">[5]</a></sup></li>
+</ul>
+
+<h3>Flavor B: geometric algebra in neural nets</h3>
+<p>The Clifford / geometric-algebra formalism — multivectors, the geometric product — applied as neural network operations. Promising for physics-informed ML and for rotation-equivariant networks; not yet mainstream.</p>
+
+<h2>4. Why a quant should care</h2>
+<p>Three concrete touchpoints, none yet in this repo:</p>
+
+<h3>(a) GNN for portfolio risk modeling</h3>
+<p>The "graph of stocks" is naturally encoded as a GNN — nodes are tickers, edges encode sector / supply-chain / correlation relationships. Message passing learns embeddings that respect graph structure. Used by some quant funds as a feature-engineering step for cross-sectional ranking.</p>
+
+<h3>(b) SPD-manifold learning for covariance matrices</h3>
+<p>The covariance matrix Σ from Lesson 0006 lives on the cone of symmetric positive-definite matrices — a Riemannian manifold, not a Euclidean space. Standard ML treats it as a flat vector and loses structure. Riemannian methods (e.g. log-Euclidean metric) train portfolio optimization more stably. Direct application to <code>predict_next.py:meanvar_long_only</code>.</p>
+
+<h3>(c) Lie-group equivariance for time-series symmetries</h3>
+<p>Some time-series have natural group symmetries (e.g. time-shifting, sign reversal under sign of return). Equivariant networks exploit these explicitly; standard CNNs ignore them. Active research direction in 2025.<sup><a class="fn" href="#fn-3">[3]</a></sup></p>
+
+<h2>5. Illustrative GNN code (PyTorch Geometric)</h2>
+<pre><span class="kw">from</span> torch_geometric.nn <span class="kw">import</span> GCNConv
+<span class="kw">import</span> torch.nn <span class="kw">as</span> nn
+
+<span class="kw">class</span> <span class="fn">PortfolioGNN</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, in_dim, hid_dim):
+        <span class="fn">super</span>().<span class="fn">__init__</span>()
+        self.conv1 = <span class="fn">GCNConv</span>(in_dim, hid_dim)
+        self.conv2 = <span class="fn">GCNConv</span>(hid_dim, hid_dim)
+        self.head  = nn.<span class="fn">Linear</span>(hid_dim, <span class="num">1</span>)         <span class="com"># predicted return per node</span>
+
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x, edge_index):
+        <span class="com"># x: [num_tickers, features], edge_index: [2, num_edges]</span>
+        h = self.<span class="fn">conv1</span>(x, edge_index).<span class="fn">relu</span>()
+        h = self.<span class="fn">conv2</span>(h, edge_index).<span class="fn">relu</span>()
+        <span class="kw">return</span> self.<span class="fn">head</span>(h).<span class="fn">squeeze</span>(-<span class="num">1</span>)        <span class="com"># shape: [num_tickers]</span>
+</pre>
+<p>The model is <strong>permutation-equivariant</strong>: relabeling the tickers gives a relabeled output. The cross-sectional prediction GBM in this repo also has that property (it doesn't use ticker identity), but GBM doesn't exploit edge structure; the GNN does.</p>
+
+<h2>6. Often confused with</h2>
+<div class="grid2">
+<div class="card"><h4>Equivariant vs Invariant</h4><p><strong>Equivariant</strong>: f(g·x) = g·f(x). The output transforms predictably. <strong>Invariant</strong>: f(g·x) = f(x). The output ignores the transformation. Image-classification networks are translation-invariant; segmentation networks are translation-equivariant.</p></div>
+<div class="card"><h4>GNN vs Transformer</h4><p>A transformer is technically a fully-connected GNN with attention as message-passing. Modern GNN research often borrows attention from transformers. The line is blurry; "GNN" usually implies sparse graphs.</p></div>
+<div class="card"><h4>Riemannian vs Euclidean optimization</h4><p><strong>Euclidean</strong>: SGD/Adam in ℝⁿ. <strong>Riemannian</strong>: SGD/Adam along geodesics of a curved manifold. Required when weights are constrained (orthogonal, SPD).</p></div>
+<div class="card"><h4>Geometric DL vs Physics-informed ML</h4><p><strong>Geometric DL</strong>: respect data symmetries via architecture. <strong>Physics-informed</strong>: respect physical laws via loss-function constraints. Different mechanisms, overlapping goals.</p></div>
+</div>
+
+<h2>7. Practice</h2>
+<div class="question" data-question><p class="q">Q1. Why is a CNN considered translation-equivariant rather than translation-invariant?</p><ul class="options">
+<li data-correct="false" data-why="CNNs do have padding and stride choices but those don't determine equivariance vs invariance.">Because they use padding and stride.</li>
+<li data-correct="true" data-why="Right. Equivariance means the output shifts with the input: if you move the cat 10 pixels right in the image, the feature map for the cat also moves 10 pixels right. Invariance would require the output to be unchanged. Classification heads (global pooling + linear) make the FINAL output invariant, but intermediate feature maps are equivariant. The distinction matters when designing segmentation or detection networks.">Because shifting the input shifts the feature maps correspondingly; the network's response transforms with the transformation, rather than ignoring it.</li>
+<li data-correct="false" data-why="Skip connections are an architectural feature unrelated to translation symmetry handling.">Because of skip connections.</li>
+<li data-correct="false" data-why="Permutation-equivariance is what GNNs guarantee for nodes, not what CNNs guarantee for translations.">Because pixels are permutation-equivariant.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q2. The covariance matrix in <code>predict_next.py</code> lives on the cone of SPD matrices, a Riemannian manifold. Why might Riemannian ML be relevant?</p><ul class="options">
+<li data-correct="true" data-why="Right. Treating SPD matrices as flat vectors and applying Euclidean operations can produce non-SPD outputs (lose positive-definiteness, breaking the optimization). Riemannian methods respect the manifold structure and produce SPD outputs by construction. Concrete tool: the log-Euclidean metric maps SPD matrices to a flat space via the matrix log, does Euclidean work there, then maps back.">Riemannian methods respect the SPD constraint by construction; Euclidean treatment can produce non-SPD outputs that break downstream optimization.</li>
+<li data-correct="false" data-why="Riemannian methods are usually slower per step but better behaved overall — they're not chosen for speed.">Because Riemannian methods are computationally faster.</li>
+<li data-correct="false" data-why="Riemannian methods preserve structure; they're chosen for correctness, not for simpler interpretation.">Because they make the covariance matrix easier to interpret.</li>
+<li data-correct="false" data-why="The covariance is computed from data and doesn't itself participate in market-data transmission.">Because they reduce the bandwidth of market-data feeds.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q3. Equivariance vs Invariance — which is correct?</p><ul class="options">
+<li data-correct="false" data-why="Backwards. Invariant means the transformation has no effect on the output; equivariant means the output transforms predictably with the input.">Equivariant means the output is unchanged by the transformation.</li>
+<li data-correct="true" data-why="Right. Equivariant: f(g·x) = g·f(x). Invariant: f(g·x) = f(x). Translation invariance is what you want for image classification (where is the cat doesn't matter, only that there is one). Equivariance is what you want for segmentation (the cat mask must move where the cat moves).">Invariant: the output ignores the transformation. Equivariant: the output transforms with the input in a predictable way.</li>
+<li data-correct="false" data-why="They are not synonymous — they describe different mathematical relationships between input transformations and output changes.">Equivariant and invariant are synonyms in this context.</li>
+<li data-correct="false" data-why="Both terms apply to neural networks broadly; they're not architecture-specific.">Invariant only applies to RNNs; equivariant only to CNNs.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<div class="question" data-question><p class="q">Q4. A teammate proposes using a GNN to predict stock returns where nodes are tickers and edges encode sector and supply-chain relationships. What's the structural advantage over the repo's GBM?</p><ul class="options">
+<li data-correct="false" data-why="GNNs don't categorically train faster than GBMs — often slower at small scale. Speed isn't the structural advantage.">GNNs train faster than gradient-boosted trees.</li>
+<li data-correct="true" data-why="Right. The GBM treats every (ticker, day) row as independent and ignores relationships between tickers. The GNN explicitly models the graph: a node's prediction can depend on its neighbors' features via message passing. This captures sector/supply-chain co-movement and lets information propagate through related companies. Whether the advantage outweighs the implementation complexity in practice is the empirical question.">It explicitly models inter-ticker relationships via message passing on the graph, capturing sector and supply-chain co-movement that the GBM ignores.</li>
+<li data-correct="false" data-why="GNNs don't automatically reduce overfitting; they have their own overfitting risks. Modeling graph structure is the key.">It automatically reduces overfitting by adding more parameters.</li>
+<li data-correct="false" data-why="GNN inference depends on the network and is not necessarily faster than tree ensembles. The advantage is structural, not throughput-related.">It produces inference at lower latency than tree ensembles.</li>
+</ul><p class="feedback" hidden></p></div>
+
+<h2>8. Scenarios</h2>
+<details class="scenario"><summary>S1. You implement a GNN for portfolio prediction with sector-edge graphs. It performs WORSE than the simple GBM. Diagnose the most likely causes.</summary>
+<p>Three usual suspects. (1) <strong>Graph topology is wrong</strong>: sector classifications are coarse and miss real economic relationships. Try edge weights based on returns-correlation or supply-chain data rather than industry codes. (2) <strong>Insufficient data</strong>: GNNs have more parameters than GBMs and need more rows. With 10k daily samples, the GNN may underfit while the GBM works on the same data. (3) <strong>Wrong aggregation</strong>: simple message-passing averages neighbors. Maybe you need attention-based aggregation (GAT) or skip connections. (4) Most boringly: the GBM was already exploiting all the signal there is. Sometimes the simpler model is just right; geometric structure isn't always available alpha.</p></details>
+
+<details class="scenario"><summary>S2. Your covariance-matrix-on-SPD-manifold work seems mathematically elegant but doesn't improve Sharpe in backtest. Should you ship it?</summary>
+<p>Probably not, but the framing matters. Riemannian SPD methods do improve <em>numerical stability</em> of the mean-variance optimization (the matrix inverse used in Σ⁻¹μ can blow up with naïve estimation). If your existing covariance pipeline already shrinks toward diagonal and adds regularization (as the repo's <code>--shrink</code> does), the numerical benefit is small. The mathematical elegance doesn't automatically translate to Sharpe. Either way, the right metric is Sharpe + drawdown + stability under regime change, not aesthetic appeal. Ship only if the empirical evidence is there.</p></details>
+
+<h2>Sources</h2>
+<div class="sources"><ol>
+<li id="fn-1"><a href="https://patricknicolas.substack.com/p/a-friendly-primer-on-geometric-deep">A Friendly Primer on Geometric Deep Learning — Patrick Nicolas (Substack)</a></li>
+<li id="fn-2"><a href="https://pytorch-geometric.readthedocs.io/">PyTorch Geometric documentation</a></li>
+<li id="fn-3"><a href="https://www.emergentmind.com/topics/lie-group-based-neural-network-method">Lie Group-Based Neural Networks — EmergentMind</a></li>
+<li id="fn-4"><a href="https://geomstats.github.io/">Geomstats — Riemannian geometry for ML</a></li>
+<li id="fn-5"><a href="https://www.mdpi.com/1099-4300/27/8/878">Geometric Neural ODEs: From Manifolds to Lie Groups — MDPI Entropy (2025)</a></li>
+</ol></div>
+</main>
+<script>
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
+const answered=new Set();let cc=0;const tq=document.querySelectorAll('[data-question]').length;const se=document.getElementById('quizScore');
+function rs(){se.textContent=cc+' / '+tq}
+document.querySelectorAll('[data-question]').forEach((q,i)=>{const l=q.querySelector('.options');shuffle([...l.children]).forEach(li=>l.appendChild(li));const f=q.querySelector('.feedback');l.querySelectorAll('li').forEach(li=>{li.addEventListener('click',()=>{const c=li.dataset.correct==='true';l.querySelectorAll('li').forEach(o=>o.classList.remove('picked-good','picked-bad'));li.classList.add(c?'picked-good':'picked-bad');f.hidden=false;f.innerHTML=(c?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;f.style.color=c?'var(--good)':'var(--bad)';if(!answered.has(i)){answered.add(i);if(c)cc++;rs();}});});});rs();
+</script></body></html>

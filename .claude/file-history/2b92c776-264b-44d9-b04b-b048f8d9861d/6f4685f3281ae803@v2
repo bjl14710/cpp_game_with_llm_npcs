@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Create the multiplayer milestone, labels, 7 issues, and stacked draft PRs
+for the branches pushed overnight on bjl14710/cpp_game_with_llm_npcs."""
+import os
+import sys
+
+from github import Github, GithubException
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from create_multiplayer_issues import (ISSUE_TEMPLATE, MILESTONE_DESC,
+                                       MILESTONE_TITLE, REPO_SLUG, SPECS)
+
+USERNAME = os.environ.get("GITHUB_USERNAME", "bjl14710")
+
+# spec index -> the branch that implemented it (None = folded elsewhere).
+BRANCH_FOR_SPEC = {
+    0: "feature/issue-1-net-protocol-framing",
+    1: "feature/issue-2-netserver-snapshots",
+    2: "feature/issue-2-netserver-snapshots",  # client landed with server
+    3: "feature/issue-4-server-npc-chat",
+    4: "feature/issue-5-menu-host-join",
+    5: None,  # loopback fixture folded into branches 2 and 4
+    6: "feature/issue-7-docs-multiplayer",
+}
+
+# (head, base, title, body-intro, spec indexes it closes)
+PR_CHAIN = [
+    ("feature/multiplayer-scaffold", "main",
+     "chore(net): scaffold multiplayer core modules and test stubs",
+     "Skeletons and skipped doctest stubs for the shared-world multiplayer v1 "
+     "(plan: `.claude/plans/multiplayer-and-aws-deploy.md`). No behavior "
+     "change; every stub is `doctest::skip()` so the suite stays green.\n\n"
+     "**Merge order: 1 of 6** — merge this first; the stack re-targets "
+     "automatically.",
+     []),
+    ("feature/issue-1-net-protocol-framing", "feature/multiplayer-scaffold",
+     "feat(net): message protocol and length-prefixed framing",
+     "`FrameAssembler` (4-byte big-endian length prefix, 1 MiB cap, "
+     "connection-drop on violation) and the `NetMessage` JSON codec "
+     "(type-tagged envelope, nullopt on garbage, Vec3/pose helpers). "
+     "All 11 framing/protocol stubs are now live tests.\n\n"
+     "**Merge order: 2 of 6.**",
+     [0]),
+    ("feature/issue-2-netserver-snapshots", "feature/issue-1-net-protocol-framing",
+     "feat(net): NetServer and NetClient with join handshake and world snapshots",
+     "The authoritative host (accept/reader/tick threads, version + join-code "
+     "+ capacity handshake, snapshot broadcast) and the joining client "
+     "(timeout connect, poll() drain). Thread contract: server threads touch "
+     "only sockets/queues — World and LlmClient stay single-threaded.\n\n"
+     "**Also fixes a pre-existing deadlock**: `LlmClient::~LlmClient` set "
+     "`stop_` and notified without the queue mutex — a lost wakeup that hung "
+     "`join()` about once per few suite runs (caught by tonight's flake "
+     "checks; regression test included: 200 construct/destroy cycles).\n\n"
+     "Five loopback tests live (join, movement, unreachable, session-full, "
+     "version mismatch); suite green 8x consecutively.\n\n"
+     "**Merge order: 3 of 6.**",
+     [1, 2]),
+    ("feature/issue-4-server-npc-chat", "feature/issue-2-netserver-snapshots",
+     "feat(net): route NPC dialogue through the server with mood/speech broadcast",
+     "`HostChatRouter` (host-main-loop glue): remote ChatLines queue per-NPC "
+     "and serialize through the one shared Npc/LlmClient path — same NPC, "
+     "same memory, for every player. Deltas/replies go only to the asker; "
+     "`NpcSpeechBubble`/`NpcMoodUpdate` broadcast to everyone. LLM failures "
+     "reach just the requester; a mid-conversation disconnect drops only that "
+     "player's routing. Completes the loopback fixture — all four chat "
+     "integration tests run against FakeOllama.\n\n"
+     "**Merge order: 4 of 6.**",
+     [3, 5]),
+    ("feature/issue-5-menu-host-join", "feature/issue-4-server-npc-chat",
+     "feat(menu): host and join a shared world from the pause menu",
+     "Multiplayer page (host on default port, click-to-type ip:port join, "
+     "error toasts, live status) and the three main.cpp modes: Solo is "
+     "byte-for-byte untouched; Host publishes poses and runs the router; "
+     "joined clients stop simulating and render players/NPCs/moods from "
+     "snapshots. Renames the wire struct to `NetNpcPose` (collided with the "
+     "renderer's `NpcPose` gesture enum).\n\n"
+     "**Manual verification** (GL window — needs eyeballs): run two "
+     "instances on one machine, host in one, join `127.0.0.1:40605` in the "
+     "other; walk around and chat with the same NPC from both.\n\n"
+     "**Merge order: 5 of 6.**",
+     [4]),
+    ("feature/issue-7-docs-multiplayer", "feature/issue-5-menu-host-join",
+     "docs(multiplayer): hosting and joining guide",
+     "README host/join walkthrough (incl. the port-forward/Tailscale reality "
+     "of internet play) and DEVELOPER.md's Net* module table, wire format, "
+     "protocol-version rule, and thread contract.\n\n"
+     "**Merge order: 6 of 6.**",
+     [6]),
+]
+
+LABELS = [
+    ("ready-for-ai", "0075ca", "Scoped and clear — safe for overnight AI run"),
+    ("ai-in-progress", "e4e669", "Claude is currently working on this"),
+    ("ai-completed", "0e8a16", "AI finished — awaiting human review"),
+    ("ai-blocked", "d93f0b", "AI attempted but could not complete"),
+    ("needs-human", "cc317c", "Requires a human decision before work starts"),
+]
+
+
+def main() -> None:
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise SystemExit("GH_TOKEN not set")
+    gh = Github(token)
+    repo = gh.get_repo(REPO_SLUG)
+    print(f"Syncing: {repo.full_name}")
+
+    for name, color, description in LABELS:
+        try:
+            repo.create_label(name=name, color=color, description=description)
+            print(f"label created: {name}")
+        except GithubException as e:
+            if e.status != 422:
+                raise
+            print(f"label exists: {name}")
+
+    milestone = None
+    for m in repo.get_milestones(state="open"):
+        if m.title == MILESTONE_TITLE:
+            milestone = m
+            break
+    if milestone is None:
+        milestone = repo.create_milestone(title=MILESTONE_TITLE, description=MILESTONE_DESC)
+    print(f"milestone: #{milestone.number} {milestone.title}")
+
+    existing_titles = {}
+    for issue in repo.get_issues(state="all"):
+        if not issue.pull_request:
+            existing_titles[issue.title.lower()] = issue
+
+    issue_numbers = {}  # spec index -> issue number
+    for idx, spec in enumerate(SPECS):
+        if spec["title"].lower() in existing_titles:
+            issue_numbers[idx] = existing_titles[spec["title"].lower()].number
+            print(f"issue exists: #{issue_numbers[idx]} {spec['title']}")
+            continue
+        body = ISSUE_TEMPLATE.format(**{k: spec[k] for k in
+                                        ("what", "where", "verify", "constraints",
+                                         "economy_note", "slug", "concept")})
+        issue = repo.create_issue(title=spec["title"], body=body,
+                                  labels=["ai-completed"], assignees=[USERNAME],
+                                  milestone=milestone)
+        branch = BRANCH_FOR_SPEC.get(idx)
+        real_branch = branch if branch else "feature/issue-2-netserver-snapshots + feature/issue-4-server-npc-chat"
+        issue.edit(body=body.replace("feature/issue-N-" + spec["slug"], real_branch))
+        issue_numbers[idx] = issue.number
+        print(f"issue created: #{issue.number} {spec['title']}")
+
+    existing_pr_heads = {pr.head.ref: pr for pr in repo.get_pulls(state="open")}
+    created_prs = []
+    for head, base, title, intro, closes in PR_CHAIN:
+        if head in existing_pr_heads:
+            print(f"PR exists for {head}: #{existing_pr_heads[head].number}")
+            created_prs.append(existing_pr_heads[head])
+            continue
+        body = intro + "\n\n**Testing:** `make -C tests test` — 96 cases, 0 failed, "
+        body += "repeated runs clean (threaded loopback suites flake-checked).\n"
+        if closes:
+            body += "\n" + "\n".join(f"Closes #{issue_numbers[i]}" for i in closes) + "\n"
+        body += "\n---\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n"
+        try:
+            pr = repo.create_pull(title=title, body=body, head=head, base=base, draft=True)
+        except GithubException as e:
+            if e.status == 422 and any("draft" in str(err).lower()
+                                       for err in (e.data or {}).get("errors", [])):
+                pr = repo.create_pull(title=title, body=body, head=head, base=base)
+            else:
+                raise
+        created_prs.append(pr)
+        print(f"PR created: #{pr.number} {title} ({head} -> {base})")
+
+    for idx, num in issue_numbers.items():
+        branch = BRANCH_FOR_SPEC.get(idx)
+        pr_link = next((f"#{pr.number}" for pr in created_prs if branch and pr.head.ref == branch),
+                       "#" + str(created_prs[3].number) + " and #" + str(created_prs[2].number))
+        issue = repo.get_issue(num)
+        if not any("Implemented overnight" in (c.body or "") for c in issue.get_comments()):
+            issue.create_comment(f"Implemented overnight. Draft PR: {pr_link}\n"
+                                 f"Merge the PR stack bottom-up (scaffold first); "
+                                 f"this issue closes automatically when its PR merges.")
+
+    print("\n=== Draft PR stack (merge top to bottom) ===")
+    for pr in created_prs:
+        print(f"  #{pr.number} {pr.title}\n      {pr.html_url}")
+
+
+if __name__ == "__main__":
+    main()

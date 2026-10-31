@@ -1,0 +1,10 @@
+# All keys are OPTIONAL for the default CL-vs-XLE daily pipeline.
+# yfinance needs no key; FRED works via keyless CSV download.
+# Add keys only if you want the keyed FRED/EIA paths or extra redundancy sources.
+
+FRED_API_KEY=
+EIA_API_KEY=
+ALPHA_VANTAGE_API_KEY=
+TWELVE_DATA_API_KEY=
+FMP_API_KEY=
+TIINGO_API_KEY=

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0022 — Propose, Validate, Commit</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:2rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:.5rem; }
+  h2 { font-size:1.3rem; color:var(--accent2); margin:2.2rem 0 .8rem; }
+  p, li { margin-bottom:.8rem; } ul { margin-left:1.4rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  pre { background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:1rem; overflow-x:auto; margin-bottom:1rem; }
+  .callout { background:var(--surface); border-left:4px solid var(--accent); border-radius:0 10px 10px 0; padding:.9rem 1.1rem; margin:1.2rem 0; }
+  .warn { border-left-color:var(--red); }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Lesson 0022 · LLM engineering · from PR #89 (gossip)</div>
+<h1>Propose, Validate, Commit: LLMs Never Write Directly</h1>
+<p>Gossip needs the model to CREATE game state — the facts NPCs learn.
+Letting model output write into the world directly turns every hallucination
+into corrupted state. The discipline:</p>
+<pre><code>PROPOSE   the model returns a strict-JSON array of ≤2 candidate facts
+VALIDATE  code parses (non-throwing), normalizes subjects, checks types,
+          directions, lengths — anything wrong yields NOTHING
+COMMIT    only validated records touch the WorldState bus; ids hash
+          subject+content so repeats are idempotent</code></pre>
+
+<h2>Design choices that make it robust</h2>
+<ul>
+<li><strong>All-or-nothing validation</strong>: one malformed entry rejects
+the whole proposal — no partial commits from half-good output.</li>
+<li><strong>Idempotent ids</strong>: <code>factIdFor(subject, content)</code>
+is a stable hash, so the same statement extracted twice is one fact, and
+the first teller's timestamp/source survive re-commits.</li>
+<li><strong>Normalization at the boundary</strong>: subjects squeeze to
+<code>[a-z0-9_]</code> on the way in, because the journal compares them
+exactly. Comparable fields beat free paragraphs.</li>
+<li><strong>Failure is silence</strong>: prose instead of JSON logs one
+line and commits nothing. Facts are a bonus; a crash would be a bug.</li>
+</ul>
+
+<h2>Propagation is state, not messages</h2>
+<p>Spread is a tick over the shared store: pairs within 6 units, teller
+knowledge older than 30 game minutes, 35% roll, at most one fact per pair
+per tick. No NPC→NPC message channel exists — so the journal (and any
+future reader) plugs into the same store with zero new wiring, and the
+conservative gates keep a secret's spread traceable and slow enough to
+walk back.</p>
+
+<div class="callout warn"><strong>Contrast with the directive tags.</strong>
+[[ACTION:]] tags are also validated (parseDirectives), but they are
+TRANSIENT — a bad tag wastes one turn. Facts are PERSISTENT state; the
+validation bar is higher because mistakes compound.</div>
+</div></body>
+</html>

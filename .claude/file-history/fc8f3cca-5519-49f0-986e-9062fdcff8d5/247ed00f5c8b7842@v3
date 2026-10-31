@@ -1,0 +1,31 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "oil_alpha"
+version = "0.1.0"
+description = "Crude-oil lead-lag quant research pipeline with a Streamlit dashboard"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[tool.scikit-build]
+# Tell scikit-build-core where the Python source lives so it also installs it.
+wheel.packages = ["src/oil_alpha"]
+
+[tool.scikit-build.cmake]
+build-type = "Release"
+# Place the compiled extension alongside the Python source so it is importable
+# in editable installs without an extra sys.path manipulation.
+args = ["-DPYBIND11_FINDPYTHON=ON"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]

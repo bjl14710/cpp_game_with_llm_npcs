@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Alpha Vantage earnings-surprise cache — scaffold (entry: refresh-earnings).
+
+Spec: .claude/plans/pead-strategy.md. Free-tier reality: ~25 API calls/day,
+so `refresh-earnings` drip-fetches under a per-run --budget and caches each
+ticker's quarterly earnings as JSON in data/earnings/<TICKER>.json.
+Earnings history is effectively append-only — quarterly refreshes suffice.
+Strategies read the cache ONLY; the network path lives here alone.
+"""
+from __future__ import annotations
+
+import pandas as pd
+
+
+def surprises_for(ticker: str, earnings_dir: str = "data/earnings") -> pd.DataFrame:
+    """Cached quarterly surprises for one ticker (no network, ever).
+
+    TODO(implement): read data/earnings/<ticker>.json; return a DataFrame
+    with columns reportedDate (datetime), reportedEPS, estimatedEPS,
+    surprise — where surprise = (reported - estimated) /
+    max(|estimated|, 0.10) (denominator floored at 10 cents so near-zero
+    estimates don't explode). Rows with null estimatedEPS are skipped.
+    Missing cache file -> empty DataFrame.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/pead-strategy.md")
+
+
+def refresh(tickers: list[str], earnings_dir: str, budget: int, api_key: str) -> dict:
+    """Fetch up to `budget` tickers' EARNINGS payloads and cache them.
+
+    TODO(implement): skip tickers whose cache is younger than ~80 days
+    (one quarter with slack); stop early and report cleanly on a
+    rate-limit response, keeping the partial cache; return
+    {fetched, skipped_fresh, remaining} counts for the CLI to print.
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/pead-strategy.md")
+
+
+def main() -> None:
+    """CLI: refresh-earnings --tickers_file ... [--budget 20] [--earnings_dir ...].
+
+    TODO(implement): argparse per the plan; ALPHAVANTAGE_API_KEY from env;
+    print the refresh() counts including how many tickers remain unfetched
+    (the drip-feed progress line).
+    """
+    raise NotImplementedError("scaffold: see .claude/plans/pead-strategy.md")
+
+
+if __name__ == "__main__":
+    main()

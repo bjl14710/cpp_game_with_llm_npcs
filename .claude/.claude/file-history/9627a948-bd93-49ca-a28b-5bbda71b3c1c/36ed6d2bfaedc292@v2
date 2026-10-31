@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drill 0007 — Creating New Blocks</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#2d333b;
+  --green:#34d399;--blue:#60a5fa;--yellow:#fbbf24;--red:#f87171;
+  --orange:#fb923c;--purple:#a78bfa;--teal:#22d3ee;--pink:#f472b6;
+  --text:#c9d1d9;--dim:#6e7681;--border:#30363d;--code:#010409;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.7;min-height:100vh}
+
+/* ── SHELL ─── */
+#start-screen,#drill-screen,#results-screen{max-width:700px;margin:0 auto;padding:2rem 1.3rem 5rem}
+.hidden{display:none!important}
+
+/* ── START SCREEN ─── */
+.logo{font-family:var(--mono);font-size:.75rem;color:var(--dim);letter-spacing:.08em;margin-bottom:.5rem}
+h1{font-size:1.75rem;color:#fff;margin-bottom:.3rem}
+.sub{font-size:.93rem;color:var(--dim);margin-bottom:2rem}
+
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1.8rem}
+.chip{font-family:var(--mono);font-size:.76rem;padding:.3rem .75rem;border-radius:20px;
+      border:1px solid var(--border);cursor:pointer;background:var(--surf2);
+      color:var(--dim);transition:all .15s;user-select:none}
+.chip.on{border-color:var(--green);background:rgba(52,211,153,.1);color:var(--green)}
+.chip.all-chip{border-color:var(--blue);color:var(--blue)}
+.chip.all-chip.on{background:rgba(96,165,250,.1)}
+
+.opt-row{display:flex;align-items:center;gap:.8rem;margin-bottom:1.8rem;font-size:.88rem;color:var(--dim)}
+.toggle{width:38px;height:20px;border-radius:10px;background:var(--surf3);border:1px solid var(--border);
+        cursor:pointer;position:relative;transition:background .15s}
+.toggle.on{background:var(--green)}
+.toggle::after{content:'';position:absolute;width:14px;height:14px;border-radius:50%;
+               background:#fff;top:2px;left:2px;transition:left .15s}
+.toggle.on::after{left:20px}
+.toggle-lbl{cursor:pointer}
+
+.begin-btn{font-family:var(--mono);font-size:.9rem;padding:.65rem 2rem;
+           border-radius:6px;border:none;background:var(--green);color:#0d1117;
+           cursor:pointer;font-weight:700;letter-spacing:.04em;transition:opacity .15s}
+.begin-btn:hover{opacity:.85}
+.begin-btn:disabled{opacity:.4;cursor:not-allowed}
+
+.count-note{font-size:.8rem;color:var(--dim);margin-top:.8rem}
+
+/* ── DRILL SCREEN ─── */
+.drill-header{display:flex;align-items:center;gap:1rem;margin-bottom:.9rem}
+.prog-text{font-family:var(--mono);font-size:.8rem;color:var(--dim)}
+.prog-bar{flex:1;height:4px;background:var(--surf3);border-radius:2px;overflow:hidden}
+.prog-fill{height:100%;background:var(--green);border-radius:2px;transition:width .25s}
+
+.q-meta{display:flex;gap:.5rem;margin-bottom:1rem}
+.tag{font-family:var(--mono);font-size:.7rem;padding:.18rem .52rem;border-radius:3px;border:1px solid var(--border);color:var(--dim)}
+.tag.ch-device{border-color:var(--blue);color:var(--blue)}
+.tag.ch-block{border-color:var(--purple);color:var(--purple)}
+.tag.ch-registry{border-color:var(--yellow);color:var(--yellow)}
+.tag.ch-gui{border-color:var(--teal);color:var(--teal)}
+.tag.ch-separation{border-color:var(--orange);color:var(--orange)}
+.tag.ch-traps{border-color:var(--red);color:var(--red)}
+.tag.type-mc{border-color:var(--dim)}
+.tag.type-wr{border-color:var(--pink);color:var(--pink)}
+
+.q-text{font-size:1.02rem;color:#e6edf3;font-weight:600;margin-bottom:1.1rem;line-height:1.55}
+
+pre.snippet{background:var(--code);border:1px solid var(--border);border-radius:6px;
+            padding:.85rem 1rem;font-family:var(--mono);font-size:.8rem;
+            line-height:1.8;overflow-x:auto;margin-bottom:1rem;white-space:pre-wrap}
+.cm{color:#2d4a5a;font-style:italic}.kw{color:#ff7b72}.fn{color:var(--green)}
+.str{color:#a5d6ff}.cls{color:var(--yellow)}.num{color:var(--orange)}.pm{color:#d2a8ff}
+
+/* MC */
+.opts{list-style:none}
+.opts li{background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+         padding:.55rem 1rem;margin-bottom:.4rem;cursor:pointer;font-size:.9rem;
+         transition:border-color .12s,background .12s;line-height:1.5}
+.opts li:hover:not(.lk){border-color:var(--green);background:rgba(52,211,153,.06)}
+.opts li.ok{border-color:var(--green);background:rgba(52,211,153,.09);color:var(--green)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.07);color:var(--red)}
+.opts li.lk{cursor:default}
+.mc-fb{font-size:.84rem;margin-top:.5rem;padding:.4rem .8rem;border-radius:4px;display:none}
+.mc-fb.ok{background:rgba(52,211,153,.08);color:var(--green);border:1px solid rgba(52,211,153,.2)}
+.mc-fb.no{background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.2)}
+
+/* Written recall */
+textarea{width:100%;background:var(--surf2);border:1px solid var(--border);border-radius:6px;
+         color:var(--text);font-family:var(--mono);font-size:.84rem;padding:.7rem .9rem;
+         resize:vertical;min-height:90px;outline:none;transition:border-color .15s}
+textarea:focus{border-color:var(--blue)}
+.wr-actions{display:flex;gap:.6rem;margin-top:.6rem;flex-wrap:wrap}
+.wr-btn{font-family:var(--mono);font-size:.77rem;padding:.3rem .75rem;border-radius:4px;
+        border:1px solid var(--border);background:none;color:var(--dim);cursor:pointer;
+        transition:all .14s}
+.wr-btn:hover{border-color:var(--blue);color:var(--blue)}
+.wr-btn.show-btn:hover{border-color:var(--yellow);color:var(--yellow)}
+.concept-hits{margin-top:.7rem;font-size:.83rem;line-height:1.8}
+.hit{color:var(--green)}.miss{color:var(--red)}
+.tally{font-family:var(--mono);font-size:.9rem;font-weight:700;margin-bottom:.4rem}
+.rough-note{font-size:.74rem;color:var(--dim);margin-top:.3rem;font-style:italic}
+.model-ans{margin-top:.8rem;background:var(--surf2);border:1px solid var(--border);
+           border-radius:6px;padding:.8rem 1rem;font-size:.87rem;line-height:1.65;display:none}
+.model-ans strong{color:var(--yellow)}
+.self-rate{display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap}
+.sr-btn{font-family:var(--mono);font-size:.75rem;padding:.28rem .7rem;border-radius:4px;
+        border:1px solid var(--border);background:none;cursor:pointer;transition:all .14s}
+.sr-knew{color:var(--green);border-color:var(--green)}
+.sr-knew:hover{background:rgba(52,211,153,.1)}
+.sr-review{color:var(--red);border-color:var(--red)}
+.sr-review:hover{background:rgba(248,113,113,.1)}
+
+/* Nav */
+.nav-row{display:flex;justify-content:space-between;align-items:center;margin-top:1.5rem}
+.nav-btn{font-family:var(--mono);font-size:.82rem;padding:.4rem 1.1rem;border-radius:5px;
+         border:1px solid var(--border);background:var(--surf2);color:var(--dim);
+         cursor:pointer;transition:all .14s}
+.nav-btn:hover:not(:disabled){border-color:var(--green);color:var(--green)}
+.nav-btn:disabled{opacity:.3;cursor:not-allowed}
+.nav-btn.finish{border-color:var(--yellow);color:var(--yellow);background:rgba(251,191,36,.07)}
+
+/* Results */
+h2{font-size:1.4rem;color:#fff;margin-bottom:.6rem}
+.score-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.5rem 0}
+.sc-box{background:var(--surf2);border:1px solid var(--border);border-radius:8px;
+        padding:1rem;text-align:center}
+.sc-big{font-family:var(--mono);font-size:2.2rem;font-weight:700;color:var(--green);line-height:1.1}
+.sc-lbl{font-size:.8rem;color:var(--dim);margin-top:.3rem}
+.miss-list{margin-top:1.5rem}
+.miss-list h3{font-size:.95rem;color:var(--yellow);margin-bottom:.7rem}
+.miss-item{background:var(--surf2);border:1px solid var(--border);border-radius:5px;
+           padding:.5rem .9rem;margin-bottom:.4rem;font-size:.84rem}
+.results-btns{display:flex;gap:.8rem;margin-top:1.8rem;flex-wrap:wrap}
+.r-btn{font-family:var(--mono);font-size:.84rem;padding:.5rem 1.2rem;border-radius:5px;
+       border:1px solid var(--border);background:none;cursor:pointer;transition:all .15s}
+.r-btn.primary{border-color:var(--green);color:var(--green)}
+.r-btn.primary:hover{background:rgba(52,211,153,.08)}
+.r-btn.secondary{color:var(--dim)}
+.r-btn.secondary:hover{border-color:var(--blue);color:var(--blue)}
+</style>
+</head>
+<body>
+
+<!-- ══ START ══ -->
+<div id="start-screen">
+  <div class="logo">DRILL / 0007</div>
+  <h1>Creating New Blocks</h1>
+  <p class="sub">Active recall drill — device layer, block layer, registration, traps</p>
+
+  <div class="chips" id="channel-chips">
+    <span class="chip all-chip on" data-ch="all">all channels</span>
+    <span class="chip on" data-ch="device">device layer</span>
+    <span class="chip on" data-ch="block">block layer</span>
+    <span class="chip on" data-ch="registry">registration</span>
+    <span class="chip on" data-ch="gui">gui path</span>
+    <span class="chip on" data-ch="separation">device/block split</span>
+    <span class="chip on" data-ch="traps">traps &amp; gotchas</span>
+  </div>
+
+  <div class="opt-row">
+    <div class="toggle on" id="shuffle-tog" onclick="toggleShuffle()"></div>
+    <span class="toggle-lbl" onclick="toggleShuffle()">Shuffle questions</span>
+  </div>
+
+  <button class="begin-btn" id="begin-btn" onclick="begin()">Begin drill</button>
+  <p class="count-note" id="count-note">20 questions selected</p>
+</div>
+
+<!-- ══ DRILL ══ -->
+<div id="drill-screen" class="hidden">
+  <div class="drill-header">
+    <span class="prog-text" id="prog-text">Q 1 / 20</span>
+    <div class="prog-bar"><div class="prog-fill" id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="q-meta" id="q-meta"></div>
+  <div class="q-text" id="q-text"></div>
+  <div id="q-body"></div>
+
+  <div class="nav-row">
+    <button class="nav-btn" id="prev-btn" onclick="go(-1)" disabled>← prev</button>
+    <button class="nav-btn" id="next-btn" onclick="go(1)">next →</button>
+  </div>
+</div>
+
+<!-- ══ RESULTS ══ -->
+<div id="results-screen" class="hidden">
+  <div class="logo">DRILL / 0007 — RESULTS</div>
+  <h2>Session complete</h2>
+  <div class="score-grid">
+    <div class="sc-box"><div class="sc-big" id="mc-score">-</div><div class="sc-lbl">MC correct</div></div>
+    <div class="sc-box"><div class="sc-big" id="wr-score">-</div><div class="sc-lbl">Written: knew it</div></div>
+  </div>
+  <div class="miss-list" id="miss-list"></div>
+  <div class="results-btns">
+    <button class="r-btn primary" onclick="reviewMissed()">Review missed only</button>
+    <button class="r-btn secondary" onclick="restart()">Restart from scratch</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// QUESTION BANK
+// ══════════════════════════════════════════════════════
+const BANK = [
+
+// ── DEVICE LAYER ──────────────────────────────────────
+
+{ch:'device',type:'mc',
+ q:'What does <code>_register(path, fn)</code> store, and when is it called?',
+ opts:[
+   {t:'Stores <code>fn</code> in <code>self._handlers[path.upper()]</code>; called inside <code>_setup_handlers()</code>, which is invoked by <code>super().__init__()</code>.',correct:true,why:'Correct. _register uppercases the path and inserts the handler. _setup_handlers() is called by super().__init__(), so by the time __init__ returns all handlers are registered.'},
+   {t:'Stores <code>fn</code> in <code>self._handlers[path]</code> (case-preserved); called by the subclass directly in its own <code>__init__</code>.',correct:false,why:'Wrong on two counts: _register() normalizes the key to uppercase, and it should be called inside _setup_handlers(), not scattered through __init__.'},
+   {t:'Stores <code>fn</code> in <code>BLOCK_REGISTRY</code>; called after <code>super().__init__()</code> once the instance is fully constructed.',correct:false,why:'BLOCK_REGISTRY is a canvas.py dict of block classes, not a handler map. _register() stores into self._handlers, not any module-level registry.'},
+   {t:'Stores a string path in <code>self._commands</code>; <code>fn</code> is looked up at dispatch time from the class <code>__dict__</code>.',correct:false,why:'_register() stores the callable directly under the normalized path in self._handlers — no late lookup. self._commands is not a real attribute in BaseDevice.'},
+ ]},
+
+{ch:'device',type:'wr',
+ q:'Describe the handler contract for write vs query commands. What must each type return, and what happens if a write handler returns a non-empty string?',
+ concepts:[
+   {label:'writes return ""',terms:['""','empty string','return ""']},
+   {label:'queries return str value',terms:['query','str(','return f','return "']},
+   {label:'non-empty from write echoed to caller',terms:['echo','caller','response','non-empty','append']},
+   {label:'ScpiError for invalid input',terms:['scpierror','scpi_error','ScpiError','raise']},
+ ],
+ model:'Write handlers must return "" (empty string). The return value is collected by process() — non-empty strings, regardless of command type, are appended to the response list and returned to the caller as if they were query results. Query handlers return the value as a string (e.g. f"{self.state.voltage:.4f}"). For out-of-range or invalid input, raise ScpiError(code, message) — BaseDevice._dispatch() catches it and queues it for SYSTEM:ERROR?. Never raise plain ValueError.',
+},
+
+{ch:'device',type:'wr',
+ q:'Why must <code>self.state = MyState()</code> come BEFORE <code>super().__init__()</code>? Trace exactly what breaks if the order is reversed.',
+ concepts:[
+   {label:'super().__init__ calls _setup_handlers',terms:['_setup_handlers','setup_handler']},
+   {label:'handlers reference self.state',terms:['self.state','state']},
+   {label:'crash on first dispatch not __init__',terms:['first','dispatch','process','attributeerror','attribute']},
+ ],
+ model:'super().__init__() calls _setup_handlers(), which registers handler methods like _volt() that close over self. Those methods are NOT called at registration time — they are just stored. So __init__ itself won\'t crash. The crash happens later, on the first process("VOLT?") call: _dispatch() calls _volt(), which reads self.state — which doesn\'t exist yet — raising AttributeError. Rule: all instance variables must be set before super().__init__().',
+},
+
+{ch:'device',type:'mc',
+ q:'A device needs to support both <code>VOLT</code> and <code>SOURCE:VOLTAGE</code> routed to the same handler. Which approach is correct?',
+ opts:[
+   {t:'Call <code>self._register("VOLT", self._volt)</code> and <code>self._register("SOURCE:VOLTAGE", self._volt)</code> — register the same callable under both paths.',correct:true,why:'Correct. _register() can map multiple paths to the same function. There is no de-duplication check; both entries just point to self._volt.'},
+   {t:'Register only the canonical long-form path and rely on SCPI abbreviation expansion inside _dispatch() to match "VOLT".',correct:false,why:'BaseDevice._dispatch() does a direct dict lookup — it does not expand SCPI short-forms. Both paths must be registered explicitly.'},
+   {t:'Use <code>self._register_alias("SOURCE:VOLTAGE", "VOLT")</code> only — _register_alias() handles multi-path routing natively.',correct:false,why:'_register_alias() stores an alias, but the primary ("VOLT") must also be registered. Using only _register_alias without a primary registration means the primary path isn\'t handled.'},
+   {t:'Override <code>_normalize_path()</code> to map both strings to a single canonical form before _dispatch() looks them up.',correct:false,why:'BaseDevice does not have a _normalize_path() hook that subclasses are expected to override. Multi-path support is done via multiple _register() calls.'},
+ ]},
+
+{ch:'device',type:'wr',
+ q:'What is <code>_do_reset()</code> for? When is it called? Write the body of <code>_do_reset()</code> for a device whose only state is <code>self.state = MyState()</code>.',
+ concepts:[
+   {label:'called on *RST or reset()',terms:['*rst','rst','reset()','reset']},
+   {label:'restore factory defaults',terms:['default','factory','restore','initial']},
+   {label:'body: self.state = MyState()',terms:['mystate()','MyState','self.state =']},
+ ],
+ model:'_do_reset() is called by BaseDevice.reset(), which is triggered by *RST (the IEEE 488.2 reset command) or right-click → "Reset device". It restores the device to factory defaults. For a device with a single state dataclass, the correct body is: def _do_reset(self) -> None: self.state = MyState()',
+},
+
+{ch:'device',type:'wr',
+ q:`Read this snippet from <code>silmulator/devices/power_supply.py</code>:
+
+<pre class="snippet"><span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+    self.channels: Dict[int, ChannelState] = {
+        i: ChannelState() <span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">1</span>, self.NUM_CHANNELS+<span class="num">1</span>)
+    }
+    self.selected_channel: int = <span class="num">1</span>
+    <span class="kw">super</span>().__init__()</pre>
+
+Why is the dict comprehension on lines 2-4 placed before super().__init__(), and what breaks if it's moved after?`,
+ concepts:[
+   {label:'super calls _setup_handlers',terms:['_setup_handlers','setup_handler']},
+   {label:'handlers close over self.channels',terms:['self.channels','channels']},
+   {label:'attributeerror on first dispatch',terms:['attributeerror','attribute error','dispatch','process']},
+ ],
+ model:'The dict comprehension builds self.channels before super().__init__() is called. super().__init__() calls _setup_handlers(), which registers handler methods (e.g. _set_voltage) that access self.channels. If self.channels were created after super(), those handlers would be registered before self.channels exists. On the first SCPI dispatch, a handler like self._set_voltage() would try to read self.channels and raise AttributeError. Same rule applies to selected_channel.',
+},
+
+// ── BLOCK LAYER ──────────────────────────────────────
+
+{ch:'block',type:'mc',
+ q:'What arguments does <code>add_port(id, label, x, y)</code> accept, and what do <code>x</code> and <code>y</code> represent?',
+ opts:[
+   {t:'<code>id</code>: string key; <code>label</code>: displayed text; <code>x, y</code>: fractions of BLOCK_WIDTH and BLOCK_HEIGHT (0.0–1.0).',correct:true,why:'Correct. BaseBlock.add_port() calls setPos(BLOCK_WIDTH * x, BLOCK_HEIGHT * y) on the ConnectionPort, so 0.0 is the top/left edge and 1.0 is the bottom/right edge.'},
+   {t:'<code>id</code>: string key; <code>label</code>: displayed text; <code>x, y</code>: pixel offsets from the block\'s top-left corner.',correct:false,why:'x and y are fractions, not pixels. BaseBlock.add_port() multiplies them by BLOCK_WIDTH and BLOCK_HEIGHT to get pixel positions.'},
+   {t:'<code>id</code>: integer index; <code>label</code>: displayed text; <code>x, y</code>: scene coordinates.',correct:false,why:'port id is a string, and x/y are fractional (relative to block size), not scene coordinates. Scene coordinates are computed from the block\'s position plus the port offset.'},
+   {t:'<code>id</code>: string key; <code>label</code>: displayed text; <code>x, y</code>: fractions where x=0.5 is always centered horizontally.',correct:false,why:'x=0.5 IS centered horizontally, but x is not "always" centered — you choose any fraction from 0.0 to 1.0. The description of what x/y represent is also wrong (they are fractions of block dimensions, which is correct for x=0.5 being the center).'},
+ ]},
+
+{ch:'block',type:'wr',
+ q:'What are the four overrideable hooks in <code>BaseBlock</code>? Which one is required? When does each get called?',
+ concepts:[
+   {label:'_setup_ports required',terms:['_setup_ports','setup_ports','required']},
+   {label:'_paint_content called by paint()',terms:['_paint_content','paint_content','paint()']},
+   {label:'_add_device_menu_actions called by contextMenuEvent',terms:['_add_device_menu','menu_actions','context']},
+   {label:'_do_reset in device not block',terms:['_do_reset','do_reset','device']},
+ ],
+ model:'Four hooks: (1) _setup_ports() — REQUIRED; called by BaseBlock.__init__(); use add_port() to define connection points. (2) _paint_content(painter, rect) — optional; called by BaseBlock.paint() after the title bar is drawn; draw the instrument face with QPainter. (3) _add_device_menu_actions(menu) — optional; called by contextMenuEvent; add QAction shortcuts for common commands. (4) _do_reset() — this one lives in the DEVICE subclass (BaseDevice), not the block; triggered by *RST or right-click → Reset device.',
+},
+
+{ch:'block',type:'wr',
+ q:'You call <code>send_command("OUTP ON")</code> from a right-click menu action lambda. The state changes in the device, but the block face still shows the output as OFF. What call is missing and why does it fix the problem?',
+ concepts:[
+   {label:'self.update() missing',terms:['self.update','update()']},
+   {label:'schedules repaint via Qt event loop',terms:['repaint','schedule','event loop','qt']},
+   {label:'_paint_content reads device state',terms:['_paint_content','paint_content','device state']},
+ ],
+ model:'self.update() is missing after send_command(). update() tells Qt to schedule a repaint of this QGraphicsItem. On the next event loop tick, Qt calls BaseBlock.paint() → _paint_content(), which reads the updated device state and redraws the block face. Without update(), Qt only repaints when it independently decides to (e.g. window resize or overlap by another window), which may never happen for a stationary block.',
+},
+
+{ch:'block',type:'mc',
+ q:`This is from <code>multimeter_block.py</code>:
+
+<pre class="snippet"><span class="kw">class</span> <span class="cls">MultimeterBlock</span>(<span class="cls">BaseBlock</span>):
+    BLOCK_WIDTH  = <span class="num">200</span>
+    BLOCK_HEIGHT = <span class="num">160</span>
+    HEADER_COLOR = <span class="cls">QColor</span>(<span class="num">80</span>, <span class="num">50</span>, <span class="num">120</span>)
+
+    <span class="kw">def</span> <span class="fn">__init__</span>(self) -> <span class="cls">None</span>:
+        <span class="kw">super</span>().__init__(<span class="cls">Multimeter</span>(), <span class="str">"Multimeter"</span>)
+        self._last_reading: float = <span class="num">0.0</span></pre>
+
+What does <code>self._last_reading</code> represent and where should it NOT be stored?`,
+ opts:[
+   {t:'A display cache for the last value shown on the block face; it should NOT be stored in the device (Multimeter) class.',correct:true,why:'Correct. _last_reading is a UI concern — it holds what the block last rendered, not the device\'s simulated "true" reading. The device stores truth (injected values, measurement state). Mixing these would make the device untestable without Qt.'},
+   {t:'The last measured voltage from the device; it should NOT be stored in the block, only in the device.',correct:false,why:'The last measured voltage is a device concern and lives in Multimeter._injected_values / _get_reading(). _last_reading in the block is specifically a display cache, not the authoritative reading.'},
+   {t:'A debounce buffer preventing rapid redraws; it should NOT be exposed outside MultimeterBlock.',correct:false,why:'It is not a debounce buffer. It is a display cache holding the last value shown on the LCD face. Debouncing is not the purpose.'},
+   {t:'A copy of the device\'s authoritative state, synchronized on every repaint; it should NOT be read by _paint_content.',correct:false,why:'It is not synchronized automatically. _paint_content() may update it when it calls _get_reading(), but it is a stale cache, not a live copy of device truth.'},
+ ]},
+
+{ch:'block',type:'wr',
+ q:`This snippet is from <code>multimeter_block.py</code>:
+
+<pre class="snippet"><span class="kw">def</span> <span class="fn">_setup_ports</span>(self) -> <span class="cls">None</span>:
+    self.<span class="fn">add_port</span>(<span class="str">"HI"</span>,      <span class="str">"HI"</span>, <span class="num">0.5</span>, <span class="num">1.0</span>)
+    self.<span class="fn">add_port</span>(<span class="str">"LO"</span>,      <span class="str">"LO"</span>, <span class="num">0.7</span>, <span class="num">1.0</span>)
+    self.<span class="fn">add_port</span>(<span class="str">"CURR_IN"</span>, <span class="str">"A"</span>,  <span class="num">0.3</span>, <span class="num">1.0</span>)
+    self.<span class="fn">add_port</span>(<span class="str">"GUARD"</span>,   <span class="str">"G"</span>,  <span class="num">0.0</span>, <span class="num">0.7</span>)</pre>
+
+Where do the HI, LO, and CURR_IN ports appear on the block, and where does GUARD appear? Use edge names (top, bottom, left, right).`,
+ concepts:[
+   {label:'y=1.0 is bottom edge',terms:['bottom','y=1.0','y = 1.0','bottom edge']},
+   {label:'HI LO CURR_IN on bottom',terms:['hi','lo','curr','bottom']},
+   {label:'x=0.0 is left edge',terms:['left','x=0.0','x = 0.0','left edge']},
+   {label:'GUARD on left',terms:['guard','left']},
+ ],
+ model:'y=1.0 maps to BLOCK_HEIGHT, so HI (x=0.5, y=1.0), LO (x=0.7, y=1.0), and CURR_IN (x=0.3, y=1.0) all appear on the bottom edge at different horizontal positions. GUARD (x=0.0, y=0.7) appears on the left edge, 70% down from the top.',
+},
+
+// ── REGISTRATION ──────────────────────────────────────
+
+{ch:'registry',type:'mc',
+ q:'You add <code>BLOCK_REGISTRY["My PSU"] = MyPSUBlock</code> to canvas.py. But <code>MyPSUBlock.__init__</code> calls <code>super().__init__(MyPSU(), "PSU")</code>. A user saves a layout with your block and reloads the file. What happens?',
+ opts:[
+   {t:'Your block and its wires are silently dropped — to_dict() stores "PSU" but BLOCK_REGISTRY has no "PSU" key, so from_dict() cannot reconstruct it.',correct:true,why:'Correct. to_dict() records device_type = "PSU" (the string from super().__init__). from_dict() calls add_block("PSU"), which does BLOCK_REGISTRY.get("PSU") → None. The block is silently skipped and all connected wires are dropped too.'},
+   {t:'from_dict() matches by class type, not by string key, so the block loads fine even though the strings differ.',correct:false,why:'from_dict() does a string lookup: BLOCK_REGISTRY.get(bdata["type"]). It has no access to class objects in the saved JSON — only the device_type string. The string must match a registry key exactly.'},
+   {t:'A KeyError is raised during reload, alerting the user that "PSU" is not in BLOCK_REGISTRY.',correct:false,why:'BLOCK_REGISTRY.get() returns None rather than raising KeyError. from_dict() checks "if block:" before using the result — None is falsy, so the block is silently skipped without any error message.'},
+   {t:'The block loads with a generic placeholder, preserving its wires but showing a "Missing block type" label.',correct:false,why:'There is no generic placeholder or fallback in from_dict(). When add_block() returns None, the block is simply omitted from the reconstructed scene.'},
+ ]},
+
+{ch:'registry',type:'wr',
+ q:'List the three edits needed to add a brand-new Python block to Silmulator. Be specific about what goes where and what constraint the registry key must satisfy.',
+ concepts:[
+   {label:'create device file in silmulator/devices/',terms:['devices/','devices\\','device.py']},
+   {label:'create block file in silmulator/gui/blocks/',terms:['gui/blocks','gui\\blocks','block.py']},
+   {label:'import in canvas.py',terms:['import','canvas.py']},
+   {label:'add to BLOCK_REGISTRY',terms:['block_registry','BLOCK_REGISTRY','registry']},
+   {label:'key must match device_type string',terms:['match','device_type','same string','equal']},
+ ],
+ model:'Three edits: (1) Create silmulator/devices/my_device.py — BaseDevice subclass with _setup_handlers() and _do_reset(). (2) Create silmulator/gui/blocks/my_block.py — BaseBlock subclass; __init__ calls super().__init__(MyDevice(), "My Key"). (3) In silmulator/gui/canvas.py: add the import and add BLOCK_REGISTRY["My Key"] = MyBlock. Constraint: the string "My Key" must be IDENTICAL in both the registry dict key and the second argument to super().__init__(). Mismatch = silent data loss on reload.',
+},
+
+{ch:'registry',type:'wr',
+ q:'After registering your block, it appears in one GUI location automatically but NOT in another. Name both locations and explain why the second one requires a separate manual edit.',
+ concepts:[
+   {label:'Add menu appears automatically',terms:['add menu','add →','menu bar','automatically']},
+   {label:'BlockLibraryPanel does not auto-update',terms:['blocklibrary','library panel','left panel','sidebar','hardcoded']},
+   {label:'panel has hardcoded descriptions dict',terms:['hardcoded','hard-coded','descriptions','dict']},
+ ],
+ model:'The Add menu (menu bar → Add) appears automatically because it iterates BLOCK_REGISTRY.keys() at render time. The BlockLibraryPanel (left sidebar) does NOT auto-update because its _setup_ui() method contains a hardcoded "descriptions" dict with the original six block names. New blocks must be added to that dict manually in main_window.py. This is a known inconsistency — the panel was written before BLOCK_REGISTRY was the single source of truth.',
+},
+
+// ── GUI PATH ──────────────────────────────────────────
+
+{ch:'gui',type:'mc',
+ q:'A user wants to create a new block from the GUI without editing any Python code. Which of these accurately describes what Silmulator currently supports?',
+ opts:[
+   {t:'The only no-code path is dropping a JSON spec file into custom_blocks/ — the GUI has no visual wizard for creating blocks.',correct:true,why:'Correct. hardware_docs/README.md mentions a right-click "New custom block from docs…" wizard aspirationally, but it is not implemented in main_window.py or anywhere in the codebase.'},
+   {t:'Right-click on the canvas → "New custom block from docs…" opens a wizard that reads hardware_docs/ and generates a JSON spec.',correct:false,why:'This is described in hardware_docs/README.md as a planned feature, but reading main_window.py shows no such context menu item or wizard exists in the code.'},
+   {t:'The Block Library panel has an "Add custom…" button that opens a JSON editor.',correct:false,why:'BlockLibraryPanel has no "Add custom…" button. It has only drag targets for the six hardcoded built-in blocks.'},
+   {t:'The SCPI console includes a "Create block" macro that generates a Python skeleton from a device description string.',correct:false,why:'The SCPI console only sends commands to existing blocks — it has no block creation functionality.'},
+ ]},
+
+{ch:'gui',type:'wr',
+ q:'When a JSON spec block is added to BLOCK_REGISTRY via <code>register_custom_blocks()</code>, does it appear in the BlockLibraryPanel? Why or why not?',
+ concepts:[
+   {label:'No, not in library panel',terms:['no','not in','does not appear','won\'t appear']},
+   {label:'panel uses hardcoded descriptions',terms:['hardcoded','hard-coded','descriptions']},
+   {label:'appears in Add menu',terms:['add menu','add →','menu']},
+ ],
+ model:'No. register_custom_blocks() adds entries to BLOCK_REGISTRY, which drives the Add menu. But BlockLibraryPanel uses its own hardcoded "descriptions" dict that only lists the original six built-in blocks. Neither JSON spec blocks nor new Python blocks appear in the panel unless someone manually edits the descriptions dict. The Add menu is the reliable path for all registered blocks (built-in, JSON, and Python).',
+},
+
+// ── DEVICE/BLOCK SEPARATION ───────────────────────────
+
+{ch:'separation',type:'mc',
+ q:'Which of these belongs in the DEVICE subclass, and which belongs in the BLOCK subclass?',
+ opts:[
+   {t:'SCPI handler for VOLT → device; pixel width and header colour → block.',correct:true,why:'Correct. The device handles all protocol logic (SCPI handlers, state, noise computation) and has no Qt imports. The block handles all visual/GUI concerns (dimensions, colours, ports, repainting).'},
+   {t:'SCPI handler for VOLT → block (because it triggers a repaint); pixel width → device (part of the spec).',correct:false,why:'SCPI handlers belong in the device regardless of whether they trigger a repaint. A handler in the block would mix Qt concerns into protocol logic, making the device untestable without Qt.'},
+   {t:'Both belong in the device — the block is purely a thin wrapper that delegates everything to the device.',correct:false,why:'The block has real responsibilities: port layout, painting, menu actions, display state. It is not a thin wrapper — it is a full Qt component.'},
+   {t:'It depends on whether the device state change is visible — if it changes the display, handle it in the block.',correct:false,why:'The division is by layer (protocol vs GUI), not by whether the change is visible. A state change lives in the device; the block reads device state and calls self.update() to schedule a repaint.'},
+ ]},
+
+{ch:'separation',type:'wr',
+ q:'Why is it valuable to keep Qt imports out of the device file? Give a concrete example of what this enables.',
+ concepts:[
+   {label:'device testable without QApplication',terms:['qapplication','q_application','without qt','no qt','pytest','unit test']},
+   {label:'plain pytest no GUI needed',terms:['pytest','unit test','test','no gui']},
+   {label:'concrete example device.process()',terms:['process(','device.process','process("','dev.process']},
+ ],
+ model:'Keeping the device free of Qt imports means it can be instantiated and tested with plain pytest — no QApplication, no display, no GUI. Concrete example: from silmulator.devices.my_device import MyDevice; dev = MyDevice(); dev.process("VOLT 5.0"); assert dev.state.voltage == 5.0. This test runs in CI on a headless server. If SCPI logic lived in the block, every test would need a full QApplication context, which is slow and fragile.',
+},
+
+{ch:'separation',type:'wr',
+ q:'A developer puts <code>self.voltage = 5.0</code> in <code>MyBlock.__init__</code> (the block, not the device) and uses it in <code>_paint_content()</code>. What is wrong with this design, and what should they do instead?',
+ concepts:[
+   {label:'state belongs in device',terms:['device','basedevice','device layer']},
+   {label:'block state is not accessible via SCPI',terms:['scpi','process(','command','accessible','not reachable']},
+   {label:'move voltage to device class',terms:['device','move','in the device','mydevice']},
+ ],
+ model:'self.voltage in the block is unreachable by any SCPI command. When firmware sends "VOLT?", BaseDevice._dispatch() looks up the handler in self._handlers — a dict on the device instance. There is no way for the handler to read or write block attributes. The voltage state must live in the device (e.g. self.state.voltage in MyDevice) where the SCPI handler can set it. The block reads device state at paint time: dev.state.voltage, and calls self.update() after commands that change it.',
+},
+
+// ── TRAPS ─────────────────────────────────────────────
+
+{ch:'traps',type:'mc',
+ q:`A colleague adds <code>self._log = []</code> AFTER <code>super().__init__()</code> in a new device. In normal use it works. After receiving <code>*RST</code> it crashes with <code>AttributeError: \'MyDevice\' object has no attribute \'_log\'</code>. Why?`,
+ opts:[
+   {t:'<code>*RST</code> triggers <code>_do_reset()</code>, which the colleague implemented to call <code>self._log.clear()</code>. But <code>_log</code> was never assigned because <code>super().__init__()</code> raised an exception before reaching line 2.',correct:false,why:'super().__init__() does not raise on a missing attribute at init time. The issue is the ORDER of initialization, not an exception.'},
+   {t:'<code>*RST</code> calls <code>_do_reset()</code>. If <code>_do_reset()</code> references <code>self._log</code>, it works once (after __init__ completes) but crashes if <code>*RST</code> arrives before <code>self._log = []</code> is reached — which can happen if <code>super().__init__()</code> itself triggers a reset.',correct:true,why:'Correct. If super().__init__() sends a reset signal, _do_reset() runs DURING __init__() before self._log is assigned (since the assignment comes after super()). Also, if _do_reset() is overridden to reference self._log, any call to reset() before self._log is assigned fails. Rule: all attributes referenced in _do_reset() or handlers must be set before super().'},
+   {t:'<code>*RST</code> reinitialises the object by calling <code>__init__</code> again, but this time <code>super().__init__()</code> overwrites the attributes that were set after it in the first call.',correct:false,why:'*RST calls reset() → _do_reset(). It does NOT call __init__ again. The object is not re-initialised.'},
+   {t:'<code>super().__init__()</code> calls <code>_do_reset()</code> as part of the IEEE 488.2 power-on reset sequence, which runs before <code>self._log = []</code> is reached in the subclass.',correct:false,why:'super().__init__() calls _setup_handlers(), not _do_reset(). _do_reset() is only called by reset(). However, if a handler registered by _setup_handlers() is invoked during __init__ for some reason, a missing attribute would also crash.'},
+ ]},
+
+{ch:'traps',type:'wr',
+ q:'You name your registry key <code>"OSC"</code> but a hardware_docs JSON spec also uses <code>"OSC"</code> as its name. Both are loaded. Which one wins and why?',
+ concepts:[
+   {label:'first-seen wins in BLOCK_REGISTRY',terms:['first','first-seen','first seen','wins']},
+   {label:'packaged scanned before user dir',terms:['packaged','packaged_dir','custom_blocks','scanned first']},
+   {label:'seen_names set prevents duplicate',terms:['seen_names','seen names','duplicate','skip']},
+ ],
+ model:'First-seen wins. discover_specs() scans PACKAGED_DIR first, then USER_DIR. When register_custom_blocks() iterates the discovered specs, it inserts each name into a seen_names set. If "OSC" already exists in seen_names, the spec is skipped — so the packaged spec would win over a user-dir spec. Then the Python block registered directly in canvas.py (after discover_specs() runs at startup) would OVERWRITE the spec entry in BLOCK_REGISTRY because it\'s assigned directly: BLOCK_REGISTRY["OSC"] = OscilloscopeBlock. Canvas-level Python registration runs at import time, after startup discovery. Avoid name collisions by using unique, descriptive keys.',
+},
+
+{ch:'traps',type:'wr',
+ q:'A block\'s <code>_paint_content()</code> calls <code>import random</code> at the top of the method body to generate noise. Is this a problem? When does it get called and how often?',
+ concepts:[
+   {label:'_paint_content called every repaint',terms:['every','each repaint','every repaint','each paint','called repeatedly']},
+   {label:'import inside method is slow but functional',terms:['slow','cached','sys.modules','import inside']},
+   {label:'should move import to top of file',terms:['top of file','module level','file top','move import']},
+ ],
+ model:'Functionally it works because Python caches module imports in sys.modules — the second and subsequent imports of "random" are O(1) dict lookups. But _paint_content() is called on every repaint, which can happen many times per second if the user is moving the block or other items are animating. The import lookup, while fast, is still unnecessary overhead inside a hot path. Move the import to the top of the file (module level). This is a minor style issue, not a crash — but it\'s a clean-code trap worth knowing.',
+},
+
+{ch:'traps',type:'mc',
+ q:'Which of these does NOT cause the block face to visually update after a device state change triggered from a right-click menu action?',
+ opts:[
+   {t:'Calling <code>self.device.state.voltage = 5.0</code> directly in the lambda without calling <code>send_command()</code> first.',correct:false,why:'Setting state directly (bypassing send_command) is a valid shortcut for right-click shortcuts — it updates device state just as well. The block face still needs self.update() regardless of how state is set.'},
+   {t:'Calling <code>send_command("VOLT 5.0")</code> and then <code>self.update()</code>.',correct:false,why:'send_command() updates device state; self.update() schedules a repaint. Together they correctly update the block face. This IS the pattern that works.'},
+   {t:'Calling <code>send_command("VOLT 5.0")</code> without calling <code>self.update()</code>.',correct:true,why:'Correct — this does NOT cause a visual update. send_command() changes device state, but Qt has no idea the visual representation is stale. Without self.update(), the repaint is never scheduled, so the block face stays frozen at the old value until Qt independently decides to repaint.'},
+   {t:'Calling <code>self.scene().update()</code> instead of <code>self.update()</code>.',correct:false,why:'scene().update() forces a full scene repaint, which is wasteful but functional — it would repaint this block along with everything else. So it DOES cause a visual update (just inefficiently).'},
+ ]},
+
+]; // end BANK
+
+// ══════════════════════════════════════════════════════
+// APP STATE
+// ══════════════════════════════════════════════════════
+let selectedCh = new Set(['device','block','registry','gui','separation','traps']);
+let doShuffle = true;
+let queue = [];
+let idx = 0;
+let mcResults = {}; // qidx → true/false
+let wrResults = {}; // qidx → 'knew'|'review'|null
+let typedAnswers = {};
+
+// ── channel chips ──
+document.querySelectorAll('.chip').forEach(c => {
+  c.addEventListener('click', () => {
+    if (c.dataset.ch === 'all') {
+      const allOn = selectedCh.size === 6;
+      if (allOn) { selectedCh.clear(); document.querySelectorAll('.chip:not(.all-chip)').forEach(x => x.classList.remove('on')); c.classList.remove('on'); }
+      else { selectedCh = new Set(['device','block','registry','gui','separation','traps']); document.querySelectorAll('.chip:not(.all-chip)').forEach(x => x.classList.add('on')); c.classList.add('on'); }
+    } else {
+      if (selectedCh.has(c.dataset.ch)) { selectedCh.delete(c.dataset.ch); c.classList.remove('on'); }
+      else { selectedCh.add(c.dataset.ch); c.classList.add('on'); }
+      const allChip = document.querySelector('.all-chip');
+      allChip.classList.toggle('on', selectedCh.size === 6);
+    }
+    updateCount();
+  });
+});
+
+function updateCount() {
+  const n = BANK.filter(q => selectedCh.has(q.ch)).length;
+  document.getElementById('count-note').textContent = n + ' questions selected';
+  document.getElementById('begin-btn').disabled = n === 0;
+}
+
+function toggleShuffle() {
+  doShuffle = !doShuffle;
+  document.getElementById('shuffle-tog').classList.toggle('on', doShuffle);
+}
+
+function begin() {
+  queue = BANK.filter(q => selectedCh.has(q.ch));
+  if (doShuffle) shuffle(queue);
+  idx = 0; mcResults = {}; wrResults = {}; typedAnswers = {};
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('drill-screen').classList.remove('hidden');
+  render();
+}
+
+function restart() {
+  document.getElementById('results-screen').classList.add('hidden');
+  document.getElementById('start-screen').classList.remove('hidden');
+  updateCount();
+}
+
+function reviewMissed() {
+  const missed = queue.filter((q, i) => {
+    if (q.type === 'mc') return mcResults[i] === false;
+    if (q.type === 'wr') return wrResults[i] === 'review' || wrResults[i] == null;
+    return false;
+  });
+  if (!missed.length) { alert('No misses to review!'); return; }
+  queue = missed;
+  if (doShuffle) shuffle(queue);
+  idx = 0; mcResults = {}; wrResults = {}; typedAnswers = {};
+  document.getElementById('results-screen').classList.add('hidden');
+  document.getElementById('drill-screen').classList.remove('hidden');
+  render();
+}
+
+function go(dir) {
+  // save textarea
+  const ta = document.querySelector('#q-body textarea');
+  if (ta) typedAnswers[idx] = ta.value;
+  idx += dir;
+  if (idx >= queue.length) { showResults(); return; }
+  if (idx < 0) idx = 0;
+  render();
+}
+
+function render() {
+  const q = queue[idx];
+  document.getElementById('prog-text').textContent = `Q ${idx+1} / ${queue.length}`;
+  document.getElementById('prog-fill').style.width = ((idx / queue.length) * 100) + '%';
+
+  // meta tags
+  const chLabel = {device:'device layer',block:'block layer',registry:'registration',gui:'gui path',separation:'device/block split',traps:'traps & gotchas'};
+  document.getElementById('q-meta').innerHTML =
+    `<span class="tag ch-${q.ch}">${chLabel[q.ch]}</span>` +
+    `<span class="tag type-${q.type}">${q.type === 'mc' ? 'multiple choice' : 'written recall'}</span>`;
+
+  document.getElementById('q-text').innerHTML = q.q;
+
+  const body = document.getElementById('q-body');
+  body.innerHTML = '';
+
+  if (q.type === 'mc') renderMC(q, body);
+  else renderWR(q, body);
+
+  document.getElementById('prev-btn').disabled = idx === 0;
+  const isLast = idx === queue.length - 1;
+  const nb = document.getElementById('next-btn');
+  nb.textContent = isLast ? 'finish ✓' : 'next →';
+  nb.className = 'nav-btn' + (isLast ? ' finish' : '');
+}
+
+function renderMC(q, body) {
+  const ul = document.createElement('ul'); ul.className = 'opts';
+  const opts = [...q.opts];
+  shuffle(opts);
+  opts.forEach(opt => {
+    const li = document.createElement('li');
+    li.innerHTML = opt.t;
+    li.dataset.correct = String(opt.correct);
+    li.dataset.why = opt.why;
+    ul.appendChild(li);
+  });
+  body.appendChild(ul);
+
+  const fb = document.createElement('div'); fb.className = 'mc-fb'; body.appendChild(fb);
+
+  // restore already-answered
+  const prev = mcResults[idx];
+  if (prev !== undefined) {
+    ul.querySelectorAll('li').forEach(li => {
+      li.classList.add('lk');
+      if (li.dataset.correct === 'true') li.classList.add('ok');
+    });
+    fb.style.display = 'block';
+    fb.className = 'mc-fb ' + (prev ? 'ok' : 'no');
+    fb.textContent = prev ? '✓ Correct.' : '✗ Not quite — correct answer highlighted.';
+  }
+
+  ul.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (li.classList.contains('lk')) return;
+      ul.querySelectorAll('li').forEach(x => x.classList.add('lk'));
+      const correct = li.dataset.correct === 'true';
+      li.classList.add(correct ? 'ok' : 'no');
+      if (!correct) ul.querySelector('[data-correct="true"]').classList.add('ok');
+      mcResults[idx] = correct;
+      fb.style.display = 'block';
+      fb.className = 'mc-fb ' + (correct ? 'ok' : 'no');
+      fb.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+    });
+  });
+}
+
+function renderWR(q, body) {
+  const ta = document.createElement('textarea');
+  ta.placeholder = 'Type your answer here…';
+  ta.value = typedAnswers[idx] || '';
+  body.appendChild(ta);
+
+  const actions = document.createElement('div'); actions.className = 'wr-actions';
+  const checkBtn = document.createElement('button'); checkBtn.className = 'wr-btn'; checkBtn.textContent = 'Check my answer';
+  const showBtn = document.createElement('button'); showBtn.className = 'wr-btn show-btn'; showBtn.textContent = 'Show model answer';
+  actions.append(checkBtn, showBtn); body.appendChild(actions);
+
+  const hitsDiv = document.createElement('div'); hitsDiv.className = 'concept-hits'; body.appendChild(hitsDiv);
+  const modelDiv = document.createElement('div'); modelDiv.className = 'model-ans'; body.appendChild(modelDiv);
+
+  const roughNote = document.createElement('p'); roughNote.className = 'rough-note';
+  roughNote.textContent = 'Keyword check is rough — self-judge honestly against the model answer.';
+  body.appendChild(roughNote);
+
+  checkBtn.addEventListener('click', () => {
+    typedAnswers[idx] = ta.value;
+    const text = ta.value.toLowerCase();
+    const results = q.concepts.map(c => ({ label: c.label, hit: c.terms.some(t => text.includes(t.toLowerCase())) }));
+    const got = results.filter(r => r.hit).length;
+    const total = results.length;
+    hitsDiv.innerHTML = `<div class="tally">${got} / ${total} key concepts detected</div>` +
+      results.map(r => `<div class="${r.hit ? 'hit' : 'miss'}">${r.hit ? '✓' : '✗'} ${r.label}</div>`).join('');
+  });
+
+  showBtn.addEventListener('click', () => {
+    typedAnswers[idx] = ta.value;
+    modelDiv.style.display = 'block';
+    modelDiv.innerHTML = `<strong>Model answer:</strong><br>${q.model.replace(/\n/g,'<br>')}
+      <div class="self-rate">
+        <button class="sr-btn sr-knew" onclick="rate(${idx},'knew',this)">✓ Knew it</button>
+        <button class="sr-btn sr-review" onclick="rate(${idx},'review',this)">⚑ Needs review</button>
+      </div>`;
+    // restore rating
+    if (wrResults[idx]) {
+      const btn = wrResults[idx] === 'knew' ? modelDiv.querySelector('.sr-knew') : modelDiv.querySelector('.sr-review');
+      if (btn) btn.style.fontWeight = '700';
+    }
+  });
+
+  // restore if already rated
+  if (wrResults[idx]) {
+    modelDiv.style.display = 'block';
+    modelDiv.innerHTML = `<strong>Model answer:</strong><br>${q.model.replace(/\n/g,'<br>')}
+      <div class="self-rate">
+        <button class="sr-btn sr-knew" onclick="rate(${idx},'knew',this)">✓ Knew it</button>
+        <button class="sr-btn sr-review" onclick="rate(${idx},'review',this)">⚑ Needs review</button>
+      </div>`;
+    const btn = wrResults[idx] === 'knew' ? modelDiv.querySelector('.sr-knew') : modelDiv.querySelector('.sr-review');
+    if (btn) btn.style.fontWeight = '700';
+  }
+}
+
+function rate(i, rating, btn) {
+  wrResults[i] = rating;
+  btn.closest('.self-rate').querySelectorAll('button').forEach(b => b.style.fontWeight = '');
+  btn.style.fontWeight = '700';
+}
+
+function showResults() {
+  document.getElementById('drill-screen').classList.add('hidden');
+  document.getElementById('results-screen').classList.remove('hidden');
+
+  const mcQs = queue.filter((q, i) => q.type === 'mc');
+  const mcTotal = mcQs.length;
+  const mcCorrect = Object.values(mcResults).filter(Boolean).length;
+  document.getElementById('mc-score').textContent = `${mcCorrect}/${mcTotal}`;
+
+  const wrQs = queue.filter((q, i) => q.type === 'wr');
+  const knew = Object.values(wrResults).filter(r => r === 'knew').length;
+  const wrTotal = wrQs.length;
+  document.getElementById('wr-score').textContent = `${knew}/${wrTotal}`;
+
+  const missDiv = document.getElementById('miss-list');
+  const missed = queue.filter((q, i) => {
+    if (q.type === 'mc') return mcResults[i] === false;
+    if (q.type === 'wr') return wrResults[i] === 'review' || wrResults[i] == null;
+    return false;
+  });
+  if (missed.length) {
+    missDiv.innerHTML = `<h3>Topics to revisit (${missed.length})</h3>` +
+      missed.map(q => `<div class="miss-item">${q.q.replace(/<[^>]+>/g,'').substring(0,100)}…</div>`).join('');
+  } else {
+    missDiv.innerHTML = '<p style="color:var(--green);font-family:var(--mono)">✓ Clean sweep — no misses!</p>';
+  }
+}
+
+// Fisher-Yates
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+updateCount();
+</script>
+</body>
+</html>

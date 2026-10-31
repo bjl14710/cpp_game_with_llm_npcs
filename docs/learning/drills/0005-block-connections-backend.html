@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drill 0005 — Block Connections: Backend</title>
+<style>
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+:root{
+  --bg:#0d1117;--surf:#161b22;--surf2:#21262d;--surf3:#30363d;
+  --wire:#fbbf24;--port-idle:#60a5fa;--port-conn:#34d399;
+  --accent:#34d399;--blue:#60a5fa;--red:#f87171;--orange:#fb923c;--purple:#a78bfa;
+  --text:#c9d1d9;--dim:#6e7681;--border:#30363d;--code:#010409;
+  --mono:'Cascadia Code','Fira Mono','Consolas',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+     background:var(--bg);color:var(--text);font-size:15px;line-height:1.68;min-height:100vh}
+.screen{display:none;max-width:820px;margin:0 auto;padding:2rem 1.5rem 5rem}
+.screen.active{display:block}
+
+/* ── start ── */
+.hd{text-align:center;margin-bottom:1.8rem}
+.lbl{font-family:var(--mono);font-size:.72rem;color:var(--dim);letter-spacing:.15em;
+     text-transform:uppercase;margin-bottom:.4rem}
+.ttl{font-size:2rem;color:#fff;margin-bottom:.35rem}
+.sub{color:var(--accent);font-size:.94rem;margin-bottom:.3rem}
+
+/* mini diagram */
+.mini{display:flex;align-items:center;justify-content:center;gap:.5rem;
+      margin:1.2rem 0 1.6rem;flex-wrap:wrap}
+.mb{font-family:var(--mono);font-size:.75rem;padding:.3rem .75rem;border-radius:4px;
+    border:1px solid var(--border);background:var(--surf2);color:#c9d1d9}
+.mp{width:10px;height:10px;border-radius:50%;display:inline-block;border:1.5px solid #111}
+.mp.i{background:var(--port-idle)}.mp.c{background:var(--port-conn)}
+.mw{width:48px;height:2px;background:var(--wire);margin:0 .1rem}
+.arr{color:var(--dim)}
+.layer-row{display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;font-family:var(--mono);font-size:.73rem}
+.ltag{padding:.18rem .55rem;border-radius:12px;border:1px solid var(--border)}
+.ltag.d{border-color:var(--blue);color:var(--blue);background:rgba(96,165,250,.08)}
+.ltag.v{border-color:var(--wire);color:var(--wire);background:rgba(251,191,36,.07)}
+.ltag.s{border-color:var(--accent);color:var(--accent);background:rgba(52,211,153,.07)}
+
+/* chips */
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin:1.2rem 0}
+.chip{font-family:var(--mono);font-size:.8rem;padding:.33rem .82rem;
+      border:1px solid var(--border);border-radius:20px;cursor:pointer;
+      background:var(--surf);color:var(--dim);user-select:none;transition:all .15s}
+.chip.on{border-color:var(--accent);color:var(--accent);background:rgba(52,211,153,.07)}
+.chip.all{border-color:var(--wire);color:var(--wire)}
+.chip.all.on{background:rgba(251,191,36,.06)}
+.smeta{text-align:center;color:var(--dim);font-size:.85rem;margin-bottom:.7rem}
+.shuf{display:flex;align-items:center;justify-content:center;gap:.65rem;
+      margin-bottom:1.2rem;font-size:.86rem;color:var(--dim)}
+.tog{position:relative;display:inline-block;width:36px;height:20px}
+.tog input{opacity:0;width:0;height:0}
+.sl{position:absolute;inset:0;background:var(--surf2);border-radius:20px;cursor:pointer;transition:background .2s}
+.sl:before{content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;
+           background:#fff;border-radius:50%;transition:transform .2s}
+input:checked+.sl{background:var(--accent)}
+input:checked+.sl:before{transform:translateX(16px)}
+
+/* ── question ── */
+.qhdr{display:flex;align-items:center;gap:.8rem;margin-bottom:1.4rem;flex-wrap:wrap}
+.qnum{font-family:var(--mono);font-size:.78rem;color:var(--dim)}
+.pbar{flex:1;height:5px;background:var(--surf2);border-radius:3px;min-width:80px}
+.pfill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
+.ctag{font-family:var(--mono);font-size:.7rem;padding:.18rem .52rem;
+      border:1px solid var(--border);border-radius:12px;color:var(--dim)}
+.ttag{font-family:var(--mono);font-size:.7rem;padding:.18rem .52rem;border-radius:12px}
+.ttag.mc{background:rgba(96,165,250,.12);color:var(--blue)}
+.ttag.wr{background:rgba(251,146,60,.12);color:var(--orange)}
+
+.qtxt{font-size:1.04rem;font-weight:600;color:#fff;margin-bottom:.9rem;line-height:1.52}
+pre.snip{background:var(--code);border:1px solid var(--border);border-radius:6px;
+         padding:.85rem 1.1rem;overflow-x:auto;font-family:var(--mono);
+         font-size:.82rem;line-height:1.7;margin-bottom:1rem;display:none}
+.cm{color:#2d4a5a;font-style:italic}.kw{color:#ff7b72}.fn{color:var(--accent)}
+.str{color:#a5d6ff}.cls{color:var(--wire)}.fl{color:var(--dim);user-select:none;margin-right:.8rem}
+.num{color:#ffa657}.op{color:var(--dim)}
+
+/* mc */
+.opts{list-style:none}
+.opts li{background:var(--surf);border:1px solid var(--border);border-radius:5px;
+         padding:.5rem .9rem;margin-bottom:.4rem;cursor:pointer;user-select:none;
+         transition:border-color .13s,background .13s;font-size:.9rem}
+.opts li:hover:not(.lk){border-color:var(--accent);background:rgba(52,211,153,.06)}
+.opts li.ok{border-color:var(--accent);background:rgba(52,211,153,.08);color:var(--accent)}
+.opts li.no{border-color:var(--red);background:rgba(248,113,113,.06);color:var(--red)}
+.opts li.lk{cursor:default}
+.mfb{margin-top:.55rem;font-size:.86rem;padding:.4rem .75rem;border-radius:4px;display:none}
+.mfb.ok{background:rgba(52,211,153,.08);color:var(--accent);border:1px solid rgba(52,211,153,.25)}
+.mfb.no{background:rgba(248,113,113,.07);color:var(--red);border:1px solid rgba(248,113,113,.25)}
+
+/* written */
+textarea{width:100%;min-height:108px;background:var(--surf);border:1px solid var(--border);
+         border-radius:6px;padding:.7rem .9rem;color:#e6edf3;font-family:inherit;
+         font-size:.92rem;resize:vertical;line-height:1.55}
+textarea:focus{outline:2px solid var(--accent)}
+.wacts{display:flex;gap:.5rem;margin-top:.55rem;flex-wrap:wrap}
+.kwres{margin-top:.75rem;display:none}
+.tally{font-weight:700;margin-bottom:.4rem;font-size:.88rem}
+.kwchips{display:flex;flex-wrap:wrap;gap:.32rem;margin-bottom:.45rem}
+.kc{font-family:var(--mono);font-size:.74rem;padding:.15rem .48rem;border-radius:12px}
+.kc.h{background:rgba(52,211,153,.11);color:var(--accent);border:1px solid rgba(52,211,153,.25)}
+.kc.m{background:rgba(248,113,113,.09);color:var(--red);border:1px solid rgba(248,113,113,.25)}
+.knote{color:var(--dim);font-size:.77rem}
+.modans{display:none;margin-top:.75rem;background:var(--surf);border:1px solid var(--border);
+        border-radius:6px;padding:.75rem 1rem;font-size:.89rem;line-height:1.65;white-space:pre-wrap}
+.modlbl{font-family:var(--mono);font-size:.7rem;color:var(--dim);text-transform:uppercase;
+        letter-spacing:.08em;margin-bottom:.3rem}
+.sr{display:none;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.85rem;
+    color:var(--dim);margin-top:.6rem}
+
+/* nav */
+.nav{display:flex;gap:.5rem;margin-top:1.4rem;flex-wrap:wrap;align-items:center}
+.spc{flex:1}
+.btn{font-family:var(--mono);font-size:.82rem;padding:.42rem .95rem;
+     border:1px solid transparent;border-radius:5px;cursor:pointer;transition:opacity .15s}
+.pri{background:var(--accent);color:#000}.pri:hover{opacity:.82}
+.sec{background:var(--surf2);color:#e6edf3;border-color:var(--border)}.sec:hover{border-color:var(--accent)}
+.grn{background:var(--accent);color:#000}.red{background:var(--red);color:#fff}
+.gld{background:var(--wire);color:#000}
+.sm{padding:.3rem .68rem;font-size:.76rem}
+
+/* results */
+.rhdr{text-align:center;margin-bottom:1.8rem}
+.sbig{font-size:3.4rem;font-family:var(--mono);color:var(--accent)}
+.slbl{color:var(--dim);font-size:.88rem;margin-top:.22rem}
+.rcols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1.3rem 0}
+@media(max-width:520px){.rcols{grid-template-columns:1fr}}
+.rcard{background:var(--surf);border:1px solid var(--border);border-radius:7px;padding:.85rem 1.05rem}
+.rcard h3{font-family:var(--mono);font-size:.77rem;color:var(--dim);
+          text-transform:uppercase;letter-spacing:.08em;margin-bottom:.55rem}
+.miss{background:var(--surf2);border-radius:4px;padding:.35rem .6rem;margin-bottom:.35rem;font-size:.85rem}
+.mcorr{color:var(--accent);font-family:var(--mono);font-size:.79rem;display:block;margin-top:.18rem}
+</style>
+</head>
+<body>
+
+<!-- ═══ START ═══ -->
+<div id="S" class="screen active">
+<div class="hd">
+  <div class="lbl">Drill 0005 · Active Recall</div>
+  <div class="ttl">Block Connections: Backend</div>
+  <div class="sub">20 questions — layers · ports · wires · mouse machine · transactions · serialisation</div>
+</div>
+<div class="mini">
+  <div class="mb"><span class="mp i"></span> port (free)</div>
+  <div class="mw"></div>
+  <div class="mb"><span class="mp c"></span> port (connected)</div>
+</div>
+<div class="layer-row">
+  <span class="ltag d">data: connected_to</span>
+  <span class="ltag v">visual: WireItem</span>
+  <span class="ltag s">signal: pyqtSignal</span>
+</div>
+<div class="chips" id="chips" style="margin-top:1.3rem">
+  <div class="chip all on" data-ch="all">⚡ All</div>
+  <div class="chip on" data-ch="layers">Layers</div>
+  <div class="chip on" data-ch="ports">Ports &amp; symmetry</div>
+  <div class="chip on" data-ch="wires">WireItem</div>
+  <div class="chip on" data-ch="mouse">Mouse machine</div>
+  <div class="chip on" data-ch="txn">connect_ports &amp; remove</div>
+  <div class="chip on" data-ch="serial">Serialisation &amp; clear</div>
+</div>
+<p class="smeta" id="smeta">20 questions selected</p>
+<div class="shuf">Shuffle
+  <label class="tog"><input type="checkbox" id="sh" checked><span class="sl"></span></label>
+</div>
+<div style="text-align:center">
+  <button class="btn pri" onclick="go()" style="font-size:1rem;padding:.62rem 2rem">Begin →</button>
+</div>
+</div>
+
+<!-- ═══ QUESTION ═══ -->
+<div id="Q" class="screen">
+<div class="qhdr">
+  <span class="qnum" id="qn">Q 1 / 20</span>
+  <div class="pbar"><div class="pfill" id="pf" style="width:0%"></div></div>
+  <span class="ctag" id="ct"></span>
+  <span class="ttag mc" id="tt">MC</span>
+</div>
+<div class="qtxt" id="qt"></div>
+<pre class="snip" id="qs"></pre>
+<div id="MA" style="display:none"><ul class="opts" id="mo"></ul><div class="mfb" id="mf"></div></div>
+<div id="WA" style="display:none">
+  <textarea id="wa" placeholder="Type your answer…"></textarea>
+  <div class="wacts">
+    <button class="btn sec sm" onclick="chkW()">Check keywords</button>
+    <button class="btn sec sm" onclick="showM()">Show model answer</button>
+  </div>
+  <div class="kwres" id="kr">
+    <div class="tally" id="kt"></div>
+    <div class="kwchips" id="kc"></div>
+    <div class="knote">⚠ Keyword check is fuzzy — judge yourself honestly against the model answer.</div>
+  </div>
+  <div class="modans" id="md"><div class="modlbl">Model answer</div><div id="mt"></div></div>
+  <div class="sr" id="sr">
+    Rate yourself:
+    <button class="btn grn sm" onclick="rate('k')">✓ Knew it</button>
+    <button class="btn red sm" onclick="rate('r')">↺ Needs review</button>
+  </div>
+</div>
+<div class="nav">
+  <button class="btn sec sm" id="bp" onclick="prev()">← Prev</button>
+  <div class="spc"></div>
+  <button class="btn pri sm" id="bn" onclick="next()">Next →</button>
+  <button class="btn gld sm" id="bf" style="display:none" onclick="results()">Results</button>
+</div>
+</div>
+
+<!-- ═══ RESULTS ═══ -->
+<div id="R" class="screen">
+<div class="rhdr">
+  <div class="sbig" id="rb">—</div>
+  <div class="slbl" id="rl"></div>
+</div>
+<div class="rcols">
+  <div class="rcard"><h3>MC misses</h3><div id="rm"><em style="color:var(--dim);font-size:.85rem">None!</em></div></div>
+  <div class="rcard"><h3>Written — needs review</h3><div id="rw"><em style="color:var(--dim);font-size:.85rem">None flagged.</em></div></div>
+</div>
+<div style="display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:.8rem">
+  <button class="btn sec" onclick="rev()">Review missed only</button>
+  <button class="btn pri" onclick="location.reload()">Restart</button>
+</div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// QUESTION BANK — 20 questions, 7 MC + 13 written
+// ════════════════════════════════════════════════════════════
+const BANK = [
+
+// ─── LAYERS ─────────────────────────────────────────────
+{id:'la1',ch:'layers',type:'w',
+ q:'Name the three layers of Silmulator\'s connection model and give the concrete Python type or mechanism responsible for each layer.',
+ c:[{l:'Data layer — connected_to pointer on ConnectionPort',t:['data','connected_to','pointer','optional']},
+    {l:'Visual layer — WireItem (QGraphicsLineItem)',t:['visual','wireitem','qgraphicslineitem','line']},
+    {l:'Signal layer — pyqtSignal on CanvasScene',t:['signal','pyqtsignal','wire_added','wire_removed','emit']}],
+ m:`Data layer: the connected_to: Optional["ConnectionPort"] field on each port. These are live Python object references that say "these two ports know about each other."
+Visual layer: WireItem (a QGraphicsLineItem). It reads scenePos() from both ports and draws the yellow line between them.
+Signal layer: pyqtSignal emissions on CanvasScene (wire_added, wire_removed, block_added, etc.). These let the rest of the app react without polling — e.g. the status bar can update when a wire is removed without knowing about WireItem.`
+},
+
+{id:'la2',ch:'layers',type:'mc',
+ q:'A wire is removed from the canvas. Which sequence correctly describes all three layers being updated in the right order inside _remove_wire()?',
+ opts:[
+  {t:'dict pop → removeItem → disconnect() on both ports → signal emit',c:false,
+   w:'Wrong order. If you pop from _wires and remove the item before disconnecting the ports, the ports\' connected_to still points at each other — the data layer is never cleaned up. Subsequent routing calls would still see the ports as connected.'},
+  {t:'disconnect() both ports → pop from _wires → removeItem() → wire_removed.emit()',c:true,
+   w:'Correct. Data layer first (disconnect nulls both sides), then dict cleanup, then visual removal, then signal. This order ensures that if any observer reacts to wire_removed and immediately inspects the ports, it sees them as free.'},
+  {t:'removeItem() → disconnect() both ports → pop from _wires → wire_removed.emit()',c:false,
+   w:'Removing the item first is fine for the visual layer, but the PyQt6 C++ object backing the WireItem may still be referenced by src_port/dst_port — calling their methods after C++ destruction is undefined behaviour in PyQt6.'},
+  {t:'signal emit → disconnect() both ports → pop from _wires → removeItem()',c:false,
+   w:'Emitting wire_removed before the cleanup means any observer that inspects ports or the _wires dict sees dirty state — the ports still appear connected and the wire is still in the dict.'},
+ ]
+},
+
+// ─── PORTS ──────────────────────────────────────────────
+{id:'po1',ch:'ports',type:'w',
+ q:'State the symmetry invariant for ConnectionPort.connected_to. What is the exact condition that must hold at all times?',
+ c:[{l:'if A.connected_to = B then B.connected_to = A',t:['if a.connected_to','b.connected_to = a','both sides','bidirectional','symmetric']},
+    {l:'OR both are None',t:['none','both none','neither']}],
+ m:`The symmetry invariant: for any two ports A and B, either:
+  A.connected_to is B AND B.connected_to is A (both connected to each other)
+OR:
+  A.connected_to is None AND B.connected_to is None (both free)
+There is no valid intermediate state where one side is set and the other is None. Violating this produces a ghost connection — routing code that walks connected_to will behave inconsistently depending on which port it starts from.`
+},
+
+{id:'po2',ch:'ports',type:'w',
+ q:'Walk through what disconnect() does line by line. Why must it null the peer\'s connected_to before nulling self\'s connected_to?',
+ snip:`<span class="fl">60</span><span class="kw">def</span> <span class="fn">disconnect</span>(self) -> <span class="cls">None</span>:
+<span class="fl">61</span>    <span class="kw">if</span> self.connected_to:
+<span class="fl">62</span>        self.connected_to.connected_to = <span class="kw">None</span>   <span class="cm"># peer first</span>
+<span class="fl">63</span>        self.connected_to.<span class="fn">_update_color</span>()
+<span class="fl">64</span>    self.connected_to = <span class="kw">None</span>                   <span class="cm"># then self</span>
+<span class="fl">65</span>    self.<span class="fn">_update_color</span>()`,
+ c:[{l:'reads self.connected_to to reach the peer before losing the reference',t:['reference','before losing','self.connected_to','reach peer','access peer']},
+    {l:'nulls peer.connected_to using self.connected_to as the handle',t:['peer.connected_to','null peer','connected_to.connected_to']},
+    {l:'then nulls self.connected_to (would lose the handle if done first)',t:['then nulls self','then self','lose the handle','if done first']}],
+ m:`Line 61: if self.connected_to is not None — only do anything if actually connected.
+Line 62: self.connected_to.connected_to = None — using self.connected_to as a handle to reach the peer, null the PEER's back-pointer. This must happen BEFORE line 64 because after line 64 we've lost the reference to the peer.
+Line 63: update the peer's visual color back to blue (idle).
+Line 64: self.connected_to = None — null our own pointer.
+Line 65: update our own visual color.
+If you swapped lines 62 and 64, self.connected_to would be None when you tried to write to the peer's field — a NoneType AttributeError.`
+},
+
+{id:'po3',ch:'ports',type:'mc',
+ q:'What is the consequence of calling <code>portA.connected_to = None</code> directly, bypassing <code>portA.disconnect()</code>?',
+ opts:[
+  {t:'portA turns blue (idle), portB turns green (connected), and routing via portB still finds portA as its peer — a ghost connection.',c:true,
+   w:'Correct. _update_color() is not called on portA (so it may stay green visually), portB.connected_to still points at portA (so _get_connected_blocks() walking from portB returns portA\'s block), and portA sees itself as free while portB doesn\'t.'},
+  {t:'Qt automatically detects the reference change and calls portB.disconnect() to maintain symmetry.',c:false,
+   w:'Python attributes have no automatic observer hook. Setting an instance variable triggers __setattr__ but ConnectionPort doesn\'t override it. Nothing propagates the change to portB.'},
+  {t:'Both ports turn blue immediately because _update_color() is called on any attribute write via Qt\'s property system.',c:false,
+   w:'_update_color() is a plain Python method, not a Qt property setter. Direct attribute writes to connected_to bypass it entirely.'},
+  {t:'A RuntimeError is raised because connected_to is a read-only Qt property protected by the C++ layer.',c:false,
+   w:'connected_to is a plain Python instance attribute, not a Qt property. Python has no enforcement mechanism on plain attributes.'},
+ ]
+},
+
+{id:'po4',ch:'ports',type:'w',
+ q:'How does add_port() position a port at the right edge, vertically centered, of a 220×160 block? Give the exact x_frac and y_frac values and explain why.',
+ snip:`<span class="fl">189</span><span class="kw">def</span> <span class="fn">add_port</span>(self, port_id, label, x_frac, y_frac):
+<span class="fl">190</span>    port = <span class="cls">ConnectionPort</span>(self, port_id, label)
+<span class="fl">191</span>    port.<span class="fn">setPos</span>(self.BLOCK_WIDTH * x_frac, self.BLOCK_HEIGHT * y_frac)`,
+ c:[{l:'x_frac = 1.0 → right edge (220 × 1.0 = 220)',t:['x_frac = 1.0','x_frac=1.0','1.0 × 220','1.0 * 220','right edge','220']},
+    {l:'y_frac = 0.5 → vertical center (160 × 0.5 = 80)',t:['y_frac = 0.5','y_frac=0.5','0.5 × 160','0.5 * 160','80','center']}],
+ m:`x_frac = 1.0 → setPos(220 * 1.0, ...) = 220 → the right edge of the 220-wide block.
+y_frac = 0.5 → setPos(..., 160 * 0.5) = 80 → the vertical midpoint of the 160-tall block.
+The coordinates are in the block's LOCAL space (because ConnectionPort is a child of the block). When the block moves, Qt automatically transforms all child positions — so the port follows the block without any extra update_position() call.`
+},
+
+// ─── WIRES ──────────────────────────────────────────────
+{id:'wi1',ch:'wires',type:'mc',
+ q:'WireItem has <code>setZValue(-1)</code>. What is the visual effect and why is −1 chosen specifically?',
+ opts:[
+  {t:'Wires render below blocks (ZValue 0 default) so when two blocks overlap, the wire doesn\'t paint over their title bars and body content.',c:true,
+   w:'Correct. Qt paints items in ZValue order, lowest first. Blocks default to ZValue 0. Setting the wire to -1 ensures it\'s always behind every block, so overlapping blocks don\'t show a wire crossing their face.'},
+  {t:'Wires render above blocks to stay visible during drags — negative ZValues have special hit-test priority in Qt.',c:false,
+   w:'Negative ZValues render BELOW zero-value items, not above. There is no special hit-test behaviour for negative ZValues in Qt.'},
+  {t:'ZValue -1 disables mouse events on the wire so it doesn\'t intercept port clicks.',c:false,
+   w:'ZValue controls paint order, not mouse event acceptance. To disable mouse events you use setAcceptedMouseButtons(NoButton), which is done separately on the _temp_wire, not on permanent WireItems.'},
+  {t:'ZValue -1 ensures the wire is drawn before the scene background grid, so it appears to glow through the grid.',c:false,
+   w:'The scene background is drawn by drawBackground(), which runs before all items regardless of ZValue. No item ZValue can affect the background render order.'},
+ ]
+},
+
+{id:'wi2',ch:'wires',type:'w',
+ q:'Why does update_position() call scenePos() on the ports rather than pos()? Be specific about what coordinate space each returns.',
+ c:[{l:'pos() returns parent-local coordinates (relative to the block)',t:['pos()','parent-local','local','relative to','block\'s origin','local space']},
+    {l:'scenePos() returns absolute scene coordinates',t:['scenepos()','absolute','scene coordinate','scene space','world coordinate']},
+    {l:'need scene coords to draw a line between two different blocks',t:['different block','cross-block','between block','setLine','scene coord','absolute']}],
+ m:`pos() returns the item's position in its PARENT's local coordinate space. For a ConnectionPort that is a child of a block, pos() returns something like QPointF(220, 80) — the offset from the block's top-left corner. Two ports on two different blocks return parent-relative positions that are incomparable.
+scenePos() walks up the parent transform chain and returns the position in SCENE (world) coordinates. Both ports, regardless of which block they belong to, return scene-space positions that can be directly passed to QLineF to draw the wire between them.`
+},
+
+{id:'wi3',ch:'wires',type:'mc',
+ q:'A user drags a block while a wire is connected to one of its ports. The wire doesn\'t follow the block — it stays anchored at the original position. Which code path is responsible for keeping wires taut, and when is it triggered?',
+ opts:[
+  {t:'update_position() is called for every wire inside mouseMoveEvent when self._connecting is active — but only during a wire-drawing gesture, not block drags.',c:true,
+   w:'Correct. The update_position() loop is inside the "if self._connecting and self._temp_wire:" guard in mouseMoveEvent. It fires when you\'re drawing a new wire, not when you\'re dragging an existing block. To fix wire-following during block drags, you\'d need to override itemChange() on BaseBlock with ItemPositionHasChanged.'},
+  {t:'update_position() is called in QGraphicsScene\'s default itemChange() handler automatically whenever a child item\'s parent moves.',c:false,
+   w:'QGraphicsScene has no knowledge of WireItem or update_position(). The default itemChange() propagates selection and geometry flags, but it does not call any Silmulator-specific method.'},
+  {t:'update_position() is called in WireItem\'s paint() method, so it re-queries scenePos() on every repaint cycle.',c:false,
+   w:'WireItem.paint() calls super().paint() (the QGraphicsLineItem painter). It does not call update_position() — that would update the internal QLineF data, but paint() doesn\'t call it.'},
+  {t:'update_position() is registered as a slot connected to the block\'s ItemPositionHasChanged signal via itemChange().',c:false,
+   w:'BaseBlock does not override itemChange() and does not connect to any position-change signal. This would be the correct design to fix the wire-drag bug, but it is not implemented.'},
+ ]
+},
+
+// ─── MOUSE ──────────────────────────────────────────────
+{id:'mo1',ch:'mouse',type:'w',
+ q:'Describe the three-event mouse state machine for drawing a wire. For each event, name the method, the state change, and the key action taken.',
+ c:[{l:'mousePressEvent: find port, set _connecting, create _temp_wire, accept()',t:['mousepressevent','_connecting','_temp_wire','accept','start_wire']},
+    {l:'mouseMoveEvent: update _temp_wire endpoint, update all wire positions, accept()',t:['mousemoveevent','update','endpoint','accept','update_position']},
+    {l:'mouseReleaseEvent: find target port, call connect_ports, cancel temp wire, accept()',t:['mousereleaseevent','connect_ports','_cancel_wire','cancel','target']}],
+ m:`mousePressEvent: calls _port_at(scenePos). If a free port is found: saves it as _connecting (state: "wiring in progress"), calls _start_wire() to create a dashed QGraphicsLineItem as _temp_wire at ZValue 100, then calls event.accept() to prevent the view's RubberBandDrag from hijacking the gesture.
+mouseMoveEvent: if _connecting is set, updates _temp_wire's endpoint to follow the cursor, calls update_position() on every committed wire, then calls event.accept() to stay in control.
+mouseReleaseEvent: if _connecting is set, calls _port_at(scenePos) to find the target port. If a valid target is found, calls connect_ports(src, target) to create the permanent WireItem. Always calls _cancel_wire() to remove the temp wire and reset _connecting to None, then calls event.accept().`
+},
+
+{id:'mo2',ch:'mouse',type:'mc',
+ q:'_port_at() iterates self.items(pos) and skips the first item if it is self._temp_wire. What would happen if that skip were removed?',
+ opts:[
+  {t:'items(pos) would return _temp_wire first (ZValue 100, topmost), the loop would find no ConnectionPort, and _port_at() would return None — so connect_ports() is never called and the wire gesture always fails silently.',c:true,
+   w:'Correct. _temp_wire sits at ZValue 100 — above every block and port. Without the "if item is self._temp_wire: continue" skip, it would be the first item returned and the isinstance(item, ConnectionPort) check would fail. _port_at() returns None, mouseReleaseEvent skips connect_ports(), _cancel_wire() runs, and the user sees the dashed line snap away with no wire created.'},
+  {t:'_temp_wire would receive the mouseReleaseEvent and consume it, preventing the event from reaching the destination port.',c:false,
+   w:'_temp_wire has setAcceptedMouseButtons(NoButton) set, so it never consumes mouse events. The issue is in items(pos) ordering, not event consumption.'},
+  {t:'The loop would skip _temp_wire automatically because it is not a ConnectionPort, and continue to the next item correctly.',c:false,
+   w:'The loop checks isinstance(item, ConnectionPort). _temp_wire is a QGraphicsLineItem, not a ConnectionPort — so it WOULD be skipped by the isinstance check. But this is not what the code does: the code has an explicit "if item is self._temp_wire: continue" BEFORE the isinstance check. If that skip is removed, _temp_wire fails the isinstance check and iteration continues correctly. So removing the explicit skip actually wouldn\'t break things in isolation — but the explicit skip is defensive (it short-circuits faster).'},
+  {t:'_temp_wire would also be returned by _port_at() since QGraphicsLineItem is a superclass of ConnectionPort.',c:false,
+   w:'ConnectionPort inherits from QGraphicsEllipseItem, not QGraphicsLineItem. They are siblings in the Qt hierarchy, not ancestors. isinstance(wireItem, ConnectionPort) is False.'},
+ ]
+},
+
+{id:'mo3',ch:'mouse',type:'w',
+ q:'Explain exactly why event.accept() in mousePressEvent is load-bearing. What breaks if you remove it?',
+ c:[{l:'unaccepted event propagates to CanvasView',t:['propagate','canvasview','view','unaccepted','bubbles up']},
+    {l:'CanvasView is in RubberBandDrag mode',t:['rubberbanddrag','rubber-band','rubber band','drag mode']},
+    {l:'rubber-band selection starts, fights the wire drag',t:['rubber-band','selection','fights','churns','rubber band selection']}],
+ m:`If event.accept() is not called, the event is "not handled" and Qt propagates it up to the QGraphicsView (CanvasView). CanvasView is set to DragMode.RubberBandDrag. An unaccepted left-button press in RubberBandDrag mode causes the view to start drawing a rubber-band selection rectangle. On every subsequent mouseMoveEvent, the view extends the selection, churns the scene's selectedItems list, and visually fights the dashed _temp_wire — which also gets rubber-banded over. The user sees the dashed line appear briefly and then get overridden by the selection rectangle. The wire drag fails and no WireItem is created. This was the root-cause of the original "connections not working" bug, fixed in commit 34122c2.`
+},
+
+{id:'mo4',ch:'mouse',type:'mc',
+ q:'The temp wire has two extra flags set: setAcceptedMouseButtons(NoButton) and ItemIsSelectable=False. Which one prevents _port_at() from returning the wrong item, and which one prevents rubber-band selection highlighting it?',
+ opts:[
+  {t:'NoButton prevents hit-test consumption; ItemIsSelectable=False prevents it from entering the rubber-band selection, but neither affects items() ordering — that\'s controlled purely by ZValue.',c:false,
+   w:'Half correct: ItemIsSelectable=False does prevent rubber-band selection. But NoButton doesn\'t affect items() ordering — items() is a geometric query, not an event-based one. The items() issue is handled by the explicit "if item is self._temp_wire: continue" in _port_at().'},
+  {t:'ItemIsSelectable=False prevents _port_at() from finding it; NoButton prevents it from intercepting mouse events during the move phase.',c:false,
+   w:'ItemIsSelectable controls rubber-band selection, not items() visibility. items() returns all items whose bounds contain the position, regardless of selectable state.'},
+  {t:'NoButton prevents the temp wire from intercepting mouse events during drag; ItemIsSelectable=False prevents it from being highlighted by rubber-band selection.',c:true,
+   w:'Correct. setAcceptedMouseButtons(NoButton) means no mouse event is delivered to the temp wire — so move events land on the scene and _port_at() can still query items() freely. ItemIsSelectable=False excludes it from the selection set when rubber-band selection runs, so it doesn\'t accidentally enter scene.selectedItems().'},
+  {t:'Both flags are redundant with each other — either one alone fully isolates the temp wire from all interaction.',c:false,
+   w:'They address different mechanisms. NoButton affects event delivery; ItemIsSelectable affects the selection set. Neither implies the other.'},
+ ]
+},
+
+// ─── TRANSACTIONS ────────────────────────────────────────
+{id:'tx1',ch:'txn',type:'w',
+ q:'connect_ports() has two early-return guards before creating the WireItem. Name them and explain what each prevents.',
+ snip:`<span class="fl">196</span><span class="kw">if</span> src.parent_block <span class="kw">is</span> dst.parent_block:
+<span class="fl">197</span>    <span class="kw">return</span> <span class="kw">None</span>
+<span class="fl">198</span><span class="kw">if</span> src.connected_to <span class="kw">or</span> dst.connected_to:
+<span class="fl">199</span>    <span class="kw">return</span> <span class="kw">None</span>`,
+ c:[{l:'self-loop guard: prevents a block wiring to itself',t:['self-loop','parent_block is','same block','self','loop']},
+    {l:'already-connected guard: prevents a port getting two wires',t:['already','connected_to','two wire','multiple wire','existing']}],
+ m:`Guard 1 (line 196-197): self-loop guard. If both ports belong to the same parent block (src.parent_block is dst.parent_block), return None. Without this, a block could wire one of its OUT ports to its own IN port, creating a command feedback loop and confusing _get_connected_blocks().
+Guard 2 (line 198-199): already-connected guard. If either port already has a wire (connected_to is not None), return None. Without this, a second wire could be created that calls connect_to() on an already-connected port — violating the symmetry invariant by overwriting one side's connected_to without nulling the old peer.`
+},
+
+{id:'tx2',ch:'txn',type:'w',
+ q:'In _remove_wire(), why is wire.dst_port.disconnect() called even though wire.src_port.disconnect() already nulls dst\'s connected_to pointer?',
+ c:[{l:'idempotent defensive call — if disconnect() implementation changes, second call still catches it',t:['idempotent','defensive','if implementation changes','future change','guard']},
+    {l:'second call does nothing (connected_to already None) — zero runtime cost',t:['does nothing','already none','zero cost','no-op','safe to call twice']}],
+ m:`After src_port.disconnect() runs: src.connected_to = None AND dst.connected_to = None (disconnect() nulls both sides). Calling dst_port.disconnect() afterwards finds connected_to is already None and does nothing — it's idempotent.
+The reason to keep the call: if disconnect() is ever modified (e.g. to not null the peer), the second call in _remove_wire() catches the case. It's a defensive invariant — zero runtime cost, strong correctness guarantee. The alternative (calling disconnect() only on src) creates a latent dependency on disconnect()'s implementation detail.`
+},
+
+{id:'tx3',ch:'txn',type:'mc',
+ q:'In connect_ports(), connect_to() is called AFTER the WireItem is created and added to the scene. Swap the order: call connect_to() first, then create WireItem. What breaks?',
+ opts:[
+  {t:'Nothing breaks — connect_to() only sets Python references; WireItem only reads them to draw. Order doesn\'t matter.',c:false,
+   w:'Actually nothing does break here as written — WireItem.__init__ calls update_position() which reads scenePos(), not connected_to. But the question tests whether you understand why the current order is intentional.'},
+  {t:'The already-connected guard (line 198) would fire on the second port after connect_to() sets the first, preventing WireItem from being created.',c:false,
+   w:'connect_to() sets both sides simultaneously (line 55-56). Neither port is partially connected at any point during connect_to() — both are set atomically. The guard runs before connect_to() is called in either order.'},
+  {t:'Nothing functional breaks because WireItem.__init__ reads scenePos(), not connected_to. The current order is a readability convention, not a semantic requirement.',c:true,
+   w:'Correct. WireItem.__init__ calls update_position() which reads scenePos() — it does not inspect connected_to. So swapping the order is safe in practice. The current order (create WireItem, then link ports) reads as "build the visual, then establish the data relationship," which is a natural narrative order but not strictly required.'},
+  {t:'connect_to() calls _update_color() which triggers a repaint. The repaint would occur before the WireItem is added, causing a visible frame where the ports are green but no wire exists.',c:false,
+   w:'PyQt6 repaints are scheduled asynchronously via the event loop, not executed immediately during _update_color(). A single-frame gap would not be observable in practice, and even if it were, it wouldn\'t constitute a bug.'},
+ ]
+},
+
+// ─── SERIALISATION ───────────────────────────────────────
+{id:'se1',ch:'serial',type:'w',
+ q:'from_dict() builds a port_map keyed by (block_id, port_id) tuples. The block_id used as the key comes from bdata["id"] (the saved JSON), NOT block.block_id (the freshly-generated UUID). Why?',
+ c:[{l:'add_block() generates a new UUID for each new block',t:['new uuid','new block_id','generates','fresh uuid','newly generated']},
+    {l:'wire data references the SAVED block IDs (from to_dict)',t:['saved block id','wdata["src_block"]','wdata','references','src_block','dst_block']},
+    {l:'must use saved ID to match wires correctly',t:['match','lookup','get','find wire','port_map.get']}],
+ m:`When from_dict() calls add_block(), the new block object gets a freshly-generated UUID (str(uuid.uuid4())[:8]). This UUID is different from the one stored in the JSON.
+The wire data (wdata["src_block"], wdata["dst_block"]) contains the SAVED block IDs — the ones from the session that was serialised. port_map must be keyed with those saved IDs so that the wire lookup port_map.get((wdata["src_block"], wdata["src_port"])) finds the right port. If port_map were keyed by block.block_id (the new UUID), the lookup would always return None and no wires would be restored.`
+},
+
+{id:'se2',ch:'serial',type:'mc',
+ q:'You add a new block type "Spectrum Analyser" but forget to register it in BLOCK_REGISTRY. A user saves a layout with it, then reloads. What happens to the block and its wires?',
+ opts:[
+  {t:'The block is skipped silently (add_block returns None), never enters port_map, and every wire referencing it passes the "if src and dst" guard as False — so those wires are silently dropped.',c:true,
+   w:'Correct. BLOCK_REGISTRY.get("Spectrum Analyser") returns None, so add_block() returns None without creating any block or ports. Nothing is added to port_map under the saved block ID. When from_dict() processes wires referencing this block, port_map.get() returns None, and the "if src and dst:" guard skips connect_ports(). No error, no warning — silent data loss.'},
+  {t:'A KeyError is raised when add_block() tries to look up the device type, rolling back the entire from_dict() call.',c:false,
+   w:'BLOCK_REGISTRY.get() returns None rather than raising KeyError. add_block() checks "if cls is None: return None" and exits cleanly. No exception propagates.'},
+  {t:'The block is restored as a generic BaseBlock placeholder so the layout renders, but its ports have no type-specific label.',c:false,
+   w:'There is no fallback BaseBlock placeholder in the current code. add_block() either finds a class in the registry or returns None. An unrecognised device_type means no block is created at all.'},
+  {t:'The wires are restored using the last known port positions cached in the JSON, even though the block itself is missing.',c:false,
+   w:'WireItem positions are computed from live port scenePos() calls, not from cached coordinates in JSON. The JSON stores only block/port IDs, not pixel positions for wires.'},
+ ]
+},
+
+{id:'se3',ch:'serial',type:'w',
+ q:'What does the overridden CanvasScene.clear() do that QGraphicsScene.clear() alone does not, and what crash does it prevent?',
+ snip:`<span class="fl">185</span><span class="kw">super</span>().<span class="fn">clear</span>()      <span class="cm"># deletes C++ items</span>
+<span class="fl">186</span>self._blocks = {}   <span class="cm"># ← why is this line necessary?</span>
+<span class="fl">187</span>self._wires = {}
+<span class="fl">188</span>self._connecting = <span class="kw">None</span>
+<span class="fl">189</span>self._temp_wire = <span class="kw">None</span>`,
+ c:[{l:'super().clear() deletes C++ objects but Python wrappers still hold references',t:['c++ object','python wrapper','reference','still hold','deleted']},
+    {l:'accessing a deleted C++ object raises RuntimeError: wrapped C/C++ object has been deleted',t:['runtimeerror','wrapped c/c++','deleted','access deleted','next save']},
+    {l:'resetting the dicts drops Python references so objects are garbage-collected',t:['reset','garbage collect','drop reference','empty dict','{}','clean up']}],
+ m:`QGraphicsScene.clear() destroys the underlying C++ objects for every item (blocks, wires). The Python wrapper objects (BaseBlock, WireItem instances) still exist in memory, but any attribute access or method call on them raises: RuntimeError: wrapped C/C++ object of type BaseBlock has been deleted.
+The _blocks and _wires dicts still hold references to these dead wrappers. The next call to to_dict() iterates _blocks.values() and tries to read block.x(), block.device_type — instant RuntimeError.
+Resetting the dicts to {} drops the Python references, allowing the wrappers to be garbage-collected cleanly. Also resetting _connecting and _temp_wire ensures no dead reference is left in the mouse state machine.`
+},
+
+]; // end BANK
+
+// ════════════════════════════════════════════════════════
+const CHS=['layers','ports','wires','mouse','txn','serial'];
+let active=new Set(CHS),qs=[],idx=0,saved={},mcR={},wR={};
+
+document.querySelectorAll('.chip:not(.all)').forEach(c=>{
+  c.addEventListener('click',()=>{
+    const ch=c.dataset.ch;
+    active.has(ch)?active.delete(ch):active.add(ch);
+    c.classList.toggle('on',active.has(ch));
+    document.querySelector('.chip.all').classList.toggle('on',active.size===CHS.length);
+    upMeta();
+  });
+});
+document.querySelector('.chip.all').addEventListener('click',()=>{
+  const allOn=active.size===CHS.length;
+  allOn?active.clear():CHS.forEach(c=>active.add(c));
+  document.querySelectorAll('.chip:not(.all)').forEach(c=>c.classList.toggle('on',!allOn));
+  document.querySelector('.chip.all').classList.toggle('on',!allOn);
+  upMeta();
+});
+function upMeta(){const n=BANK.filter(q=>active.has(q.ch)).length;document.getElementById('smeta').textContent=`${n} question${n===1?'':'s'} selected`;}
+function shuf(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+function go(){qs=BANK.filter(q=>active.has(q.ch));if(document.getElementById('sh').checked)shuf(qs);if(!qs.length)return;idx=0;saved={};mcR={};wR={};show('Q');render();}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+function render(){
+  const q=qs[idx],n=qs.length;
+  document.getElementById('qn').textContent=`Q ${idx+1} / ${n}`;
+  document.getElementById('pf').style.width=((idx+1)/n*100)+'%';
+  document.getElementById('ct').textContent=q.ch;
+  const tt=document.getElementById('tt');tt.textContent=q.type==='mc'?'MC':'Written';tt.className='ttag '+(q.type==='mc'?'mc':'wr');
+  document.getElementById('qt').innerHTML=q.q;
+  const sn=document.getElementById('qs');if(q.snip){sn.style.display='block';sn.innerHTML=q.snip;}else sn.style.display='none';
+  document.getElementById('MA').style.display=q.type==='mc'?'block':'none';
+  document.getElementById('WA').style.display=q.type!=='mc'?'block':'none';
+  q.type==='mc'?renderMC(q):renderW(q);
+  document.getElementById('bp').disabled=idx===0;
+  const last=idx===n-1;
+  document.getElementById('bn').style.display=last?'none':'inline-block';
+  document.getElementById('bf').style.display=last?'inline-block':'none';
+}
+function renderMC(q){
+  const list=document.getElementById('mo');list.innerHTML='';
+  const fb=document.getElementById('mf');fb.style.display='none';
+  const prev=mcR[q.id];
+  shuf([...q.opts]).forEach(o=>{
+    const li=document.createElement('li');li.tabIndex=0;
+    li.dataset.correct=o.c?'true':'false';li.dataset.why=o.w;li.textContent=o.t;
+    if(prev)li.classList.add('lk');
+    li.addEventListener('click',()=>{
+      if(li.classList.contains('lk'))return;
+      list.querySelectorAll('li').forEach(x=>x.classList.add('lk'));
+      const ok=li.dataset.correct==='true';
+      li.classList.add(ok?'ok':'no');
+      if(!ok)list.querySelector('[data-correct="true"]')?.classList.add('ok');
+      mcR[q.id]=ok?'ok':'no';
+      fb.style.display='block';fb.className='mfb '+(ok?'ok':'no');
+      fb.textContent=(ok?'✓ Correct. ':'✗ Not quite. ')+li.dataset.why;
+    });
+    li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')li.click();});
+    list.appendChild(li);
+  });
+  if(prev){fb.style.display='block';fb.className='mfb '+(prev==='ok'?'ok':'no');fb.textContent=prev==='ok'?'✓ Marked correct.':'✗ Marked incorrect.';}
+}
+function renderW(q){
+  const sv=saved[q.id]||{};
+  document.getElementById('wa').value=sv.t||'';
+  const kr=document.getElementById('kr');kr.style.display=sv.kr?'block':'none';
+  if(sv.kr){document.getElementById('kt').innerHTML=sv.kr.tally;document.getElementById('kc').innerHTML=sv.kr.chips;}
+  document.getElementById('md').style.display=sv.ms?'block':'none';
+  if(sv.ms)document.getElementById('mt').textContent=qs[idx].m;
+  document.getElementById('sr').style.display=sv.ms?'flex':'none';
+}
+function saveW(){const q=qs[idx];if(!q||q.type!=='w')return;if(!saved[q.id])saved[q.id]={};saved[q.id].t=document.getElementById('wa').value;}
+function chkW(){
+  const q=qs[idx];const txt=(document.getElementById('wa').value||'').toLowerCase();
+  const hits=q.c.map(c=>({l:c.l,h:c.t.some(t=>txt.includes(t.toLowerCase()))}));
+  const got=hits.filter(h=>h.h).length;
+  const tally=`<strong>${got} / ${hits.length} key concepts detected</strong>`;
+  const chips=hits.map(h=>`<span class="kc ${h.h?'h':'m'}">${h.h?'✓':'✗'} ${h.l}</span>`).join('');
+  document.getElementById('kt').innerHTML=tally;document.getElementById('kc').innerHTML=chips;document.getElementById('kr').style.display='block';
+  if(!saved[q.id])saved[q.id]={};saved[q.id].kr={tally,chips};saved[q.id].t=document.getElementById('wa').value;
+}
+function showM(){
+  const q=qs[idx];document.getElementById('mt').textContent=q.m;document.getElementById('md').style.display='block';document.getElementById('sr').style.display='flex';
+  if(!saved[q.id])saved[q.id]={};saved[q.id].ms=true;saved[q.id].t=document.getElementById('wa').value;
+}
+function rate(v){wR[qs[idx].id]=v;if(!saved[qs[idx].id])saved[qs[idx].id]={};saved[qs[idx].id].rate=v;document.getElementById('sr').querySelectorAll('button').forEach(b=>b.style.opacity='.4');const b=v==='k'?document.getElementById('sr').children[1]:document.getElementById('sr').children[2];if(b)b.style.opacity='1';}
+function prev(){saveW();if(idx>0){idx--;render();}}
+function next(){saveW();if(idx<qs.length-1){idx++;render();}}
+function results(){
+  saveW();
+  const mc=qs.filter(q=>q.type==='mc'),mcOk=Object.values(mcR).filter(v=>v==='ok').length,pct=mc.length?Math.round(mcOk/mc.length*100):0;
+  document.getElementById('rb').textContent=`${mcOk}/${mc.length}`;
+  document.getElementById('rl').textContent=(pct===100?'Perfect MC!':pct>=60?`${pct}% — review misses below`:`${pct}% — revisit lesson 0005`)+' · Written: check self-ratings';
+  const miss=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const rm=document.getElementById('rm');rm.innerHTML=miss.length?miss.map(q=>`<div class="miss">${q.q.slice(0,68)}…<span class="mcorr">✓ ${q.opts.find(o=>o.c).t.slice(0,55)}</span></div>`).join(''):'<em style="color:var(--dim);font-size:.84rem">None!</em>';
+  const revW=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const rw=document.getElementById('rw');rw.innerHTML=revW.length?revW.map(q=>`<div class="miss">${q.q.slice(0,68)}…</div>`).join(''):'<em style="color:var(--dim);font-size:.84rem">None flagged.</em>';
+  show('R');
+}
+function rev(){
+  const mc=qs.filter(q=>q.type==='mc'&&mcR[q.id]==='no');
+  const wr=qs.filter(q=>q.type==='w'&&wR[q.id]==='r');
+  const all=[...mc,...wr];if(!all.length)return;
+  mc.forEach(q=>delete mcR[q.id]);wr.forEach(q=>{delete wR[q.id];delete saved[q.id];});
+  qs=all;idx=0;show('Q');render();
+}
+</script>
+</body>
+</html>

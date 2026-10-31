@@ -1,0 +1,100 @@
+"""Deterministic, rule-based market regime classification for the Strategy
+Arena's gating feature.
+
+Classifies each trading day as one of four states from a single benchmark
+proxy (market-wide, not per-ticker):
+  - "high_vol"       — rolling annualized volatility exceeds a threshold.
+    Checked first: a volatile market overrides trend questions entirely.
+  - "trending"       — positive lag-1 return autocorrelation (momentum persists).
+  - "mean_reverting" — negative lag-1 return autocorrelation (moves fade).
+  - "neutral"        — ambiguous or insufficient history. Gates nothing —
+    every strategy trades on a neutral day.
+
+No ML/training involved by design — this stays simple enough to unit test
+exactly. See .claude/plans/regime-gating.md.
+"""
+from __future__ import annotations
+
+import math
+from typing import Dict, List
+
+import pandas as pd
+
+
+def market_proxy_returns(raw: Dict[str, pd.DataFrame], end_date, lookback: int = 90) -> pd.Series:
+    """SPY's daily returns up to end_date if present, else the cross-
+    sectional mean return across all fetched tickers.
+
+    Mirrors the SPY-or-mean proxy pattern already used by
+    ``walkforward_sim``'s risk overlay, reimplemented independently here
+    (rather than imported) to avoid a circular import between this module
+    and walkforward_sim.py.
+    """
+    if "SPY" in raw and "Close" in raw["SPY"].columns:
+        sub = raw["SPY"][raw["SPY"].index <= end_date]["Close"].pct_change().dropna()
+        if not sub.empty:
+            return sub.iloc[-lookback:] if lookback > 0 and len(sub) > lookback else sub
+
+    rets = []
+    for df in raw.values():
+        if "Close" not in df.columns:
+            continue
+        sub = df[df.index <= end_date]["Close"].pct_change().dropna()
+        if not sub.empty:
+            rets.append(sub)
+    if not rets:
+        return pd.Series(dtype=float)
+    panel = pd.concat(rets, axis=1).dropna(how="all")
+    if lookback > 0 and len(panel) > lookback:
+        panel = panel.iloc[-lookback:]
+    return panel.mean(axis=1)
+
+
+def classify_regime(market_returns: pd.Series, vol_window: int = 20, trend_window: int = 60,
+                    vol_threshold: float = 0.35, autocorr_threshold: float = 0.05) -> str:
+    """Classify one benchmark return series into a regime label.
+
+    Args:
+        market_returns: Daily returns of the benchmark proxy, oldest-first.
+        vol_window: Rolling window (days) for the annualized-vol check.
+        trend_window: Window (days) for the lag-1 autocorrelation check.
+        vol_threshold: Annualized vol above this -> "high_vol".
+        autocorr_threshold: |lag-1 autocorrelation| above this -> trending/
+            mean_reverting; otherwise "neutral".
+
+    Returns:
+        One of "high_vol", "trending", "mean_reverting", "neutral".
+    """
+    if market_returns is None or market_returns.empty:
+        return "neutral"
+
+    if len(market_returns) >= vol_window:
+        ann_vol = float(market_returns.iloc[-vol_window:].std() * math.sqrt(252))
+        if ann_vol > vol_threshold:
+            return "high_vol"
+
+    if len(market_returns) >= trend_window:
+        window = market_returns.iloc[-trend_window:]
+        ac = window.autocorr(lag=1)
+        if ac is not None and not math.isnan(ac):
+            if ac > autocorr_threshold:
+                return "trending"
+            if ac < -autocorr_threshold:
+                return "mean_reverting"
+
+    return "neutral"
+
+
+def regime_series_for_dates(raw: Dict[str, pd.DataFrame], dates: List,
+                            vol_window: int = 20, trend_window: int = 60,
+                            proxy_lookback: int = 90, vol_threshold: float = 0.35,
+                            autocorr_threshold: float = 0.05) -> pd.Series:
+    """Classify the regime for every date in ``dates`` — one label per day,
+    market-wide, shared by every strategy gated against it in that run.
+    """
+    out = {}
+    for d in dates:
+        proxy = market_proxy_returns(raw, end_date=d, lookback=proxy_lookback)
+        out[d] = classify_regime(proxy, vol_window=vol_window, trend_window=trend_window,
+                                 vol_threshold=vol_threshold, autocorr_threshold=autocorr_threshold)
+    return pd.Series(out, dtype=object)

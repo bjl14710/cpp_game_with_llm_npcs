@@ -1,0 +1,80 @@
+"""Build docs/learning/index.html: one row per lesson, binding the drill and
+vocab that share its NNNN-slug; lone drills (no matching lesson) get their
+own section."""
+import re
+from pathlib import Path
+
+LEARN = Path(__file__).resolve().parent.parent / "docs" / "learning"
+
+
+def title_of(path: Path) -> str:
+    m = re.search(r"<title>(.*?)</title>", path.read_text(), re.S)
+    t = m.group(1).strip() if m else path.stem
+    # Drop any site-name suffix like " — Silmulator Learning"
+    return re.split(r"\s+[—|-]\s+Silmulator.*$", t)[0].strip()
+
+
+def stems(kind: str) -> dict:
+    return {p.stem: p for p in sorted((LEARN / kind).glob("[0-9]*.html"))}
+
+
+lessons, drills, vocab = stems("lessons"), stems("drills"), stems("vocab")
+
+rows = []
+for stem, lpath in lessons.items():
+    drill_cell = f'<a href="drills/{stem}.html">drill</a>' if stem in drills else "—"
+    vocab_cell = f'<a href="vocab/{stem}.html">vocab</a>' if stem in vocab else "—"
+    cells = [f'<td class="num">{stem[:4]}</td>',
+             f'<td><a href="lessons/{lpath.name}">{title_of(lpath)}</a></td>',
+             f'<td>{drill_cell}</td>',
+             f'<td>{vocab_cell}</td>']
+    rows.append("<tr>" + "".join(cells) + "</tr>")
+
+lone = [f'<li><a href="drills/{p.name}">{title_of(p)}</a></li>'
+        for stem, p in drills.items() if stem not in lessons]
+
+lone_section = ""
+if lone:
+    lone_section = ("<h2>Drills without a lesson</h2>\n<ul>\n"
+                    + "\n".join(lone) + "\n</ul>\n")
+
+html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silmulator Learning — Index</title>
+<style>
+  body {{ background: #1e2330; color: #d0d8f0; font-family: -apple-system, 'Segoe UI', sans-serif;
+         max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }}
+  h1 {{ color: #c8d8ff; border-bottom: 2px solid #3a4060; padding-bottom: .4rem; }}
+  h2 {{ color: #c8d8ff; margin-top: 2rem; }}
+  a {{ color: #7fb4ff; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
+  td, th {{ border: 1px solid #3a4060; padding: .5rem .75rem; text-align: left; }}
+  th {{ background: #252b3b; color: #c0d0f0; }}
+  td.num {{ color: #808890; font-family: Menlo, Consolas, monospace; width: 3.5rem; }}
+  tr:hover {{ background: #252b3b; }}
+  .meta {{ color: #808890; font-size: .85rem; margin-top: 2rem; }}
+</style>
+</head>
+<body>
+<h1>Silmulator Learning</h1>
+<p>Lessons, drills, and vocabulary generated from real changes to this
+codebase. Each lesson row links its matching drill and vocab set when one
+exists. See <a href="PROGRESS.md">PROGRESS.md</a> for session history and
+<a href="GLOSSARY.md">GLOSSARY.md</a> for every term in one place.</p>
+<h2>Lessons</h2>
+<table>
+<tr><th>#</th><th>Lesson</th><th>Drill</th><th>Vocab</th></tr>
+{chr(10).join(rows)}
+</table>
+{lone_section}<p class="meta">Rebuilt 2026-07-15 (overnight session). {len(lessons)} lessons,
+{len(drills)} drills, {len(vocab)} vocab sets.</p>
+</body>
+</html>
+"""
+(LEARN / "index.html").write_text(html)
+print(f"index.html: {len(lessons)} lessons, {len(drills)} drills, "
+      f"{len(vocab)} vocab, {len(lone)} lone drills")

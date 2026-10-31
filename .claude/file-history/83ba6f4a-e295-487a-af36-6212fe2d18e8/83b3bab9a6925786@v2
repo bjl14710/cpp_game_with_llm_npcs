@@ -1,0 +1,279 @@
+"""Semantic sequencing review for extracted MSP430 SCPI call lists.
+
+``CodeParser`` extracts SCPI strings syntactically; this module adds a
+review pass that flags sequencing bugs a syntactic parser cannot catch,
+for code that targets the simulated MSP430:
+
+- **trigger-before-read** — an ADC result is read but no conversion was
+  ever triggered (SLAU367P §34.2: results are valid only after a
+  triggered conversion).
+- **enable-before-conversion** — a channel is converted or read without
+  having been enabled (mirrors the ADC12ENC gate).
+- **busy-check-before-blocking-op** — a UART receive with no prior
+  RXCOUNT? ready check: on real hardware this blocks forever when no
+  data arrives.
+- **shared-bus-overlap** — SPI *n* and I2C *n* used in the same program:
+  both map onto the one eUSCI_B *n* peripheral, which is either SPI or
+  I2C at any moment, never both.
+
+Findings are purely additive — they never block or alter the extraction
+output. v1 reports a flat list (no severity tiers); ambiguous ordering is
+marked ``LOW_CONFIDENCE`` instead of being dropped or hard-flagged.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import List, Optional, Sequence, TYPE_CHECKING
+
+from silmulator.code_parser.base_parser import ParsedCommand
+
+if TYPE_CHECKING:  # avoid a runtime cycle; only needed for type hints
+    from silmulator.code_parser.project import CodeProject
+
+HIGH = "HIGH"
+LOW_CONFIDENCE = "LOW_CONFIDENCE"
+
+# Command shapes on the simulated MSP430 (see silmulator/devices/msp430.py).
+_MSP430_PREFIX = re.compile(
+    r"^(ADC|GPIO|TIMERA\d|TIMERB\d|TA\d|TB\d|UART\d|EUSCI|SPI\d|I2C\d"
+    r"|CLOCK|POWER|CPU|MEM|MEMORY|WDT|INTERRUPT|FAULT)[:\s]",
+    re.IGNORECASE,
+)
+_ADC_RESULT_READ = re.compile(r"^ADC:(?:CHANNEL|CH)(\d+):(?:RAW|VALUE|VAL)\?", re.IGNORECASE)
+_ADC_TRIGGER = re.compile(r"^ADC:(?:TRIGGER|CONVERT)\b", re.IGNORECASE)
+_ADC_CONVERT = re.compile(r"^ADC:CONVERT\s+(\d+)", re.IGNORECASE)
+_ADC_ENABLE_ON = re.compile(r"^ADC:(?:CHANNEL|CH)(\d+):ENABLE\s+(?:1|ON)\b", re.IGNORECASE)
+_UART_BLOCKING_READ = re.compile(r"^(?:UART(\d+):RECEIVE|EUSCI:A(\d+):RXDATA)", re.IGNORECASE)
+_UART_READY_CHECK = re.compile(r"^UART(\d+):RXCOUNT\?", re.IGNORECASE)
+_SPI_USE = re.compile(r"^SPI(\d+):", re.IGNORECASE)
+_I2C_USE = re.compile(r"^I2C(\d+):", re.IGNORECASE)
+
+# A line that starts a new function in pasted C/C++/Python — used only to
+# detect that call order is ambiguous, not to parse the language.
+_FUNCTION_BOUNDARY = re.compile(
+    r"^\s*(?:def\s+\w+\s*\(|(?:[\w\*]+\s+)+\w+\s*\([^;]*\)\s*\{?\s*$)"
+)
+
+
+@dataclass
+class SemanticFinding:
+    """One flagged sequencing issue in reviewed code."""
+
+    rule: str
+    message: str
+    line_number: int
+    scpi_command: str
+    confidence: str = HIGH
+    file: Optional[str] = None
+
+
+@dataclass
+class SemanticReviewer:
+    """Sequencing-rule review over an already-extracted SCPI call list.
+
+    Reuses ``CodeParser`` output — it never re-parses source. Commands that
+    do not target the simulated MSP430 are ignored entirely.
+    """
+
+    findings: List[SemanticFinding] = field(default_factory=list)
+
+    def review(
+        self,
+        commands: Sequence[ParsedCommand],
+        source: Optional[str] = None,
+    ) -> List[SemanticFinding]:
+        """Review one ordered command list (one pasted buffer / one file).
+
+        ``source`` is optional; when provided it is used only to detect
+        multi-function code, where extraction order is not execution order —
+        absence-based findings then downgrade to LOW_CONFIDENCE.
+        """
+        msp = [c for c in commands if _MSP430_PREFIX.match(c.scpi_command.strip())]
+        msp.sort(key=lambda c: c.line_number)
+
+        ambiguous = self._has_multiple_functions(source)
+        confidence = LOW_CONFIDENCE if ambiguous else HIGH
+
+        findings: List[SemanticFinding] = []
+        findings += self._check_adc_trigger_before_read(msp, confidence)
+        findings += self._check_adc_enable_before_conversion(msp, confidence)
+        findings += self._check_uart_ready_before_receive(msp, confidence)
+        findings += self._check_shared_bus_overlap(msp)
+        findings.sort(key=lambda f: f.line_number)
+        self.findings = findings
+        return findings
+
+    def review_project(self, project: "CodeProject") -> List[SemanticFinding]:
+        """Review every parsed file of a project independently.
+
+        Files are reviewed in isolation because cross-file call order is
+        unknowable from static extraction.
+        """
+        all_findings: List[SemanticFinding] = []
+        for parsed_file in project.files:
+            if not parsed_file.commands:
+                continue
+            try:
+                source = parsed_file.path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                source = None
+            for finding in self.review(parsed_file.commands, source=source):
+                finding.file = str(parsed_file.path)
+                all_findings.append(finding)
+        self.findings = all_findings
+        return all_findings
+
+    # ------------------------------------------------------------------
+    # Rules
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_adc_trigger_before_read(
+        msp: Sequence[ParsedCommand], confidence: str
+    ) -> List[SemanticFinding]:
+        """Flag ADC result reads that no conversion trigger ever precedes."""
+        findings = []
+        triggered = False
+        for c in msp:
+            cmd = c.scpi_command.strip()
+            if _ADC_TRIGGER.match(cmd):
+                triggered = True
+            elif _ADC_RESULT_READ.match(cmd) and not triggered:
+                findings.append(SemanticFinding(
+                    rule="trigger-before-read",
+                    message=(
+                        f"ADC result is read on line {c.line_number} but no conversion "
+                        "was triggered first (ADC:TRIGGER or ADC:CONVERT). On real "
+                        "hardware the result register holds stale or undefined data "
+                        "until a conversion completes (SLAU367P §34.2)."
+                    ),
+                    line_number=c.line_number,
+                    scpi_command=cmd,
+                    confidence=confidence,
+                ))
+        return findings
+
+    @staticmethod
+    def _check_adc_enable_before_conversion(
+        msp: Sequence[ParsedCommand], confidence: str
+    ) -> List[SemanticFinding]:
+        """Flag conversions/reads on channels never enabled (ADC12ENC gate)."""
+        findings = []
+        enabled: set = set()
+        for c in msp:
+            cmd = c.scpi_command.strip()
+            m = _ADC_ENABLE_ON.match(cmd)
+            if m:
+                enabled.add(int(m.group(1)))
+                continue
+            channel: Optional[int] = None
+            m = _ADC_CONVERT.match(cmd)
+            if m:
+                channel = int(m.group(1))
+            else:
+                m = _ADC_RESULT_READ.match(cmd)
+                if m:
+                    channel = int(m.group(1))
+            if channel is not None and channel not in enabled:
+                findings.append(SemanticFinding(
+                    rule="enable-before-conversion",
+                    message=(
+                        f"ADC channel {channel} is used on line {c.line_number} without "
+                        "being enabled first (ADC:CHANNEL{n}:ENABLE ON). Real hardware "
+                        "requires ADC12ENC before any conversion (SLAU367P §34.2)."
+                    ),
+                    line_number=c.line_number,
+                    scpi_command=cmd,
+                    confidence=confidence,
+                ))
+        return findings
+
+    @staticmethod
+    def _check_uart_ready_before_receive(
+        msp: Sequence[ParsedCommand], confidence: str
+    ) -> List[SemanticFinding]:
+        """Flag blocking UART receives with no prior RXCOUNT? ready check."""
+        findings = []
+        checked: set = set()
+        for c in msp:
+            cmd = c.scpi_command.strip()
+            m = _UART_READY_CHECK.match(cmd)
+            if m:
+                checked.add(int(m.group(1)))
+                continue
+            m = _UART_BLOCKING_READ.match(cmd)
+            if m:
+                instance = int(m.group(1) or m.group(2))
+                if instance not in checked:
+                    findings.append(SemanticFinding(
+                        rule="busy-check-before-blocking-op",
+                        message=(
+                            f"UART{instance} receive on line {c.line_number} has no "
+                            f"prior UART{instance}:RXCOUNT? ready check. On hardware a "
+                            "receive with an empty RX buffer blocks (or returns stale "
+                            "UCAxRXBUF contents) instead of failing cleanly."
+                        ),
+                        line_number=c.line_number,
+                        scpi_command=cmd,
+                        confidence=confidence,
+                    ))
+        return findings
+
+    @staticmethod
+    def _check_shared_bus_overlap(msp: Sequence[ParsedCommand]) -> List[SemanticFinding]:
+        """Flag SPI n + I2C n use in one program: one eUSCI_B, two protocols.
+
+        This rule stays HIGH confidence even in multi-function code — both
+        uses exist regardless of call order.
+        """
+        findings = []
+        spi_first_use = {}
+        i2c_first_use = {}
+        for c in msp:
+            cmd = c.scpi_command.strip()
+            m = _SPI_USE.match(cmd)
+            if m:
+                spi_first_use.setdefault(int(m.group(1)), c)
+            m = _I2C_USE.match(cmd)
+            if m:
+                i2c_first_use.setdefault(int(m.group(1)), c)
+        for n in sorted(set(spi_first_use) & set(i2c_first_use)):
+            later = max(spi_first_use[n], i2c_first_use[n], key=lambda c: c.line_number)
+            findings.append(SemanticFinding(
+                rule="shared-bus-overlap",
+                message=(
+                    f"SPI{n} and I2C{n} are both driven in this program (second use on "
+                    f"line {later.line_number}). They share the single eUSCI_B{n} "
+                    "peripheral, which operates in SPI or I2C mode — overlapping "
+                    "transactions must be serialized around an explicit mode switch "
+                    "(SLAU367P §31/§32)."
+                ),
+                line_number=later.line_number,
+                scpi_command=later.scpi_command.strip(),
+                confidence=HIGH,
+            ))
+        return findings
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _has_multiple_functions(source: Optional[str]) -> bool:
+        """True when the pasted code defines 2+ functions.
+
+        Extraction order is line order; with multiple functions the actual
+        call order is unknowable statically, so absence-based rules report
+        LOW_CONFIDENCE instead of a hard finding.
+        """
+        if not source:
+            return False
+        count = 0
+        for line in source.splitlines():
+            if _FUNCTION_BOUNDARY.match(line):
+                count += 1
+                if count >= 2:
+                    return True
+        return False

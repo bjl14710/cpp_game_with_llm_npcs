@@ -1,0 +1,49 @@
+/idea
+
+Goal: Fix car/person sizing, add the menu + NPC speaking/dialogue UI, pull in the
+weapon systems from other in-progress branches, and do all of it through a change
+that also makes future art-style swaps cheap.
+
+Context: Cars and people are currently rendered at the wrong relative sizes to
+each other. Investigate whether this is because entity size is being derived
+from each sprite's native pixel dimensions rather than a declared world size —
+if so, fix it at that level (a size contract per entity type: world_width,
+world_height, anchor point), not with hardcoded per-sprite scale constants.
+Any hardcoded scale multiplier tied to a specific asset's pixel dimensions is
+the wrong fix here even if it makes today's sizing look right.
+
+Scope:
+1. Sizing fix — introduce (or correct) a per-entity-type size spec that's
+   independent of any bound texture's pixel dimensions. Apply it to cars and
+   people at minimum; audit other entity types for the same issue while you're
+   in there.
+2. Art-style swappability — this should fall out of (1) rather than being a
+   separate system. If it doesn't fully fall out of the size-contract fix,
+   flag specifically what additional decoupling is needed (e.g. animation
+   frame consistency, anchor handling) and address it in the same pass.
+3. Menu + speaking options — add a menu system and the in-conversation
+   dialogue/speaking-option UI for talking to NPCs. Follow whatever UI
+   patterns already exist in the codebase; if none exist, pick something
+   simple and consistent with the existing render approach rather than
+   pulling in a new UI framework.
+4. Weapons — search open branches/PRs in this repo for existing weapon-related
+   work and port/merge the relevant pieces in. If more than one branch touches
+   weapons, reconcile them into one coherent implementation rather than
+   layering both. If nothing weapon-related actually exists on another branch,
+   say so plainly in the report rather than inventing a weapons system from
+   scratch under this ticket — flag it as a separate scoping question instead.
+
+Autonomy instructions for tonight's run — this runs unattended, so:
+- Do not stop to ask me clarifying questions, including any /grill-me-style
+  interrogation step. Where a decision would normally prompt me, pick the
+  most defensible option yourself, log the decision and reasoning in
+  OVERNIGHT_REPORT.md, and keep going.
+- If the weapon branches conflict or are ambiguous, default to porting the
+  most complete/recent one and note what was left out, rather than blocking.
+- Prefer fixing sizing at the size-contract level over any faster hack, even
+  if the hack would look done sooner — this ticket's value is mostly in that
+  it prevents the same bug from recurring under a new art style.
+- Follow existing CLAUDE.md agent routing.
+- Draft tickets, implement, test, open a draft PR as usual. Do not merge,
+  do not touch main.
+- docs/learning/, OVERNIGHT_REPORT.md, .claude/memory/ stay gitignored.

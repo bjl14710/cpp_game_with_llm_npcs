@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Drill 0019 — Distance Fog</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --accent:#7c6af7; --accent2:#4fc3f7;
+          --green:#56c78a; --red:#e05c6e; --text:#e0e2f0; --muted:#8589a8;
+          --code-bg:#141722; --border:#2d3150; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; font-size:16px; line-height:1.7; padding:2rem 1rem; }
+  .wrap { max-width:800px; margin:0 auto; }
+  .meta { font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase; margin-bottom:.4rem; }
+  h1 { font-size:1.7rem; background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:1rem; }
+  .q { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem 1.2rem; margin-bottom:1rem; }
+  .q h3 { color:var(--accent2); font-size:1rem; margin-bottom:.5rem; }
+  code { font-family:ui-monospace,monospace; background:var(--code-bg); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.9em; }
+  details { margin-top:.6rem; } summary { cursor:pointer; color:var(--accent); }
+  .a { border-left:3px solid var(--green); padding:.6rem 1rem; margin-top:.5rem; background:var(--code-bg); border-radius:0 8px 8px 0; }
+  p { margin-bottom:.6rem; }
+</style>
+</head>
+<body><div class="wrap">
+<div class="meta">Drill 0019 · pairs with lesson 0019</div>
+<h1>Drill: Distance Fog in a Forward Renderer</h1>
+
+<div class="q"><h3>1. Neon grass</h3>
+<p>After assigning the fog shader to every model material, buildings haze
+but the grass plane stays fully saturated to the horizon. Why, and what's
+the fix?</p>
+<details><summary>Answer</summary><div class="a">
+<p><code>DrawPlane</code>/<code>DrawCube</code> go through rlgl's immediate
+batch, which ignores material shaders — it uses the shader set by
+<code>BeginShaderMode</code>. Wrap the 3D pass in
+<code>BeginShaderMode(fog)</code> / <code>EndShaderMode()</code> so both
+paths share the shader.</p>
+</div></details></div>
+
+<div class="q"><h3>2. Why does the same vertex shader work for models AND
+batch primitives?</h3>
+<details><summary>Answer</summary><div class="a">
+<p>It computes <code>fragPosition = matModel * vertexPosition</code>. Models
+carry their placement in <code>matModel</code>; batch vertices are already
+world-space and get <code>matModel = identity</code> — the expression is
+correct either way.</p>
+</div></details></div>
+
+<div class="q"><h3>3. Pick the curve</h3>
+<p>You want the plaza (40 units) crisp but the city edge (200+) gone. Why
+exp² over linear or plain exp?</p>
+<details><summary>Answer</summary><div class="a">
+<p>exp² is nearly flat close-in (at density 0.006: ~5% at 40 units) then
+rolls off steeply (~80% at 220). Linear creates a visible "fog wall" at its
+start distance; plain exp dulls even nearby objects.</p>
+</div></details></div>
+
+<div class="q"><h3>4. Fog color choice</h3>
+<p>What goes wrong if fogColor is gray instead of the sky clear color?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Distant geometry fades toward gray while the sky behind it stays blue —
+buildings become gray silhouettes pasted on a blue backdrop. Matching the
+sky makes far geometry melt into the horizon, which is the entire trick.</p>
+</div></details></div>
+
+<div class="q"><h3>5. Who frees the shader?</h3>
+<p>The fog shader is assigned to ~30 model materials. What would double-free
+it, and what is raylib's actual contract?</p>
+<details><summary>Answer</summary><div class="a">
+<p>Calling <code>UnloadMaterial</code> on those materials would free the
+shader once per material. But <code>UnloadModel</code> deliberately leaves
+material shaders alone (shared-resource contract, per raylib's source
+comment) — so Assets assigns freely and unloads the shader exactly once in
+its destructor.</p>
+</div></details></div>
+
+<div class="q"><h3>6. GPU skinning caveat</h3>
+<p>Why did the custom shader not break character animation here, and when
+would it?</p>
+<details><summary>Answer</summary><div class="a">
+<p>raylib 5.5 skins on the CPU — posed vertices are written into the mesh
+before drawing, so any shader that reads <code>vertexPosition</code> sees
+the animated pose. Under GPU skinning the vertex shader itself applies bone
+matrices; a replacement shader without that code would freeze characters in
+bind pose.</p>
+</div></details></div>
+</div></body>
+</html>

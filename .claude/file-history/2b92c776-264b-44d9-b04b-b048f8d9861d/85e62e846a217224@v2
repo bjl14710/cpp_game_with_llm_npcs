@@ -1,0 +1,69 @@
+"""Draft PR for the punch-and-jump branch (user-requested fixes)."""
+import os, subprocess, re, time
+from github import Github
+
+token = os.environ.get("GH_TOKEN") or os.environ.get("TOKEN")
+full = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$",
+                 subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()).group(1)
+repo = Github(token).get_repo(full)
+
+def retry(fn, *a, **k):
+    for i in range(5):
+        try:
+            return fn(*a, **k)
+        except Exception as e:
+            if i == 4: raise
+            print(f"  transient ({type(e).__name__}), retry..."); time.sleep(3 + i * 2)
+
+BODY = """## Summary
+Two live user requests, one branch, one commit each.
+
+**fix(render): camera-locked viewmodel — hidden fist that punches, held
+pistol** (`863485e`). The old viewmodel drew world-axis-aligned cubes at
+a camera offset — both weapons read as a floating block that didn't turn
+with the view. The prop now draws in camera-local space (translate to
+the eye, rotate by the camera's yaw/pitch, draw with +z forward), so it
+pivots with the look direction. The **fist is invisible at rest** and
+only appears as a punch: a sleeved arm shooting out and retracting (sin
+over the decaying attack fraction) with a fist at the end. The **pistol
+is a held silhouette** (slide, barrel, grip, hand) with a back-and-up
+recoil kick.
+
+**feat(movement): height-aware collision and a Space-bound jump**
+(`d5f1360`). Collision treated every collider as an infinite wall, so
+curb-line props (benches 0.6u, bushes 1.1u, parked cars ~1.35u) snagged
+the player with no way past. Buildings now block only while their top is
+above the mover's feet; `supportHeightAt` reports what the feet stand
+on, so the player can hop **onto** and **across** low tops and falls off
+edges. Jump is a rebindable action (Space by default; the controls page
+lists it automatically) with gravity in the main loop — apex ~1.45u
+clears street furniture, walls stay walls. NPCs and all existing callers
+keep exact ground-level behaviour via the defaulted foot-height param.
+
+## Verification
+- `make -C tests test` green: **176 cases / 3337 assertions** (new City
+  height-collision/support cases, keybindings default updated).
+- Game builds clean; screenshot-verified that nothing renders at rest
+  with the fist equipped (the old floating block is gone).
+
+## Needs human verification (feel is interactive)
+- Punch: click with the fist — the arm should shoot out and retract, no
+  hovering prop before or after.
+- Pistol: equip and fire — held silhouette pointing at the crosshair,
+  recoil kick.
+- Jump: Space over a bench/bush, onto a car roof, off an edge; confirm
+  walls still block and curb-line props no longer snag you.
+
+## Notes
+- Stacked on `feature/shared-character-library` (PR #99). Merge order:
+  #94 → #99 → this. Do not merge; review only.
+- Tunables: kGravity 22, kJumpSpeed 8 (apex ~1.45u) in main.cpp.
+
+Co-authored with Claude Opus 4.8.
+"""
+
+pr = retry(repo.create_pull,
+           title="fix: real punch + held pistol viewmodel, jump over curb-line props",
+           body=BODY, base="feature/shared-character-library",
+           head="feature/punch-and-jump", draft=True)
+print(f"DRAFT PR #{pr.number}: {pr.html_url}")

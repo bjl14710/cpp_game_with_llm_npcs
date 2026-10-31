@@ -1,0 +1,1031 @@
+# Glossary — HFT_practice
+
+Terms the learner has been introduced to. A term is promoted from *introduced* to
+*understood* only after they've answered a question about it correctly or used it
+correctly themselves.
+
+Status legend: `intro` = covered in a lesson · `solid` = demonstrably grasped.
+
+---
+
+### Algorithmic trading — `intro`
+Any trading where decisions are made by code rather than a human. A superset of HFT.
+
+### Ask (offer) — `intro`
+The lowest price a seller is currently willing to accept.
+
+### Adverse selection — `intro`
+The risk that the counterparty who hit your quote knew more than you did about
+where the price was about to go. The reason market makers cancel orders aggressively.
+
+### Bid — `intro`
+The highest price a buyer is currently willing to pay.
+
+### Colocation — `intro`
+Renting rack space inside the exchange's data center so your trading server is
+physically next to the matching engine, minimizing wire latency.
+
+### FPGA — `intro`
+Field-Programmable Gate Array. Reconfigurable hardware wired into a fixed
+pipeline at synthesis time. Used in HFT for deterministic nanosecond-scale latency.
+Example in this repo: `fpga/market_maker.vhd`.
+
+### HFT (High-Frequency Trading) — `intro`
+Automated trading defined by microsecond-to-nanosecond latency, very high order
+rates, and short (often sub-second) holding periods.
+
+### Limit order — `intro`
+"Buy/sell at price X or better." Rests passively in the book until matched or
+cancelled. The order type market makers post.
+
+### Limit Order Book (LOB) — `intro`
+The full list of resting buy and sell orders at every price level on a venue.
+The core data structure of modern electronic markets.
+
+### Market maker — `intro`
+A strategy that simultaneously posts both a bid and an ask, earning the spread
+when both sides fill. `fpga/market_maker.vhd` is a hardware example.
+
+### Market order — `intro`
+"Fill me now at the best available price." Crosses the spread and pays for
+immediacy. The order type takers send.
+
+### Mid-price — `intro`
+`(bid + ask) / 2`. A common reference for "fair value" between the two sides of
+the book. Computed explicitly in `fpga/market_maker.vhd`.
+
+### Q16.16 fixed-point — `intro`
+A 32-bit signed integer encoding where the lower 16 bits represent the
+fractional part: `real_value = integer_signal / 65536`. Used in
+`fpga/market_maker.vhd` so all arithmetic stays in one-cycle integer ops.
+
+### Spread — `intro`
+`ask − bid`. The cost of crossing the book; the prize a market maker tries to
+capture on round-trips.
+
+### Tick — `intro`
+A single market data update — a trade, a quote change, a cancel. The unit of
+input to an HFT pipeline.
+
+### Tick-to-trade latency — `intro`
+The time between receiving a market data tick and your responding order leaving
+your NIC. The headline latency number in HFT (top firms: ~100–500 ns on FPGA).
+
+---
+
+## Added in Lesson 0002 (FPGAs in HFT)
+
+### ASIC — `intro`
+Application-Specific Integrated Circuit. Silicon manufactured for one design.
+Fastest possible, but multi-million-dollar tape-out cost and frozen forever —
+which is why HFT firms use FPGAs (reconfigurable) instead.
+
+### Bitstream — `intro`
+The binary file produced by synthesis + place-and-route. Loading it onto the
+FPGA configures every LUT, flip-flop, and routing switch to realize your
+design. Reloading is a seconds-long operation, not a recompile of a chip.
+
+### Combinational logic — `intro`
+Logic whose outputs depend only on current inputs — no clock involved. Inside
+each pipeline stage in `fpga/*.vhd`, arithmetic between clock edges is
+combinational.
+
+### Determinism (FPGA sense) — `intro`
+The property that the same input takes the same number of cycles every time.
+The opposite of CPU jitter from OS scheduling, cache misses, branch prediction.
+The single biggest reason HFT firms tolerate the pain of FPGA development.
+
+### DSP slice — `intro`
+A dedicated multiply-accumulate block inside the FPGA fabric. Each `*` in
+VHDL (e.g. `W_F0 * feature_0` in `linear_regression_predictor.vhd`) typically
+maps to one DSP slice.
+
+### HDL — `intro`
+Hardware Description Language. VHDL or Verilog. Describes hardware
+register-by-register, not as an executing program.
+
+### HLS — `intro`
+High-Level Synthesis. Toolchain that takes annotated C/C++ and generates HDL
+for you. Faster to write than hand-VHDL; sometimes worse timing or area.
+`fpga/hls_synthesis.tcl` drives the HLS flow in this repo.
+
+### Jitter — `intro`
+Variability in latency from one event to the next. HFT cares about jitter as
+much as average latency, because strategies are sized against the worst-case
+not the median.
+
+### Kernel bypass — `intro`
+Networking techniques (DPDK, Solarflare OpenOnload, XDP) that route packets
+from the NIC directly to userspace, skipping the Linux kernel network stack.
+A 20–30% latency win for CPU-based HFT; obsolete on FPGA NICs where parsing
+is on-chip already.
+
+### LUT (Look-Up Table) — `intro`
+The basic configurable unit of FPGA fabric. A small truth table that can be
+programmed to compute any function of N inputs (typically N=6). LUT count is
+the headline capacity metric of an FPGA part.
+
+### Pipeline stage — `intro`
+A combinational chunk of logic terminated by a register (flip-flop). More
+stages = higher clock frequency but more cycles of latency. `linear_regression_predictor.vhd`
+has 2 stages; `market_maker.vhd` has 1.
+
+### Place-and-Route (PAR) — `intro`
+The step after synthesis that assigns each gate in your netlist to a physical
+LUT on the chip and routes the wires between them. Where timing closure is
+won or lost.
+
+### Sequential logic — `intro`
+Logic that uses flip-flops driven by a clock to hold state between cycles.
+Each pipeline stage boundary in the repo's VHDL is sequential.
+
+### Synthesis — `intro`
+The step that turns HDL source into a netlist of generic gates. Distinct from
+Place-and-Route, which maps those gates onto the physical chip.
+
+### Timing closure — `intro`
+The act of making your design meet the target clock period at every register-
+to-register path. The real bottleneck of FPGA HFT development — not the
+arithmetic, not the algorithm, but proving the silicon can run that fast.
+
+### Valid handshake — `intro`
+The convention of carrying a `valid` bit alongside every datum through a
+pipeline, so each stage knows which cycles contain real data. Used uniformly
+in all three `fpga/*.vhd` modules.
+
+### VHDL vs Verilog — `intro`
+Two HDLs that compile to the same gates. VHDL: verbose, strongly typed, used
+in this repo. Verilog/SystemVerilog: terser, more common at web-scale silicon
+firms. The choice is cultural, not technical.
+
+---
+
+## Added in Lesson 0003 (ML Algorithms in Trading)
+
+### Boosting — `intro`
+Sequentially combine many weak learners (typically shallow trees), each trained
+to correct the errors of the previous ensemble. Contrast with bagging
+(independent learners averaged together).
+
+### Classification vs Regression — `intro`
+**Classification** predicts a discrete label (up/down). **Regression** predicts
+a continuous number. This repo uses regression because the downstream step
+ranks tickers by predicted-return magnitude, which requires the number itself.
+
+### Cross-sectional ranking — `intro`
+At each date, rank all tickers by their predicted return and act on the top-N.
+The model's predicted *magnitude* matters less than its *order*. The whole
+selection step in `paper_trading_sim.py` (`sort_values("pred")`) depends on this.
+
+### Ensemble — `intro`
+A model made of many sub-models combined to produce one prediction.
+`GradientBoostingRegressor`'s default is 100 trees combined additively with a
+0.1 learning rate.
+
+### Feature engineering — `intro`
+Turning raw data into model inputs. In this repo: returns, moving averages,
+MA gap, rolling vol, RSI — all computed in `build_features` from raw Close prices.
+
+### Gradient Boosting — `intro`
+A boosting method where each new weak learner is fit to the gradient of the
+loss with respect to the current ensemble's predictions. For squared error,
+the gradient is just the residual `y − F(x)`, so each tree learns the current
+error pattern.
+
+### GradientBoostingRegressor — `intro`
+scikit-learn's class for gradient-boosted decision trees on a continuous target.
+The flagship model in `paper_trading_sim.py:train_model`.
+
+### Inference — `intro`
+Applying a trained model to make predictions (`model.predict(X)`). The
+latency-sensitive half of ML — what HFT cares about almost exclusively.
+
+### Learning rate (ν) — `intro`
+The scalar that scales each new tree's contribution before adding it to the
+ensemble. Smaller = more conservative updates, more trees needed, better
+generalization. Default 0.1 in sklearn.
+
+### Linear Regression — `intro`
+`ŷ = w₀ + Σ wᵢ xᵢ`. Closed-form least-squares fit. Parametric, additive, fast.
+Used in `fpga/linear_regression_predictor.vhd` because four constants fit in
+silicon trivially.
+
+### Look-ahead bias — `intro`
+The bug where a feature secretly contains information from the future relative
+to the target. Backtests look great; live trading loses money. The
+`.shift(-1)` discipline in `build_features` is what prevents this when done
+correctly.
+
+### Mean-variance optimization — `intro`
+Markowitz's portfolio framework: choose weights `w` to balance expected return
+`μᵀw` against risk `wᵀΣw`. Closed-form long-only solution `w ∝ Σ⁻¹μ` is
+implemented in `predict_next.py:meanvar_long_only`. Not ML — it's optimization
+on top of the ML output.
+
+### Non-parametric model — `intro`
+A model whose effective parameter count grows with the data. Gradient-boosted
+trees are non-parametric in this sense. Contrast: linear regression's
+parameter count is fixed at N+1 regardless of dataset size.
+
+### Overfitting — `intro`
+When a model fits noise in the training data and fails to generalize to new
+data. In `GradientBoostingRegressor` it appears as training R² climbing while
+test R² drops. Fixes: lower learning rate, shallower trees, more
+regularization, early stopping.
+
+### Parametric model — `intro`
+A model with a fixed number of parameters regardless of dataset size. Linear
+regression: N feature weights plus an intercept, done. Parametric models are
+much easier to fit on an FPGA.
+
+### Residual — `intro`
+`y − F(x)` — what the current ensemble got wrong on a given row. Gradient
+boosting fits each new tree to predict the residuals of the previous step.
+
+### RSI (Relative Strength Index) — `intro`
+A 0–100 momentum oscillator that rises when up-days dominate down-days within
+the lookback window. Computed in `paper_trading_sim._rsi` with window=14 and
+normalized to 0–1 in `build_features`.
+
+### Supervised learning — `intro`
+Learning a mapping from inputs `x` to known outputs `y`, using a dataset of
+labeled examples. All three "ML" elements in this repo (linear regression and
+gradient boosting) are supervised. The MA rule in VHDL is *not* supervised —
+it isn't learned at all.
+
+### Target — `intro`
+The value the model is trained to predict. In this repo: `fwd_ret_1d`, the
+next-day return, computed via `out["ret_1d"].shift(-1)`.
+
+### Training vs Inference — `intro`
+**Training** is the expensive offline step that produces parameters (`fit`).
+**Inference** is the cheap online step that uses them (`predict`). HFT cares
+about inference latency; training latency essentially doesn't matter.
+
+---
+
+## Added in Lesson 0004 (Linux Internal Networking)
+
+### 0.0.0.0 (wildcard bind) — `intro`
+A wildcard address meaning "listen on every interface in this network
+namespace." Used in this repo's `Dockerfile`. Distinct from `127.0.0.1`,
+which means "loopback only."
+
+### Bridge (Linux bridge) — `intro`
+A software L2 switch in the kernel. Docker creates one (`docker0` by default,
+or a per-project bridge for `docker-compose`) and plugs every container's
+veth into it so they can talk to each other and to the outside.
+
+### Busy polling — `intro`
+Kernel networking option (`SO_BUSY_POLL`) that spins a CPU on the NIC's RX
+queue instead of sleeping for an interrupt. Trades a CPU core for ~100 µs
+of latency reduction. Useful for HFT-adjacent workloads, wasteful for web apps.
+
+### DNAT (Destination NAT) — `intro`
+iptables rule that rewrites the destination IP/port of inbound packets. Docker
+installs DNAT rules to implement `ports: "HOST:CONTAINER"` mappings.
+
+### DPDK — `intro`
+Data Plane Development Kit. Userspace networking framework that maps the NIC's
+DMA rings directly into application memory, bypassing the kernel stack. Common
+in HFT and high-perf network appliances.
+
+### eth0 (container) — `intro`
+The conventional name of a container's primary virtual ethernet interface.
+One end of a veth pair; the other end sits on the host bridge.
+
+### iptables / Netfilter — `intro`
+The Linux kernel's packet-filtering and NAT framework. Docker programs it to
+implement port forwarding (DNAT) and outbound source rewriting (MASQUERADE).
+
+### Kernel bypass — `solid` (promoted from intro in Lesson 0002)
+Skipping the kernel network stack to cut tick-to-trade latency. DPDK,
+OpenOnload, XDP are CPU-side; FPGA NICs go further by doing parsing in
+hardware.
+
+### Loopback (`lo`, 127.0.0.1) — `intro`
+A virtual interface inside the kernel where packets never reach any NIC.
+Every network namespace has its own private loopback — the container's
+`127.0.0.1` is not the host's `127.0.0.1`.
+
+### MASQUERADE / SNAT — `intro`
+iptables rule that rewrites the source IP of outbound packets. Used by Docker
+so that traffic from a container's private bridge IP appears to come from the
+host's outbound IP, so replies can route back correctly.
+
+### Namespace (network namespace) — `intro`
+A kernel object that gives a group of processes their own copy of the network
+stack: their own interfaces, routing table, iptables rules, loopback. The
+isolation primitive containers are built on.
+
+### Network stack (Linux) — `intro`
+The kernel's layered TCP/IP implementation: socket layer → TCP/UDP → IP →
+netfilter → qdisc → driver. Each layer adds latency; total is typically
+~50–120 µs round-trip on a busy host.
+
+### Port — `intro`
+A 16-bit number that distinguishes endpoints on a host. Part of the socket
+5-tuple `(proto, src_ip, src_port, dst_ip, dst_port)`.
+
+### Port forwarding — `intro`
+Common name for DNAT-based "expose container port X on host port Y." What
+`ports: "8000:8000"` in `docker-compose.yml` actually does.
+
+### Qdisc (Queueing discipline) — `intro`
+The kernel's packet-scheduling layer between the IP layer and the NIC driver.
+Decides which packet goes out next when the wire is busy.
+
+### Socket — `intro`
+The kernel object representing one endpoint of a connection, identified by
+the 5-tuple. A listening socket can spawn many connected sockets, all sharing
+one port.
+
+### TCP/UDP — `intro`
+The two main L4 transports. TCP is reliable, ordered, connection-oriented.
+UDP is unreliable, unordered, connectionless. Exchange market data is almost
+always UDP (multicast); orders are usually TCP-based protocols like FIX.
+
+### veth pair — `intro`
+A pair of virtual ethernet interfaces in the kernel, connected back-to-back.
+Packets out one end appear at the other. Docker uses veth pairs to bridge a
+container's network namespace to the host bridge.
+
+---
+
+## Added in Lesson 0005 (Prediction Models in Trading)
+
+### Adaptivity (model) — `intro`
+Whether a model is trained once (`paper_trading_sim.py`) or refit periodically
+on rolling windows (`walkforward_sim.py --rolling_retrain`). One of the five
+axes that define a trading prediction model.
+
+### Cross-sectional model — `intro`
+A model that ranks N assets against each other at the same point in time.
+This repo's GBM is cross-sectional: every day it scores all tickers and picks
+the top-N. Contrast with time-series, which forecasts one asset's future from
+its own past.
+
+### Cross-sectional pooling — `intro`
+Training one model on rows from many assets stacked together, assuming the
+feature→target relationship is roughly universal. The repo does this; sector
+or market-cap bucketing is the production refinement.
+
+### CUSUM (cumulative sum) — `intro`
+A change-point detection statistic. Triggers when the cumulative deviation of
+a series from its mean exceeds a threshold. Used in `walkforward_sim.py` as
+one of four stress detectors that gate exposure.
+
+### Distributional forecast — `intro`
+A prediction that includes uncertainty — quantiles, mean+variance, or a full
+distribution. Lets downstream sizing be risk-aware. This repo currently
+emits only point estimates.
+
+### Filtering (vs forecasting) — `intro`
+Estimating a *present* hidden state from past observations (HMM/GMM regime
+detection). Distinct from forecasting, which estimates a *future* value. The
+repo's `GaussianMixture` overlay is filtering, not forecasting.
+
+### Foundation model (time-series) — `intro`
+Large pretrained model (TimesFM, Chronos, Kronos, Moirai) trained on billions
+of time-series points, used for zero-/few-shot forecasting. On tabular daily
+equity features, GBM still beats them for cross-sectional ranking — for now.
+
+### Gaussian Mixture Model (GMM) — `intro`
+A probabilistic clustering model that fits K Gaussian components to a dataset.
+Used in `walkforward_sim.py` to estimate the probability that today's returns
+belong to a "high-vol" regime, then to scale exposure down accordingly.
+
+### Hidden Markov Model (HMM) — `intro`
+A state-space model where an unobserved discrete state evolves over time and
+emits observations. Common as a regime model in finance. The repo's GMM is a
+simpler cousin (no transition matrix — just clustering).
+
+### Horizon (forecast horizon) — `intro`
+The future window over which the target is measured. This repo: 1 trading
+day. Choose tick-level and you need a completely different infrastructure.
+
+### Output shape — `intro`
+The form of a model's prediction: point estimate, distribution, or action.
+One of the five axes; the repo emits point estimates only.
+
+### Per-asset model — `intro`
+One model per ticker, trained on that ticker's data only. Opposite of
+cross-sectional pooling. Captures asset-specific quirks but starves on
+data and fails for new tickers.
+
+### Pooling (model pooling) — `intro`
+The choice between training one shared model across assets vs one per asset.
+One of the five axes; this repo pools across all tickers.
+
+### Regime model — `intro`
+Any model whose primary output is the identification of a hidden market state
+(calm/stress, bull/bear). Used to switch strategies or scale exposure, not to
+predict returns directly. `walkforward_sim.py:GaussianMixture` is the
+project's regime model.
+
+### Reinforcement learning (in trading) — `intro`
+Learning an action policy directly from a reward signal (P&L). Promising for
+execution and market-making but notoriously hard to train on financial data.
+Not used in this repo.
+
+### Rolling retrain — `intro`
+Periodically refitting a model on a fixed-length window of the most recent
+past data only. `walkforward_sim.py --rolling_retrain --retrain_freq monthly
+--train_window_days 756` is the repo's default flavor.
+
+### Stationarity — `intro`
+A property of a time series whose statistical moments don't drift over time.
+Returns are roughly stationary; prices are not. Pooling across tickers
+requires features and targets that are at least approximately stationary —
+this is why the repo predicts returns, not prices.
+
+### Target axis — `intro`
+The choice of what the model predicts: direction (binary), magnitude
+(regression), volatility, jump probability, regime, or action (RL). The
+single most consequential design decision in a trading model.
+
+### TimesFM / Chronos / Kronos — `intro`
+Time-series foundation models from the 2024–2025 wave (Google, Amazon,
+Tsinghua respectively). Pretrained transformers for general forecasting.
+Strong zero-shot on benchmarks; not yet a slam-dunk on tabular cross-sectional
+equity alpha.
+
+---
+
+## Added in Lesson 0006 (Statistics Math in Trading)
+
+### Annualization factor — `intro`
+Convention for converting per-period statistics to per-year. For US equities,
+252 trading days. Means scale by ×252; standard deviations scale by ×√252
+(because variances add across independent periods).
+
+### Bessel's correction (ddof=1) — `intro`
+Dividing by (n−1) instead of n when computing sample variance/std, to get an
+unbiased estimator. pandas defaults to `ddof=1`; NumPy defaults to `ddof=0`.
+Cross-library default mismatches are a real bug source.
+
+### CAGR (Compound Annual Growth Rate) — `intro`
+Geometric annual return: `(final / initial)^(252/N) − 1`. The actual
+compounded growth rate. Always ≤ arithmetic APR; gap is volatility drag.
+Computed in `analyze_equity.py:compute_metrics`.
+
+### Correlation — `intro`
+Standardized covariance: `cov(i,j) / (σᵢ σⱼ)`. Unit-free, bounded in [−1, 1].
+Use for comparing relationships across assets; covariance for portfolio
+variance formulas.
+
+### Covariance matrix (Σ) — `intro`
+Symmetric matrix whose entry (i,j) is the covariance of asset i and asset j
+returns. Diagonal entries are variances. The repo estimates Σ from the recent
+`--cov_lookback` days in `predict_next.py:compute_returns`.
+
+### CUSUM (cumulative sum) test — `intro`
+Change-point statistic that tracks deviations from the mean. Two running sums
+(positive and negative drift) update each period with a slack term k. The
+repo uses `k = cusum_threshold * σ` (default 3σ) as one of four stress
+detectors in `walkforward_sim.py`.
+
+### Drawdown — `intro`
+Percentage drop from the running peak so far:
+`DD_t = equity_t / max_{s≤t}(equity_s) − 1`. Always ≤ 0.
+
+### Log return — `intro`
+`ln(P_t / P_{t-1})`. Sums across time linearly; symmetric around zero. Used in
+academic risk math. Numerically ≈ simple return for small moves.
+
+### Maximum drawdown (MaxDD) — `intro`
+The minimum of the drawdown series over the full period — the worst
+peak-to-trough loss the equity curve ever felt. Investors emotionally trade on
+this number more than on Sharpe.
+
+### Sharpe ratio — `intro`
+Risk-adjusted return: `(mean_return × 252) / (std_return × √252)`. Unit-free.
+This repo's version assumes risk-free rate = 0. >1 solid, >2 excellent, >3
+raises eyebrows.
+
+### Shrinkage (covariance) — `intro`
+Mixing the sample covariance matrix with a more stable target (typically the
+diagonal): `Σ_shrunk = (1−λ) Σ_sample + λ diag(Σ_sample)`. Trades a little
+bias for much less estimation noise; vital when Σ is going to be inverted.
+Lives in `predict_next.py` via `--shrink`.
+
+### Simple return — `intro`
+`(P_t − P_{t-1}) / P_{t-1}`. Computed by pandas `.pct_change()`. Aggregates
+linearly across *assets* in a portfolio: `r_p = Σ wᵢ rᵢ`. This repo's
+default everywhere.
+
+### Sortino ratio — `intro`
+Like Sharpe but divides by downside standard deviation only (negative returns
+counted, positive ignored). Kinder to positively skewed strategies. Not
+computed in this repo.
+
+### Standard deviation (σ) — `intro`
+Square root of variance. Same units as the underlying. In finance: "volatility."
+
+### Variance — `intro`
+`E[(r − μ)²]`. Units: returns². Adds linearly across independent periods,
+which is why annual std = daily std × √252.
+
+### Volatility drag — `intro`
+The gap between arithmetic and geometric mean return, approximately σ²/2 in
+log terms. A high-vol strategy with the same mean as a low-vol one will
+compound *more slowly*. The reason `analyze_equity.py` returns both
+`APR_simple` and `CAGR`.
+
+---
+
+## Added in Lesson 0007 (Neural Networks in Quant)
+
+### Activation function — `intro`
+The elementwise nonlinearity inside each NN layer (ReLU, sigmoid, tanh, GELU).
+Without it, a stack of linear layers collapses to one linear layer.
+
+### Attention / self-attention — `intro`
+The mechanism at the heart of transformers: each output position is a weighted
+combination of all input positions, with weights computed from the inputs
+themselves. Replaces the sequential recurrence of an LSTM.
+
+### Backpropagation — `intro`
+The chain-rule algorithm that computes gradients of a loss with respect to
+every weight in a network. Combined with an optimizer (Adam, SGD) it's how
+neural nets train.
+
+### BERT / FinBERT — `intro`
+BERT is a 2018 transformer pretrained on text via masked-language-modeling.
+FinBERT is BERT fine-tuned on financial corpora (news, filings). Alpha
+Vantage's news sentiment is a BERT-family model's output.
+
+### CNN (Convolutional Neural Network) — `intro`
+NN that applies learned filters across local windows of its input. Dominant
+on images and the 2D price-level grid of LOB snapshots (DeepLOB).
+
+### Deep RL — `intro`
+Reinforcement learning where the policy and/or value function is a neural
+network. Used in quant for execution and market-making research; production
+deployment is rare due to backtesting difficulty.
+
+### DeepLOB / TransLOB / TLOB — `intro`
+Neural architectures for limit-order-book modeling. DeepLOB (2018): CNN+LSTM
+on LOB snapshots. TransLOB / TLOB (2024–2025): transformer variants with
+attention over price levels. The natural NN bridge to this repo's FPGA work.
+
+### Embedding — `intro`
+A learned dense vector representation of a discrete input (a word, a ticker,
+an article). The intermediate layer outputs of a transformer are embeddings
+of the input — much richer than a single scalar like a sentiment score.
+
+### Epoch / Iteration / Batch — `intro`
+**Batch**: a chunk of training rows for one gradient step. **Iteration**: one
+batch processed. **Epoch**: one full pass through the training set.
+
+### Feedforward / MLP — `intro`
+A neural network where every layer is fully connected and information flows
+forward only (no recurrence, no attention). The simplest deep NN.
+
+### Fine-tuning — `intro`
+Taking a pretrained model and continuing training on a smaller task-specific
+dataset. FinBERT is BERT fine-tuned on financial text.
+
+### Gradient descent (in NN context) — `intro`
+The optimizer that updates weights `W ← W − η·∇L` to reduce the loss.
+Variants (Adam, RMSprop, SGD with momentum) differ in how they adapt the
+step size per weight.
+
+### hls4ml — `intro`
+Open-source toolchain that compiles trained scikit-learn/Keras/PyTorch models
+into HDL for FPGA deployment. Documented in `fpga/README.md` as the bridge
+from the Python model side to the silicon side.
+
+### Linear collapse — `intro`
+The fact that the composition of linear functions is linear. Stacking N
+linear layers without nonlinearities is mathematically equivalent to one
+linear layer.
+
+### LSTM / GRU — `intro`
+Recurrent NN cells designed to remember information across long sequences
+via gating. State-of-the-art for sequence forecasting from ~2016–2022;
+now often replaced by transformers.
+
+### Loss function — `intro`
+The scalar objective the optimizer minimizes. MSE for regression, cross-entropy
+for classification, Huber for robustness. Distinct from the activation function.
+
+### Neural network — `intro`
+A stack of (linear transform → nonlinearity) layers, trained by minimizing a
+loss with gradient-based optimization. Not used in this repo's Python code
+today, but Alpha Vantage's sentiment score is one consumed silently.
+
+### Pretraining — `intro`
+Training a large model on a huge generic corpus before any task-specific
+training. The base half of "pretrain + fine-tune."
+
+### ReLU — `intro`
+Rectified Linear Unit: `max(0, x)`. The default activation function in
+modern feedforward networks. Cheap to compute, mostly avoids vanishing
+gradients.
+
+### RNN / Recurrent NN — `intro`
+NN that processes a sequence step-by-step, carrying hidden state forward.
+LSTM and GRU are RNN cells designed to mitigate vanishing gradients.
+
+### Transformer — `intro`
+NN architecture built on self-attention; processes all sequence positions in
+parallel. Dominant in NLP, increasingly in finance time-series (TLOB,
+TimesFM, Chronos, Kronos).
+
+### Universal Approximation Theorem — `intro`
+A theoretical guarantee that a NN with one sufficiently wide hidden layer can
+approximate any continuous function. Comfort, not a recipe — depth is what
+makes networks practically trainable on real data.
+
+---
+
+## Added in Lesson 0008 (LLM Use-Cases in HFT)
+
+### Agent (LLM agent) — `intro`
+LLM that plans → calls a tool → reads result → plans next step, in a loop.
+Useful for open-ended research; brittle in production. Failure modes include
+infinite loops and confident wrongness.
+
+### Alpha-GPT — `intro`
+Class of research systems (2024–2025) that use LLMs with prompt engineering
+to propose trading signal code, then backtest the result. Promising as an
+exploration loop, not as an autonomous trader.
+
+### Cold path / Warm path / Hot path — `intro`
+Three latency regimes for LLM-relevance in a trading firm.
+**Hot path** (ns–µs, FPGA/CPU tick-to-trade): LLMs forbidden.
+**Warm path** (ms–s, intraday research/alerts): LLMs sometimes.
+**Cold path** (seconds+, overnight research/docs): LLMs obvious.
+
+### Completion model — `intro`
+LLM endpoint that generates text given a prompt. Distinct from an *embedding*
+model, which produces vectors for similarity search.
+
+### Distillation (LLM) — `intro`
+Training a small model to mimic input/output pairs of a frontier model.
+Get most of the quality at a fraction of cost. Standard for high-volume
+feature-extraction jobs (e.g. scoring millions of articles).
+
+### Embedding model — `intro`
+LLM endpoint that turns text into a dense vector for similarity search.
+The retrieval half of RAG.
+
+### Fine-tuning (LLM) — `intro`
+Continuing training of a base LLM on task-specific data. Changes the model's
+weights. Slower to update than RAG; usually justified only with abundant
+labeled examples and a single repeatable task.
+
+### Function calling / Tool use — `intro`
+The protocol whereby an LLM emits a structured request to call a specific
+function on the host (e.g. `compute_metrics(equity_csv)`), then incorporates
+the result into its final answer. Lets the LLM stay symbolic and accurate.
+
+### Hallucination — `intro`
+The model fabricates a fact (a paper, a function, a citation) that doesn't
+exist. Distinct from being wrong about a real fact. Both look the same to the
+user; both demand verification before acting.
+
+### Hosted vs Self-hosted LLM — `intro`
+**Hosted**: API call to OpenAI, Anthropic, Google. Cheap per call, no infra.
+**Self-hosted**: run an open-weight model (Llama, Mistral, Qwen, DeepSeek)
+on your own GPUs. Mandatory for sensitive data; cheaper at scale.
+
+### LLM (Large Language Model) — `intro`
+Transformer-architecture neural network with 10⁹–10¹² parameters, pretrained
+on internet-scale text. Larger cousins of BERT/FinBERT from Lesson 0007.
+General-purpose; expensive per call; cannot sit on the HFT hot path.
+
+### MCP (Model Context Protocol) — `intro`
+2024–2025 open standard for exposing tools, resources, and prompts to LLMs.
+The agreed-upon plumbing layer between an LLM client and your codebase.
+
+### Prompt engineering — `intro`
+Writing inputs to an LLM that reliably produce useful structured outputs.
+Includes system prompts, few-shot examples, format constraints (JSON mode),
+chain-of-thought instructions.
+
+### RAG (Retrieval-Augmented Generation) — `intro`
+Pattern where relevant chunks of an external corpus are retrieved at query
+time and stuffed into the LLM's context. Default architecture for codebase
+or document Q&A; cheap, deterministic-ish, no fine-tuning required.
+
+### StockBench — `intro`
+2025 benchmark for LLM agents trading real-world stock data. Headline result:
+most LLM agents underperform buy-and-hold. Implication: LLMs are tools, not
+traders.
+
+### System prompt vs User prompt — `intro`
+**System**: the persistent instruction set ("you are a quant assistant").
+**User**: the per-query message. Mixing them weakens guardrails.
+
+### Temperature — `intro`
+The decoding parameter controlling sampling randomness. `temperature=0` gives
+deterministic-ish output (still subject to provider model changes). Always
+use 0 for feature pipelines that need to be reproducible.
+
+### Vector store — `intro`
+A database (FAISS, sqlite-vss, Pinecone, pgvector) that indexes embeddings
+and supports nearest-neighbor retrieval. The R in RAG.
+
+---
+
+## Added in Lesson 0009 (Low-Latency C++ for Trading)
+
+### Atomic (operation) — `intro`
+A single hardware-level read/modify/write instruction (CAS, LOCK XADD) that
+is indivisible. ~25 ns. Building block of lock-free queues.
+
+### Branch elimination — `intro`
+Rewriting code so a conditional is replaced by arithmetic
+(`x = cond*a + (1-cond)*b`). Worth it when the branch is unpredictable.
+
+### Branch prediction — `intro`
+The CPU's front-end guesses which side of a conditional will be taken before
+the comparison resolves. Mispredict cost ~10–20 ns (pipeline flush).
+
+### Cache line — `intro`
+The unit the CPU fetches from main memory: 64 bytes on modern x86. Reading
+one byte fetches the whole line; sequential access is cheap, random access
+across lines is expensive.
+
+### Cache (L1/L2/L3) — `intro`
+On-die SRAM hierarchy. L1 ~1 ns, L2 ~3 ns, L3 ~15 ns. The 100× gap to main
+memory (~100 ns) makes "is the working set cache-resident?" the most
+important performance question.
+
+### Constexpr — `intro`
+C++ keyword guaranteeing a value or function is evaluable at compile time.
+Lets the compiler fold the value into the generated machine code as an
+immediate instead of a runtime memory load.
+
+### CRTP (Curiously Recurring Template Pattern) — `intro`
+Static-polymorphism idiom: a base class is templated on the derived type so
+all dispatch is resolved at compile time. Replaces virtual functions in
+HFT-grade C++.
+
+### False sharing — `intro`
+When two threads write different variables that happen to share a cache
+line, the line ping-pongs between caches and performance collapses. Fix
+with `alignas(64)` padding.
+
+### Hot path / Cold path — `intro`
+**Hot path**: the per-tick code that runs millions of times a second. No
+allocation, no I/O, no syscalls. **Cold path**: setup, teardown, rare
+events. Allocate, log, and call APIs freely.
+
+### Inlining — `intro`
+Compiler optimization that replaces a function call with the function body.
+Removes call/ret overhead and enables cross-boundary optimization. Templates
+inline; non-final `virtual` calls do not.
+
+### `[[likely]]` / `[[unlikely]]` — `intro`
+C++20 attributes that hint to the compiler which branch is the common case.
+Help with code layout and icache pressure; do not replace the hardware
+predictor.
+
+### Lock-free queue / SPSC ring — `intro`
+A fixed-size circular buffer where a single producer thread writes and a
+single consumer thread reads using only atomic head/tail indices — no
+mutex. The HFT-grade alternative to `std::cout` from the hot path.
+
+### `noexcept` — `intro`
+Function specifier promising no exceptions will escape. Lets the compiler
+skip generating unwinding scaffolding and inline more aggressively. Default
+on every leaf hot-path function.
+
+### Pipeline (CPU pipeline) — `intro`
+The CPU executes instructions in ~15 overlapping stages. A branch mispredict
+or a long-latency memory access stalls the pipeline. Modern HFT C++ is
+largely about avoiding pipeline stalls.
+
+### Ring buffer (stack) — `intro`
+A fixed-size circular array used as a FIFO. O(1) push/pop, no allocation.
+The C++ analog of the VHDL `price_reg` shift register in
+`fpga/moving_average_trader.vhd`.
+
+### SoA vs AoS — `intro`
+**Struct-of-Arrays**: one array per field (`prices[]`, `volumes[]`). Fast
+when iterating one field at a time. **Array-of-Structs**: one record per
+row (`struct Tick { p; v; }`). Fast when touching multiple fields together.
+HFT often prefers SoA for vectorization.
+
+### Spinlock — `intro`
+A lock that busy-waits via CAS instead of sleeping. Uncontended ~25 ns;
+contended catastrophically slow. Used only when expected hold time is
+shorter than a kernel sleep cycle.
+
+### Stack vs Heap allocation — `intro`
+**Stack**: pointer move, fixed size, free. **Heap** (`new`, `malloc`,
+`vector::push_back`): unpredictable, allocator-locked, ~30–200 ns. Hot-path
+code lives on the stack and on pre-allocated arenas.
+
+### Syscall — `intro`
+A user-to-kernel transition (`read`, `write`, `mmap`). Cheapest is ~300 ns;
+many are much more. Treated as the boundary of "fast code" — hot loops
+never cross it.
+
+### Vtable / Virtual call — `intro`
+The dispatch table backing `virtual` methods. Each call requires a pointer
+load and an indirect jump (~5–15 ns) and, more importantly, blocks the
+compiler from inlining. Replaced by templates/CRTP in HFT code.
+
+---
+
+## Added in Lesson 0010 (Low-Latency C++ Best Practices)
+
+### alignas(64) — `intro`
+C++ keyword that forces a variable onto a 64-byte (cache-line) boundary.
+Used on SPSC ring head/tail indices to prevent false sharing between
+producer and consumer cores.
+
+### Busy polling (CPU side) — `intro`
+Spin in user space calling `_mm_pause()` on the data source (a ring, a NIC
+queue) instead of sleeping. Near-zero wakeup latency; burns one core at
+100% utilization. Used on the strategy thread; not on the logger.
+
+### Cache coherence / Line ping-pong — `intro`
+When two cores repeatedly write to the same cache line, the line bounces
+between their L1 caches via the L3 (~30 ns per round-trip). The performance
+killer that `alignas(64)` defends against.
+
+### CPU isolation (`isolcpus`) — `intro`
+Linux kernel boot parameter that tells the scheduler to leave specific
+cores free of general tasks. Combined with `nohz_full` (no timer tick) and
+`rcu_nocbs` (no RCU callbacks) for true HFT-grade isolation.
+
+### `_mm_pause()` — `intro`
+x86 intrinsic that hints to the CPU that this is a spin-wait loop. Slows
+speculative execution, conserves power, friendlier to a sibling
+hyperthread. Always used in tight polling loops.
+
+### Lock-free vs Wait-free — `intro`
+**Lock-free**: at least one thread always makes progress. **Wait-free**:
+every thread completes in bounded steps. A correct SPSC ring with the
+above pattern is wait-free; most MPMC queues are only lock-free.
+
+### LTO (Link-Time Optimization) — `intro`
+Compiler flag (`-flto`) that runs the optimizer at link time across all
+translation units, enabling cross-TU inlining and dead-code elimination.
+Stacks with PGO.
+
+### `mlockall` — `intro`
+Linux syscall that locks all of a process's pages into RAM, preventing the
+kernel from paging them out. Used in HFT setups so a memory page fault
+can't introduce ms-scale jitter.
+
+### `memory_order_acquire` — `intro`
+Atomic load ordering that pairs with `release` on the other side. Ensures
+all reads after the acquire-load see writes done before the matching
+release-store. Used by the SPSC consumer reading `head_`.
+
+### `memory_order_relaxed` — `intro`
+Atomic operation with no synchronization — only atomicity. Cheapest. Used
+when the thread owns the variable (e.g. the producer reading its own
+`head_`).
+
+### `memory_order_release` — `intro`
+Atomic store ordering. Guarantees all writes done before the store are
+visible to a thread that acquire-loads the same atomic. The "publish" in
+SPSC.
+
+### `memory_order_seq_cst` — `intro`
+Atomic ordering that gives a total global order over all seq_cst
+operations. Default in `std::atomic`. ~5–10 ns overhead on x86
+(MFENCE). Avoid unless you actually need it.
+
+### `nohz_full` — `intro`
+Linux boot parameter that disables the 1 kHz scheduling timer on isolated
+cores when only one task is runnable. Removes ~1000 interrupts/sec of
+jitter from the HFT hot path.
+
+### MPSC / MPMC queue — `intro`
+**MPSC**: multi-producer, single-consumer (e.g. many threads feeding one
+logger). **MPMC**: multi-producer, multi-consumer. Both are more expensive
+than SPSC; design the system to need SPSC wherever possible.
+
+### PGO (Profile-Guided Optimization) — `intro`
+Build twice: first with `-fprofile-generate` to instrument, run a
+representative workload, then rebuild with `-fprofile-use` so the compiler
+knows which branches are hot. 5–15% latency wins on the hot path.
+
+### `pthread_setaffinity_np` — `intro`
+POSIX call that pins a thread to a specific CPU core via a `cpu_set_t`
+mask. The C++-side mechanism for the per-thread pinning that pairs with
+`isolcpus`.
+
+### `rcu_nocbs` — `intro`
+Linux boot parameter that offloads RCU (read-copy-update) callbacks off
+the specified cores. Removes a class of kernel work from the HFT cores.
+
+### `SCHED_FIFO` — `intro`
+Linux real-time scheduling class. A `SCHED_FIFO` thread runs until it
+voluntarily blocks; preempts lower-priority work. Used for the strategy
+thread.
+
+### SPSC ring buffer — `intro`
+Single-producer / single-consumer lock-free queue using a power-of-two
+circular array and atomic head/tail indices with release/acquire ordering.
+The HFT-grade inter-thread communication primitive.
+
+### Synchronizes-with relationship — `intro`
+The C++ memory-model term for the formal guarantee that a release-store on
+one thread "synchronizes with" an acquire-load that reads its value on
+another thread. The reason SPSC rings need release/acquire to be correct.
+
+### Thread pinning — `intro`
+Binding a thread to a specific CPU core so the scheduler can't migrate it.
+Eliminates cache invalidation from migration and is the in-program half of
+`isolcpus`-based isolation.
+
+---
+
+## Added in Lesson 0011 (Low-Latency vs Ultra-Low-Latency)
+
+### Adverse selection (in latency context) — `intro`
+Losing money systematically because faster participants see the same signal
+microseconds before you and pick off the favorable side. The structural risk
+of running at a lower tier than your venue's median competitor.
+
+### App-to-app latency — `intro`
+Latency measured between two points inside your application code only
+(e.g. signal extracted → decision made). Excludes wire and kernel. Useful
+for internal optimization, not for competitive comparison.
+
+### ASIC (Application-Specific Integrated Circuit) — `intro`
+Custom silicon fabricated for one purpose. Faster than FPGAs but multi-
+million-dollar tape-out cost and frozen logic. Tier 6 of the latency ladder;
+only the largest desks justify it.
+
+### Hardware timestamp — `intro`
+A nanosecond-resolution timestamp attached to a packet by the NIC or FPGA at
+ingress/egress. The only trustworthy clock at ULL scales — immune to OS
+scheduling and clock skew.
+
+### Inside-FPGA latency — `intro`
+Latency measured between registers on a single FPGA, i.e. a fixed number of
+clock cycles. At 250 MHz, 1 cycle = 4 ns. Fundamentally different unit than
+wire-to-wire latency.
+
+### Jitter (latency variability) — `intro`
+The variability of latency across events, often quoted as `p99.99 − p50` or
+as the standard deviation. ULL systems are judged on jitter as much as on
+median latency.
+
+### Latency ladder / tier — `intro`
+The 6-rung industry mental model of trading-system latency, from Tier 0
+(web app, ms) through Tier 6 (ASIC + microwave, ns + cross-market RF). Each
+rung is ~10× more expensive than the one above.
+
+### Latency tail — `intro`
+The high-percentile portion of the latency distribution (p99, p99.9,
+p99.99). At HFT message rates, tail events happen multiple times per
+second; the tail is what loses money, not the mean.
+
+### Low-latency (LL) — `intro`
+Industry term for systems with microsecond-scale tick-to-trade (~1–100 µs).
+Tuned C++, lock-free queues, kernel TCP. Tier 2 of the ladder.
+
+### Microwave / RF link — `intro`
+Line-of-sight wireless link used for cross-market arbitrage. Light through
+air ≈ 1.0c vs ~0.67c through glass — a few ms edge over a thousand km. The
+basis of the Chicago↔NJ trading corridor.
+
+### One-way latency — `intro`
+Time from event ingress to action emission, measured in one direction
+(e.g. tick arrival → order on wire). Distinct from round-trip; both are
+quoted in HFT and must be specified.
+
+### p50 / p99 / p99.99 — `intro`
+Quantiles of the latency distribution: 50%, 99%, 99.99% of events come in
+under this latency. HFT systems are evaluated on the higher percentiles.
+
+### Real-time (OS sense) — `intro`
+Bounded worst-case latency. Distinct from "fast" — a 10 ms deterministic
+system is real-time; a 100 ns average with a 10 ms tail is not. ULL systems
+aim to be real-time first.
+
+### Round-trip latency — `intro`
+Time from event ingress to action egress through the full pipeline, including
+the order leaving your NIC. The headline tick-to-trade number in most
+benchmarks is wire-to-wire round-trip.
+
+### Strategy cadence — `intro`
+The natural decision rate of a strategy (per day, per second, per tick).
+The single most useful input to deciding what tier of latency the strategy
+needs.
+
+### TSC (Time-Stamp Counter) — `intro`
+x86 CPU register incremented every cycle. Read with `rdtsc` in ~10 ns;
+nanosecond resolution but needs `tsc_reliable` and per-core synchronization
+on multi-socket systems.
+
+### Ultra-low-latency (ULL) — `intro`
+Industry term for systems with nanosecond-scale tick-to-trade (~10 ns – 1
+µs). FPGA, kernel-bypass NIC, hardware timestamps, microwave links. Tiers
+3–6 of the ladder.
+
+### Wire-to-wire latency — `intro`
+Time from the last bit of an inbound packet arriving at the NIC to the
+first bit of an outbound order leaving the NIC. The most defensible
+endpoint pair for competitive benchmarking.

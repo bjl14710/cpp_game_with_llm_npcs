@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lesson 0032 — Candlestick Pattern Detection Without Lookahead Bias</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #252836;
+    --green: #26a269; --red: #c01c28; --yellow: #e9b96e;
+    --blue: #3584e4; --text: #e0e0e0; --muted: #888;
+    --bull: #26a269; --bear: #c01c28;
+    --radius: 8px; --mono: 'Fira Code', 'Cascadia Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: Georgia, serif;
+         line-height: 1.7; max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 1.9rem; color: #fff; margin-bottom: 0.3rem; }
+  .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.3rem; color: var(--yellow); margin: 2.2rem 0 0.8rem; border-bottom: 1px solid #333; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; color: var(--blue); margin: 1.4rem 0 0.5rem; }
+  p { margin-bottom: 1rem; }
+  code { font-family: var(--mono); background: var(--surface2); padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.88em; }
+  pre { background: var(--surface); border: 1px solid #333; border-radius: var(--radius);
+        padding: 1.2rem; overflow-x: auto; margin: 1rem 0; }
+  pre code { background: none; padding: 0; font-size: 0.85rem; line-height: 1.5; }
+  .kw { color: #c792ea; } .fn { color: #82aaff; } .str { color: #c3e88d; }
+  .cm { color: #637777; font-style: italic; } .num { color: #f78c6c; }
+  .cls { color: #ffcb6b; } .deco { color: #89ddff; }
+
+  .callout { border-left: 3px solid var(--yellow); background: var(--surface);
+             padding: 0.8rem 1.2rem; border-radius: var(--radius); margin: 1rem 0; }
+  .callout.danger { border-color: var(--red); }
+  .callout.good { border-color: var(--green); }
+
+  /* Candle diagram */
+  .candle-grid { display: flex; gap: 2rem; align-items: flex-end; margin: 1.5rem 0;
+                 background: var(--surface); padding: 1.5rem; border-radius: var(--radius); flex-wrap: wrap; }
+  .candle-wrap { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+  .candle-label { font-size: 0.78rem; color: var(--muted); font-family: var(--mono); }
+  .candle-svg { display: block; }
+
+  /* Quiz */
+  .quiz-section { background: var(--surface); border-radius: var(--radius);
+                  padding: 1.5rem; margin: 1.5rem 0; }
+  .question { margin-bottom: 1.8rem; }
+  .question p { font-weight: bold; margin-bottom: 0.7rem; }
+  .options { list-style: none; }
+  .options li { background: var(--surface2); border: 1px solid #333; border-radius: 6px;
+                padding: 0.6rem 0.9rem; margin-bottom: 0.4rem; cursor: pointer;
+                transition: border-color 0.15s; font-family: var(--mono); font-size: 0.9rem; }
+  .options li:hover { border-color: var(--blue); }
+  .options li.correct { border-color: var(--green); background: #0d2b1a; }
+  .options li.wrong { border-color: var(--red); background: #2b0d0d; }
+  .feedback { margin-top: 0.5rem; font-size: 0.88rem; display: none; }
+  .score-bar { margin-top: 1.2rem; font-family: var(--mono); font-size: 0.9rem; color: var(--yellow); }
+
+  /* Progress */
+  .progress-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+  .check-item { display: flex; align-items: center; gap: 0.4rem; background: var(--surface2);
+                padding: 0.4rem 0.8rem; border-radius: 20px; font-size: 0.85rem; cursor: pointer; }
+  .check-item input { accent-color: var(--green); width: 15px; height: 15px; }
+
+  .tag { display: inline-block; font-family: var(--mono); font-size: 0.75rem;
+         padding: 0.1em 0.5em; border-radius: 3px; margin-right: 0.3rem; }
+  .tag.bull { background: #0d2b1a; color: var(--green); border: 1px solid var(--green); }
+  .tag.bear { background: #2b0d0d; color: var(--red); border: 1px solid var(--red); }
+  .tag.hold { background: #2b2700; color: var(--yellow); border: 1px solid var(--yellow); }
+
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.88rem; }
+  th { background: var(--surface2); padding: 0.5rem 0.8rem; text-align: left; color: var(--yellow); }
+  td { padding: 0.5rem 0.8rem; border-top: 1px solid #2a2a2a; font-family: var(--mono); }
+  tr:hover td { background: var(--surface); }
+</style>
+</head>
+<body>
+
+<h1>Candlestick Pattern Detection Without Lookahead Bias</h1>
+<p class="subtitle">Lesson 0032 — Why this matters: the engulfing detector in <code>strategies/engulfing.py</code> is the foundation of the intraday day-trading engine. Getting lookahead wrong here invalidates every backtest result.</p>
+
+<div class="progress-row">
+  <label class="check-item"><input type="checkbox"> What a candlestick encodes</label>
+  <label class="check-item"><input type="checkbox"> Bullish engulfing rules</label>
+  <label class="check-item"><input type="checkbox"> Bearish engulfing rules</label>
+  <label class="check-item"><input type="checkbox"> Doji guard</label>
+  <label class="check-item"><input type="checkbox"> Lookahead bias defined</label>
+  <label class="check-item"><input type="checkbox"> Quiz complete</label>
+</div>
+
+<h2>1. What a Candlestick Encodes</h2>
+<p>A single OHLCV candlestick bar summarises everything that happened to a stock's price during one time period (here, 5 minutes). It has four prices:</p>
+
+<div class="candle-grid">
+  <div class="candle-wrap">
+    <svg class="candle-svg" width="60" height="160" viewBox="0 0 60 160">
+      <!-- wick -->
+      <line x1="30" y1="10" x2="30" y2="40" stroke="#26a269" stroke-width="2"/>
+      <line x1="30" y1="110" x2="30" y2="148" stroke="#26a269" stroke-width="2"/>
+      <!-- body -->
+      <rect x="12" y="40" width="36" height="70" fill="#26a269" rx="2"/>
+      <text x="62" y="14" fill="#888" font-size="11" font-family="monospace">High</text>
+      <text x="62" y="45" fill="#ccc" font-size="11" font-family="monospace">Open (low)</text>
+      <text x="62" y="106" fill="#ccc" font-size="11" font-family="monospace">Close (high)</text>
+      <text x="62" y="150" fill="#888" font-size="11" font-family="monospace">Low</text>
+    </svg>
+    <span class="candle-label">GREEN (bullish)<br>Close &gt; Open</span>
+  </div>
+  <div class="candle-wrap">
+    <svg class="candle-svg" width="60" height="160" viewBox="0 0 60 160">
+      <line x1="30" y1="10" x2="30" y2="40" stroke="#c01c28" stroke-width="2"/>
+      <line x1="30" y1="110" x2="30" y2="148" stroke="#c01c28" stroke-width="2"/>
+      <rect x="12" y="40" width="36" height="70" fill="#c01c28" rx="2"/>
+      <text x="62" y="14" fill="#888" font-size="11" font-family="monospace">High</text>
+      <text x="62" y="45" fill="#ccc" font-size="11" font-family="monospace">Open (high)</text>
+      <text x="62" y="106" fill="#ccc" font-size="11" font-family="monospace">Close (low)</text>
+      <text x="62" y="150" fill="#888" font-size="11" font-family="monospace">Low</text>
+    </svg>
+    <span class="candle-label">RED (bearish)<br>Open &gt; Close</span>
+  </div>
+  <div style="flex:1; min-width:220px">
+    <table>
+      <tr><th>Column</th><th>Meaning</th></tr>
+      <tr><td>Open</td><td>First trade price of the period</td></tr>
+      <tr><td>High</td><td>Highest trade price</td></tr>
+      <tr><td>Low</td><td>Lowest trade price</td></tr>
+      <tr><td>Close</td><td>Last trade price of the period</td></tr>
+      <tr><td>Volume</td><td>Shares traded (not used for signal)</td></tr>
+    </table>
+    <p style="font-size:0.85rem; color: var(--muted);">yfinance returns capitalised column names. The <strong>body</strong> is the rectangle between Open and Close. The <strong>wicks</strong> (or shadows) extend to High and Low.</p>
+  </div>
+</div>
+
+<h2>2. The Bullish Engulfing Pattern</h2>
+<p>A <strong>bullish engulfing</strong> pattern appears after a downward move. It signals potential reversal upward. It requires exactly <strong>two consecutive bars</strong>:</p>
+
+<div class="candle-grid">
+  <div class="candle-wrap">
+    <svg class="candle-svg" width="60" height="160" viewBox="0 0 60 160">
+      <line x1="30" y1="30" x2="30" y2="60" stroke="#c01c28" stroke-width="2"/>
+      <line x1="30" y1="110" x2="30" y2="138" stroke="#c01c28" stroke-width="2"/>
+      <rect x="12" y="60" width="36" height="50" fill="#c01c28" rx="2"/>
+      <text x="64" y="63" fill="#ccc" font-size="10" font-family="monospace">prev.Open</text>
+      <text x="64" y="112" fill="#ccc" font-size="10" font-family="monospace">prev.Close</text>
+    </svg>
+    <span class="candle-label">Bar N (prev)<br>RED — seller control</span>
+  </div>
+  <div style="font-size: 2rem; align-self: center; color: #555;">→</div>
+  <div class="candle-wrap">
+    <svg class="candle-svg" width="60" height="160" viewBox="0 0 60 160">
+      <line x1="30" y1="15" x2="30" y2="50" stroke="#26a269" stroke-width="2"/>
+      <line x1="30" y1="130" x2="30" y2="148" stroke="#26a269" stroke-width="2"/>
+      <rect x="12" y="50" width="36" height="80" fill="#26a269" rx="2"/>
+      <text x="64" y="53" fill="#ccc" font-size="10" font-family="monospace">curr.Close ≥ prev.Open</text>
+      <text x="64" y="132" fill="#ccc" font-size="10" font-family="monospace">curr.Open ≤ prev.Close</text>
+    </svg>
+    <span class="candle-label">Bar N+1 (curr)<br>GREEN — engulfs prev</span>
+  </div>
+  <div style="flex:1; min-width:200px;">
+    <p style="font-size:0.9rem;"><strong>Four conditions must all be true:</strong></p>
+    <ol style="margin-left:1.2rem; font-size:0.9rem; line-height:2;">
+      <li><code>prev.Open &gt; prev.Close</code> — prev is red</li>
+      <li><code>curr.Close &gt; curr.Open</code> — curr is green</li>
+      <li><code>curr.Open &lt;= prev.Close</code> — opens inside or below prev body</li>
+      <li><code>curr.Close &gt;= prev.Open</code> — closes above prev body top</li>
+    </ol>
+    <p style="font-size:0.85rem; color: var(--muted);">The current candle's <em>body</em> must fully wrap the previous candle's body. Wicks do not count.</p>
+  </div>
+</div>
+
+<h2>3. The Bearish Engulfing Pattern</h2>
+<p>Mirror image — signals potential reversal downward after an upward move:</p>
+
+<table>
+  <tr><th>Condition</th><th>Bullish Engulfing</th><th>Bearish Engulfing</th></tr>
+  <tr><td>prev bar colour</td><td>Red (Open &gt; Close)</td><td>Green (Open &lt; Close)</td></tr>
+  <tr><td>curr bar colour</td><td>Green (Close &gt; Open)</td><td>Red (Close &lt; Open)</td></tr>
+  <tr><td>curr opens</td><td>&lt;= prev.Close (low end)</td><td>&gt;= prev.Close (high end)</td></tr>
+  <tr><td>curr closes</td><td>&gt;= prev.Open (above top)</td><td>&lt;= prev.Open (below bottom)</td></tr>
+  <tr><td>Signal</td><td><span class="tag bull">BUY</span></td><td><span class="tag bear">SELL</span></td></tr>
+</table>
+
+<h2>4. The Doji Guard — Filtering Ambiguous Bars</h2>
+<p>A <strong>doji</strong> is a bar where the body is so small that neither buyers nor sellers won — the result is ambiguous. Engulfing signals from doji bars are meaningless because you can't say the previous bar was "clearly red" or "clearly green".</p>
+
+<pre><code><span class="cm"># strategies/engulfing.py</span>
+<span class="cls">DOJI_THRESHOLD</span> = <span class="num">0.0005</span>  <span class="cm"># 0.05% of price — body smaller than this → doji</span>
+
+<span class="kw">def</span> <span class="fn">_is_doji</span>(bar: pd.Series) -> bool:
+    <span class="kw">return</span> abs(bar[<span class="str">"Close"</span>] - bar[<span class="str">"Open"</span>]) < <span class="cls">DOJI_THRESHOLD</span> * bar[<span class="str">"Close"</span>]</code></pre>
+
+<p>If either <code>prev</code> or <code>curr</code> is a doji, <code>generate_signal</code> returns <span class="tag hold">HOLD</span> immediately — before checking any engulfing conditions. This prevents false signals on low-volatility bars.</p>
+
+<div class="callout">
+  <strong>Why 0.05%?</strong> At $100/share, this means a body smaller than $0.05. A 5-minute bar with a $0.05 body means essentially no net movement — price opened and closed at nearly the same level, so calling it "bullish" or "bearish" is meaningless.
+</div>
+
+<h2>5. The Full Detector — Reading the Real Code</h2>
+<p>This is the actual <code>strategies/engulfing.py</code> from this project, annotated:</p>
+
+<pre><code><span class="kw">from</span> strategies.base <span class="kw">import</span> BaseStrategy, Signal
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+<span class="cls">DOJI_THRESHOLD</span> = <span class="num">0.0005</span>
+
+<span class="kw">def</span> <span class="fn">_is_doji</span>(bar: pd.Series) -> bool:
+    <span class="cm"># body size as fraction of price — both sides of equality matter</span>
+    <span class="kw">return</span> abs(bar[<span class="str">"Close"</span>] - bar[<span class="str">"Open"</span>]) < <span class="cls">DOJI_THRESHOLD</span> * bar[<span class="str">"Close"</span>]
+
+<span class="kw">class</span> <span class="cls">EngulfingStrategy</span>(BaseStrategy):
+    <span class="kw">def</span> <span class="fn">generate_signal</span>(<span class="kw">self</span>, prev: pd.Series, curr: pd.Series, bar_index: <span class="kw">int</span> = <span class="num">0</span>) -> Signal:
+
+        <span class="cm"># GUARD — bail early on doji; order matters (cheap check first)</span>
+        <span class="kw">if</span> <span class="fn">_is_doji</span>(prev) <span class="kw">or</span> <span class="fn">_is_doji</span>(curr):
+            <span class="kw">return</span> Signal(<span class="str">"HOLD"</span>, curr[<span class="str">"Close"</span>], bar_index)
+
+        <span class="cm"># ── BULLISH ENGULFING ──────────────────────────────────────────</span>
+        prev_red   = prev[<span class="str">"Open"</span>] > prev[<span class="str">"Close"</span>]   <span class="cm"># prev bar is bearish</span>
+        curr_green = curr[<span class="str">"Close"</span>] > curr[<span class="str">"Open"</span>]  <span class="cm"># curr bar is bullish</span>
+
+        <span class="kw">if</span> prev_red <span class="kw">and</span> curr_green:
+            <span class="cm"># curr body must fully cover prev body</span>
+            <span class="kw">if</span> curr[<span class="str">"Open"</span>] <= prev[<span class="str">"Close"</span>] <span class="kw">and</span> curr[<span class="str">"Close"</span>] >= prev[<span class="str">"Open"</span>]:
+                <span class="kw">return</span> Signal(<span class="str">"BUY"</span>, curr[<span class="str">"Close"</span>], bar_index)
+
+        <span class="cm"># ── BEARISH ENGULFING ──────────────────────────────────────────</span>
+        prev_green = prev[<span class="str">"Open"</span>] < prev[<span class="str">"Close"</span>]   <span class="cm"># prev bar is bullish</span>
+        curr_red   = curr[<span class="str">"Close"</span>] < curr[<span class="str">"Open"</span>]  <span class="cm"># curr bar is bearish</span>
+
+        <span class="kw">if</span> prev_green <span class="kw">and</span> curr_red:
+            <span class="kw">if</span> curr[<span class="str">"Open"</span>] >= prev[<span class="str">"Close"</span>] <span class="kw">and</span> curr[<span class="str">"Close"</span>] <= prev[<span class="str">"Open"</span>]:
+                <span class="kw">return</span> Signal(<span class="str">"SELL"</span>, curr[<span class="str">"Close"</span>], bar_index)
+
+        <span class="cm"># Everything else — no pattern</span>
+        <span class="kw">return</span> Signal(<span class="str">"HOLD"</span>, curr[<span class="str">"Close"</span>], bar_index)</code></pre>
+
+<div class="callout good">
+  <strong>Key design choice:</strong> <code>generate_signal</code> receives exactly two <code>pd.Series</code> rows — the previous bar and the current bar. It has no access to the rest of the DataFrame. This structural constraint makes lookahead physically impossible.
+</div>
+
+<h2>6. Lookahead Bias — The Most Dangerous Backtest Bug</h2>
+
+<p><strong>Lookahead bias</strong> means your signal calculation uses information that would not have been available at the moment the signal was generated. It makes backtests look better than they will perform in live trading.</p>
+
+<div class="callout danger">
+  <strong>Classic lookahead mistake:</strong><br>
+  <code>df["signal"] = df["engulfing"].shift(-1)</code><br>
+  Using <code>shift(-1)</code> peeks one bar into the future — the signal at bar N uses bar N+1's prices.
+</div>
+
+<p>In the engulfing detector, lookahead is prevented by design:</p>
+<table>
+  <tr><th>Mistake (introduces bias)</th><th>Correct (no bias)</th></tr>
+  <tr>
+    <td><code>curr["Close"] = df.iloc[i+1]["Close"]</code></td>
+    <td>Pass only <code>df.iloc[i-1]</code> and <code>df.iloc[i]</code></td>
+  </tr>
+  <tr>
+    <td>Using <code>df.rolling().apply()</code> over a window that includes future bars</td>
+    <td>Pure two-bar function — no DataFrame slice</td>
+  </tr>
+  <tr>
+    <td>Signal at bar N opens trade at bar N's Close (also lookahead — you can't trade on a price until the bar is closed)</td>
+    <td><code>PaperEngine</code> opens at bar <strong>N+1's Open</strong> — the first price available after the signal is confirmed</td>
+  </tr>
+</table>
+
+<p>The bar-by-bar replay in <code>strategies/paper_engine.py</code> enforces this at the execution level: even if the signal is generated at bar N, the trade entry is always <code>df.iloc[i+1]["Open"]</code>.</p>
+
+<h2>7. Often Confused With: Engulfing vs Inside Bar</h2>
+<table>
+  <tr><th></th><th>Engulfing</th><th>Inside Bar (Harami)</th></tr>
+  <tr><td>Which bar is bigger?</td><td>Current (second) bar is larger</td><td>Previous (first) bar is larger</td></tr>
+  <tr><td>Relationship</td><td>Curr body ⊇ prev body</td><td>Curr body ⊆ prev body</td></tr>
+  <tr><td>Signal type</td><td>Reversal</td><td>Consolidation / breakout setup</td></tr>
+  <tr><td>Trading action</td><td>Enter in the direction of the curr bar</td><td>Wait for the breakout of the prev bar's range</td></tr>
+  <tr><td>In this project</td><td><code>EngulfingStrategy</code> ✅</td><td>Not yet implemented (future strategy)</td></tr>
+</table>
+
+<h2>8. Quiz</h2>
+<div class="quiz-section">
+  <div class="question" data-question>
+    <p>Given: prev bar has Open=100, Close=95 (red). curr bar has Open=94, Close=102 (green). Is this a bullish engulfing?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Close=102 ≥ Open=100 ✓, Open=94 ≤ Close=95 ✓ — all four conditions hold. This IS bullish engulfing.">No — the curr bar's open is below the prev close, so it doesn't qualify.</li>
+      <li data-correct="true" data-why="prev is red (100>95) ✓, curr is green (102>94) ✓, curr.Open(94) ≤ prev.Close(95) ✓, curr.Close(102) ≥ prev.Open(100) ✓. All four conditions met.">Yes — all four engulfing conditions are satisfied.</li>
+      <li data-correct="false" data-why="We need to check the full engulfing conditions. The doji check would only apply if body size ÷ price < 0.05%.">Only if we check for doji first.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>A bar has Open=50.00 and Close=50.01. The DOJI_THRESHOLD is 0.0005. Is this a doji?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Body = |50.01 - 50.00| = 0.01. Threshold = 0.0005 × 50.01 = 0.025. Since 0.01 < 0.025, it IS a doji.">No — body of 0.01 is large enough.</li>
+      <li data-correct="true" data-why="body = 0.01, threshold = 0.0005 × 50.01 ≈ 0.025. Since 0.01 < 0.025, this bar qualifies as a doji and would cause generate_signal to return HOLD.">Yes — body (0.01) is less than 0.05% of price (0.025).</li>
+      <li data-correct="false" data-why="DOJI_THRESHOLD is defined once as a module constant. It doesn't need to be passed — _is_doji uses it directly.">Impossible to know without passing the threshold explicitly.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>In the paper engine, a BUY signal fires at bar index 47 (the 47th bar). At what price does the trade entry occur?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Using Close of bar 47 is lookahead — the bar isn't closed yet when the signal is confirmed at its close. Wait for bar 48.">Bar 47's Close price — use the current bar's last price.</li>
+      <li data-correct="false" data-why="Bar 47's Open is the price at the start of the signal bar — but you don't know the bar is an engulfing signal until it closes.">Bar 47's Open price — use the signal bar's first price.</li>
+      <li data-correct="true" data-why="The signal is confirmed at bar 47's close, but you can only act on bar 48's open — the first price available after the pattern completes. This eliminates lookahead bias at the execution level.">Bar 48's Open price — the next bar's first available price.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>Which of these Python patterns in a bar-by-bar loop introduces lookahead bias?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="Using only bars up to index i (not i+1 or later) is safe — no future information.">signal = detect(df.iloc[i-1], df.iloc[i])</li>
+      <li data-correct="true" data-why="df.iloc[i+1] is bar i+1, which hasn't happened yet when you're processing bar i. This is lookahead — you're using a future price to make a decision at the current bar.">signal = detect(df.iloc[i], df.iloc[i+1])</li>
+      <li data-correct="false" data-why="Shifting the signal forward by one row means you act one bar later than when the signal fires — conservative, not lookahead.">entry_price = df.iloc[i+1]["Open"] if signal == "BUY" else None</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="question" data-question>
+    <p>The bearish engulfing condition requires curr.Open >= prev.Close. Why >= (greater-than-or-equal) rather than strictly greater than?</p>
+    <ul class="options">
+      <li data-correct="false" data-why="The boundary case (opening exactly at the previous close) is a valid engulfing setup — there's no gap but the current bar still engulfs the previous body.">To allow for rounding errors in float comparison.</li>
+      <li data-correct="true" data-why="If curr.Open == prev.Close exactly (no gap up), the curr bar still completely engulfs the prev body as long as curr.Close ≤ prev.Open. The boundary case is a legitimate signal.">Because a gap of exactly zero (curr opens precisely at prev close) still forms a valid engulfing pattern.</li>
+      <li data-correct="false" data-why="yfinance prices are floats, but the >= choice is about trading logic (boundary validity), not floating-point precision.">Because yfinance returns floats which are never exactly equal.</li>
+    </ul>
+    <p class="feedback"></p>
+  </div>
+
+  <div class="score-bar" id="score-display"></div>
+</div>
+
+<h2>9. Scenarios — Check Your Understanding</h2>
+<p>Work through these mentally:</p>
+<ol style="margin-left:1.4rem; line-height:2.5;">
+  <li>prev: O=200, C=210 (green). curr: O=215, C=195 (red, opens with gap up). Does curr engulf prev? <em style="color:var(--muted)">(Yes — bearish engulfing. curr.Open=215 ≥ prev.Close=210 ✓, curr.Close=195 ≤ prev.Open=200 ✓)</em></li>
+  <li>prev: O=100, C=90 (red). curr: O=88, C=95 (green, closes only partway). Engulfing? <em style="color:var(--muted)">(No — curr.Close=95 &lt; prev.Open=100, so it doesn't reach the top of prev's body)</em></li>
+  <li>prev: O=50.00, C=50.001 (essentially flat). DOJI_THRESHOLD=0.0005. Body = 0.001, threshold = 0.025. Doji? <em style="color:var(--muted)">(Yes — 0.001 &lt; 0.025, so generate_signal returns HOLD regardless of curr)</em></li>
+  <li>A signal fires at bar 100. The position opens at bar 101's Open. Bar 102 has Low=97 when stop is at 98. Does stop trigger? <em style="color:var(--muted)">(Yes — bar Low ≤ stop price. The engine closes at 98, not 97)</em></li>
+</ol>
+
+<script>
+// Shuffle quiz options and wire click handlers
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+let totalQ = 0, answeredQ = 0;
+document.querySelectorAll('[data-question]').forEach(q => {
+  totalQ++;
+  const list = q.querySelector('.options');
+  const fb = q.querySelector('.feedback');
+  shuffle([...list.children]).forEach(li => list.appendChild(li));
+  list.querySelectorAll('li').forEach(li => {
+    li.addEventListener('click', () => {
+      if (q.dataset.answered) return;
+      q.dataset.answered = 'true';
+      answeredQ++;
+      const correct = li.dataset.correct === 'true';
+      li.classList.add(correct ? 'correct' : 'wrong');
+      if (!correct) {
+        list.querySelectorAll('[data-correct="true"]').forEach(r => r.classList.add('correct'));
+      }
+      fb.style.display = 'block';
+      fb.style.color = correct ? 'var(--green)' : 'var(--red)';
+      fb.textContent = (correct ? '✓ Correct. ' : '✗ Not quite. ') + li.dataset.why;
+      document.getElementById('score-display').textContent =
+        `Score: ${document.querySelectorAll('[data-answered]').length} / ${totalQ} answered`;
+    });
+  });
+});
+document.getElementById('score-display').textContent = `Score: 0 / ${totalQ} answered`;
+</script>
+
+</body>
+</html>

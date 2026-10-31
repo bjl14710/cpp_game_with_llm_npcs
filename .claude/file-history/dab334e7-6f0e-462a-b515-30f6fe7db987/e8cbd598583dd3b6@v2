@@ -1,0 +1,99 @@
+"""Tests for live_watch.py — completed-bar logic, signal evaluation, and the
+fresh-signal dedupe. All offline: fetch is injected, no yfinance."""
+import datetime as dt
+
+import pandas as pd
+import pytest
+
+from live_watch import completed_bars, evaluate_latest, format_tick_line, watch_once
+from strategies.engulfing import EngulfingStrategy
+
+
+def _bars(rows, start="2026-07-13 09:30", freq="5min"):
+    """Intraday OHLCV frame from (open, close) tuples."""
+    idx = pd.date_range(start, periods=len(rows), freq=freq)
+    return pd.DataFrame(
+        {"Open": [o for o, _ in rows], "High": [max(o, c) * 1.001 for o, c in rows],
+         "Low": [min(o, c) * 0.999 for o, c in rows], "Close": [c for _, c in rows],
+         "Volume": [1000] * len(rows)}, index=idx)
+
+
+# ---------------------------------------------------------------------------
+# completed_bars
+# ---------------------------------------------------------------------------
+
+def test_forming_bar_is_dropped_mid_interval():
+    df = _bars([(100, 101), (101, 102), (102, 103)])
+    # "now" is 2 minutes into the last 5m bar (bar starts 09:40) -> forming
+    now = dt.datetime(2026, 7, 13, 9, 42)
+    out = completed_bars(df, "5m", now=now)
+    assert len(out) == 2
+    assert out.index[-1] == df.index[-2]
+
+
+def test_last_bar_kept_once_its_interval_has_elapsed():
+    df = _bars([(100, 101), (101, 102), (102, 103)])
+    # last bar starts 09:40, ends 09:45 — at 09:45 sharp it is complete
+    now = dt.datetime(2026, 7, 13, 9, 45)
+    out = completed_bars(df, "5m", now=now)
+    assert len(out) == 3  # nothing dropped — the day's final signal survives
+
+
+def test_completed_bars_empty_frame_passthrough():
+    empty = pd.DataFrame()
+    assert completed_bars(empty, "5m").empty
+
+
+# ---------------------------------------------------------------------------
+# evaluate_latest
+# ---------------------------------------------------------------------------
+
+def test_evaluate_needs_two_bars():
+    assert evaluate_latest(_bars([(100, 101)]), EngulfingStrategy()) is None
+
+
+def test_evaluate_detects_bullish_engulfing_on_last_two_bars():
+    # prev red (105->100), curr green engulfing (99->106)
+    df = _bars([(100, 100), (105, 100), (99, 106)])
+    ts, signal = evaluate_latest(df, EngulfingStrategy())
+    assert ts == df.index[-1]
+    assert signal.direction == "BUY"
+
+
+# ---------------------------------------------------------------------------
+# watch_once: dedupe + error isolation
+# ---------------------------------------------------------------------------
+
+def test_watch_once_flags_signal_fresh_only_once():
+    df = _bars([(100, 100), (105, 100), (99, 106)])  # ends in a BUY
+    fetch = lambda ticker, interval: df
+    seen = {}
+    now = dt.datetime(2026, 7, 13, 10, 0)  # all bars long complete
+
+    first = watch_once(["AAA"], EngulfingStrategy(), "5m", fetch, seen, now=now)
+    second = watch_once(["AAA"], EngulfingStrategy(), "5m", fetch, seen, now=now)
+    assert "NEW SIGNAL" in first[0]
+    assert "NEW SIGNAL" not in second[0]  # same bar -> not fresh again
+    assert "BUY" in second[0]             # but the state is still shown
+
+
+def test_watch_once_isolates_a_failing_ticker():
+    good = _bars([(100, 100), (105, 100), (99, 106)])
+
+    def fetch(ticker, interval):
+        if ticker == "BAD":
+            raise RuntimeError("feed down")
+        return good
+
+    lines = watch_once(["BAD", "AAA"], EngulfingStrategy(), "5m", fetch, {},
+                       now=dt.datetime(2026, 7, 13, 10, 0))
+    assert "fetch error" in lines[0]
+    assert "BUY" in lines[1]  # the healthy ticker still evaluated
+
+
+def test_format_tick_line_hold_never_shouts():
+    sig_hold = EngulfingStrategy().generate_signal(
+        _bars([(100, 101), (101, 102)]).iloc[0], _bars([(100, 101), (101, 102)]).iloc[1])
+    line = format_tick_line("AAPL", pd.Timestamp("2026-07-13 09:35"), 102.0, sig_hold, fresh=True)
+    assert "NEW SIGNAL" not in line
+    assert "HOLD" in line

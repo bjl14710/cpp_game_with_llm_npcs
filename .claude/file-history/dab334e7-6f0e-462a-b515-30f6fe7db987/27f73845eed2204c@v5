@@ -1,0 +1,62 @@
+# Overnight Build Report
+Date: 2026-07-15
+Session: overnight #3 — "Streamlit Research Console" milestone #5
+Issues attempted: 2 (#73, #74) — both completed
+
+## Summary
+The native Streamlit dashboard is real: `streamlit_app/` now holds a pure,
+read-only data layer (#73) and the three-tab console (#74) — arena
+standings, equity analysis, and a manual-refresh live-signals tape,
+mirroring your oil dashboard's layout patterns over this platform's
+artifacts. Draft **PR #75** open (base: feature/lab-theme); issues labeled
+`ai-completed`. **273 passed** with the dashboard extra installed; the core
+environment stays streamlit-free by tested contract.
+
+## Completed ✅
+| Issue | Feature | Commit |
+|-------|---------|--------|
+| #73 | Read-only data layer (mode=ro SQLite, badge mapping, equity metrics, live tape) — 8 tests | 2d87a63 |
+| #74 | Three-tab console with AppTest coverage + import-safety guard — 3 tests | 5784bf0 |
+
+## Failed ❌ / Skipped ⏭
+None.
+
+## Design notes worth knowing 🔍
+- The console deliberately does NOT use ArenaState to read the arena DB —
+  ArenaState's constructor runs migrations (writes). A viewer opening a
+  ledger writable would be a bug waiting to happen; SQLite's `mode=ro`
+  enforces the invariant at the connection level (test-pinned).
+- The crimson-dashed drawdown reference from the oil app renders as a plain
+  running-peak series for now — `st.line_chart` can't dash; the plotly
+  upgrade is noted in-code as deliberately out of scope.
+- Streamlit was installed into your venv via the pre-approved
+  `dashboard` extra (`uv sync --extra dashboard`) — plain `uv sync` still
+  excludes it.
+
+## Run it
+```
+uv run streamlit run streamlit_app/dashboard.py
+```
+(streamlit already installed here; fresh clones need `uv sync --extra dashboard` first)
+
+## Learning Materials
+| Concept | Lesson | Drill |
+|---------|--------|-------|
+| Streamlit's whole-script-rerun model: session_state vs globals, the script-run-context guard, AppTest, the mode=ro viewer invariant | ✅ 0040 | — (short session; ask for drill 0009 anytime) |
+
+Index rebuilt (12 lessons, 8 drills).
+
+## Test Status
+`uv run pytest tests/ -m "not exercise"` → **273 passed** (11 new). Headless
+`streamlit run` smoke: HTTP 200, zero errors logged.
+
+## Suggested First Move
+`uv run streamlit run streamlit_app/dashboard.py` — the Arena tab against
+your real arena.db is the payoff. Then the PR chain, which now reads:
+#52 → #53 → #63 → #72 → (lab-theme branch, no PR) → **#75**. The lab-theme
+branch between #72 and #75 has no PR of its own yet — say the word and I'll
+open it so the chain is fully reviewable.
+
+## Draft PRs Awaiting Review
+- #52 → #53 → #63 → #72 (arena lineage) · #75 (streamlit console)
+- Game repo #56 — conflict-free since 07-13, awaiting merge
