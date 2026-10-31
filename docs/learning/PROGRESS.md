@@ -118,3 +118,84 @@ ground-truthed from raw JSON (wrist rest position at hip height), fixed in
 Assets::rebakeVerticesToRestPose; the shared-rig insight that gave mixed
 head/body figures bone attachment for free.
 **Artifacts (local-only):** lessons/0027, drills/0027, vocab/0026.
+
+## Session 9 (2026-08-21) — overnight run
+
+### Lesson 0028 — Inverting a Clock's Ownership Without Disturbing Its Consumers
+**Concept:** how a producer can be swapped under six consumers at zero cost
+when they are coupled to a shared VALUE rather than to a producer call or a
+tick event; the inversion itself (free roam ticks the hour, a match derives it
+from phase progress so dusk lands exactly when the vote opens); enforcing
+"exactly one owner" through topology — a single `advanceWorldClock` write site
+plus `std::optional<MatchClock>` as the sole representation of whether a match
+is running, rather than a bool flag that can drift; why a new enum value
+(`MatchPhase::Intro`) is cheaper than the same condition repeated at every
+downstream switch, and why Intro holds the clock at dawn while Vote/Resolution
+hold it at dusk; the diegetic countdown (dayEndHour inside DayNight's dusk
+band) and the test that pins it; and proving an untouched path is untouched
+with a byte-identical `--frames` capture rather than an argument.
+Grounded in issue #155: MatchClock existed and was entirely unused until this
+change wired it into the loop.
+**Artifacts (local-only):** lessons/0028, drills/0028, vocab/0027.
+
+### Lesson 0029 — Layering a Temporary Override Over Authored Content
+From issue #156 (plaza gather for the vote phase), PR #310.
+
+Covered: why rewriting authored schedules and adding a mode flag both fail; the
+nullable-destination-override shape and its restore-by-reset property; "out-ranked,
+not suspended" and how it stays visible in the activity label; splitting a bundled
+guard without smuggling in an incidental behaviour change; keying a release on the
+state ENTERED so untried transitions are covered; the map fact that the plaza's
+computed centre sits inside Gus's cart (and the `Mystery.cpp` warning that had been
+reporting it for months); spacing vs. formation logic, and why a gap in the ring is
+the feature; the vacuous-test trap of a movement fixture spawned inside a collider.
+
+Files: lessons/0029, drills/0029 (15 questions), vocab/0028 (12 terms), GLOSSARY.
+
+### Lesson 0030 — Diegetic Versus HUD Signalling for Time Pressure
+From issue #157 (day/phase HUD and match settings), PR #311.
+
+Covered: diegetic vs HUD signalling and the precision/attention trade; how one
+constant (`dayEndHour` inside DayNight's dusk band) turned an existing light model
+into a countdown, and why #155's clock inversion was the prerequisite; what the sky
+CANNOT say, and why two HUD lines is the answer; the stated HUD budget as a design
+guard; raylib's integer glyph advance and the 10/20/30/44 ladder; making "settings
+cannot affect a running match" structural via a single read site (weak vs strong
+invariants); trailing defaults hiding missing cases (Sandbox and Model were titled
+"Multiplayer" for months) and the no-`default:` switch that fixes it; magic layout
+offsets hiding overflow (Quit was 14px off-screen) and derived layout; the harness
+boundary — `tests/Makefile` globs only `src/core/*.cpp`, so all of `src/app/` is
+verified by capture or not at all.
+
+Files: lessons/0030, drills/0030 (15 questions), vocab/0029 (13 terms), GLOSSARY.
+
+### Lesson 0031 — One Implementation Across a Language Boundary
+From issue #304 (persona_prompt --state), PR #312.
+
+Covered: why re-implementing prompt assembly in Python would produce an invalid
+instrument rather than merely duplicated code (placement is what the probe
+measures); the `--parse` precedent and the codebase's own admitted counterexample
+in bench_npc_models.py; inverting the unknown-id policy at a measurement boundary
+(the game demotes, the tool refuses) and why zero-byte refusal matters; the
+byte-identity check as the thing that keeps the seam honest; residue testing against
+a known harness boundary; the pointer-into-argument hazard in findRole.
+
+Files: lessons/0031, drills/0031 (10 questions), vocab/0030 (8 terms), GLOSSARY.
+
+### Lesson 0032 — Side-Channel Leakage: Measuring What a System Reveals Through Its Metadata
+From issue #200 (implement the role leak probe), PR #313.
+
+Covered: the mood tag as a side channel the design never treated as one; why
+"the killer is never angry" is the wrong pass condition and separability is the
+right one; deriving a statistic from the exploit (a rank, because sorting faces is
+what a player does) and why a permutation test beats a chi-square here; how a
+collapsed statistic went blind and what the full mood distribution showed (TVD:
+killer-keepers 0.59, killer-bystanders 0.12, keepers-bystanders 0.69); reading a
+result that contradicts its own stated pass condition; the finding that the
+secret-keepers provide no cover and the killer is defended by an undocumented
+mechanism instead; why the probe names content directions without choosing one;
+the four honesty requirements (self-reported n, raw distributions, CANNOT EVALUATE
+as a distinct outcome, scaffolds never reporting a pass); recognising side channels
+in latency, length, error codes and refusal style.
+
+Files: lessons/0032, drills/0032 (14 questions), vocab/0031 (12 terms), GLOSSARY.

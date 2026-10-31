@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <random>
 
+#include "Zones.hpp"
+
 namespace llm_npc {
 
 World::World(City city)
@@ -173,6 +175,26 @@ int World::nearestNpcWithin(const Vec3& pos, float radius) const {
         }
     }
     return best;
+}
+
+void World::setPlazaGather(bool gathering) {
+    if (!gathering) {
+        // Unconditional: a dead resident may still be holding the target it
+        // was given while alive, and "released except the corpses" is how an
+        // NPC turns up standing in the plaza on day two.
+        for (Npc& npc : npcs_) npc.clearGatherTarget();
+        return;
+    }
+    int living = 0;
+    for (const Npc& npc : npcs_) {
+        if (npc.combatState() != NpcState::Dead) ++living;
+    }
+    int slot = 0;
+    for (Npc& npc : npcs_) {
+        if (npc.combatState() == NpcState::Dead) continue;
+        npc.setGatherTarget(plazaGatherSpot(slot, living));
+        ++slot;
+    }
 }
 
 }  // namespace llm_npc

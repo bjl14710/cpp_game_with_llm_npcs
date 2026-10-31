@@ -15,6 +15,7 @@
 #include "FaceTexture.hpp"
 #include "Math.hpp"
 #include "NoirLook.hpp"
+#include "WalkCycle.hpp"
 
 namespace llm_npc {
 
@@ -79,15 +80,15 @@ class RaylibRenderer {
     // shared-character-library): parts snapped by the core's socket
     // assembly, scaled ONCE so the whole figure meets the same 1.8-unit
     // height contract as pack characters, colored by the look's palette.
-    // `phase` drives the procedural walk bob (no skeleton in v1). Non-neutral
-    // `face` billboards the same emote pack characters use; `dead` lays the
-    // figure flat instead (the dead don't emote). Defaults keep the creator
-    // preview call sites unchanged.
-    // `highlighted` marks the NPC the talk prompt targets: at night its
-    // outline turns into a thin unlit red rim (one of the few colors the
+    // `pose` is one sample of the procedural walk (WalkCycle): two-bone
+    // legs, bob, lean, sway, head nod and hair follow-through; the default
+    // stands still. Non-neutral `face` billboards the same emote pack
+    // characters use; `dead` lays the figure flat instead (the dead don't
+    // emote). `highlighted` marks the NPC the talk prompt targets: at night
+    // its outline turns into a thin unlit red rim (one of the few colors the
     // noir grade lets through); by day it changes nothing.
     void drawCompositeCharacter(const CharacterLook& look, const Vec3& position,
-                                float facingDeg, bool walking, float phase,
+                                float facingDeg, const WalkPose& pose = standingPose(),
                                 NpcFace face = NpcFace::Neutral, bool dead = false,
                                 bool highlighted = false);
 

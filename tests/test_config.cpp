@@ -164,6 +164,95 @@ TEST_CASE("setKvValue ignores commented and longer-prefixed keys") {
     CHECK(llm_npc::slurp(tmp.path / "llm.cfg").find("# model = commented") != std::string::npos);
 }
 
+// --- Anthropic provider keys (plan: anthropic-haiku-backend) ------------------
+
+TEST_CASE("loadLlmConfig keeps Anthropic defaults when none are set") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "provider = anthropic\n");
+    unsetenv("NPC_GAME_ANTHROPIC_API_KEY");
+    const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.provider == "anthropic");
+    CHECK(cfg.anthropicModel == "claude-haiku-5-5");
+    CHECK(cfg.anthropicBaseUrl == "https://api.anthropic.com");
+    CHECK(cfg.anthropicMaxTokens == 200);
+    CHECK(cfg.anthropicHistoryTurns == 12);
+    CHECK(cfg.anthropicTokenBudget == 0);
+    CHECK(cfg.anthropicRetryBackoffMs == 750);
+    CHECK(cfg.anthropicTimeoutSeconds == 20);
+    // The key env var follows the provider when api_key_env is not named.
+    CHECK(cfg.apiKeyEnv == "NPC_GAME_ANTHROPIC_API_KEY");
+    CHECK(cfg.apiKey.empty());
+}
+
+TEST_CASE("loadLlmConfig reads every anthropic_* key") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "provider = anthropic\n"
+              "anthropic_model = claude-haiku-5-5\n"
+              "anthropic_base_url = http://127.0.0.1:9\n"
+              "anthropic_max_tokens = 300\n"
+              "anthropic_history_turns = 6\n"
+              "anthropic_token_budget = 250000\n"
+              "anthropic_retry_backoff_ms = 10\n"
+              "anthropic_timeout_s = 7\n");
+    const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.anthropicBaseUrl == "http://127.0.0.1:9");
+    CHECK(cfg.anthropicMaxTokens == 300);
+    CHECK(cfg.anthropicHistoryTurns == 6);
+    CHECK(cfg.anthropicTokenBudget == 250000);
+    CHECK(cfg.anthropicRetryBackoffMs == 10);
+    CHECK(cfg.anthropicTimeoutSeconds == 7);
+}
+
+TEST_CASE("secrets.cfg api_key is only used by the provider it belongs to") {
+    unsetenv("NPC_GAME_ANTHROPIC_API_KEY");
+    unsetenv("OPENROUTER_API_KEY");
+    SUBCASE("an Anthropic key is not handed to an OpenAI-compatible provider") {
+        TempDir tmp;
+        tmp.write("llm.cfg", "provider = openrouter\n");
+        tmp.write("secrets.cfg", "api_key = sk-ant-leftover\n");
+        CHECK(llm_npc::loadLlmConfig(tmp.path).apiKey.empty());
+    }
+    SUBCASE("a non-Anthropic key is not sent to Anthropic") {
+        TempDir tmp;
+        tmp.write("llm.cfg", "provider = anthropic\n");
+        tmp.write("secrets.cfg", "api_key = sk-or-v1-leftover\n");
+        CHECK(llm_npc::loadLlmConfig(tmp.path).apiKey.empty());
+    }
+    SUBCASE("a matching key is used") {
+        TempDir tmp;
+        tmp.write("llm.cfg", "provider = anthropic\n");
+        tmp.write("secrets.cfg", "api_key = sk-ant-matching\n");
+        CHECK(llm_npc::loadLlmConfig(tmp.path).apiKey == "sk-ant-matching");
+    }
+}
+
+TEST_CASE("the Anthropic key is read from NPC_GAME_ANTHROPIC_API_KEY and never written anywhere") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "provider = anthropic\n");
+    setenv("NPC_GAME_ANTHROPIC_API_KEY", "sk-ant-test-only", 1);
+    const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
+    unsetenv("NPC_GAME_ANTHROPIC_API_KEY");
+    CHECK(cfg.apiKey == "sk-ant-test-only");
+    CHECK_FALSE(fs::exists(tmp.path / "secrets.cfg"));
+}
+
+TEST_CASE("an explicit api_key_env still wins over the provider default") {
+    TempDir tmp;
+    tmp.write("llm.cfg",
+              "provider = anthropic\n"
+              "api_key_env = LLM_NPC_TEST_KEY\n");
+    const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.apiKeyEnv == "LLM_NPC_TEST_KEY");
+}
+
+TEST_CASE("provider ollama keeps the OpenRouter env var default") {
+    TempDir tmp;
+    tmp.write("llm.cfg", "provider = ollama\n");
+    const llm_npc::LlmConfig cfg = llm_npc::loadLlmConfig(tmp.path);
+    CHECK(cfg.apiKeyEnv == "OPENROUTER_API_KEY");
+}
+
 TEST_CASE("parseOnOff accepts the usual spellings and falls back otherwise") {
     using llm_npc::parseOnOff;
     for (const char* yes : {"on", "ON", " true ", "Yes", "1"}) {

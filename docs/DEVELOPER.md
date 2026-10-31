@@ -44,6 +44,7 @@ clone builds with no graphics packages installed. Keep the split absolute:
 | `NetServer`       | Authoritative host. Threads: accept → per-connection reader (handshake: version, join code, `kMaxPlayers`) → tick (snapshot broadcast + connection reaping). Its threads touch only sockets and queues; the host loop feeds `setHostPose`/`publishNpcPoses` in and drains `drainChatEvents()` out, so `World`/`LlmClient` stay single-threaded. |
 | `NetClient`       | Joining side: `connect` (4s timeout + handshake), reader thread → `poll()` drain on the main loop (the `drainReplies` shape). Never simulates; renders what snapshots say. |
 | `HostChatRouter`  | Host-loop glue routing remote NPC chat: per-NPC queues serialize concurrent askers, deltas/replies return to the requesting player only, `NpcSpeechBubble`/`NpcMoodUpdate` broadcast to all. |
+| `WalkCycle`       | Procedural composite walk: phase from distance walked (planted feet, no shared beat), eased start/stop blend, speed-driven run blend, two-bone leg IK. `advanceWalk` once per rendered frame; `walkPose` feeds `RaylibRenderer::drawCompositeCharacter`. |
 
 ### App modules
 

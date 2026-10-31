@@ -45,3 +45,66 @@ TEST_CASE("the clock wraps at midnight") {
     state.setTimeOfDayHours(31.0);  // out-of-range set normalizes too
     CHECK(state.timeOfDayHours() == doctest::Approx(7.0));
 }
+
+// ---- clock ownership tripwire (issue #155) ---------------------------------
+//
+// Exactly one owner may write the clock per frame: free roam ticking
+// advanceTime, or a match driving setTimeOfDayHours. These cover the RECORDING
+// mechanism rather than the assert itself -- doctest has no death test, and a
+// test that deliberately trips an assert would abort the suite rather than
+// report a failure. What is checked here is that each writer is attributed
+// correctly and that the tripwire stays inert outside a frame, which is what
+// makes the assert both reachable and free of false positives.
+
+TEST_CASE("the clock tripwire is inert until a frame arms it") {
+    // Tests and the --hour flag write the clock outside any frame. If the
+    // tripwire armed itself on construction, every one of them would be a
+    // candidate for a false positive.
+    WorldState state;
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::None);
+    state.setTimeOfDayHours(14.0);
+    state.advanceTime(1.f);
+    // Unarmed: nothing was recorded, and crucially nothing tripped.
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::None);
+}
+
+TEST_CASE("free roam is recorded as the ticking owner") {
+    WorldState state;
+    state.beginClockFrame();
+    state.advanceTime(0.016f);
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::Ticked);
+}
+
+TEST_CASE("a match is recorded as the driving owner") {
+    WorldState state;
+    state.beginClockFrame();
+    state.setTimeOfDayHours(17.5);
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::Driven);
+    CHECK(state.timeOfDayHours() == doctest::Approx(17.5));
+}
+
+TEST_CASE("the same owner may write twice in one frame") {
+    // Only a SECOND, DIFFERENT owner is the error. One owner writing more than
+    // once is legal -- and has to be, or a future match that recomputed the
+    // hour mid-frame would trip on itself rather than on a real conflict.
+    WorldState state;
+    state.beginClockFrame();
+    state.setTimeOfDayHours(9.0);
+    state.setTimeOfDayHours(9.5);
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::Driven);
+}
+
+TEST_CASE("each frame starts with no owner, so ownership can change between frames") {
+    // Leaving a match and returning to free roam is a legitimate change of
+    // owner. It must not look like a conflict just because the previous frame
+    // had a different writer.
+    WorldState state;
+    state.beginClockFrame();
+    state.setTimeOfDayHours(20.0);
+    REQUIRE(state.clockWriterThisFrame() == WorldState::ClockWriter::Driven);
+
+    state.beginClockFrame();
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::None);
+    state.advanceTime(0.016f);
+    CHECK(state.clockWriterThisFrame() == WorldState::ClockWriter::Ticked);
+}

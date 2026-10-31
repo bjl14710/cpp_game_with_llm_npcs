@@ -71,6 +71,17 @@ struct CutsceneBeat {
     float fadeIn = 0.f;
     float fadeOut = 0.f;
     std::string fadeColour;  // empty means black; the app maps the name
+
+    // Overlay text, all optional and all drawn by the app layer. These exist
+    // because every dramatic moment the game had before them was one line of
+    // HUD text, and a scene needs to say WHERE it is, WHO is speaking and WHAT
+    // just changed without inventing three more mechanisms.
+    //
+    // ASCII-only, checked at parse for the same reason captions are: the
+    // built-in font renders anything above 126 as a literal "?".
+    std::string slug;        // place and clock, e.g. "THE PLAZA - 05:40"
+    std::string speakerLine; // "Name: line", drawn in the transcript's amber
+    std::string headline;    // the 44px card line; its presence IS the card
 };
 
 // One authored cutscene.
@@ -80,6 +91,17 @@ struct CutsceneDef {
     Skippable skippable = Skippable::AfterFirst;
     int letterboxPx = 90;
     std::vector<CutsceneBeat> beats;
+
+    // The journal subject this scene opens, and the fact written under it.
+    //
+    // WHY A CUTSCENE WRITES TO THE WORLD AT ALL. The journal already renders
+    // [conflicting accounts] in orange when two residents disagree on a
+    // subject — a murder-investigation mechanic sitting finished with nothing
+    // to be conflicted about. Opening one subject key is what converts ten
+    // chatty residents into a case. Empty subject means the scene writes
+    // nothing, which is every scene that is only a camera move.
+    std::string journalSubject;
+    std::string journalLine;
 
     // Total playback time. Used to check a scene against its phase budget.
     float duration() const;
@@ -230,6 +252,17 @@ public:
 
     int letterboxPx() const;
     const std::string& caption() const;
+
+    // Current beat's overlay text; empty when this beat sets none.
+    const std::string& slug() const;
+    const std::string& speakerLine() const;
+    const std::string& headline() const;
+
+    // The playing scene's journal write. The app applies it when playback
+    // ends, INCLUDING on a skip: a player who skips the cold open still has
+    // the case open, or skipping would quietly cost them the game's premise.
+    const std::string& journalSubject() const { return scene_.journalSubject; }
+    const std::string& journalLine() const { return scene_.journalLine; }
 
     // Which beat is on screen. Exposed for screenshot naming and for tests
     // asserting that authored order is what plays.

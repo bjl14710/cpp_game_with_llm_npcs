@@ -71,6 +71,27 @@ option(ENABLE_PROFILING "Scoped frame-budget timers (issue #257)" OFF)
 
 find_package(Threads REQUIRED)
 
+# TLS for cloud LLM providers (plan: .claude/plans/anthropic-haiku-backend.md).
+# cpp-httplib only speaks https when CPPHTTPLIB_OPENSSL_SUPPORT is defined and
+# OpenSSL is linked, and api.anthropic.com is https-only. OPTIONAL on purpose:
+# a clean clone must still build with no system packages, so a machine without
+# OpenSSL gets an Ollama-only build and the backend logs why at runtime.
+# Homebrew's openssl@3 is keg-only, so point CMake at it before searching.
+if(APPLE AND NOT OPENSSL_ROOT_DIR)
+    foreach(candidate /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3)
+        if(EXISTS "${candidate}/include/openssl/ssl.h")
+            set(OPENSSL_ROOT_DIR "${candidate}")
+            break()
+        endif()
+    endforeach()
+endif()
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    message(STATUS "OpenSSL ${OPENSSL_VERSION} found — https LLM providers enabled")
+else()
+    message(STATUS "OpenSSL not found — https LLM providers disabled (Ollama still works)")
+endif()
+
 # raylib provides windowing, input, 3D rendering, and the 2D UI overlay
 # (plan: .claude/plans/raylib-visual-overhaul.md). Fetched and pinned so a
 # clean clone builds with no system packages; 5.5 is pinned deliberately —
@@ -112,9 +133,16 @@ add_library(llm_npc_core STATIC
     src/core/TopicMatcher.cpp
     src/core/Trait.cpp
     src/core/Vote.cpp
+    src/core/WalkCycle.cpp
     src/core/WorldGen.cpp
     src/core/WorldGenValidate.cpp
     src/core/Zones.cpp
+    src/core/AnthropicBackend.cpp
+    src/core/ElevenLabsBackend.cpp
+    src/core/TtsBackend.cpp
+    src/core/TtsCache.cpp
+    src/core/TtsClient.cpp
+    src/core/TtsConfig.cpp
     src/core/LlmBackend.cpp
     src/core/LlmClient.cpp
     src/core/OllamaBackend.cpp
@@ -133,6 +161,12 @@ target_include_directories(llm_npc_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/external
 )
 target_link_libraries(llm_npc_core PUBLIC Threads::Threads)
+if(OpenSSL_FOUND)
+    # PUBLIC: httplib.h is header-only, so every TU that includes it must agree
+    # on the macro or the Client type changes shape between objects.
+    target_compile_definitions(llm_npc_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
+    target_link_libraries(llm_npc_core PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+endif()
 if(WIN32)
     # httplib needs winsock when built with MinGW.
     target_link_libraries(llm_npc_core PUBLIC ws2_32)
@@ -148,6 +182,8 @@ add_executable(cpp_game_with_llm_npcs
     src/app/InputMap.cpp
     src/app/Menu.cpp
     src/app/RaylibRenderer.cpp
+    src/app/Theme.cpp
+    src/app/Speech.cpp
 )
 target_include_directories(cpp_game_with_llm_npcs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src

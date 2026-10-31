@@ -50,6 +50,32 @@ struct LlmConfig {
     // at load time and never written back to disk.
     std::string apiKey = "";
 
+    // --- Anthropic (provider = anthropic; plan: anthropic-haiku-backend) ---
+    // Everything the Messages API backend needs beyond the shared fields.
+    // `model`, `host` and `port` keep describing the Ollama fallback.
+    //
+    // Pinned model id, deliberately not an alias: the dialogue is tuned against
+    // one model and an alias could move underneath it between sessions.
+    std::string anthropicModel = "claude-haiku-5-5";
+    // Messages API origin. https needs an OpenSSL build (CMakeLists.txt finds
+    // it when present); tests point this at an in-process fake over http.
+    std::string anthropicBaseUrl = "https://api.anthropic.com";
+    // Output cap per reply. Thinking is sent disabled so none of it is spent
+    // before the first visible word.
+    int anthropicMaxTokens = 200;
+    // Most recent history turns (messages) sent per request; <= 0 sends all.
+    int anthropicHistoryTurns = 12;
+    // Session budget over all four usage counters (input, output, cache write,
+    // cache read); 0 means unlimited. Once reached, Ollama serves the rest of
+    // the session and one log line says so.
+    std::uint64_t anthropicTokenBudget = 0;
+    // Pause before the single retry a 429/5xx/timeout earns.
+    int anthropicRetryBackoffMs = 750;
+    // Per-attempt read timeout. Shorter than requestTimeoutSeconds on purpose:
+    // the fallback path is try, back off, retry, then Ollama, and at the local
+    // model's 60 s that is two minutes before the player hears anything.
+    int anthropicTimeoutSeconds = 20;
+
     // --- Line bank (banks/*.bank; see banks/README.md) --------------------
     // Authored replies for recurring topics, served locally instead of a round
     // trip. Off by default: the game must behave exactly as it always has

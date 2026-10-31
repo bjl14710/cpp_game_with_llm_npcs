@@ -19,16 +19,41 @@ namespace llm_npc {
 // never touches WorldState, so it is testable with no world at all.
 
 enum class MatchPhase {
+    // Day one opens here and no later day returns to it. An explicit value
+    // rather than reusing Resolution's slot on day zero: a phase that means
+    // something different should not borrow another's name, and the vote and
+    // cutscene hooks in later issues switch on this enum.
+    Intro,          // the opening beat elapses; the clock holds at dawn
     Investigation,  // players roam and interrogate; the clock sweeps
     Vote,           // ballot open; the hour holds
     Resolution,     // outcome applied, cutscenes play; the hour holds
     Ended,          // match over; nothing advances
 };
 
+// The player-facing name for a phase, e.g. "Investigation".
+//
+// Lives here rather than in the HUD because the vote UI (#224) and the phase
+// HUD (#157) both name phases, and two switch statements over the same enum
+// are two places for a seventh phase to be forgotten. Written WITHOUT a
+// `default:` label on purpose, so adding a phase is a compiler warning rather
+// than a silent "Unknown" appearing on someone's screen.
+//
+// ASCII only: it reaches raylib's built-in bitmap font, which substitutes '?'
+// for anything above 126 (see AsciiText.hpp).
+const char* phaseName(MatchPhase phase);
+
 // All durations in REAL seconds; the in-world hour is derived from them.
 struct MatchRules {
     // How many days before the killer wins by default. Clamped to >= 1.
     int dayLimit = 3;
+    // The opening beat, before the first Investigation. Sized to the cold
+    // open's 12.0s budget (cutscenes/body_in_plaza.cutscene).
+    //
+    // The cutscene does NOT gate this: with no cutscene playing the phase
+    // simply elapses. That keeps the phase machine independent of
+    // presentation, which is why MatchClock stayed mergeable while the
+    // cutscene system was still unbuilt.
+    float introSeconds = 12.f;
     // The long phase: roam, interrogate, examine.
     float investigationSeconds = 8.f * 60.f;
     // Ballot open. Short enough to force a decision, long enough to argue.
@@ -88,14 +113,24 @@ class MatchClock {
     // 0..1 through the current phase; 0 once Ended.
     float phaseProgress() const;
 
-    // The in-world hour the caller writes into WorldState. Sweeps
-    // dayStartHour -> dayEndHour across Investigation; HOLDS at dayEndHour
-    // during Vote and Resolution, so a slow vote cannot slide the town into
-    // full night and make the plaza gather unreadable.
+    // The in-world hour the caller writes into WorldState. HOLDS at
+    // dayStartHour through Intro -- the day has not begun, and opening on a
+    // dusk sky would spend the diegetic countdown before the player has moved.
+    // Sweeps dayStartHour -> dayEndHour across Investigation; HOLDS at
+    // dayEndHour during Vote and Resolution, so a slow vote cannot slide the
+    // town into full night and make the plaza gather unreadable.
     double worldHour() const;
 
     // Early exit — someone won, or the host quit. Idempotent: a second call
     // fires no transition and changes nothing.
+    //
+    // IT RETURNS NOTHING, and callers that skip advance() must account for
+    // that. src/app/main.cpp releases the vote-phase plaza gather (#156) off
+    // the PhaseTransition that advance() returns, so a future feature that
+    // ends a match by calling this directly — rather than letting the day
+    // limit run out — leaves every resident holding a stale destination and
+    // standing in the plaza afterwards. Either route the exit through the
+    // frame loop's transition, or release the gather at the new call site.
     void endMatch();
 
     // The clamped rules actually in force, which may differ from those passed
@@ -109,7 +144,7 @@ class MatchClock {
     static MatchPhase nextPhase(MatchPhase phase);
 
     MatchRules rules_;
-    MatchPhase phase_ = MatchPhase::Investigation;
+    MatchPhase phase_ = MatchPhase::Intro;
     int day_ = 1;
     // Real seconds elapsed inside the current phase.
     float elapsedInPhase_ = 0.f;

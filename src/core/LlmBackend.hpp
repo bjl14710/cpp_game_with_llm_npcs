@@ -19,9 +19,13 @@ struct BackendRequest {
 };
 
 // Outcome of a backend chat call: the assembled assistant text on success, or a
-// human-readable error.
+// human-readable error. `fallback` is set by a backend that declined to answer
+// (no key, disabled, provider unreachable) and is happy for another backend to
+// take the request; `error` then says why. A result with ok=false and
+// fallback=false is a final failure that must reach the player's failure path.
 struct BackendResult {
     bool ok = false;
+    bool fallback = false;
     std::string content;
     std::string error;
 };
@@ -50,8 +54,10 @@ class LlmBackend {
 };
 
 // Builds the backend named by config.provider: "ollama" (the default) selects
-// the native Ollama backend; any other value selects the OpenAI-compatible
-// backend (OpenRouter, OpenAI, Gemini's compat layer, a local /v1, ...).
+// the native Ollama backend; "anthropic" selects the Claude Messages API with
+// Ollama as the automatic fallback (or plain Ollama, with one log line, when no
+// key is configured); any other value selects the OpenAI-compatible backend
+// (OpenRouter, OpenAI, Gemini's compat layer, a local /v1, ...).
 std::unique_ptr<LlmBackend> makeBackend(const LlmConfig& config);
 
 }  // namespace llm_npc

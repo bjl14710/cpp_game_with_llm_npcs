@@ -65,8 +65,31 @@ class WorldState {
     // Time of day in hours, [0, 24).
     double timeOfDayHours() const;
 
-    // Overrides the clock (smoke runs' --hour flag, tests).
+    // Overrides the clock (smoke runs' --hour flag, tests, and a match
+    // DRIVING the hour -- see advanceWorldClock in main.cpp).
     void setTimeOfDayHours(double hours);
+
+    // ---- clock ownership tripwire (issue #155) -----------------------------
+    //
+    // Exactly ONE owner may write the clock per frame: free roam ticking
+    // advanceTime, or a match driving setTimeOfDayHours. main.cpp enforces
+    // that structurally by routing both through a single function -- but both
+    // writers above are public, so a future feature is one call away from
+    // quietly becoming a second owner, and the day would then have two
+    // masters with no symptom beyond time behaving oddly.
+    //
+    // So it is CHECKED, not assumed. The frame loop calls beginClockFrame()
+    // once per frame; each writer records itself; a DIFFERENT writer in the
+    // same frame trips an assert naming the culprit. Debug builds only.
+    //
+    // The tripwire ARMS on the first beginClockFrame() call and is inert
+    // before it. That is deliberate: tests and the --hour flag write the
+    // clock outside any frame, and they are not what this is looking for.
+    enum class ClockWriter { None, Ticked, Driven };
+    void beginClockFrame();
+    // Which owner wrote the clock this frame. Exposed so the mechanism itself
+    // is testable without provoking the assert.
+    ClockWriter clockWriterThisFrame() const { return clockWriter_; }
 
     // ---- structured town knowledge (gossip) --------------------------------
     // Commit a fact to the bus. Idempotent: an existing factId keeps its
@@ -88,7 +111,18 @@ class WorldState {
 
     const KnownFact* findFact(const std::string& factId) const;
 
+    // Tripwire state. Not conditional on NDEBUG: keeping the members in
+    // every build avoids an ABI that differs between debug and release, and
+    // two bytes is not worth that class of bug. Only the assert is compiled
+    // out.
+    ClockWriter clockWriter_ = ClockWriter::None;
+    bool clockFrameArmed_ = false;
+
    private:
+    // Records a clock write and trips if a second, different owner writes in
+    // the same frame.
+    void noteClockWrite(ClockWriter who);
+
     std::unordered_map<std::string, WorldFact> facts_;
     std::vector<KnownFact> knownFacts_;  // commit order preserved
     std::unordered_map<std::string, std::unordered_set<std::string>>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drill 0029 — Layering a Temporary Override Over Authored Content</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #47a; padding-bottom: .4rem; }
+  .q { background: #f2f6fb; border-left: 4px solid #47a; padding: .8rem 1rem;
+       margin: 1.2rem 0; border-radius: 0 6px 6px 0; }
+  details { margin: .5rem 0 0 .5rem; }
+  summary { cursor: pointer; color: #247; font-weight: 600; }
+  code, pre { background: #f4f4f6; border-radius: 4px; padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Drill 0029 — Layering a Temporary Override Over Authored Content</h1>
+<p>Answer before expanding. Source: lesson 0029, issue #156.</p>
+
+<div class="q"><strong>1.</strong> Two obvious ways to make every NPC go to the
+plaza temporarily are to rewrite their schedules, or to add a mode flag and branch
+the movement code. Give the specific failure of each.
+<details><summary>Answer</summary>
+<strong>Rewriting schedules</strong> turns read-only authored data into mutable
+state. Restore now requires remembering exactly what you changed, per NPC, and any
+path that skips the undo corrupts authored content permanently.
+<strong>A mode flag</strong> duplicates the walk — one copy for schedules, one for
+gathering. The copies drift, and the newer one is always worse, because the older
+one has years of edge cases beaten into it.
+</details></div>
+
+<div class="q"><strong>2.</strong> What single property makes the nullable-override
+approach cheap to undo?
+<details><summary>Answer</summary>
+Nothing was ever overwritten. The authored schedule was <em>out-ranked</em>, not
+suspended, so <code>gatherTarget_.reset()</code> is the entire restore and it needs
+no memory of the previous state. If your restore needs to know what was there
+before, you built the schedule-rewriting version.
+</details></div>
+
+<div class="q"><strong>3.</strong> While a resident is walking to the plaza, their
+nameplate still reads "baking bread". Bug or intended? Justify.
+<details><summary>Answer</summary>
+Intended, and it is the visible consequence of "out-ranked, not suspended". As far
+as her authored day is concerned she <em>is</em> baking bread; she has been pulled
+away from it. Suppressing the label would mean the override had replaced the
+schedule rather than outranking it.
+</details></div>
+
+<div class="q"><strong>4.</strong> The original guard was
+<code>if (timeOfDayHours &lt; 0.f || schedule_.empty() || state_ != NpcState::Idle) break;</code>.
+Which of the three conditions must still stop an override, and why are the other two
+different in kind?
+<details><summary>Answer</summary>
+<code>state_ != NpcState::Idle</code> must still break: it means something else owns
+this NPC's movement (combat, death, an arrest), and an override must not fight it.
+This is also why dead NPCs need no separate check anywhere in the walk. The other
+two only mean "there is no authored answer right now", which an override does not
+care about — splitting them out is what lets a resident with no schedule at all
+still gather.
+</details></div>
+
+<div class="q"><strong>5.</strong> Splitting that guard required re-wrapping the
+<code>activity_</code> assignment in <code>if (hasSchedule)</code>. What would have
+broken otherwise, and what class of bug is that?
+<details><summary>Answer</summary>
+The old code returned <em>before</em> touching <code>activity_</code>, so a
+clockless or scheduleless NPC kept its last label. The restructured code reaches the
+assignment, so it would have started clearing it. That is an unrelated behaviour
+change smuggled in under a movement fix — the kind that surfaces months later as
+"why do nameplates go blank in the sandbox?"
+</details></div>
+
+<div class="q"><strong>6.</strong> <code>World::setPlazaGather(false)</code> clears
+the override on dead NPCs too, even though dead NPCs were never given one on the way
+in. Why is the asymmetry correct?
+<details><summary>Answer</summary>
+Because a resident can die <em>while</em> gathered. They were alive when slots were
+handed out, so they hold a destination; the <code>state_ != Idle</code> guard just
+stops them acting on it. "Released except the corpses" is exactly how someone turns
+up standing in the plaza the next morning — or the moment anything revives them.
+</details></div>
+
+<div class="q"><strong>7.</strong> The issue says "release on the Resolution &rarr;
+Investigation rollover". Why is releasing on <em>leaving</em> the Vote phase a real
+bug rather than an equivalent phrasing?
+<details><summary>Answer</summary>
+The reveal happens in Resolution, the phase immediately after the vote. Releasing on
+exit from Vote empties the plaza at the exact moment the scene pays off. The two
+phrasings differ by precisely the phase the whole feature exists to stage.
+</details></div>
+
+<div class="q"><strong>8.</strong> Why key the release on the phase being
+<em>entered</em> (<code>to == Investigation || matchEnded</code>) rather than on
+<code>dayAdvanced</code>?
+<details><summary>Answer</summary>
+<code>dayAdvanced</code> is correct for the ordinary rollover but misses a match
+that ends straight out of the vote, and any future path back to Investigation.
+Keying on entry makes the release total; clearing when nobody is gathered is a
+harmless no-op, so the release cannot be missed by a transition nobody has written
+yet.
+</details></div>
+
+<div class="q"><strong>9.</strong> <code>MatchClock::endMatch()</code> got a doc
+comment out of this issue. What trap does it warn about?
+<details><summary>Answer</summary>
+It returns no <code>PhaseTransition</code>. The plaza release fires off the
+transition that <code>advance()</code> returns, so a future early-exit feature that
+calls <code>endMatch()</code> directly — "host quits", "someone wins early" — would
+skip the release and strand the town in the plaza. Either route the exit through the
+frame loop, or release at the new call site.
+</details></div>
+
+<div class="q"><strong>10.</strong> Why can the gather point not simply be
+<code>zoneCentre("plaza")</code>?
+<details><summary>Answer</summary>
+Gus's hot dog cart is a solid collider at x ∈ [-3, 3], z ∈ [-2, 2], and the plaza's
+computed centre is (0, 0) — <em>inside it</em>. Sending the town to the geometric
+centre walks all of them into a wall. A geometric centre is a statement about
+bounds, not about emptiness.
+</details></div>
+
+<div class="q"><strong>11.</strong> The codebase had been reporting this obstruction
+for months. Where, and what is the transferable habit?
+<details><summary>Answer</summary>
+<code>[llm_npc] mystery: no clear spot in zone "plaza" — body placed at the zone
+centre, which may be inside a building</code>, logged by <code>Mystery.cpp</code>.
+The habit: when a spatial default "obviously" works, read what is actually authored
+at that coordinate — and treat a long-standing warning nobody chased as evidence
+rather than noise.
+</details></div>
+
+<div class="q"><strong>12.</strong> The ring deliberately does not re-pack when a
+resident dies. Why is the gap a feature?
+<details><summary>Answer</summary>
+The vote scene exists so a player can see who is still alive and who is missing. A
+ring that closes up hides exactly the information the scene was staged to show.
+Residents keep whatever slot they were given; the hole is the signal.
+</details></div>
+
+<div class="q"><strong>13.</strong> A test fixture placed residents at (-70, -52),
+inside the bakery's collider, and the regression test "an NPC with no override moves
+exactly as before" still passed. Why is that passing test worthless, and what is the
+general rule?
+<details><summary>Answer</summary>
+Both the before and after cases were pinned in place by a wall, so the test compared
+"did not move" with "did not move" and proved nothing. A movement test that never
+moves always passes. When asserting that something travels, assert the travel first
+— a fixture that cannot move makes every downstream claim vacuous.
+</details></div>
+
+<div class="q"><strong>14.</strong> Name the three properties that identify this
+pattern in an unfamiliar codebase.
+<details><summary>Answer</summary>
+(1) The override is <strong>nullable</strong>, so absence is representable and is
+the default. (2) It is consulted at the <strong>single point</strong> the authored
+value is read, not branched around the consumer. (3) Restore is a
+<strong>reset</strong>, not a replay.
+</details></div>
+
+<div class="q"><strong>15.</strong> The issue's economy note said "if this needs
+more than one new field on the NPC, the approach is wrong." What does that
+constraint actually protect against?
+<details><summary>Answer</summary>
+A second field implies remembered state — the previous destination, a "was
+gathering" flag, a saved schedule index — which is the schedule-rewriting design
+wearing a different hat. One nullable field is only sufficient <em>because</em>
+nothing needs restoring, so the field count is a proxy for the property that
+matters.
+</details></div>
+</body>
+</html>

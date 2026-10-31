@@ -12,6 +12,7 @@ constexpr float kMinPhaseSeconds = 1.f;
 
 MatchRules clamped(MatchRules rules) {
     rules.dayLimit = std::max(1, rules.dayLimit);
+    rules.introSeconds = std::max(kMinPhaseSeconds, rules.introSeconds);
     rules.investigationSeconds = std::max(kMinPhaseSeconds, rules.investigationSeconds);
     rules.voteSeconds = std::max(kMinPhaseSeconds, rules.voteSeconds);
     rules.resolutionSeconds = std::max(kMinPhaseSeconds, rules.resolutionSeconds);
@@ -24,6 +25,7 @@ MatchClock::MatchClock(MatchRules rules) : rules_(clamped(rules)) {}
 
 MatchPhase MatchClock::nextPhase(MatchPhase phase) {
     switch (phase) {
+        case MatchPhase::Intro:         return MatchPhase::Investigation;
         case MatchPhase::Investigation: return MatchPhase::Vote;
         case MatchPhase::Vote:          return MatchPhase::Resolution;
         case MatchPhase::Resolution:    return MatchPhase::Investigation;
@@ -34,6 +36,7 @@ MatchPhase MatchClock::nextPhase(MatchPhase phase) {
 
 float MatchClock::phaseDuration(MatchPhase phase) const {
     switch (phase) {
+        case MatchPhase::Intro:         return rules_.introSeconds;
         case MatchPhase::Investigation: return rules_.investigationSeconds;
         case MatchPhase::Vote:          return rules_.voteSeconds;
         case MatchPhase::Resolution:    return rules_.resolutionSeconds;
@@ -105,6 +108,10 @@ double MatchClock::worldHour() const {
     const double start = static_cast<double>(rules_.dayStartHour);
     const double end = static_cast<double>(rules_.dayEndHour);
 
+    // Intro holds at the START of the day: the match has not begun, so the
+    // sky must not have spent its light yet.
+    if (phase_ == MatchPhase::Intro) return start;
+
     // Vote, Resolution and Ended all hold at the end of the day. Letting the
     // hour run during the vote would slide the town toward night and make the
     // plaza gather unreadable; freezing the light is also a signal in itself.
@@ -116,6 +123,20 @@ double MatchClock::worldHour() const {
 void MatchClock::endMatch() {
     phase_ = MatchPhase::Ended;
     elapsedInPhase_ = 0.f;
+}
+
+const char* phaseName(MatchPhase phase) {
+    switch (phase) {
+        case MatchPhase::Intro: return "Intro";
+        case MatchPhase::Investigation: return "Investigation";
+        case MatchPhase::Vote: return "Vote";
+        case MatchPhase::Resolution: return "Resolution";
+        case MatchPhase::Ended: return "Ended";
+    }
+    // Unreachable for a valid enumerator; present because a function with a
+    // declared return type must return on every path, not as a fallback for a
+    // phase somebody forgot to add above. The missing case is a warning.
+    return "Ended";
 }
 
 }  // namespace llm_npc

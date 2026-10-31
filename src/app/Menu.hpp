@@ -16,17 +16,19 @@ namespace llm_npc {
 
 // What the main loop should do after the menu handled this frame's input.
 enum class MenuResult {
-    None,    // keep showing the menu
-    Resume,  // close the menu and return to the game
-    Quit,    // close the window
+    None,        // keep showing the menu
+    Resume,      // close the menu and return to the game
+    NewMystery,  // start a detective match, then return to the game
+    Quit,        // close the window
 };
 
-// Mouse-driven pause menu: Resume / Controls / Multiplayer / Quit on the main
-// page, a Controls page where clicking a key chip arms capture of the next
-// key press, and a Multiplayer page for hosting or joining a session.
-// Rebinds use KeyBindings swap semantics and are saved to disk immediately.
-// raylib is polled, so update() handles input and returns the result each
-// frame; render() draws.
+// Pause menu in the Nocturne design (src/app/Theme.hpp): a left panel on the
+// main page with the entries in four groups, driven by mouse or Up/Down/Enter,
+// and full-window sub-pages — Controls (click a key chip to arm capture of the
+// next key press), Multiplayer (host or join), Creator, Journal, Sandbox,
+// Model, Match Settings and Graphics. Rebinds use KeyBindings swap semantics and are
+// saved to disk immediately. raylib is polled, so update() handles input and
+// returns the result each frame; render() draws.
 class Menu {
    public:
     // Callbacks the Multiplayer page drives, injected by main.cpp so the
@@ -78,6 +80,13 @@ class Menu {
     // Installs the Creator page's save callback.
     void setCreator(CreatorHooks hooks);
 
+    // Whether a detective match is currently running. Pushed in by main.cpp
+    // each frame -- a bool, so the menu still knows nothing about MatchClock
+    // or any world type. Used only to refuse a second New Mystery: starting
+    // one mid-match would throw away the day, the phase and the elapsed time
+    // for a misclick one row above Resume.
+    void setMatchActive(bool active) { matchActive_ = active; }
+
     // The player's own avatar (issue #106): the SAME creator page opens in
     // avatar mode from "Edit My Avatar" — same picker, same Randomize, same
     // preview — but Save writes the avatar instead of spawning an NPC.
@@ -111,9 +120,30 @@ class Menu {
     };
     void setModels(ModelHooks hooks);
 
-    // Installs the main page's graphics toggles (Noir night / Rain):
-    // `current` reads the live switches, `onChange` applies and persists a
-    // flipped set. Without hooks the toggles are not shown.
+    // Match settings page (issue #157): the day limit and how long a day
+    // runs. Two integers, deliberately — the dusk light already signals time
+    // pressure, so this page exists to set the pace, not to expose the clock.
+    //
+    // Ints rather than a MatchRules, so Menu keeps knowing nothing about
+    // MatchClock; `onChange` is what converts minutes back into the rules'
+    // real seconds. The same reason ModelHooks passes strings rather than an
+    // LlmClient.
+    //
+    // CHANGES NEVER REACH A RUNNING MATCH. main.cpp reads these when it
+    // creates one, so a mid-match edit simply applies to the next mystery —
+    // changing day length mid-day would make the world clock jump. `active`
+    // exists only so the page can SAY so rather than looking broken.
+    struct MatchHooks {
+        std::function<int()> dayLimit;
+        std::function<int()> dayMinutes;
+        std::function<void(int dayLimit, int dayMinutes)> onChange;
+        std::function<bool()> active;
+    };
+    void setMatchSettings(MatchHooks hooks);
+
+    // Graphics page toggles (Noir night / Rain): `current` reads the live
+    // switches, `onChange` applies and persists a flipped set. Without
+    // hooks the page shows both switches off and clicking does nothing.
     struct GraphicsHooks {
         std::function<GraphicsConfig()> current;
         std::function<void(const GraphicsConfig&)> onChange;
@@ -123,6 +153,12 @@ class Menu {
     // Installs the Journal page's read hook (pure read path — the journal
     // owns no data and never writes).
     void setJournal(JournalHooks hooks);
+
+    // The main page's header: a kicker ("Lowell Square - Day 1") and a
+    // sub-line ("09:30 - Morning"). main.cpp sets both when it opens the
+    // menu so the pause screen says where and when the player is; the menu
+    // itself knows nothing about zones or the clock. Either may be empty.
+    void setHeader(std::string kicker, std::string sub);
 
     // The draft look while the Creator page is open, nullptr otherwise.
     // main.cpp renders it as an in-world preview in front of the camera that
@@ -160,7 +196,8 @@ class Menu {
     // full-screen menu shipped drawn over the map editor (#215) and how every
     // UI capture in this project's history turned out to be missing its UI
     // (#216).
-    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model };
+    enum class Page { Main, Controls, Multiplayer, Creator, Journal, Sandbox, Model, Match,
+                      Graphics };
 
     // Opens `page` directly. Intended for --menu; play reaches pages by
     // clicking, and nothing about that path changes.
@@ -172,6 +209,20 @@ class Menu {
     static std::optional<Page> pageFromName(const std::string& name);
 
    private:
+
+    // Applies one -/+ click on the match settings page, clamped to the
+    // bounds the page offers, and warns when a match is already running.
+    void nudgeMatchSetting(int id);
+
+    // Performs what clicking (or pressing Enter on) the control `id` means:
+    // page changes, hook calls, field focus. One dispatch for both the mouse
+    // and the keyboard so the two can never drift apart.
+    MenuResult activate(int id);
+
+    // Draws the sub-page header (kicker, title, sub-line, rule, Back) that
+    // every page but Main shares.
+    void renderPageHeader(const std::string& kicker, const std::string& title,
+                          const std::string& sub) const;
 
     // A clickable rectangle paired with what clicking it means.
     struct Hit {
@@ -185,6 +236,9 @@ class Menu {
     std::optional<Action> awaiting_;
     std::string toast_;
     float toastLeft_ = 0.f;
+    std::string headerKicker_;
+    std::string headerSub_;
+    int selected_ = 0;  // main page row the keyboard (or hover) is on
 
     MultiplayerHooks multiplayer_;
     std::string joinAddress_ = "127.0.0.1:40605";
@@ -197,10 +251,12 @@ class Menu {
     AvatarHooks avatar_;
     SandboxHooks sandbox_;
     ModelHooks models_;
+    MatchHooks matchSettings_;
     GraphicsHooks graphics_;
     std::vector<std::string> modelList_;  // refreshed on page entry
     std::vector<std::string> sandboxMaps_;  // stems, refreshed on page entry
     bool avatarMode_ = false;  // Creator page writes the avatar, not an NPC
+    bool matchActive_ = false;  // a match is running; New Mystery refuses
     std::string creatorName_;
     std::vector<std::string> traitChoices_;  // cycled by the trait row
     int creatorTraitIndex_ = 0;              // 0 = none; else 1-based into choices
@@ -221,7 +277,8 @@ class Menu {
 
     // ---- Journal page state ----
     JournalHooks journal_;
-    int journalPage_ = 0;  // paging offset, kJournalRowsPerPage rows each
+    int journalSubject_ = 0;  // index into the subject list on the left
+    int journalPage_ = 0;     // page of cards within the selected subject
 
     // Clickable areas for the current page, derived from the window size so
     // render() and update() always agree.

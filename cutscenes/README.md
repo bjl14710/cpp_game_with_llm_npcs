@@ -46,7 +46,12 @@ beat = out
 | `yaw` / `pitch` | beat | Degrees. `yaw 0` faces +Z, `yaw +90` faces +X, `pitch > 0` looks up. |
 | `hold` | beat | Seconds. Clamped up to one timestep. |
 | `ease` | beat | `linear`, `smooth` (default) or `hold`. |
-| `caption` | beat | Text centred above the lower bar. |
+| `caption` | beat | Text centred above the lower bar, or under the headline on a card beat. |
+| `slug` | beat | Place and clock, drawn under the top bar in label grey. |
+| `speaker` | beat | `Name: line`, drawn in the transcript's amber. |
+| `headline` | beat | 44px card line. **Its presence makes the beat a card**: a dim wash goes over the whole frame and the caption moves under it. |
+| `journal_subject` | file | Subject key this scene opens on the fact bus. Normalized to `[a-z0-9_]` at parse. |
+| `journal_line` | file | The fact written under that subject, max 140 characters. |
 | `fade_in` / `fade_out` | beat | Seconds of fade at the start / end of the beat. |
 | `fade_colour` | beat | `black` (default), `white` or `grey`. |
 
@@ -55,6 +60,29 @@ and ignored.
 
 `#` opens a comment **only as the first non-space character**, because captions
 are prose and `Table #3, still set for two.` has to survive.
+
+## A cutscene may open a journal subject
+
+`journal_subject` + `journal_line` write one `KnownFact` (source `town`) when
+playback ends, and grant it to the player.
+
+This is the point of the whole feature. The journal already renders
+`[conflicting accounts]` in orange when two residents disagree on a subject —
+a murder-investigation mechanic that sat finished with nothing to be conflicted
+about. Opening one subject key is what turns ten chatty residents into a case.
+
+**A skip still writes.** Skipping must not quietly cost the player the premise
+of the game, so the write happens on any exit from playback.
+
+**Set both keys or neither.** The write needs a subject and a line; a scene
+carrying one of them is reported at parse and has both cleared, because half a
+pair silently writes nothing — and a scene using its own fact as an
+"already played" test would then replay forever.
+
+`addFact` is first-teller-wins, so replaying a scene never duplicates its row or
+re-dates it — and because facts round-trip through `saves/facts.sqlite3`, the
+row is also how a "play once per save" scene knows it has already played. That
+is one source of truth rather than a second seen-flag that can disagree with it.
 
 ## Camera height is literal
 

@@ -17,6 +17,7 @@
 #include <sstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,11 +30,13 @@
 #include "Config.hpp"
 #include "ConversationStore.hpp"
 #include "Cutscene.hpp"
+#include "DayNight.hpp"
 #include "DialogUI.hpp"
 #include "FactStore.hpp"
 #include "Gossip.hpp"
 #include "GroupSession.hpp"
 #include "Journal.hpp"
+#include "MatchClock.hpp"
 #include "Montage.hpp"
 #include "Mystery.hpp"
 #include "Storyline.hpp"
@@ -54,8 +57,11 @@
 #include "WorldGen.hpp"
 #include "RaylibRenderer.hpp"
 #include "SandboxMap.hpp"
+#include "Speech.hpp"
+#include "Theme.hpp"
 #include "Trait.hpp"
 #include "Weapon.hpp"
+#include "WalkCycle.hpp"
 #include "Zones.hpp"
 #include "World.hpp"
 
@@ -85,6 +91,33 @@ constexpr float kTalkRadius = 3.5f;      // how close "press T to talk" works
 // tall and a six-metre sign would float unattached above it.
 inline float signHeightFor(const Building& b) {
     return std::fmin(b.height + 1.2f, 6.f);
+}
+
+// The ONE owner of the world clock, and the reason it is a function.
+//
+// Free roam ticks WorldState::advanceTime at a fixed scale. A match INVERTS
+// that: MatchClock owns pacing and drives the hour, so dusk lands exactly when
+// the vote opens. Both running in the same frame would give the day two
+// masters and make the dusk coupling meaningless.
+//
+// Routing both through one function is the enforcement. There is no second
+// call site to forget about, and no flag anyone can get wrong -- whether a
+// match exists IS the decision. Returns an unfired transition in free roam.
+//
+// That is topology, not proof: WorldState::advanceTime and setTimeOfDayHours
+// are both public, so a future feature could still become a second owner
+// without touching this function. WorldState::beginClockFrame (armed in the
+// loop below) is the runtime check that catches it -- a second, different
+// writer in the same frame trips an assert in debug builds.
+PhaseTransition advanceWorldClock(WorldState& state, std::optional<MatchClock>& match,
+                                  float dt) {
+    if (!match) {
+        state.advanceTime(dt);
+        return PhaseTransition{};
+    }
+    const PhaseTransition fired = match->advance(dt);
+    state.setTimeOfDayHours(match->worldHour());
+    return fired;
 }
 
 // Signage carries further than nameplates: a sign is how you find a place
@@ -191,23 +224,109 @@ NpcFace faceForMood(NpcMood mood) {
     return NpcFace::Neutral;
 }
 
-// Draws `str` centered horizontally at height `y` with a dark backdrop bar.
+// Draws `str` centered horizontally at height `y` in a Nocturne pill: the
+// background at .72 behind neutral-200 text (status lines, editor HUD).
 void drawCenteredHudText(const std::string& str, int size, float y) {
-    const int width = MeasureText(str.c_str(), size);
-    const float x = (static_cast<float>(GetScreenWidth()) - static_cast<float>(width)) * 0.5f;
-    DrawRectangleRec(Rectangle{x - 12.f, y - 6.f, static_cast<float>(width) + 24.f,
-                               static_cast<float>(size) + 16.f},
-                     Color{10, 14, 22, 170});
-    DrawText(str.c_str(), static_cast<int>(x), static_cast<int>(y), size, WHITE);
+    const float fsize = static_cast<float>(size);
+    const float width = ui::measure(ui::Face::Ui, str, fsize);
+    const float x = (static_cast<float>(GetScreenWidth()) - width) * 0.5f;
+    const Rectangle box{x - 12.f, y - 6.f, width + 24.f, fsize + 12.f};
+    DrawRectangleRounded(box, 10.f / box.height, 6, ui::bgAlpha(0.72f));
+    ui::text(ui::Face::Ui, str, x, y, fsize, ui::kNeutral200);
 }
 
-// Nameplate: centered text with an outline-ish shadow at a projected point.
-void drawNameplate(const std::string& name, Vector2 screen, Color color) {
-    const int width = MeasureText(name.c_str(), 14);
-    const int x = static_cast<int>(screen.x) - width / 2;
-    const int y = static_cast<int>(screen.y) - 14;
-    DrawText(name.c_str(), x + 1, y + 1, 14, Color{0, 0, 0, 200});
-    DrawText(name.c_str(), x, y, 14, color);
+// Nameplate: a 12px label pill above a projected point. `talkable` marks the
+// resident the talk key would address with the accent ring and tick.
+void drawNameplate(const std::string& name, Vector2 screen, Color color, bool talkable) {
+    ui::pill(ui::Face::Ui, name, screen, 12.f, color, talkable);
+}
+
+// Building sign: display face, 17px, with a drop shadow and a short accent
+// underline — the one world label that is not a pill, so a sign and a name
+// never read as the same kind of thing.
+void drawSign(const std::string& name, Vector2 screen) {
+    const float w = ui::measure(ui::Face::Display, name, 17.f);
+    const float x = screen.x - w * 0.5f;
+    const float y = screen.y - 24.f;
+    ui::text(ui::Face::Display, name, x + 1.f, y + 1.f, 17.f, ui::bgAlpha(0.8f));
+    ui::text(ui::Face::Display, name, x, y, 17.f, ui::kNeutral100);
+    DrawRectangle(static_cast<int>(screen.x - 14.f), static_cast<int>(y + 21.f), 28, 1,
+                  ui::kAccent);
+}
+
+// The HUD's "HH:MM" for a world hour.
+std::string hourLabel(float worldHour) {
+    const int minutes = static_cast<int>(worldHour * 60.f) % (24 * 60);
+    const int h = minutes / 60;
+    const int m = minutes % 60;
+    return (h < 10 ? "0" : "") + std::to_string(h) + ":" + (m < 10 ? "0" : "") +
+           std::to_string(m);
+}
+
+// "Xh Ym until dusk" from the day/night bands, or "" after dusk begins.
+std::string untilDusk(float worldHour) {
+    if (worldHour >= daynight::kDuskStart) return "";
+    const int minutes = static_cast<int>((daynight::kDuskStart - worldHour) * 60.f + 0.5f);
+    std::string out;
+    if (minutes >= 60) out += std::to_string(minutes / 60) + "h ";
+    out += std::to_string(minutes % 60) + "m until dusk";
+    return out;
+}
+
+// The player's mood tag text for an NPC mood.
+const char* moodLabel(NpcMood mood) {
+    switch (mood) {
+        case NpcMood::Happy: return "Warm";
+        case NpcMood::Angry: return "Irritated";
+        case NpcMood::Sad: return "Low";
+        case NpcMood::Embarrassed: return "Flustered";
+        case NpcMood::Surprised: return "Startled";
+        case NpcMood::Neutral: return "";
+    }
+    return "";
+}
+
+// Compass strip, top centre: a 400x30 card showing the +/-90 degrees of
+// heading around the camera with cardinal labels and a marker per NPC
+// (accent when the talk key would address them). North is -Z, so the
+// bearing of a point is atan2(dx, -dz) and the camera heading is
+// 180 - yaw (flatForward points down +Z at yaw 0).
+void drawCompass(float yawDeg, const std::vector<std::pair<float, bool>>& markers) {
+    const float w = static_cast<float>(GetScreenWidth());
+    const Rectangle bar{w * 0.5f - 200.f, 16.f, 400.f, 30.f};
+    ui::roundedPanel(bar, 0.72f, ui::alpha(ui::kText, 0.10f));
+    const float heading = 180.f - yawDeg;
+    const auto xFor = [&](float bearingDeg, float& outX) {
+        float rel = std::fmod(bearingDeg - heading + 540.f, 360.f) - 180.f;
+        if (rel < -90.f || rel > 90.f) return false;
+        outX = bar.x + bar.width * 0.5f + rel / 90.f * (bar.width * 0.5f - 16.f);
+        return true;
+    };
+    const char* names[4] = {"N", "E", "S", "W"};
+    for (int i = 0; i < 4; ++i) {
+        float x;
+        if (!xFor(static_cast<float>(i) * 90.f, x)) continue;
+        ui::textCentered(ui::Face::Ui, names[i], x, bar.y + 8.f, 12.f,
+                         i == 0 ? ui::kAccent300 : ui::kNeutral400);
+    }
+    for (int tick = 0; tick < 360; tick += 30) {
+        if (tick % 90 == 0) continue;
+        float x;
+        if (!xFor(static_cast<float>(tick), x)) continue;
+        DrawRectangle(static_cast<int>(x), static_cast<int>(bar.y + 12.f), 1, 6,
+                      ui::kNeutral700);
+    }
+    for (const auto& [bearing, talkable] : markers) {
+        float x;
+        if (!xFor(bearing, x)) continue;
+        if (talkable) {
+            ui::glowDot(Vector2{x, bar.y + 25.f}, true);
+        } else {
+            DrawCircleV(Vector2{x, bar.y + 25.f}, 2.f, ui::kNeutral300);
+        }
+    }
+    DrawRectangle(static_cast<int>(bar.x + bar.width * 0.5f), static_cast<int>(bar.y + 2.f), 1,
+                  6, ui::kAccent);
 }
 
 }  // namespace
@@ -246,6 +365,10 @@ int main(int argc, char** argv) {
     // so the mode was unreachable from the game (issue #220).
     bool bootMystery = false;
     unsigned mysterySeed = 20260809u;
+    // --match [seconds]: boot straight into a detective match (see the flag
+    // scan below). The optional value compresses the investigation phase.
+    bool bootMatch = false;
+    float matchInvestigationSeconds = -1.f;
     // --menu <page>: boot straight into a menu page. Every page but Main is
     // reached by clicking, which a headless --frames capture cannot do, so
     // none of them has ever been photographed (#216).
@@ -289,6 +412,25 @@ int main(int argc, char** argv) {
             } else if (arg + 1 < argc && std::strcmp(argv[arg], "--cutscene") == 0) {
                 bootCutscene = argv[arg + 1];
                 arg += 2;
+            } else if (std::strcmp(argv[arg], "--match") == 0) {
+                // Start a detective match at boot. The in-game entry is the
+                // menu's New Mystery, which a headless --frames capture cannot
+                // click -- and the match is the only way to see the clock
+                // inverted, so without this flag the feature is unphotographable.
+                bootMatch = true;
+                arg += 1;
+                // Optional investigation length in seconds, same shape as
+                // --mystery's optional seed (leading-dash check and all).
+                //
+                // A smoke run is ~15 real seconds at 900 frames while the real
+                // investigation is eight minutes, so a bare --match would show
+                // 3% of a day sweep -- indistinguishable from free roam in a
+                // screenshot. Compressing the phase is what makes the sky race
+                // to dusk inside a capture and the inversion actually visible.
+                if (arg < argc && argv[arg][0] != '-') {
+                    matchInvestigationSeconds = std::strtof(argv[arg], nullptr);
+                    arg += 1;
+                }
             } else if (std::strcmp(argv[arg], "--mystery") == 0) {
                 bootMystery = true;
                 arg += 1;
@@ -337,6 +479,43 @@ int main(int argc, char** argv) {
     World world(City::makeDowntown());
     // Smoke runs pin the clock so day/night screenshots are deterministic.
     if (hourOverride >= 0.f) world.state().setTimeOfDayHours(hourOverride);
+
+    // The detective match, when one is running. Empty IS free roam: the
+    // optional's state is the single source of truth for who owns the clock,
+    // which is why advanceWorldClock takes it rather than a bool.
+    //
+    // --match wins over --hour. The match drives the hour every frame, so an
+    // --hour set here would be overwritten on the first tick anyway; saying so
+    // is better than letting a smoke run silently ignore a flag it was given.
+    std::optional<MatchClock> match;
+    // Settings the Match page edits (issue #157). Held here, next to the
+    // clock, and read ONLY where a match is constructed -- which is what makes
+    // "changes never reach a running match" a property of the topology rather
+    // than a rule somebody has to remember. Changing day length mid-day would
+    // make the world clock jump.
+    //
+    // Session-scoped, not written to disk: persisting them would mean a new
+    // config file, and the issue asked for a settings surface, not a settings
+    // format. Defaults come from MatchRules itself (3 days, 8 minutes), so
+    // there is exactly one place they are stated.
+    MatchRules pendingRules;
+    const auto pendingDayMinutes = [&pendingRules]() {
+        return static_cast<int>(pendingRules.investigationSeconds / 60.f + 0.5f);
+    };
+    if (bootMatch) {
+        if (matchInvestigationSeconds > 0.f) {
+            pendingRules.investigationSeconds = matchInvestigationSeconds;
+            // Keep the intro proportionate, so a compressed match still spends
+            // most of its capture in the phase the sweep belongs to.
+            pendingRules.introSeconds = std::fmin(pendingRules.introSeconds,
+                                                  matchInvestigationSeconds * 0.2f);
+        }
+        // Boots from pendingRules rather than a local copy so the Match
+        // Settings page shows what is actually running. A dev who opens the
+        // pause menu during a `--match 30` smoke run should not be told the
+        // day is 8 minutes long.
+        match.emplace(pendingRules);
+    }
     std::vector<std::string> personaErrors;
     const auto roster = loadAllPersonas(projectRoot / "personas", &personaErrors);
     for (const auto& err : personaErrors) std::cerr << "[llm_npc] persona error: " << err << "\n";
@@ -464,7 +643,11 @@ int main(int argc, char** argv) {
     {
     // Models need the GL context, so Assets loads after InitWindow.
     Assets assets((projectRoot / "assets").string());
+    // UI faces (Nocturne design): optional drop-in TTFs, raylib's font else.
+    ui::loadFonts((projectRoot / "assets").string());
     RaylibRenderer renderer(assets);
+    // NPC voices (plan: elevenlabs-tts-backend). provider = none opens no audio device.
+    Speech speech(projectRoot);
 
     // The player's own avatar (issue #106): a look-only row under the
     // reserved id in the SAME store created characters use (look-only rows
@@ -502,6 +685,9 @@ int main(int argc, char** argv) {
     std::unique_ptr<NetClient> netClient;
     std::vector<PlayerPose> remotePlayers;              // avatars to draw (both modes)
     std::vector<NetNpcPose> netNpcs;                    // join mode: NPCs from snapshots
+    // Join mode: walk cycles keyed by npcIndex, fed from snapshot positions
+    // (snapshots rebuild netNpcs, so the gait memory lives beside it).
+    std::unordered_map<int, WalkState> netNpcWalk;
     std::vector<int> netMoods(world.npcs().size(), 0);  // join mode: mood per NPC
     bool netChatWaiting = false;                        // join mode: reply pending
 
@@ -517,6 +703,7 @@ int main(int argc, char** argv) {
         }
         remotePlayers.clear();
         netNpcs.clear();
+        netNpcWalk.clear();
         std::fill(netMoods.begin(), netMoods.end(), 0);
         netChatWaiting = false;
     };
@@ -608,8 +795,10 @@ int main(int argc, char** argv) {
     // Arrest bookkeeping: catch fires once per latch (see hasCaughtPlayer).
     float jailSecondsLeft = 0.f;
     std::vector<bool> wasCaught;
-    // Previous frame's NPC positions, for walk-animation detection.
+    // Previous frame's NPC positions (facing derivation) and each NPC's
+    // distance-driven walk cycle.
     std::vector<Vec3> npcLastPos;
+    std::vector<WalkState> npcWalk;
 
     // ---- World population (issue #110) -------------------------------
     // The town roster and the per-NPC bookkeeping are (re)built through
@@ -668,8 +857,10 @@ int main(int argc, char** argv) {
         savedTurns.assign(world.npcs().size(), 0);
         wasCaught.assign(world.npcs().size(), false);
         npcLastPos.resize(world.npcs().size());
+        npcWalk.clear();
         for (std::size_t i = 0; i < world.npcs().size(); ++i) {
             npcLastPos[i] = world.npcs()[i].position();
+            npcWalk.push_back(makeWalkState(static_cast<unsigned>(i)));
         }
         for (Npc& npc : world.npcs()) {
             refreshGossip(npc);
@@ -829,15 +1020,27 @@ int main(int argc, char** argv) {
         if (!traitId.empty()) loaded.persona.traitIds.push_back(traitId);
         loaded.spotId = "plaza";
         loaded.facingDeg = 180.f;
-        // First clear standing spot on rings around the plaza center.
+        // First clear standing spot on rings around the plaza center. A spot
+        // must clear the city AND every standing NPC: the scan order is
+        // deterministic, so checking city geometry alone lands every new
+        // custom on the identical tile (issue #278).
         loaded.position = Vec3{0.f, 0.f, -10.f};
+        const auto spotIsFree = [&world](const Vec3& spot) {
+            if (world.city().circleIntersectsAny(spot.x, spot.z, 0.7f)) return false;
+            for (const Npc& other : world.npcs()) {
+                const float dx = other.position().x - spot.x;
+                const float dz = other.position().z - spot.z;
+                if (dx * dx + dz * dz < 1.4f * 1.4f) return false;
+            }
+            return true;
+        };
         for (const float radius : {8.f, 11.f, 14.f, 17.f}) {
             bool placed = false;
             for (int step = 0; step < 12 && !placed; ++step) {
                 const float angle = degToRad(static_cast<float>(step) * 30.f);
                 const Vec3 spot{std::sin(angle) * radius, 0.f,
                                 std::cos(angle) * radius};
-                if (!world.city().circleIntersectsAny(spot.x, spot.z, 0.7f)) {
+                if (spotIsFree(spot)) {
                     loaded.position = spot;
                     placed = true;
                 }
@@ -859,6 +1062,7 @@ int main(int argc, char** argv) {
         world.addNpc(std::move(npc));
         wasCaught.push_back(false);
         npcLastPos.push_back(loaded.position);
+        npcWalk.push_back(makeWalkState(static_cast<unsigned>(world.npcs().size())));
         savedTurns.push_back(0);
 
         if (!persisted) {
@@ -1053,6 +1257,19 @@ int main(int argc, char** argv) {
     };
     menu.setModels(modelHooks);
 
+    // Match settings page (#157). Menu holds no MatchRules and no MatchClock:
+    // it reads and writes two ints, and the conversion to the rules' real
+    // seconds happens here. Same separation ModelHooks keeps.
+    Menu::MatchHooks matchHooks;
+    matchHooks.dayLimit = [&pendingRules]() { return pendingRules.dayLimit; };
+    matchHooks.dayMinutes = pendingDayMinutes;
+    matchHooks.active = [&match]() { return match.has_value(); };
+    matchHooks.onChange = [&pendingRules](int dayLimit, int dayMinutes) {
+        pendingRules.dayLimit = dayLimit;
+        pendingRules.investigationSeconds = static_cast<float>(dayMinutes) * 60.f;
+    };
+    menu.setMatchSettings(matchHooks);
+
     Menu::GraphicsHooks graphicsHooks;
     graphicsHooks.current = [&graphics] { return graphics; };
     graphicsHooks.onChange = [&](const GraphicsConfig& next) {
@@ -1176,6 +1393,16 @@ int main(int argc, char** argv) {
         if (smokeRun) cutscene.setFixedStep(true);
         playCutscene(matchOpening);
     }
+    // THE COLD OPEN DOES NOT AUTO-PLAY, and that is deliberate — see #282.
+    //
+    // cutscenes/body_in_plaza.cutscene announces a body in the plaza and opens
+    // the case. A default launch runs no mystery at all (`bootMystery` is off
+    // without --mystery), so there is no victim, no corpse to walk up to and no
+    // seeded testimony to cross-check: the scene would promise an investigation
+    // the world cannot back up, and permanently mark the case opened in the
+    // save. Deciding whether the base game seeds a murder is a product call, so
+    // the scene ships triggerable and the hook waits on it:
+    //   --frames 780 shot.png --cutscene body_in_plaza
 
     // Journal: a pure read of the shared fact store — what the player was
     // personally told, grouped by subject, conflicts pre-flagged by core.
@@ -1236,6 +1463,38 @@ int main(int argc, char** argv) {
                 cutscene.skip();
             }
             if (!cutscene.advance(dt)) {
+                // The scene's journal write, applied on the way out. A SKIP
+                // LANDS HERE TOO — skip() ends playback and the next advance()
+                // returns false through this same branch — which is the point:
+                // skipping the cold open must not quietly cost the player the
+                // premise of the game.
+                //
+                // addFact is first-teller-wins, so replaying a scene never
+                // duplicates or re-dates its row, and the fact persisting to
+                // saves/facts.sqlite3 is also what stops the cold open from
+                // playing twice.
+                const std::string& subject = cutscene.journalSubject();
+                if (!subject.empty() && !cutscene.journalLine().empty()) {
+                    KnownFact opened;
+                    opened.subject = subject;
+                    opened.content = cutscene.journalLine();
+                    opened.factId = factIdFor(opened.subject, opened.content);
+                    // "town", the same source Mystery.cpp uses for what
+                    // everybody simply knows. journalEntries filters only
+                    // source == "player", so this renders as a normal row.
+                    opened.source = "town";
+                    opened.learnedAtSeconds = world.state().number("world_time_seconds");
+                    world.state().addFact(opened);
+                    world.state().grantKnowledge("player", opened.factId);
+                    // Persisted here, not only in memory: facts are written at
+                    // the moment they are created everywhere else in this file,
+                    // and the row surviving the process is what makes the fact
+                    // usable as the "already seen" test above. Without this the
+                    // cold open replays on every launch.
+                    factStore.saveFact(opened);
+                    factStore.saveKnowledge("player", opened.factId);
+                }
+
                 // Restore everything playback took: the pose, the mode and the
                 // cursor. A cutscene that leaves the camera moved, the mouse
                 // swallowed or a mode stuck is worse than one that never ran.
@@ -1311,6 +1570,15 @@ int main(int argc, char** argv) {
                 isActionJustPressed(bindings, Action::OpenMenu) || IsKeyPressed(KEY_ESCAPE);
             if (menuKey) {
                 menu.open();
+                {
+                    const float hourNow =
+                        static_cast<float>(world.state().timeOfDayHours());
+                    std::string kicker = zoneName(zoneAt(player.position.x, player.position.z));
+                    if (match) kicker += " - Day " + std::to_string(match->day());
+                    std::string sub = hourLabel(hourNow);
+                    if (match) sub += " - " + std::string(phaseName(match->phase()));
+                    menu.setHeader(kicker, sub);
+                }
                 mode = AppMode::Menu;
                 EnableCursor();
             } else if (isActionJustPressed(bindings, Action::Talk) && nearbyNpc >= 0 &&
@@ -1345,6 +1613,7 @@ int main(int argc, char** argv) {
                     for (const std::string& n : memberNames) party += " " + n + ",";
                     party.back() = '.';
                     dialog.reset();
+                    dialog.setSpeaker("", party, "", "");
                     dialog.appendLine({TranscriptLine::Kind::System, "", party});
                     dialog.setInputEnabled(true);
                     mode = AppMode::Dialogue;
@@ -1359,11 +1628,13 @@ int main(int argc, char** argv) {
                     npc.lookAt(player.position);
                 }
                 dialog.reset();
+                dialog.setSpeaker(npc.persona().name, npc.persona().role,
+                                  npc.activity().empty()
+                                      ? zoneName(zoneAt(npc.position().x, npc.position().z))
+                                      : npc.activity(),
+                                  moodLabel(npc.mood()));
                 dialog.setInputEnabled(true);
                 dialog.swallowPendingText();
-                dialog.appendLine({TranscriptLine::Kind::System, "",
-                                   "You are talking to " + npc.persona().name + " (" +
-                                       npc.persona().role + "). Enter sends, Esc leaves."});
                 mode = AppMode::Dialogue;
                 EnableCursor();
             }
@@ -1628,8 +1899,29 @@ int main(int argc, char** argv) {
                 DisableCursor();
             }
         } else {  // Menu
+            // The menu needs one bit of match state to refuse a second New
+            // Mystery. Pushed rather than pulled so Menu keeps knowing
+            // nothing about MatchClock.
+            menu.setMatchActive(match.has_value());
             switch (menu.update(dt)) {
                 case MenuResult::Resume:
+                    mode = AppMode::Playing;
+                    DisableCursor();
+                    break;
+                case MenuResult::NewMystery:
+                    // A match is a mode you enter deliberately, never a state
+                    // free roam drifts into. Constructing the clock here is
+                    // what hands it ownership of the hour; from the next frame
+                    // advanceWorldClock takes the other branch.
+                    //
+                    // Menu refuses the click while a match is running (it
+                    // toasts instead), so this cannot silently discard a day
+                    // and a phase because someone missed Resume by one row.
+                    //
+                    // The Match page's settings are read HERE and nowhere
+                    // else, so an edit made while a match is running cannot
+                    // reach it (#157).
+                    match.emplace(pendingRules);
                     mode = AppMode::Playing;
                     DisableCursor();
                     break;
@@ -1688,7 +1980,64 @@ int main(int argc, char** argv) {
         // The ONE world clock advances here; every time-aware system below
         // (schedules, day/night) reads this shared value — none keeps its
         // own. The town keeps living while the menu is open.
-        world.state().advanceTime(dt);
+        //
+        // Arms the one-owner-per-frame tripwire before anything can write the
+        // clock. See WorldState::beginClockFrame.
+        world.state().beginClockFrame();
+        //
+        // In a match the clock is DRIVEN rather than ticked, so the sky races
+        // to dusk as the investigation phase runs out. advanceWorldClock is
+        // the single owner either way; see its comment.
+        const PhaseTransition phase = advanceWorldClock(world.state(), match, dt);
+        // The vote is a scene, not a menu (#156): entering it walks every
+        // surviving resident to the plaza, so a player can SEE who is still
+        // alive and who is missing.
+        //
+        // They stay assembled THROUGH Resolution and are released when the
+        // next investigation begins — the reveal is the reason to have
+        // everyone standing there, so releasing on Vote -> Resolution would
+        // empty the plaza exactly when the scene pays off.
+        //
+        // Keyed on the phase being ENTERED rather than on dayAdvanced, so the
+        // release also covers a match ending straight out of the vote and any
+        // future path back to Investigation. Clearing when nobody is gathered
+        // is a harmless no-op, and that is the point: the release cannot be
+        // missed by a transition nobody thought of.
+        //
+        // Guests never run this: a joined client's world is the host's
+        // snapshot, and the block below already refuses to simulate.
+        if (phase.fired && !joined) {
+            if (phase.to == MatchPhase::Vote) {
+                world.setPlazaGather(true);
+            } else if (phase.to == MatchPhase::Investigation || phase.matchEnded) {
+                world.setPlazaGather(false);
+            }
+        }
+        // Hand the clock back to free roam when the match ends (#155's
+        // deferred gap, owned by #157).
+        //
+        // Without this, worldHour() holds at dayEndHour forever: the sky stays
+        // frozen at dusk and free roam's day/night never resumes, which reads
+        // as the game having broken rather than as a match having finished.
+        // Clearing the optional IS the hand-back -- advanceWorldClock takes
+        // the ticking branch from the next frame, and nothing else has to be
+        // told.
+        //
+        // Deferred by one frame past the transition on purpose: the gather
+        // release above and any Ended-phase presentation still need to see the
+        // clock that produced them.
+        //
+        // The condition POLLS match->phase() rather than reading
+        // phase.matchEnded, and the difference matters in one direction: an
+        // endMatch() called outside advance() sets the phase without firing a
+        // transition, so polling still hands the clock back on the next frame,
+        // whereas reading the transition would not. The gather release ABOVE
+        // is the half that stays uncovered -- it is keyed on phase.to, which
+        // such a call never produces. That asymmetry is exactly what
+        // MatchClock::endMatch's note warns a future caller about.
+        if (match && match->phase() == MatchPhase::Ended && !phase.fired) {
+            match.reset();
+        }
         const float worldHour = static_cast<float>(world.state().timeOfDayHours());
 
         // NPC behaviors keep running during dialogue, freeze in the menu;
@@ -2113,6 +2462,7 @@ int main(int argc, char** argv) {
                 if (text && !text->empty()) {
                     dialog.appendLine(
                         {TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                    speech.speak(npc.persona().name, *text);
                     group.addLine(npc.persona().name, *text);
                 } else {
                     dialog.appendLine({TranscriptLine::Kind::System, "",
@@ -2149,6 +2499,7 @@ int main(int argc, char** argv) {
                 if (text) {
                     if (!text->empty()) {
                         dialog.appendLine({TranscriptLine::Kind::Npc, npc.persona().name, *text});
+                        speech.speak(npc.persona().name, *text);
                     }
                     const std::string sd = stageDirection(npc.lastAction());
                     if (!sd.empty()) {
@@ -2172,6 +2523,7 @@ int main(int argc, char** argv) {
                 dialog.setInputEnabled(true);
             }
         }
+        speech.update();
 
         // ---- render ----
         PROF_SPAN_END();  // closes "sim"
@@ -2208,7 +2560,7 @@ int main(int argc, char** argv) {
             for (const PlacedNpc& placed : sandboxDoc.npcs) {
                 renderer.drawCompositeCharacter(lookForSource(placed.source),
                                                 Vec3{placed.x, 0.f, placed.z},
-                                                placed.facingDeg, false, 0.f);
+                                                placed.facingDeg);
             }
         }
         if (sandboxEditing && sandboxGhostLive && sandboxPlacingNpc) {
@@ -2216,7 +2568,7 @@ int main(int argc, char** argv) {
             renderer.drawCompositeCharacter(
                 lookForSource(sandboxGhostNpc.source),
                 Vec3{sandboxGhostNpc.x, 0.f, sandboxGhostNpc.z},
-                sandboxGhostNpc.facingDeg, false, 0.f);
+                sandboxGhostNpc.facingDeg);
             Building box;
             box.minX = sandboxGhostNpc.x - 0.6f;
             box.maxX = sandboxGhostNpc.x + 0.6f;
@@ -2249,10 +2601,18 @@ int main(int argc, char** argv) {
                 // than guessing a look.
                 if (netNpc.npcIndex >= 0 &&
                     netNpc.npcIndex < static_cast<int>(npcLooks.size())) {
+                    // Gait from the replicated positions, so remote NPCs
+                    // walk too instead of gliding.
+                    auto [slot, fresh] = netNpcWalk.try_emplace(
+                        netNpc.npcIndex,
+                        makeWalkState(static_cast<unsigned>(netNpc.npcIndex)));
+                    WalkState& walk = slot->second;
+                    if (fresh) walk.speedSmoothing = 0.3f;
+                    advanceWalk(walk, netNpc.position, dt);
                     renderer.drawCompositeCharacter(
                         npcLooks[static_cast<std::size_t>(netNpc.npcIndex)],
-                        netNpc.position, netNpc.facingDeg, false,
-                        static_cast<float>(GetTime()), face, false,
+                        netNpc.position, netNpc.facingDeg, walkPose(walk), face,
+                        false,
                         mode == AppMode::Playing && nearbyNpc == netNpc.npcIndex);
                 } else {
                     CharacterVisual visual;
@@ -2267,25 +2627,26 @@ int main(int argc, char** argv) {
             PROF_SCOPE_N("render.characters");
             for (std::size_t i = 0; i < world.npcs().size(); ++i) {
                 const Npc& npc = world.npcs()[i];
-                const bool walking = distanceXZ(npc.position(), npcLastPos[i]) > 0.01f;
                 npcLastPos[i] = npc.position();
+                // A gesture adds a soft idle bounce so a talking NPC still
+                // reads as animated (composites have no gesture clip).
+                advanceWalk(npcWalk[i], npc.position(), dt,
+                            npc.pose() != NpcAction::None);
                 NpcFace face = faceForMood(npc.mood());
                 if (smokeRun) face = static_cast<NpcFace>(i % 6);
                 // ONE shared library: every NPC — designer persona or
                 // player-created — draws from the same composite parts pool
                 // the creator picks from (plan: shared-character-library).
-                // A gesture drives the bob so a talking NPC still reads as
-                // animated (composites have no gesture clip).
-                // Per-NPC clock offset so mesh-family idle/walk cycles
-                // don't play in eerie unison across the plaza (#142). The
-                // talk prompt's target gets the noir red rim at night.
+                WalkPose pose = walkPose(npcWalk[i]);
+                // Mesh figures have no gesture clip either: a talking one
+                // plays its Walk clip so it still reads as animated.
+                if (npc.pose() != NpcAction::None) pose.gait = 1.f;
+                // The talk prompt's target gets the noir red rim at night.
                 const bool talkTarget = mode == AppMode::Playing &&
                                         nearbyNpc == static_cast<int>(i);
                 renderer.drawCompositeCharacter(
-                    npcLooks[i], npc.position(), npc.facingDeg(),
-                    walking || npc.pose() != NpcAction::None,
-                    static_cast<float>(GetTime()) + static_cast<float>(i) * 1.618f,
-                    face, npc.combatState() == NpcState::Dead, talkTarget);
+                    npcLooks[i], npc.position(), npc.facingDeg(), pose, face,
+                    npc.combatState() == NpcState::Dead, talkTarget);
             }
         }
         // Fellow players, drawn with the character mesh (id offset picks a
@@ -2352,7 +2713,7 @@ int main(int argc, char** argv) {
             }
             const Vec3 previewAt = player.position + flatForward(player.yawDeg) * 3.4f;
             renderer.drawCompositeCharacter(*menu.creatorPreview(), previewAt,
-                                            previewYaw, false, 0.f);
+                                            previewYaw);
         }
         previewWasOpen = previewOpen;
         // No viewmodel during a cutscene: the camera is not the player's
@@ -2374,14 +2735,10 @@ int main(int argc, char** argv) {
         }
         if (mode == AppMode::Dialogue && !joined && session.npcIndex() >= 0 &&
             session.npcIndex() < static_cast<int>(world.npcs().size())) {
-            const auto& ratedHistory =
-                world.npcs()[static_cast<std::size_t>(session.npcIndex())].history();
-            if (!client.busy() && ratedHistory.size() >= 2 &&
-                ratedHistory.back().role == "assistant" &&
-                !(ratedNpc == session.npcIndex() &&
-                  ratedHistorySize == ratedHistory.size())) {
-                drawCenteredHudText("[F1] like reply    [F2] flag reply", 16, 12.f);
-            }
+            // The panel's hint row already names F1/F2; keep its mood tag
+            // following the NPC's reaction to the last exchange.
+            dialog.setMood(
+                moodLabel(world.npcs()[static_cast<std::size_t>(session.npcIndex())].mood()));
         }
         if (sandboxEditing) {
             const std::string current =
@@ -2439,15 +2796,17 @@ int main(int argc, char** argv) {
             Vector2 screen;
             std::string text;
             Color color;
+            bool talkable;
         };
         std::vector<PlateCandidate> plates;
-        const auto plateFor = [&](const Vec3& feet, std::string name, Color color) {
+        const auto plateFor = [&](const Vec3& feet, std::string name, Color color,
+                                  bool talkable) {
             if (cutscenePlaying || menuOpen) return;
             const float range = distanceXZ(player.position, feet);
             if (range > kNameplateRange) return;
             Vector2 screen;
             if (!renderer.worldToScreen(feet + Vec3{0.f, 2.15f, 0.f}, screen)) return;
-            plates.push_back({range, screen, std::move(name), color});
+            plates.push_back({range, screen, std::move(name), color, talkable});
         };
         if (joined) {
             for (const auto& netNpc : netNpcs) {
@@ -2455,21 +2814,23 @@ int main(int argc, char** argv) {
                     netNpc.npcIndex >= static_cast<int>(world.npcs().size())) continue;
                 plateFor(netNpc.position,
                          world.npcs()[static_cast<std::size_t>(netNpc.npcIndex)].persona().name,
-                         WHITE);
+                         ui::kNeutral200, netNpc.npcIndex == nearbyNpc);
             }
         } else {
-            for (const Npc& npc : world.npcs()) {
+            for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                const Npc& npc = world.npcs()[i];
                 // Nameplate carries the schedule activity ("Marge - baking
                 // bread") so the routine reads at a glance.
+                const bool talkable = static_cast<int>(i) == nearbyNpc;
                 plateFor(npc.position(),
                          npc.activity().empty()
                              ? npc.persona().name
                              : npc.persona().name + " - " + npc.activity(),
-                         WHITE);
+                         talkable ? ui::kAccent200 : ui::kNeutral200, talkable);
             }
         }
         for (const auto& remote : remotePlayers) {
-            plateFor(remote.position, remote.name, Color{150, 220, 255, 255});
+            plateFor(remote.position, remote.name, ui::kAccent300, false);
         }
         std::sort(plates.begin(), plates.end(),
                   [](const PlateCandidate& a, const PlateCandidate& b) {
@@ -2477,7 +2838,7 @@ int main(int argc, char** argv) {
                   });
         for (const PlateCandidate& plate : plates) {
             if (!claimLabelSpot(plate.screen)) continue;
-            drawNameplate(plate.text, plate.screen, plate.color);
+            drawNameplate(plate.text, plate.screen, plate.color, plate.talkable);
         }
 
         // ---- building signage (issue #166) ----
@@ -2531,7 +2892,7 @@ int main(int argc, char** argv) {
                 // case. Nearest wins — and a nameplate that claimed the spot
                 // first beats any sign; the loser is simply not drawn.
                 if (!claimLabelSpot(screen)) continue;
-                drawNameplate(building->name, screen, Color{255, 232, 170, 255});
+                drawSign(building->name, screen);
             }
         }
 
@@ -2549,52 +2910,154 @@ int main(int argc, char** argv) {
             const Npc& npc = world.npcs()[static_cast<std::size_t>(callout.npcIndex)];
             Vector2 screen;
             if (renderer.worldToScreen(npc.position() + Vec3{0.f, 2.6f, 0.f}, screen)) {
-                drawNameplate(callout.text, screen, Color{255, 200, 120, 255});
+                drawNameplate(callout.text, screen, ui::kAccent200, false);
             }
         }
 
         if (mode == AppMode::Playing) {
+            const float sw = static_cast<float>(GetScreenWidth());
+            const float sh = static_cast<float>(GetScreenHeight());
             if (nearbyNpc >= 0 && nearbyNpc < static_cast<int>(world.npcs().size())) {
+                // Talk prompt: keycap + "Talk to NAME" in one pill.
                 const Npc& npc = world.npcs()[static_cast<std::size_t>(nearbyNpc)];
-                drawCenteredHudText(
-                    "[" + bindings.key(Action::Talk) + "] Talk to " + npc.persona().name, 20,
-                    static_cast<float>(GetScreenHeight()) - 84.f);
+                const std::string key = bindings.key(Action::Talk);
+                const std::string label = "Talk to " + npc.persona().name;
+                const float keyW = ui::keycapWidth(key);
+                const float labelW = ui::measure(ui::Face::Ui, label, 14.f);
+                const Rectangle box{(sw - (keyW + 8.f + labelW + 28.f)) * 0.5f, sh - 92.f,
+                                    keyW + 8.f + labelW + 28.f, 36.f};
+                ui::roundedPanel(box, 0.72f, ui::alpha(ui::kAccent700, 1.f));
+                ui::keycap(key, box.x + 14.f, box.y + 8.f, true);
+                ui::text(ui::Face::Ui, label, box.x + 14.f + keyW + 8.f, box.y + 11.f, 14.f,
+                         ui::kNeutral100);
             }
             if (jailSecondsLeft > 0.f) {
                 const int secs = static_cast<int>(jailSecondsLeft) + 1;
                 drawCenteredHudText("Arrested: disturbing the peace. Released in " +
                                         std::to_string(secs) + "s",
-                                    22, static_cast<float>(GetScreenHeight()) - 120.f);
+                                    14, sh - 132.f);
             }
-            DrawCircle(GetScreenWidth() / 2, GetScreenHeight() / 2, 2.f,
-                       Color{255, 255, 255, 200});
+            // Crosshair: a 3px dot.
+            DrawCircleV(Vector2{sw * 0.5f, sh * 0.5f}, 1.5f, ui::alpha(ui::kNeutral100, 0.9f));
+            // Compass strip with a marker per resident in nameplate range.
+            if (!sandboxEditing) {
+                std::vector<std::pair<float, bool>> markers;
+                for (std::size_t i = 0; i < world.npcs().size(); ++i) {
+                    const Npc& npc = world.npcs()[i];
+                    if (distanceXZ(player.position, npc.position()) > kNameplateRange) continue;
+                    const float dx = npc.position().x - player.position.x;
+                    const float dz = npc.position().z - player.position.z;
+                    const float bearing =
+                        std::atan2(dx, -dz) * (180.f / 3.14159265f);
+                    markers.emplace_back(bearing, static_cast<int>(i) == nearbyNpc);
+                }
+                drawCompass(player.yawDeg, markers);
+            }
+            // Match HUD (#157): two short lines, top-right, and deliberately
+            // no countdown bar.
+            //
+            // The dusk light is already the timer -- dayEndHour sits inside
+            // DayNight's dusk band precisely so the orange sky IS the
+            // countdown -- so this exists to answer "which day is it and what
+            // happens next", not to replace what the sky is saying. If this
+            // block ever grows past two lines, the diegetic design has been
+            // abandoned and the sky coupling is dead weight.
+            //
+            // Sizes 30 and 20, not 18 and 16: raylib's built-in font computes
+            // glyph advance by integer division, so every size from 14 to 18
+            // renders at identical spacing and a "slightly smaller" second
+            // line would not look smaller at all (AsciiText.hpp).
+            // Not wrapped in `!joined` like the weapon HUD below, and it
+            // does not need to be: `match` is local and a guest never
+            // constructs one, so the block is already inert for them. It is
+            // also the honest state -- a guest genuinely does not have the
+            // host's day and phase yet. Replicating those is #211's job, and
+            // when it lands THIS is the block that starts drawing for guests.
+            if (match) {
+                // Clock card: zone + day kicker, the hour in the display face,
+                // and the phase with the time left before dusk.
+                const std::string kicker =
+                    ui::upper(zoneName(zoneAt(player.position.x, player.position.z))) +
+                    " - DAY " + std::to_string(match->day());
+                const std::string hour = hourLabel(worldHour);
+                std::string sub = phaseName(match->phase());
+                const std::string dusk = untilDusk(worldHour);
+                if (!dusk.empty()) sub += " - " + dusk;
+                const float cardW = std::max({ui::measure(ui::Face::Ui, kicker, 11.f, 1.3f),
+                                              ui::measure(ui::Face::Display, hour, 38.f),
+                                              ui::measure(ui::Face::Ui, sub, 12.f)}) + 32.f;
+                const Rectangle box{sw - 24.f - cardW, 16.f, cardW, 96.f};
+                ui::roundedPanel(box, 0.72f, ui::alpha(ui::kText, 0.10f));
+                ui::kicker(kicker, box.x + 16.f, box.y + 12.f);
+                ui::text(ui::Face::Display, hour, box.x + 16.f, box.y + 28.f, 38.f, ui::kText);
+                ui::text(ui::Face::Ui, sub, box.x + 16.f, box.y + 72.f, 12.f, ui::kNeutral400);
+            }
             // Weapon + health HUD (bottom-left), solo/host only.
             if (!joined) {
+                // Weapon card: slot keycap, weapon name, ammo, and a thin
+                // health bar underneath.
                 const Player& p = world.player();
                 const WeaponDef& def = weaponDef(p.weapon);
-                std::string weaponLine = std::string("[1/2] ") + def.name;
+                const Rectangle box{24.f, sh - 24.f - 64.f, 228.f, 64.f};
+                ui::roundedPanel(box, 0.72f, ui::alpha(ui::kText, 0.10f));
+                const std::string slot = p.weapon == WeaponKind::Pistol ? "2" : "1";
+                const float keyW = ui::keycap(slot, box.x + 14.f, box.y + 12.f, false);
+                ui::text(ui::Face::Ui, def.name, box.x + 14.f + keyW + 8.f, box.y + 14.f, 14.f,
+                         ui::kNeutral100);
                 if (def.ammoMax > 0) {
                     const auto it = p.ammo.find(static_cast<std::uint8_t>(p.weapon));
-                    weaponLine += "  ammo " +
-                                  std::to_string(it != p.ammo.end() ? it->second : 0);
+                    const std::string ammo =
+                        std::to_string(it != p.ammo.end() ? it->second : 0) + " rounds";
+                    ui::textRight(ui::Face::Ui, ammo, box.x + box.width - 14.f, box.y + 15.f,
+                                  12.f, ui::kNeutral400);
                 }
-                DrawText(weaponLine.c_str(), 24, GetScreenHeight() - 64, 18, RAYWHITE);
-                DrawRectangle(24, GetScreenHeight() - 40, 180, 14, Color{40, 20, 20, 220});
-                DrawRectangle(24, GetScreenHeight() - 40,
-                              static_cast<int>(180.f * static_cast<float>(p.hp) /
-                                               static_cast<float>(p.hpMax)),
-                              14, Color{200, 60, 60, 255});
+                const float frac = std::clamp(static_cast<float>(p.hp) /
+                                                  static_cast<float>(std::max(1, p.hpMax)),
+                                              0.f, 1.f);
+                DrawRectangle(static_cast<int>(box.x + 14.f), static_cast<int>(box.y + 44.f), 180,
+                              4, ui::kNeutral800);
+                DrawRectangle(static_cast<int>(box.x + 14.f), static_cast<int>(box.y + 44.f),
+                              static_cast<int>(180.f * frac), 4,
+                              frac > 0.3f ? ui::kAccent : Color{214, 92, 92, 255});
             }
         } else if (mode == AppMode::Dead) {
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{40, 8, 8, 200});
-            const char* headline = "You died.";
-            DrawText(headline, (GetScreenWidth() - MeasureText(headline, 44)) / 2,
-                     GetScreenHeight() / 2 - 48, 44, RAYWHITE);
-            const char* hint = "Press Enter to wake up at the plaza.";
-            DrawText(hint, (GetScreenWidth() - MeasureText(hint, 20)) / 2,
-                     GetScreenHeight() / 2 + 12, 20, Color{220, 200, 200, 255});
+            // "You died." is wrong for a detective game — the player is not a
+            // soldier, and the game already respawns them at the plaza with
+            // their memory intact. A dark vignette instead of a red wash, the
+            // same Enter contract; the lost hours are a free plot hook,
+            // because the world clock really did advance while they were out
+            // and the NPCs really do remember what they said before it.
+            const float sw = static_cast<float>(GetScreenWidth());
+            const float sh = static_cast<float>(GetScreenHeight());
+            ui::vignette(0.55f, 0.92f);
+            std::string when = clockLabel(world.state().number("world_time_seconds"));
+            if (match) when = "Day " + std::to_string(match->day()) + " - " + when;
+            const float cx = sw * 0.5f;
+            ui::textCentered(ui::Face::Ui, ui::upper(when), cx, sh * 0.5f - 96.f, 11.f,
+                             ui::kAccent300);
+            ui::textCentered(ui::Face::Display, "You wake at the fountain.", cx,
+                             sh * 0.5f - 72.f, 56.f, ui::kText);
+            ui::ruleH(cx - 120.f, sh * 0.5f + 2.f, 240.f, ui::kAccent);
+            const std::vector<std::string> body = ui::wrap(
+                ui::Face::Ui,
+                "Two hours you can't account for. The town kept its clock running - and "
+                "its memory of what you said.",
+                16.f, 520.f);
+            float by = sh * 0.5f + 20.f;
+            for (const std::string& line : body) {
+                ui::textCentered(ui::Face::Ui, line, cx, by, 16.f, ui::kNeutral300);
+                by += 22.f;
+            }
+            const float keyW = ui::keycapWidth("Enter");
+            const float hintW = keyW + 8.f + ui::measure(ui::Face::Ui, "Stand up", 13.f);
+            ui::keycap("Enter", cx - hintW * 0.5f, by + 18.f, true);
+            ui::text(ui::Face::Ui, "Stand up", cx - hintW * 0.5f + keyW + 8.f, by + 21.f, 13.f,
+                     ui::kNeutral300);
         } else if (mode == AppMode::Dialogue) {
-            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Color{8, 10, 16, 150});
+            // The world dims more toward the panel so the scene stays legible
+            // on the left while the transcript gets its contrast.
+            DrawRectangleGradientH(0, 0, GetScreenWidth(), GetScreenHeight(),
+                                   ui::bgAlpha(0.35f), ui::bgAlpha(0.75f));
             dialog.render();
         } else if (mode == AppMode::Cutscene) {
             // Letterbox, fade and caption — the whole visual vocabulary. There
@@ -2606,8 +3069,11 @@ int main(int argc, char** argv) {
             const int h = GetScreenHeight();
             const int bars = cutscene.letterboxPx();
             if (bars > 0) {
-                DrawRectangle(0, 0, w, bars, BLACK);
-                DrawRectangle(0, h - bars, w, bars, BLACK);
+                DrawRectangle(0, 0, w, bars, ui::kBg);
+                DrawRectangle(0, h - bars, w, bars, ui::kBg);
+                ui::ruleH(0.f, static_cast<float>(bars), static_cast<float>(w), ui::kNeutral700);
+                ui::ruleH(0.f, static_cast<float>(h - bars - 1), static_cast<float>(w),
+                          ui::kNeutral700);
             }
             const float alpha = cutscene.fadeAlpha();
             if (alpha > 0.f) {
@@ -2620,19 +3086,61 @@ int main(int argc, char** argv) {
                 fade.a = static_cast<unsigned char>(255.f * alpha);
                 DrawRectangle(0, 0, w, h, fade);
             }
+            // Slug: where we are and what time it is, in the menu's label
+            // grey. In a detective game the timestamp is evidence, so every
+            // scene states the hour off the one world clock.
+            const std::string& slug = cutscene.slug();
+            if (!slug.empty()) {
+                // In the top bar when it is deep enough, just below it else.
+                const float slugY = bars >= 80 ? static_cast<float>(bars) - 48.f
+                                               : static_cast<float>(bars) + 16.f;
+                std::string when = hourLabel(worldHour);
+                if (match) when = "Day " + std::to_string(match->day()) + " - " + when;
+                ui::kicker(when, 40.f, slugY - 16.f);
+                ui::text(ui::Face::Display, slug, 40.f, slugY, 22.f, ui::kNeutral100);
+            }
+
+            // Speaker line in the transcript's amber. The player has already
+            // been trained on that colour by every conversation they have had,
+            // so reusing it means "an NPC is talking" needs no explanation.
+            const std::string& speaker = cutscene.speakerLine();
+            if (!speaker.empty()) {
+                ui::textCentered(ui::Face::Ui, speaker, static_cast<float>(w) * 0.5f,
+                                 static_cast<float>(h - bars) - 58.f, 17.f, ui::kAccent200);
+            }
+
+            // The case card. Its headline IS the card — a beat that sets one
+            // gets the full-bleed treatment, and the dim wash goes over the
+            // bars so the card reads as a title, not an overlay.
+            const std::string& headline = cutscene.headline();
+            if (!headline.empty()) {
+                DrawRectangle(0, 0, w, h, ui::bgAlpha(0.8f));
+                ui::textCentered(ui::Face::Display, headline, static_cast<float>(w) * 0.5f,
+                                 static_cast<float>(h) * 0.5f - 60.f, 48.f, ui::kText);
+                ui::ruleH(static_cast<float>(w) * 0.5f - 120.f, static_cast<float>(h) * 0.5f,
+                          240.f, ui::kAccent);
+            }
+
             const std::string& line = cutscene.caption();
             if (!line.empty()) {
                 // Size 20 off the usable ladder: the built-in bitmap font
                 // computes glyph spacing with integer division, so 14 through
                 // 18 space identically and only ~10 / 20 / 30 visibly differ.
-                const int size = 20;
-                const int tw = MeasureText(line.c_str(), size);
-                DrawText(line.c_str(), (w - tw) / 2, h - bars - size - 18, size,
-                         RAYWHITE);
+                const float size = 19.f;
+                // Under the headline when this beat is a card, above the lower
+                // bar otherwise.
+                const float y = headline.empty() ? static_cast<float>(h - bars) - size - 16.f
+                                                 : static_cast<float>(h) * 0.5f + 16.f;
+                ui::textCentered(ui::Face::Ui, line, static_cast<float>(w) * 0.5f, y, size,
+                                 ui::kNeutral100);
             }
             if (cutscene.canSkip()) {
-                DrawText("Space to skip", 24, h - bars - 26, 10,
-                         Color{200, 200, 200, 180});
+                const float keyW = ui::keycapWidth("Space");
+                const float skipW = keyW + 6.f + ui::measure(ui::Face::Ui, "skip", 11.f);
+                const float sx = static_cast<float>(w) - 40.f - skipW;
+                const float sy = bars >= 40 ? static_cast<float>(bars) * 0.5f - 10.f : 16.f;
+                ui::keycap("Space", sx, sy, false);
+                ui::text(ui::Face::Ui, "skip", sx + keyW + 6.f, sy + 4.f, 11.f, ui::kNeutral400);
             }
         } else if (mode == AppMode::SandboxEdit) {
             // Draw NOTHING here, and that is the whole fix.
@@ -2703,6 +3211,7 @@ shutdown:
     }
 
     leaveSession();
+    ui::unloadFonts();
     }  // end GL-resource scope: Assets/RaylibRenderer unload here, while the
        // GL context is still alive.
     CloseWindow();

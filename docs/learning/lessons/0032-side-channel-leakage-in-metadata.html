@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0032 — Side-Channel Leakage: Measuring What a System Reveals Through Its Metadata</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 820px;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #222; }
+  h1 { border-bottom: 3px solid #4a7; padding-bottom: .4rem; }
+  h2 { color: #365; margin-top: 2rem; }
+  code, pre { background: #f4f6f4; border-radius: 4px; }
+  code { padding: .1rem .3rem; }
+  pre { padding: .8rem 1rem; overflow-x: auto; border-left: 4px solid #4a7; }
+  .callout { background: #eef7ee; border-left: 4px solid #4a7; padding: .7rem 1rem;
+             margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .warn { background: #fdf3e7; border-left-color: #d90; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #cdd; padding: .45rem .6rem; text-align: left; }
+  th { background: #f0f5f0; }
+</style>
+</head>
+<body>
+<h1>Side-Channel Leakage: Measuring What a System Reveals Through Its Metadata</h1>
+<p><em>From issue #200: the killer never confesses. That was never the risk.</em></p>
+
+<h2>The content was fine. The metadata was the leak.</h2>
+<p>Ten residents each hold a secret. One is a murderer. The design worry was
+obvious: will the model confess under pressure?</p>
+<p>It does not. Zero confessions across ten guilty turns under direct
+accusation. The prose is solid.</p>
+<p>But every reply also carries a tag the model chooses:</p>
+<pre>Home, same as any night. Why, what's happened? [[MOOD: angry]]</pre>
+<p>That tag drives the rendered face. And it leaked:</p>
+<div class="warn">
+Innocent Marge <em>laughs</em> when accused. Guilty Marge goes
+<code>[[MOOD: angry]]</code> on turn one. A player could ask all twenty residents
+one question and watch for the angry face — the mystery solved in twenty
+questions with zero reasoning. Worse in multiplayer, where
+<code>NpcMoodUpdate</code> is broadcast to every client.
+</div>
+<p>This is a <strong>side channel</strong>: information reaching an observer
+through a path nobody designed as a communication path. The system was asked to
+keep a secret and did — in the channel it was watching.</p>
+
+<h2>Pick the metric a player could actually run</h2>
+<p>The tempting metric is "is the killer ever angry?" It is wrong, and the reason
+generalises. Suppressing affect entirely gives a cast of bland androids, and it
+optimises the wrong thing: the fix for a leak is to <strong>hide the signal in
+noise</strong>, not to delete the signal.</p>
+<p>So the metric is <strong>separability</strong>, and it is chosen by asking what
+attack a player would actually run:</p>
+<pre>Ask everyone one question. Sort the faces by how hostile they looked.
+Accuse the top one.</pre>
+<p>That is a <em>rank</em>. So the statistic is a rank, the null is "the killer's
+hostile rate is just another resident's", and the p-value is the fraction of the
+cast scoring at least as high. A permutation test over the cast — no
+distributional assumption, no dependency, and the number restates in words a
+person can check: "five residents in ten look at least this hostile".</p>
+<div class="callout">
+<strong>Transferable:</strong> derive the statistic from the exploit, not from
+what is convenient to compute. If you cannot describe the attack your metric
+detects in one sentence, the metric is probably measuring something adjacent.
+</div>
+
+<h2>Where a single statistic went blind</h2>
+<p>The first implementation had only the rank test. It reported a clean PASS.</p>
+<p>A rank collapses an entire distribution into one number, so it cannot see a
+killer who is conspicuous in some <em>other</em> mood. Measuring the full
+distribution changed the answer:</p>
+<table>
+<tr><th>Group</th><th>n</th><th>Pooled mood distribution</th></tr>
+<tr><td>killer</td><td>8</td><td>neutral 0.62, angry 0.12, sad 0.12</td></tr>
+<tr><td>secret-keepers</td><td>32</td><td><strong>embarrassed 0.59</strong>, neutral 0.25</td></tr>
+<tr><td>bystanders</td><td>40</td><td>neutral 0.65, angry 0.20, sad 0.12</td></tr>
+</table>
+<p>Total variation distance (0 identical, 1 nothing in common):
+killer&ndash;keepers <strong>0.59</strong>, killer&ndash;bystanders
+<strong>0.12</strong>, keepers&ndash;bystanders <strong>0.69</strong>.</p>
+<p>The issue's literal pass condition — "the killer's mood distribution is not
+separable from the secret-keepers'" — <strong>fails</strong>.</p>
+
+<h2>Reading a result that contradicts its own pass condition</h2>
+<p>The temptation is to pick whichever reading gives the tidier answer. Do
+neither. Work out what the numbers <em>mean</em>.</p>
+<p>The killer is separable from the secret-keepers because the killer reads
+<em>ordinary</em> — statistically indistinguishable from the five bystanders. It
+is the <strong>secret-keepers</strong> who stand out: their role file's demeanour
+line ("an embarrassed person covering something small") produces
+<code>embarrassed</code> on 59% of turns against ~0% for everyone else.</p>
+<p>So:</p>
+<ul>
+<li><strong>No exploit.</strong> Sorting faces does not find the killer; they are
+buried in a group of six ordinary-looking residents.</li>
+<li><strong>But the cover is not working.</strong> Secret-keepers exist so that
+"several innocent residents hide unrelated things, so deflection is common and
+hostility stops being a unique signal". Cover requires the killer and the keepers
+to <em>look alike</em>. They look nothing alike — the keepers form a third
+legible category the killer is not in.</li>
+</ul>
+<p>The killer is defended by being unremarkable, not by being camouflaged among
+deflectors. That is a real defence, it measurably works, and <strong>it is not
+the defence the design documents describe</strong>. Nobody reading the role files
+would know.</p>
+<div class="callout">
+A probe earns its keep when it tells you something the design did not — including
+that the design's stated mechanism is not the one doing the work.
+</div>
+
+<h2>What this said about a question nobody could answer by arguing</h2>
+<p>The plan's open question was "how many secret-keepers is enough cover?" —
+four was a guess.</p>
+<p>The data says the count is the <strong>wrong lever entirely</strong>. Eight
+keepers would deepen the embarrassed cluster without moving the killer one step
+closer to it. The lever is the keepers' <em>demeanour</em>, which the model
+follows very literally and very consistently.</p>
+<p>The probe stops there and names two directions without choosing — widen the
+keepers' affect, or accept the behaviour and re-state the design. A measurement
+tool that also decides content is a tool you can no longer trust to report
+against its own preferences.</p>
+
+<h2>Honesty requirements for a probe</h2>
+<p>The scaffold's own docstring set these before any code existed, and they are
+worth stealing wholesale:</p>
+<ul>
+<li><strong>Report your own n beside the verdict.</strong> The killer contributes
+8 turns. TVD at n=8 is noisy — and the gap between two runs (0.85 → 0.59) is
+exactly what that noise looks like. What survives both runs is the
+<em>ordering</em>, not the values. Say which is which.</li>
+<li><strong>Report the raw distributions, not just the statistic.</strong> A single
+number nobody can interrogate is how a bad pass condition survives.</li>
+<li><strong>Distinguish "failed" from "could not run".</strong> Exit 0 PASS, 1
+FAIL, 2 CANNOT EVALUATE. A gate that could not reach the model has measured
+nothing, and reporting that as a pass is the worst thing the file could do.</li>
+<li><strong>Never let a scaffold report a pass.</strong> Before implementation
+<code>main()</code> returned 2.</li>
+</ul>
+
+<h2>Recognising side channels elsewhere</h2>
+<p>Anywhere a system emits <em>structured</em> data alongside the content it is
+guarding, the structure is a channel:</p>
+<ul>
+<li>Response <strong>latency</strong> — a cache hit answers faster than a miss.</li>
+<li>Response <strong>length</strong> — "I can't discuss that" is shorter than a
+real answer.</li>
+<li><strong>Error codes</strong> — "wrong password" versus "no such user".</li>
+<li><strong>Refusal style</strong> — a model that refuses differently depending on
+what it is hiding.</li>
+</ul>
+<p>The question to ask is not "did it reveal the secret?" but <strong>"what
+differs between the case where there is a secret and the case where there is
+not?"</strong> Everything that differs is a channel, whether or not anyone
+designed it as one.</p>
+</body>
+</html>
